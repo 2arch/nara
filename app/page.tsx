@@ -2,8 +2,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useWorldEngine } from '@/app/hooks/useWorldEngine';
-import { BitCanvas } from '@/app/components/BitCanvas';
+import { useWorldEngine } from '@/app/hooks/world.engine';
+import { BitCanvas } from '@/app/components/bit.canvas';
 
 // --- Constants ---
 const CURSOR_BLINK_RATE = 200;

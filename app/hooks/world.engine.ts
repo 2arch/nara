@@ -1,6 +1,6 @@
 // hooks/useWorldEngine.ts
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useWorldSave } from './useWorldSave'; // Import the new hook
+import { useWorldSave } from './world.save'; // Import the new hook
 
 // --- Constants --- (Copied and relevant ones kept)
 const BASE_FONT_SIZE = 16;

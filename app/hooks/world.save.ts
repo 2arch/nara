@@ -3,7 +3,7 @@ import { database } from '@/app/firebase'; // Adjust path if needed
 import { ref, set, onValue, off, DataSnapshot } from 'firebase/database';
 // Import functions and constants directly from @sanity/diff-match-patch
 import { makeDiff, DIFF_EQUAL } from '@sanity/diff-match-patch';
-import type { WorldData } from './useWorldEngine'; // Adjust path if needed
+import type { WorldData } from './world.engine'; // Adjust path if needed
 
 // Debounce delay for saving (in milliseconds)
 const SAVE_DEBOUNCE_DELAY = 100; // 1 second

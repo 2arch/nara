@@ -1,6 +1,6 @@
 // components/BitCanvas.tsx
 import React, { useRef, useEffect, useCallback, useState } from 'react';
-import type { WorldData, Point, WorldEngine, PanStartInfo } from '@/app/hooks/useWorldEngine'; // Adjust path as needed
+import type { WorldData, Point, WorldEngine, PanStartInfo } from '@/app/hooks/world.engine'; // Adjust path as needed
 
 // --- Constants --- (Copied and relevant ones kept)
 const FONT_FAMILY = 'monospace';
