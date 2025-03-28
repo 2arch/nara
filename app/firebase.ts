@@ -1,6 +1,6 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
-import { getDatabase } from "firebase/database";
+import { getDatabase, connectDatabaseEmulator, ref, onValue, set, get } from "firebase/database";
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
 
@@ -18,5 +18,38 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Realtime Database and get a reference to the service
-export const database = getDatabase(app);
+// Configure for Electron environment
+const dbConfig = {
+  // By default, Firebase Realtime Database has persistence enabled
+  // The default cache size is 10MB, which should be sufficient for most apps
+};
+
+// Initialize Realtime Database with persistence enabled by default
+const database = getDatabase(app);
+
+// For Firebase Realtime Database, persistence is enabled by default
+// No need to explicitly enable it, but we can log for confirmation
+console.log("Firebase Realtime Database initialized with default persistence");
+
+// Connect to emulator if in development mode
+if (process.env.NODE_ENV === 'development' && process.env.FIREBASE_EMULATOR === 'true') {
+  connectDatabaseEmulator(database, 'localhost', 9000);
+  console.log('Connected to Firebase emulator');
+}
+
+// Helper function to check connection status
+const monitorConnection = () => {
+  const connectedRef = ref(database, '.info/connected');
+  onValue(connectedRef, (snap) => {
+    if (snap.val() === true) {
+      console.log('Connected to Firebase');
+    } else {
+      console.log('Not connected to Firebase, will use cached data if available');
+    }
+  });
+};
+
+// Start monitoring connection
+monitorConnection();
+
+export { database };

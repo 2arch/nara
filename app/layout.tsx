@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "CorType",
+  title: "CB2",
   description: "typed canvas",
 };
 

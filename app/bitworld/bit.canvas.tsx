@@ -1,17 +1,26 @@
 // components/BitCanvas.tsx
 import React, { useRef, useEffect, useCallback, useState } from 'react';
-import type { WorldData, Point, WorldEngine, PanStartInfo } from '@/app/hooks/world.engine'; // Adjust path as needed
+import type { WorldData, Point, WorldEngine, PanStartInfo } from './world.engine'; // Adjust path as needed
 
 // --- Constants --- (Copied and relevant ones kept)
-const FONT_FAMILY = 'monospace';
-const GRID_COLOR = '#f2f2f2';
-const TEXT_COLOR = '#000000';
+const FONT_FAMILY = 'IBM Plex Mono';
+const GRID_COLOR = '#F2F2F2';
+const TEXT_COLOR = '#161616';
 const CURSOR_COLOR_PRIMARY = '#FF6B35';
 const CURSOR_COLOR_SECONDARY = '#FFA500';
+const CURSOR_COLOR_SAVE = '#FFFF00'; // Green color for saving state
+const CURSOR_COLOR_ERROR = '#FF0000'; // Red color for error state
 const CURSOR_TEXT_COLOR = '#FFFFFF';
-const BACKGROUND_COLOR = '#ffffff';
+const BACKGROUND_COLOR = '#FFFFFF';
 const DRAW_GRID = true;
 const GRID_LINE_WIDTH = 1;
+const CURSOR_TRAIL_FADE_MS = 200; // Time in ms for trail to fully fade
+
+interface CursorTrailPosition {
+    x: number;
+    y: number;
+    timestamp: number;
+}
 
 interface BitCanvasProps {
     engine: WorldEngine;
@@ -23,6 +32,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+    const [cursorTrail, setCursorTrail] = useState<CursorTrailPosition[]>([]);
+    const lastCursorPosRef = useRef<Point | null>(null);
 
     // Refs for smooth panning
     const panStartInfoRef = useRef<PanStartInfo | null>(null);
@@ -58,6 +69,33 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
         return () => window.removeEventListener('resize', handleResize);
     }, [handleResize]);
 
+    // Track cursor movement for trail effect
+    useEffect(() => {
+        const currentPos = engine.cursorPos;
+        
+        // Only add to trail if cursor has actually moved
+        if (!lastCursorPosRef.current || 
+            currentPos.x !== lastCursorPosRef.current.x || 
+            currentPos.y !== lastCursorPosRef.current.y) {
+            
+            const now = Date.now();
+            const newTrailPosition = {
+                x: currentPos.x,
+                y: currentPos.y,
+                timestamp: now
+            };
+            
+            setCursorTrail(prev => {
+                // Add new position and filter out old ones
+                const cutoffTime = now - CURSOR_TRAIL_FADE_MS;
+                const updated = [newTrailPosition, ...prev.filter(pos => pos.timestamp >= cutoffTime)];
+                return updated;
+            });
+            
+            lastCursorPosRef.current = {...currentPos};
+        }
+    }, [engine.cursorPos]);
+
     // --- Drawing Logic ---
     const draw = useCallback(() => {
         const canvas = canvasRef.current;
@@ -81,8 +119,12 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
         // --- Actual Drawing (Copied from previous `draw` function) ---
         ctx.save();
         ctx.scale(dpr, dpr);
+        
+        // Replace fillRect with clearRect for transparency
+        // ctx.clearRect(0, 0, cssWidth, cssHeight);
         ctx.fillStyle = BACKGROUND_COLOR;
         ctx.fillRect(0, 0, cssWidth, cssHeight);
+        
         ctx.imageSmoothingEnabled = false;
         ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
         ctx.textBaseline = 'top';
@@ -121,9 +163,59 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
             }
         }
 
+        // Draw cursor trail (older positions first, for proper layering)
+        const now = Date.now();
+        for (let i = cursorTrail.length - 1; i >= 0; i--) {
+            const trailPos = cursorTrail[i];
+            const age = now - trailPos.timestamp;
+            
+            // Skip positions that are too old
+            if (age > CURSOR_TRAIL_FADE_MS) continue;
+            
+            // Skip the current position only if it perfectly matches the cursor
+            // (avoid duplicate rendering at exact same spot)
+            if (age < 20 && 
+                trailPos.x === engine.cursorPos.x && 
+                trailPos.y === engine.cursorPos.y) continue;
+            
+            // Calculate opacity based on age (1.0 to 0.0)
+            const opacity = 1 - (age / CURSOR_TRAIL_FADE_MS);
+            
+            const trailScreenPos = engine.worldToScreen(
+                trailPos.x, trailPos.y, 
+                currentZoom, currentOffset
+            );
+            
+            // Only draw if visible on screen
+            if (trailScreenPos.x >= -effectiveCharWidth && 
+                trailScreenPos.x <= cssWidth && 
+                trailScreenPos.y >= -effectiveCharHeight && 
+                trailScreenPos.y <= cssHeight) {
+                
+                // Draw faded cursor rectangle
+                const baseColor = cursorColorAlternate ? 
+                    CURSOR_COLOR_SECONDARY : CURSOR_COLOR_PRIMARY;
+                ctx.fillStyle = `rgba(${hexToRgb(baseColor)}, ${opacity})`;
+                ctx.fillRect(
+                    trailScreenPos.x, 
+                    trailScreenPos.y, 
+                    effectiveCharWidth, 
+                    effectiveCharHeight
+                );
+            }
+        }
+
         const cursorScreenPos = engine.worldToScreen(engine.cursorPos.x, engine.cursorPos.y, currentZoom, currentOffset);
         if (cursorScreenPos.x >= -effectiveCharWidth && cursorScreenPos.x <= cssWidth && cursorScreenPos.y >= -effectiveCharHeight && cursorScreenPos.y <= cssHeight) {
-            ctx.fillStyle = cursorColorAlternate ? CURSOR_COLOR_SECONDARY : CURSOR_COLOR_PRIMARY;
+            // Determine cursor color based on engine state
+            if (engine.worldPersistenceError) {
+                ctx.fillStyle = CURSOR_COLOR_ERROR;
+            } else if (engine.isSavingWorld) {
+                ctx.fillStyle = CURSOR_COLOR_SAVE;
+            } else {
+                ctx.fillStyle = cursorColorAlternate ? CURSOR_COLOR_SECONDARY : CURSOR_COLOR_PRIMARY;
+            }
+            
             ctx.fillRect(cursorScreenPos.x, cursorScreenPos.y, effectiveCharWidth, effectiveCharHeight);
             const key = `${engine.cursorPos.x},${engine.cursorPos.y}`;
             if (engine.worldData[key]) {
@@ -160,7 +252,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current]);
+    }, [engine, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail]);
 
 
     // --- Drawing Loop Effect ---
@@ -174,36 +266,53 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
         return () => cancelAnimationFrame(animationFrameId);
     }, [draw]); // Rerun if draw changes
 
+    // Add this effect to handle wheel events with non-passive option
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        
+        const wheelHandler = (e: WheelEvent) => {
+            const rect = canvas.getBoundingClientRect();
+            engine.handleCanvasWheel(
+                e.deltaX, e.deltaY,
+                e.clientX - rect.left, e.clientY - rect.top,
+                e.ctrlKey || e.metaKey
+            );
+            
+            // Prevent default if we're handling this ourselves
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+            }
+        };
+        
+        // Add wheel listener with non-passive option
+        canvas.addEventListener('wheel', wheelHandler, { passive: false });
+        
+        // Cleanup function
+        return () => {
+            canvas.removeEventListener('wheel', wheelHandler);
+        };
+    }, [engine]);
+
     // --- Event Handlers (Attached to Canvas) ---
     const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         if (e.button !== 0) return; // Only left clicks
-    
-        // Prevent click action if it was the end of a pan
-        const wasPanning = panStartInfoRef.current !== null;
-        panStartInfoRef.current = null; // Clear pan info on any click up
-        if (wasPanning && isMiddleMouseDownRef.current) { // Specifically check if middle mouse was down
-             // Don't treat the end of a middle-mouse pan as a regular click
-             return;
+
+        // Don't process click if it was the end of a pan
+        if (panStartInfoRef.current) {
+            panStartInfoRef.current = null;
+            if (isMiddleMouseDownRef.current) return;
         }
-    
-        // Pass false to not clear the selection by default
+        
+        // Get canvas-relative coordinates
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return;
-        engine.handleCanvasClick(e.clientX - rect.left, e.clientY - rect.top, true);
+        
+        // Pass false for clearSelection - let the engine decide
+        engine.handleCanvasClick(e.clientX - rect.left, e.clientY - rect.top, false, e.shiftKey);
         canvasRef.current?.focus(); // Ensure focus for keyboard
     }, [engine]);
     
-    const handleCanvasWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
-        e.preventDefault(); // Prevent page scroll
-        const rect = canvasRef.current?.getBoundingClientRect();
-        if (!rect) return;
-        engine.handleCanvasWheel(
-            e.deltaX, e.deltaY,
-            e.clientX - rect.left, e.clientY - rect.top,
-            e.ctrlKey || e.metaKey
-        );
-    }, [engine]);
-
     const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return;
@@ -250,7 +359,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
         if (isSelectingMouseDownRef.current && e.button === 0) { // Left mouse button - selection end
             isSelectingMouseDownRef.current = false; // Stop tracking mouse down state
             engine.handleSelectionEnd(); // Finalize selection state in engine
-            // No need to process selection here, engine handles it
         }
     }, [engine]);
 
@@ -271,7 +379,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
     }, [engine]);
 
     const handleCanvasKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
-        // Pass shiftKey status to the engine's handler
+        // Pass shift key status to the engine's handler
         const preventDefault = engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey, e.shiftKey);
         if (preventDefault) {
             e.preventDefault();
@@ -283,7 +391,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
             ref={canvasRef}
             className={className}
             onClick={handleCanvasClick}
-            onWheel={handleCanvasWheel}
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={handleCanvasMouseMove}
             onMouseUp={handleCanvasMouseUp}
@@ -293,4 +400,17 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
             style={{ display: 'block', outline: 'none', width: '100%', height: '100%', cursor: 'text' /* Default cursor */ }}
         />
     );
+}
+
+// Helper function to convert hex color to RGB components
+function hexToRgb(hex: string): string {
+    // Remove # if present
+    hex = hex.replace(/^#/, '');
+    
+    // Parse hex values
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    
+    return `${r}, ${g}, ${b}`;
 }

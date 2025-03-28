@@ -20,6 +20,14 @@
 # production
 /build
 
+# electron
+/dist/
+*.app
+*.dmg
+*.exe
+*.AppImage
+*.snap
+
 # misc
 .DS_Store
 *.pem

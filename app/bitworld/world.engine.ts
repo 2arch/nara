@@ -76,6 +76,7 @@ export function useWorldEngine({
     const [viewOffset, setViewOffset] = useState<Point>(initialViewOffset);
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
     const isPanningRef = useRef(false);
+    const [isSelecting, setIsSelecting] = useState(false);
     const [selectionStart, setSelectionStart] = useState<Point | null>(null);
     const [selectionEnd, setSelectionEnd] = useState<Point | null>(null);
     const clipboardRef = useRef<{ text: string, width: number, height: number } | null>(null);
@@ -302,14 +303,146 @@ export function useWorldEngine({
             // Don't set worldDataChanged = true here, paste handles its own state updates
         }
         // --- Movement ---
-        else if (key === 'ArrowUp') {
-            nextCursorPos.y -= 1; moved = true;
+        else if (key === 'Enter') {
+            // Find the starting x position of the current line
+            const currentY = cursorPos.y;
+            let lineStartX = 0;
+            let foundLineStart = false;
+            
+            // First, find the leftmost character in the current line
+            for (const k in worldData) {
+                const [xStr, yStr] = k.split(',');
+                const y = parseInt(yStr, 10);
+                if (y === currentY) {
+                    const x = parseInt(xStr, 10);
+                    if (!foundLineStart || x < lineStartX) {
+                        lineStartX = x;
+                        foundLineStart = true;
+                    }
+                }
+            }
+            
+            nextCursorPos.y = cursorPos.y + 1;
+            // Use the same indentation as the current line
+            nextCursorPos.x = lineStartX;
+            moved = true;
+        } else if (key === 'ArrowUp') {
+            if (isMod) {
+                // Meta+Up: Move to the topmost line with content
+                let topY = cursorPos.y;
+                let foundAnyContent = false;
+                
+                // Scan world data to find the minimum y coordinate with content
+                for (const k in worldData) {
+                    const [, yStr] = k.split(',');
+                    const y = parseInt(yStr, 10);
+                    if (!foundAnyContent || y < topY) {
+                        topY = y;
+                        foundAnyContent = true;
+                    }
+                }
+                
+                nextCursorPos.y = foundAnyContent ? topY : 0;
+            } else {
+                nextCursorPos.y -= 1;
+            }
+            moved = true;
         } else if (key === 'ArrowDown') {
-            nextCursorPos.y += 1; moved = true;
+            if (isMod) {
+                // Meta+Down: Move to the bottommost line with content
+                let bottomY = cursorPos.y;
+                let foundAnyContent = false;
+                
+                // Scan world data to find the maximum y coordinate with content
+                for (const k in worldData) {
+                    const [, yStr] = k.split(',');
+                    const y = parseInt(yStr, 10);
+                    if (!foundAnyContent || y > bottomY) {
+                        bottomY = y;
+                        foundAnyContent = true;
+                    }
+                }
+                
+                nextCursorPos.y = foundAnyContent ? bottomY : cursorPos.y;
+            } else {
+                nextCursorPos.y += 1;
+            }
+            moved = true;
         } else if (key === 'ArrowLeft') {
-            nextCursorPos.x -= 1; moved = true;
+            if (isMod) {
+                // Meta+Left: Move to the beginning of the current word or previous word
+                let x = cursorPos.x - 1;
+                let passedContent = false;
+                
+                // First, skip any spaces to the left
+                while (x >= 0) {
+                    const key = `${x},${cursorPos.y}`;
+                    const char = worldData[key];
+                    if (!char || char === ' ' || char === '\t') {
+                        x--;
+                    } else {
+                        passedContent = true;
+                        break;
+                    }
+                }
+                
+                // If we found content, continue to find the beginning of the word
+                if (passedContent) {
+                    // Continue until we find a space or beginning of line
+                    while (x >= 0) {
+                        const key = `${x-1},${cursorPos.y}`; // Look ahead by 1
+                        const char = worldData[key];
+                        if (!char || char === ' ' || char === '\t') {
+                            break;
+                        }
+                        x--;
+                    }
+                }
+                
+                nextCursorPos.x = Math.max(0, x);
+            } else {
+                nextCursorPos.x -= 1;
+            }
+            moved = true;
         } else if (key === 'ArrowRight') {
-            nextCursorPos.x += 1; moved = true;
+            if (isMod) {
+                // Meta+Right: Move to the end of the current word or next word
+                let x = cursorPos.x;
+                let currentLine = cursorPos.y;
+                
+                // First, see if we're in the middle of a word
+                const startKey = `${x},${currentLine}`;
+                const startChar = worldData[startKey];
+                let inWord = !!startChar && startChar !== ' ' && startChar !== '\t';
+                
+                // Find the end of current word or beginning of next word
+                while (true) {
+                    const key = `${x},${currentLine}`;
+                    const char = worldData[key];
+                    
+                    if (!char) {
+                        // We've reached the end of content
+                        break;
+                    }
+                    
+                    const isSpace = char === ' ' || char === '\t';
+                    
+                    if (inWord && isSpace) {
+                        // We've reached the end of the current word
+                        break;
+                    } else if (!inWord && !isSpace) {
+                        // We've reached the beginning of the next word
+                        inWord = true;
+                    }
+                    
+                    x++;
+                }
+                
+                nextCursorPos.x = x;
+            } else {
+                nextCursorPos.x += 1;
+            }
+            moved = true;
         }
         // --- Deletion ---
         else if (key === 'Backspace') {
@@ -319,8 +452,55 @@ export function useWorldEngine({
                     // Update local nextCursorPos for consistency if needed, though state is already set
                     nextCursorPos = { x: selectionStart?.x ?? cursorPos.x, y: selectionStart?.y ?? cursorPos.y };
                 }
+            } else if (metaKey) { 
+                nextWorldData = { ...worldData }; // Create a copy before modifying
+                
+                let deletedAny = false;
+                let x = cursorPos.x - 1; // Start from the character to the left of cursor
+                
+                // Continue deleting until we hit a space or there's no character
+                while (x >= 0) {
+                    const key = `${x},${cursorPos.y}`;
+                    const char = worldData[key];
+                    
+                    // Stop at whitespace or when no character exists
+                    if (!char || char === ' ' || char === '\t') {
+                        if (!deletedAny) {
+                            // If we haven't deleted anything yet but found whitespace,
+                            // delete it and continue looking for text
+                            if (char) {
+                                delete nextWorldData[key];
+                                deletedAny = true;
+                            }
+                        } else {
+                            // If we've already deleted some text, stop at whitespace
+                            break;
+                        }
+                    } else {
+                        // Delete the character
+                        delete nextWorldData[key];
+                        deletedAny = true;
+                    }
+                    
+                    x--;
+                }
+                
+                // Only mark as changed if we actually deleted something
+                if (deletedAny) {
+                    worldDataChanged = true;
+                    nextCursorPos.x = x + 1; // Move cursor to where we stopped
+                } else if (cursorPos.x > 0) {
+                    // If we didn't delete anything but cursor isn't at leftmost position,
+                    // perform regular backspace behavior
+                    const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
+                    if (worldData[deleteKey]) {
+                        delete nextWorldData[deleteKey];
+                        worldDataChanged = true;
+                    }
+                    nextCursorPos.x -= 1;
+                }
             } else {
-                // Only modify world data if we actually delete something
+                // Regular Backspace: Delete one character to the left
                 const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
                 if (worldData[deleteKey]) {
                     nextWorldData = { ...worldData }; // Create copy before modifying
@@ -394,7 +574,8 @@ export function useWorldEngine({
         if (moved) {
             setCursorPos(nextCursorPos);
             // Update selection based on movement and shift key
-            if (shiftKey) {
+            // Only use shift for selection when using navigation keys, not when typing
+            if (shiftKey && (key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight')) {
                  updateSelection(nextCursorPos);
             } else if (!isMod && key !== 'Delete' && key !== 'Backspace') {
                  // Clear selection if moving without Shift/Mod,
@@ -422,28 +603,38 @@ export function useWorldEngine({
         // setCursorPos, setWorldData, setSelectionStart, setSelectionEnd // Setters are stable, no need to list
     ]);
 
-    const handleCanvasClick = useCallback((canvasRelativeX: number, canvasRelativeY: number, clearSelection: boolean = true, shiftKey: boolean = false): void => {
+    const handleCanvasClick = useCallback((canvasRelativeX: number, canvasRelativeY: number, clearSelection: boolean = false, shiftKey: boolean = false): void => {
         const newCursorPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
 
+        // Determine if click is inside current selection (if any)
+        let clickedInsideSelection = false;
+        if (selectionStart && selectionEnd) {
+            const minX = Math.min(selectionStart.x, selectionEnd.x);
+            const maxX = Math.max(selectionStart.x, selectionEnd.x);
+            const minY = Math.min(selectionStart.y, selectionEnd.y);
+            const maxY = Math.max(selectionStart.y, selectionEnd.y);
+            
+            clickedInsideSelection = 
+                newCursorPos.x >= minX && newCursorPos.x <= maxX && 
+                newCursorPos.y >= minY && newCursorPos.y <= maxY;
+        }
+
         if (shiftKey && selectionStart) {
-            // Extend selection if shift is held and a selection already started
+            // Extend selection if shift is held and selection exists
             setSelectionEnd(newCursorPos);
-        } else {
-            // Otherwise, set cursor and clear selection
-            setCursorPos(newCursorPos);
+            setCursorPos(newCursorPos); // Update cursor with selection
+        } else if (clearSelection && !clickedInsideSelection) {
+            // Only clear selection if:
+            // 1. We're explicitly asked to clear it AND
+            // 2. The click is outside existing selection
             setSelectionStart(null);
             setSelectionEnd(null);
-        }
-
-        // Logging (optional)
-        const key = `${newCursorPos.x},${newCursorPos.y}`;
-        if (worldData[key]) {
-            console.log(`${shiftKey ? 'Shift-' : ''}Clicked on character: "${worldData[key]}" at position (${newCursorPos.x}, ${newCursorPos.y})`);
+            setCursorPos(newCursorPos);
         } else {
-             console.log(`${shiftKey ? 'Shift-' : ''}Clicked on empty cell at position (${newCursorPos.x}, ${newCursorPos.y})`);
+            // Just move the cursor without affecting selection
+            setCursorPos(newCursorPos);
         }
-
-    }, [zoomLevel, viewOffset, screenToWorld, worldData, selectionStart]); // Added selectionStart dependency
+    }, [zoomLevel, viewOffset, screenToWorld, selectionStart, selectionEnd]);
 
     const handleCanvasWheel = useCallback((deltaX: number, deltaY: number, canvasRelativeX: number, canvasRelativeY: number, ctrlOrMetaKey: boolean): void => {
         if (ctrlOrMetaKey) {
@@ -513,20 +704,20 @@ export function useWorldEngine({
     }, [zoomLevel, viewOffset, screenToWorld]);
 
     const handleSelectionMove = useCallback((canvasRelativeX: number, canvasRelativeY: number): void => {
-        if (selectionStart) { // Use state variable
+        if (selectionStart) { // This is correct - we want to update only if a selection has started
             const worldPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
             setSelectionEnd(worldPos);
         }
     }, [selectionStart, zoomLevel, viewOffset, screenToWorld]);
 
     const handleSelectionEnd = useCallback((): void => {
-        // If selection start and end are the same, it was effectively a click, clear selection
-        if (selectionStart && selectionEnd && selectionStart.x === selectionEnd.x && selectionStart.y === selectionEnd.y) {
-            setSelectionStart(null);
-            setSelectionEnd(null);
-        }
-        // Otherwise, keep the selection range stored in selectionStart/End
-    }, [selectionStart, selectionEnd]); // Add dependencies
+        // Simply mark selection process as ended
+        setIsSelecting(false);
+        
+        // We keep the selection intact regardless
+        // The selection will be cleared in other functions if needed
+        // This allows the selection to persist after mouse up
+    }, []);
 
     const deleteCharacter = useCallback((x: number, y: number): void => {
         const key = `${x},${y}`;
