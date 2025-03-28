@@ -160,7 +160,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, canvasSize, cursorColorAlternate]); // Depend on engine state, size, and blink state
+    }, [engine, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current]);
 
 
     // --- Drawing Loop Effect ---
@@ -179,14 +179,17 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
         if (e.button !== 0) return; // Only left clicks
     
         // Prevent click action if it was the end of a pan
-        if (panStartInfoRef.current) {
-            // ... existing code ...
+        const wasPanning = panStartInfoRef.current !== null;
+        panStartInfoRef.current = null; // Clear pan info on any click up
+        if (wasPanning && isMiddleMouseDownRef.current) { // Specifically check if middle mouse was down
+             // Don't treat the end of a middle-mouse pan as a regular click
+             return;
         }
     
         // Pass false to not clear the selection by default
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return;
-        engine.handleCanvasClick(e.clientX - rect.left, e.clientY - rect.top, false);
+        engine.handleCanvasClick(e.clientX - rect.left, e.clientY - rect.top, true);
         canvasRef.current?.focus(); // Ensure focus for keyboard
     }, [engine]);
     
@@ -268,8 +271,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
     }, [engine]);
 
     const handleCanvasKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
-        // Let engine handle logic, prevent default if it handled the key
-        const preventDefault = engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey);
+        // Pass shiftKey status to the engine's handler
+        const preventDefault = engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey, e.shiftKey);
         if (preventDefault) {
             e.preventDefault();
         }
