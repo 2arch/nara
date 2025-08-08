@@ -5,7 +5,6 @@ import React, { useState, useEffect } from 'react';
 import { useWorldEngine } from '@/app/bitworld/world.engine';
 import { BitCanvas } from '@/app/bitworld/bit.canvas';
 import SpaceBackground from '@/app/bitworld/canvas.bg';
-import Debug from '@/app/debug';
 
 // --- Constants ---
 const CURSOR_BLINK_RATE = 200;
@@ -47,7 +46,7 @@ export default function CorbuType() {
             position: 'relative'
         }}>
             {/* Space background effect */}
-            {/* <SpaceBackground /> */}
+            <SpaceBackground />
             
             {/* Main content - positioned above the space background */}
             <div style={{ position: 'relative', zIndex: 1, width: '100%', height: '100%' }}>
@@ -71,7 +70,6 @@ export default function CorbuType() {
                     // className="bit-canvas" // Add className if needed for styling
                 />
                 
-                <Debug engine={engine} />
                 
                 {/* Optional Debug Info */}
                 {/* <div style={{ position: 'absolute', bottom: 5, left: 5, background: 'rgba(0,0,0,0.6)', color: 'white', padding: '2px 5px', fontSize: '10px', pointerEvents: 'none'}}>

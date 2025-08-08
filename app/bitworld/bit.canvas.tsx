@@ -1,7 +1,7 @@
 // components/BitCanvas.tsx
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import type { WorldData, Point, WorldEngine, PanStartInfo } from './world.engine'; // Adjust path as needed
-import { useDialogue } from './dialogue';
+import { useDialogue, useDebugDialogue } from './dialogue';
 
 // --- Constants --- (Copied and relevant ones kept)
 const FONT_FAMILY = 'IBM Plex Mono';
@@ -12,7 +12,7 @@ const CURSOR_COLOR_SECONDARY = '#FFA500';
 const CURSOR_COLOR_SAVE = '#FFFF00'; // Green color for saving state
 const CURSOR_COLOR_ERROR = '#FF0000'; // Red color for error state
 const CURSOR_TEXT_COLOR = '#FFFFFF';
-const BACKGROUND_COLOR = '#FFFFFF';
+const BACKGROUND_COLOR = '#FFFFFF55';
 const DRAW_GRID = true;
 const GRID_LINE_WIDTH = 1;
 const CURSOR_TRAIL_FADE_MS = 200; // Time in ms for trail to fully fade
@@ -25,10 +25,10 @@ const SHOW_DEBUG_SCAFFOLDS = true;
 
 // --- Heat Map Color Gradient ---
 const HEAT_MAP_COLORS = [
-    { r: 255, g: 165, b: 0 },   // Orange (closest)
-    { r: 255, g: 255, b: 0 },   // Yellow
-    { r: 0, g: 255, b: 0 },     // Green
-    { r: 0, g: 0, b: 255 }      // Blue (farthest)
+    { r: 173, g: 173, b: 173 },   // Orange (closest)
+    // { r: 255, g: 255, b: 0 },   // Yellow
+    // { r: 0, g: 255, b: 0 },     // Green
+    // { r: 0, g: 0, b: 255 }      // Blue (farthest)
 ];
 const MAX_HEAT_DISTANCE = 40; // Distance at which blocks become fully "cold" (blue)
 
@@ -71,6 +71,10 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
     
     // Dialogue system
     const { renderDialogue } = useDialogue();
+    
+    // Debug dialogue system
+    const { debugText } = useDebugDialogue(engine);
+    const { renderDebugDialogue } = useDialogue();
     
     // Pan trail tracking
     const [panTrail, setPanTrail] = useState<PanTrailPoint[]>([]);
@@ -443,6 +447,38 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
             ctx.setLineDash([]); // Reset dash
         }
 
+        // === Render Deepspawn Objects with Heat Map Colors ===
+        for (const key in engine.worldData) {
+            if (key.startsWith('deepspawn_')) {
+                const coords = key.substring('deepspawn_'.length);
+                const [xStr, yStr] = coords.split(',');
+                const worldX = parseInt(xStr, 10);
+                const worldY = parseInt(yStr, 10);
+                
+                if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                    if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                        // Calculate distance from cursor to this deepspawn character
+                        const deltaX = worldX - engine.cursorPos.x;
+                        const deltaY = worldY - engine.cursorPos.y;
+                        const distanceFromCursor = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                        
+                        // Get heat map color based on distance
+                        const heatColor = getHeatMapColor(distanceFromCursor);
+                        ctx.fillStyle = heatColor;
+                        
+                        // Fill entire cell with heat-mapped color
+                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        
+                        // Render the deepspawn character on top
+                        const char = engine.worldData[key];
+                        ctx.fillStyle = '#000000'; // Black text on colored background
+                        ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                    }
+                }
+            }
+        }
+
         // === Render Blocks with Heat Map Colors ===
         const blocksToDebug = []; // Store block positions for debug lines
         for (const key in engine.worldData) {
@@ -476,58 +512,58 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
             }
         }
         
-        // === Debug Connection Lines ===
-        if (SHOW_DEBUG_SCAFFOLDS && engine.getViewportCenter && blocksToDebug.length > 0) {
-            const center = engine.getViewportCenter();
-            const centerScreen = engine.worldToScreen(center.x, center.y, currentZoom, currentOffset);
+        // // === Debug Connection Lines ===
+        // if (SHOW_DEBUG_SCAFFOLDS && engine.getViewportCenter && blocksToDebug.length > 0) {
+        //     const center = engine.getViewportCenter();
+        //     const centerScreen = engine.worldToScreen(center.x, center.y, currentZoom, currentOffset);
             
-            // Draw lines from center to each block
-            for (const block of blocksToDebug) {
-                ctx.strokeStyle = block.heatColor;
-                ctx.lineWidth = 1 / dpr;
-                ctx.setLineDash([2, 2]); // Dashed lines
-                ctx.globalAlpha = 0.6; // Semi-transparent
+        //     // Draw lines from center to each block
+        //     for (const block of blocksToDebug) {
+        //         ctx.strokeStyle = block.heatColor;
+        //         ctx.lineWidth = 1 / dpr;
+        //         ctx.setLineDash([2, 2]); // Dashed lines
+        //         ctx.globalAlpha = 0.6; // Semi-transparent
                 
-                ctx.beginPath();
-                ctx.moveTo(
-                    centerScreen.x + effectiveCharWidth/2, 
-                    centerScreen.y + effectiveCharHeight/2
-                );
-                ctx.lineTo(
-                    block.screenPos.x + effectiveCharWidth/2, 
-                    block.screenPos.y + effectiveCharHeight/2
-                );
-                ctx.stroke();
-            }
+        //         ctx.beginPath();
+        //         ctx.moveTo(
+        //             centerScreen.x + effectiveCharWidth/2, 
+        //             centerScreen.y + effectiveCharHeight/2
+        //         );
+        //         ctx.lineTo(
+        //             block.screenPos.x + effectiveCharWidth/2, 
+        //             block.screenPos.y + effectiveCharHeight/2
+        //         );
+        //         ctx.stroke();
+        //     }
             
-            // Draw individual boundary circles around each block
-            for (const block of blocksToDebug) {
-                const blockCenter = {
-                    x: block.screenPos.x + effectiveCharWidth/2,
-                    y: block.screenPos.y + effectiveCharHeight/2
-                };
+        //     // Draw individual boundary circles around each block
+        //     for (const block of blocksToDebug) {
+        //         const blockCenter = {
+        //             x: block.screenPos.x + effectiveCharWidth/2,
+        //             y: block.screenPos.y + effectiveCharHeight/2
+        //         };
                 
-                // Small spawn boundary around block (lighter color)
-                ctx.strokeStyle = block.heatColor;
-                ctx.globalAlpha = 0.3;
-                ctx.lineWidth = 1 / dpr;
-                ctx.setLineDash([1, 1]);
-                ctx.beginPath();
-                const blockSpawnRadius = 6 * effectiveCharWidth; // MIN_BLOCK_DISTANCE
-                ctx.arc(blockCenter.x, blockCenter.y, blockSpawnRadius, 0, 2 * Math.PI);
-                ctx.stroke();
+        //         // Small spawn boundary around block (lighter color)
+        //         ctx.strokeStyle = block.heatColor;
+        //         ctx.globalAlpha = 0.3;
+        //         ctx.lineWidth = 1 / dpr;
+        //         ctx.setLineDash([1, 1]);
+        //         ctx.beginPath();
+        //         const blockSpawnRadius = 6 * effectiveCharWidth; // MIN_BLOCK_DISTANCE
+        //         ctx.arc(blockCenter.x, blockCenter.y, blockSpawnRadius, 0, 2 * Math.PI);
+        //         ctx.stroke();
                 
-                // Tiny center dot for block
-                ctx.fillStyle = block.heatColor;
-                ctx.globalAlpha = 0.8;
-                ctx.beginPath();
-                ctx.arc(blockCenter.x, blockCenter.y, 2, 0, 2 * Math.PI);
-                ctx.fill();
-            }
+        //         // Tiny center dot for block
+        //         ctx.fillStyle = block.heatColor;
+        //         ctx.globalAlpha = 0.8;
+        //         ctx.beginPath();
+        //         ctx.arc(blockCenter.x, blockCenter.y, 2, 0, 2 * Math.PI);
+        //         ctx.fill();
+        //     }
             
-            ctx.globalAlpha = 1; // Reset
-            ctx.setLineDash([]); // Reset
-        }
+        //     ctx.globalAlpha = 1; // Reset
+        //     ctx.setLineDash([]); // Reset
+        // }
 
         // === Render Waypoint Arrows for Off-Screen Blocks ===
         const viewBounds = {
@@ -586,26 +622,26 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
             }
         }
 
-        // === Render Panning Direction ===
-        if (engine.panningDirection !== null && engine.getViewportCenter) {
-            const center = engine.getViewportCenter();
-            const centerScreen = engine.worldToScreen(center.x, center.y, currentZoom, currentOffset);
+        // // === Render Panning Direction ===
+        // if (engine.panningDirection !== null && engine.getViewportCenter) {
+        //     const center = engine.getViewportCenter();
+        //     const centerScreen = engine.worldToScreen(center.x, center.y, currentZoom, currentOffset);
             
-            const lineLength = 50; // Length of the direction indicator line in pixels
-            const angle = engine.panningDirection;
+        //     const lineLength = 50; // Length of the direction indicator line in pixels
+        //     const angle = engine.panningDirection;
 
-            const startX = centerScreen.x + (effectiveCharWidth / 2);
-            const startY = centerScreen.y + (effectiveCharHeight / 2);
-            const endX = startX + lineLength * Math.cos(angle);
-            const endY = startY + lineLength * Math.sin(angle);
+        //     const startX = centerScreen.x + (effectiveCharWidth / 2);
+        //     const startY = centerScreen.y + (effectiveCharHeight / 2);
+        //     const endX = startX + lineLength * Math.cos(angle);
+        //     const endY = startY + lineLength * Math.sin(angle);
 
-            ctx.beginPath();
-            ctx.moveTo(startX, startY);
-            ctx.lineTo(endX, endY);
-            ctx.strokeStyle = 'rgba(0, 102, 255, 0.8)'; // Blue color for the line
-            ctx.lineWidth = 2;
-            ctx.stroke();
-        }
+        //     ctx.beginPath();
+        //     ctx.moveTo(startX, startY);
+        //     ctx.lineTo(endX, endY);
+        //     ctx.strokeStyle = 'rgba(0, 102, 255, 0.8)'; // Blue color for the line
+        //     ctx.lineWidth = 2;
+        //     ctx.stroke();
+        // }
 
         // === Render Selection Area ===
         if (engine.selectionStart && engine.selectionEnd) {
@@ -707,9 +743,20 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
             ctx
         });
 
+        // === Render Debug Dialogue ===
+        renderDebugDialogue({
+            canvasWidth: cssWidth,
+            canvasHeight: cssHeight,
+            effectiveCharWidth,
+            effectiveCharHeight,
+            verticalTextOffset,
+            ctx,
+            debugText
+        });
+
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue]);
+    }, [engine, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue, renderDebugDialogue, debugText]);
 
 
     // --- Drawing Loop Effect ---

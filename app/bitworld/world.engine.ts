@@ -4,30 +4,14 @@ import { useWorldSave } from './world.save'; // Import the new hook
 
 // --- Constants --- (Copied and relevant ones kept)
 const BASE_FONT_SIZE = 16;
-const LINE_HEIGHT_MULTIPLIER = 1.2;
 const BASE_CHAR_WIDTH = BASE_FONT_SIZE * 0.6;
-const BASE_CHAR_HEIGHT = BASE_FONT_SIZE * LINE_HEIGHT_MULTIPLIER;
-const LOCAL_STORAGE_KEY = 'j72n';
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 5.0;
 const ZOOM_SENSITIVITY = 0.002;
 
 // --- Block Management Constants ---
-const BLOCK_PREFIX = 'block_';
-const MAX_BLOCKS_TOTAL = 8;
-const BLOCK_SPAWN_RADIUS = 40;  // Where blocks appear
-const BLOCK_DESPAWN_RADIUS = 60; // Where blocks get removed (must be larger than spawn)
-const BLOCKS_PER_REGION = 5;
-// Circle packing constants
+const BLOCK_PREFIX = 'block_';// Circle packing constants
 const MIN_BLOCK_DISTANCE = 6;  // Minimum cells between blocks
-const MAX_BLOCK_DISTANCE = 12; // Maximum cells between blocks
-
-// Phyllotactic and directional spawning constants
-const GOLDEN_ANGLE = 137.5;    // Golden angle in degrees for phyllotactic spirals
-const DIRECTIONAL_BLOCKS = 4;  // Number of blocks to spawn directionally (out of 5 total)
-const FAN_SPREAD_ANGLE = 60;   // Degrees for fan spread around panning direction
-const FAN_SPAWN_RADIUS = 40;       // Spawn exactly at the green circle boundary (same as BLOCK_SPAWN_RADIUS)
-const FAN_ARC_SEGMENTS = 4;        // Number of positions in the fan arc
 
 // --- Interfaces ---
 export interface WorldData { [key: string]: string; }
@@ -121,14 +105,48 @@ export function useWorldEngine({
     // Cursor spawning constants
     const CURSOR_SPAWN_DISTANCE = 8; // Distance from center to spawn cursors
     const CURSOR_BOUNDARY_RADIUS = MIN_BLOCK_DISTANCE; // Use the same radius as the visual boundary circles
+    
+    // Deepspawn multi-row object definition (29 characters total, 3 rows max)
+    const DEEPSPAWN_PATTERN = [
+        "●●●●●●●●●●",  // Row 1 - 10 chars
+        "●●●●●●●●●",   // Row 2 - 9 chars  
+        "●●●●●●●●●●"   // Row 3 - 10 chars
+    ]; // Total: 29 characters
+    
+    // Calculate deepspawn object dimensions
+    const DEEPSPAWN_WIDTH = Math.max(...DEEPSPAWN_PATTERN.map(row => row.length));
+    const DEEPSPAWN_HEIGHT = DEEPSPAWN_PATTERN.length;
+    
+    // Helper function to place a multi-row deepspawn object at given center position
+    const placeDeepspawnObject = useCallback((newData: WorldData, centerX: number, centerY: number) => {
+        // Calculate top-left corner of deepspawn object (centered on given position)
+        const startX = centerX - Math.floor(DEEPSPAWN_WIDTH / 2);
+        const startY = centerY - Math.floor(DEEPSPAWN_HEIGHT / 2);
+        
+        // Place each character of the deepspawn pattern
+        DEEPSPAWN_PATTERN.forEach((row, rowIndex) => {
+            for (let colIndex = 0; colIndex < row.length; colIndex++) {
+                const char = row[colIndex];
+                const worldX = startX + colIndex;
+                const worldY = startY + rowIndex;
+                const key = `deepspawn_${worldX},${worldY}`;
+                newData[key] = char;
+            }
+        });
+    }, []);
 
-    // Helper function to check if a cursor's boundary circle collides with existing cursors
-    const isPositionValidForCursor = useCallback((x: number, y: number, existingCursors: Point[]) => {
-        for (const cursor of existingCursors) {
-            const centerDistance = Math.sqrt((x - cursor.x) ** 2 + (y - cursor.y) ** 2);
-            // Two circles collide if the distance between centers is less than the sum of their radii
-            // Since all cursors have the same radius, collision occurs when centerDistance < 2 * CURSOR_BOUNDARY_RADIUS
-            if (centerDistance < 2 * CURSOR_BOUNDARY_RADIUS) {
+    // Helper function to check if a deepspawn's boundary circle collides with existing deepspawns
+    // Now accounts for multi-row deepspawn object dimensions
+    const isPositionValidForDeepspawn = useCallback((x: number, y: number, existingDeepspawns: Point[]) => {
+        for (const deepspawn of existingDeepspawns) {
+            const centerDistance = Math.sqrt((x - deepspawn.x) ** 2 + (y - deepspawn.y) ** 2);
+            
+            // Calculate effective radius based on deepspawn object dimensions
+            // Use the larger dimension (width or height) to ensure no overlap
+            const effectiveRadius = Math.max(DEEPSPAWN_WIDTH, DEEPSPAWN_HEIGHT) / 2;
+            const totalBoundaryDistance = 2 * effectiveRadius + CURSOR_BOUNDARY_RADIUS; // Add buffer
+            
+            if (centerDistance < totalBoundaryDistance) {
                 return false;
             }
         }
@@ -138,7 +156,7 @@ export function useWorldEngine({
     // Function to find a valid position by trying nearby alternatives
     const findValidPosition = useCallback((baseX: number, baseY: number, existingCursors: Point[], maxAttempts = 12) => {
         // First try the base position
-        if (isPositionValidForCursor(baseX, baseY, existingCursors)) {
+        if (isPositionValidForDeepspawn(baseX, baseY, existingCursors)) {
             return { x: baseX, y: baseY };
         }
 
@@ -152,7 +170,7 @@ export function useWorldEngine({
                 const testX = Math.round(baseX + radius * Math.cos(angle));
                 const testY = Math.round(baseY + radius * Math.sin(angle));
                 
-                if (isPositionValidForCursor(testX, testY, existingCursors)) {
+                if (isPositionValidForDeepspawn(testX, testY, existingCursors)) {
                     return { x: testX, y: testY };
                 }
             }
@@ -160,7 +178,7 @@ export function useWorldEngine({
         
         // If no valid position found, return the base position anyway
         return { x: baseX, y: baseY };
-    }, [isPositionValidForCursor]);
+    }, [isPositionValidForDeepspawn]);
 
     // Function to spawn 5 cursors: 3 ahead using phyllotactic arrangement + 2 orthogonal
     const spawnThreeCursors = useCallback((centerX: number, centerY: number, newDirection?: number | null) => {
@@ -184,12 +202,12 @@ export function useWorldEngine({
             direction = lastKnownDirection;
         }
         
-        // Clear all existing blocks first
+        // Clear all existing deepspawns first
         setWorldData(prev => {
             const newData = { ...prev };
-            // Remove all blocks (keys that start with 'block_')
+            // Remove all deepspawns (keys that start with 'deepspawn_')
             Object.keys(newData).forEach(key => {
-                if (key.startsWith('block_')) {
+                if (key.startsWith('deepspawn_')) {
                     delete newData[key];
                 }
             });
@@ -203,10 +221,9 @@ export function useWorldEngine({
             setWorldData(prev => {
                 const newData = { ...prev };
                 angles.forEach((angle, index) => {
-                    const cursorX = Math.round(centerX + CURSOR_SPAWN_DISTANCE * Math.cos(angle));
-                    const cursorY = Math.round(centerY + CURSOR_SPAWN_DISTANCE * Math.sin(angle));
-                    const key = `block_${cursorX},${cursorY}`;
-                    newData[key] = '●';
+                    const deepspawnX = Math.round(centerX + CURSOR_SPAWN_DISTANCE * Math.cos(angle));
+                    const deepspawnY = Math.round(centerY + CURSOR_SPAWN_DISTANCE * Math.sin(angle));
+                    placeDeepspawnObject(newData, deepspawnX, deepspawnY);
                 });
                 return newData;
             });
@@ -220,7 +237,7 @@ export function useWorldEngine({
         
         setWorldData(prev => {
             const newData = { ...prev };
-            const placedCursors: Point[] = []; // Track placed cursors for collision detection
+            const placedDeepspawns: Point[] = []; // Track placed deepspawns for collision detection
             
             // Spawn 3 cursors ahead using phyllotactic arrangement
             for (let i = 0; i < 3; i++) {
@@ -243,11 +260,10 @@ export function useWorldEngine({
                 const baseY = Math.round(centerY + totalDistance * Math.sin(forwardAngle));
                 
                 // Find a valid position that doesn't collide
-                const validPos = findValidPosition(baseX, baseY, placedCursors);
+                const validPos = findValidPosition(baseX, baseY, placedDeepspawns);
                 
-                const key = `block_${validPos.x},${validPos.y}`;
-                newData[key] = '●';
-                placedCursors.push(validPos); // Add to collision tracking
+                placeDeepspawnObject(newData, validPos.x, validPos.y);
+                placedDeepspawns.push(validPos); // Add to collision tracking
                 
                 console.log(`Spawning forward cursor ${i} at (${validPos.x}, ${validPos.y}) - Direction: ${(direction * 180/Math.PI).toFixed(1)}°${i === 0 ? ' (lead cursor)' : ''} ${validPos.x !== baseX || validPos.y !== baseY ? '(adjusted for collision)' : ''}`);
             }
@@ -263,11 +279,10 @@ export function useWorldEngine({
                 const baseY = Math.round(centerY + CURSOR_SPAWN_DISTANCE * Math.sin(angle));
                 
                 // Find a valid position that doesn't collide
-                const validPos = findValidPosition(baseX, baseY, placedCursors);
+                const validPos = findValidPosition(baseX, baseY, placedDeepspawns);
                 
-                const key = `block_${validPos.x},${validPos.y}`;
-                newData[key] = '●';
-                placedCursors.push(validPos); // Add to collision tracking
+                placeDeepspawnObject(newData, validPos.x, validPos.y);
+                placedDeepspawns.push(validPos); // Add to collision tracking
                 
                 console.log(`Spawning orthogonal cursor ${index} at (${validPos.x}, ${validPos.y}) - Angle: ${(angle * 180/Math.PI).toFixed(1)}° ${validPos.x !== baseX || validPos.y !== baseY ? '(adjusted for collision)' : ''}`);
             });
@@ -1093,113 +1108,6 @@ export function useWorldEngine({
         return Math.sqrt(deltaX * deltaX + deltaY * deltaY);
     }, [cursorPos, getViewportCenter]);
 
-    // --- Block Management Functions ---
-    const getExistingBlocks = useCallback((): Point[] => {
-        const blocks: Point[] = [];
-        for (const key in worldData) {
-            if (key.startsWith(BLOCK_PREFIX)) {
-                const coords = key.substring(BLOCK_PREFIX.length);
-                const [xStr, yStr] = coords.split(',');
-                const x = parseInt(xStr, 10);
-                const y = parseInt(yStr, 10);
-                if (!isNaN(x) && !isNaN(y)) {
-                    blocks.push({ x, y });
-                }
-            }
-        }
-        return blocks;
-    }, [worldData]);
-
-    const isPositionInViewport = useCallback((pos: Point): boolean => {
-        const center = getViewportCenter();
-        
-        // Calculate direction using our two-point tracking
-        if (!directionPoints.current || !directionPoints.previous) {
-            // Fallback to distance-based if no direction data
-            const distance = Math.sqrt(
-                Math.pow(pos.x - center.x, 2) + Math.pow(pos.y - center.y, 2)
-            );
-            return distance <= BLOCK_DESPAWN_RADIUS;
-        }
-        
-        // Simple direction from current direction points
-        const dx = directionPoints.current.x - directionPoints.previous.x;
-        const dy = directionPoints.current.y - directionPoints.previous.y;
-        const movementDistance = Math.sqrt(dx*dx + dy*dy);
-        
-        if (movementDistance < 0.5) {
-            // Not enough movement, keep all blocks for now
-            return true;
-        }
-        
-        const currentDirection = Math.atan2(dy, dx);
-        
-        // Calculate angle from center to block position
-        const blockAngle = Math.atan2(pos.y - center.y, pos.x - center.x);
-        
-        // Calculate angle difference from current movement direction
-        let angleDiff = Math.abs(blockAngle - currentDirection);
-        if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff; // Handle wrap-around
-        
-        const isInFront = angleDiff <= Math.PI / 2;
-        
-        // Debug logging for first few calls
-        if (Math.random() < 0.1) { // 10% sample rate
-            console.log(`Block at (${pos.x},${pos.y}) - Movement: ${movementDistance.toFixed(2)}, AngleDiff: ${(angleDiff * 180/Math.PI).toFixed(1)}°, InFront: ${isInFront}`);
-        }
-        
-        // Keep blocks that are within 90 degrees (π/2) of forward direction
-        // Despawn blocks that are more than 90 degrees away (i.e., "behind" us)
-        return isInFront;
-    }, [getViewportCenter, directionPoints]);
-
-    const calculateBlockDistance = useCallback((pos1: Point, pos2: Point): number => {
-        return Math.sqrt(Math.pow(pos1.x - pos2.x, 2) + Math.pow(pos1.y - pos2.y, 2));
-    }, []);
-
-    const isValidBlockPosition = useCallback((newPos: Point, existingBlocks: Point[]): boolean => {
-        for (const existingBlock of existingBlocks) {
-            const distance = calculateBlockDistance(newPos, existingBlock);
-            if (distance < MIN_BLOCK_DISTANCE) {
-                return false; // Too close to existing block
-            }
-        }
-        return true;
-    }, [calculateBlockDistance]);
-
-    const generateRandomPosition = useCallback((centerPoint: Point, existingBlocks: Point[]): Point => {
-        let attempts = 0;
-        const maxAttempts = 100;
-        
-        while (attempts < maxAttempts) {
-            // Generate random position within spawn radius
-            const angle = Math.random() * 2 * Math.PI;
-            const radius = Math.random() * BLOCK_SPAWN_RADIUS;
-            
-            const candidatePos = {
-                x: Math.round(centerPoint.x + radius * Math.cos(angle)),
-                y: Math.round(centerPoint.y + radius * Math.sin(angle))
-            };
-            
-            // Check if position meets distance constraints
-            if (isValidBlockPosition(candidatePos, existingBlocks)) {
-                return candidatePos;
-            }
-            
-            attempts++;
-        }
-        
-        // If we can't find a valid position with constraints, fallback to simple random
-        // This happens when the area is too crowded
-        const angle = Math.random() * 2 * Math.PI;
-        const radius = Math.random() * BLOCK_SPAWN_RADIUS;
-        
-        return {
-            x: Math.round(centerPoint.x + radius * Math.cos(angle)),
-            y: Math.round(centerPoint.y + radius * Math.sin(angle))
-        };
-    }, [isValidBlockPosition]);
-
     // Calculate panning direction from two-point tracking
     const getPanningDirection = useCallback((): number | null => {
         if (typeof window === 'undefined') return null;
@@ -1216,65 +1124,6 @@ export function useWorldEngine({
         
         return Math.atan2(dy, dx);
     }, [directionPoints, MIN_MOVEMENT_THRESHOLD]);
-
-    // Generate arc/fan positions at spawn boundary
-    const generateFanArcPosition = useCallback((index: number, centerPoint: Point, baseDirection: number): Point => {
-        // Convert to radians
-        const fanSpreadRad = (FAN_SPREAD_ANGLE * Math.PI) / 180;
-        
-        // Create evenly distributed arc positions
-        if (FAN_ARC_SEGMENTS <= 1) {
-            // Single block: spawn directly ahead
-            return {
-                x: Math.round(centerPoint.x + FAN_SPAWN_RADIUS * Math.cos(baseDirection)),
-                y: Math.round(centerPoint.y + FAN_SPAWN_RADIUS * Math.sin(baseDirection))
-            };
-        }
-        
-        // Calculate angle for this segment of the arc
-        // Distribute evenly across the fan spread, centered on baseDirection
-        const segmentStep = fanSpreadRad / (FAN_ARC_SEGMENTS - 1);
-        const startAngle = baseDirection - (fanSpreadRad / 2);
-        const segmentAngle = startAngle + (index * segmentStep);
-        
-        // All blocks spawn at exactly the same radius (green circle boundary)
-        return {
-            x: Math.round(centerPoint.x + FAN_SPAWN_RADIUS * Math.cos(segmentAngle)),
-            y: Math.round(centerPoint.y + FAN_SPAWN_RADIUS * Math.sin(segmentAngle))
-        };
-    }, []);
-
-    // Generate directional positions based on panning direction
-    const generateDirectionalPositions = useCallback((centerPoint: Point, count: number): Point[] => {
-        const baseDirection = getPanningDirection();
-        if (baseDirection === null) {
-            // Use direction from direction points or default
-            const lastDirection = (directionPoints.current && directionPoints.previous) ? 
-                Math.atan2(
-                    directionPoints.current.y - directionPoints.previous.y,
-                    directionPoints.current.x - directionPoints.previous.x
-                ) : 0; // Default to rightward (0 radians)
-            
-            const positions: Point[] = [];
-            for (let i = 0; i < count; i++) {
-                positions.push(generateFanArcPosition(i, centerPoint, lastDirection));
-            }
-            return positions;
-        }
-        
-        const positions: Point[] = [];
-        for (let i = 0; i < count; i++) {
-            positions.push(generateFanArcPosition(i, centerPoint, baseDirection));
-        }
-        
-        return positions;
-    }, [getPanningDirection, generateFanArcPosition, generateRandomPosition, directionPoints]);
-
-    // Simple block management - now handled by direction point updates
-    const manageBlocks = useCallback((): void => {
-        // Block management is now handled by spawnThreeCursors in updateDirectionPoint
-        // This function is kept for compatibility but does nothing
-    }, []);
 
     const getBlocksInRegion = useCallback((center: Point, radius: number): Point[] => {
         const blocksInRegion: Point[] = [];
@@ -1369,7 +1218,6 @@ export function useWorldEngine({
         worldPersistenceError,
         getViewportCenter,
         getCursorDistanceFromCenter,
-        manageBlocks,
         getBlocksInRegion,
         isBlock,
         directionPoints,
