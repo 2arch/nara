@@ -16,9 +16,41 @@ const DRAW_GRID = true;
 const GRID_LINE_WIDTH = 1;
 const CURSOR_TRAIL_FADE_MS = 200; // Time in ms for trail to fully fade
 
+// --- Block & Debug Constants ---
+const BLOCK_COLOR = '#FFA500'; // Orange color for blocks (fallback)
+const DEBUG_SCAFFOLD_COLOR = '#00FF00'; // Green for debug scaffolds
+const DEBUG_BOUNDARY_COLOR = '#FF00FF'; // Magenta for boundaries
+const SHOW_DEBUG_SCAFFOLDS = true;
+
+// --- Heat Map Color Gradient ---
+const HEAT_MAP_COLORS = [
+    { r: 255, g: 165, b: 0 },   // Orange (closest)
+    { r: 255, g: 255, b: 0 },   // Yellow
+    { r: 0, g: 255, b: 0 },     // Green
+    { r: 0, g: 0, b: 255 }      // Blue (farthest)
+];
+const MAX_HEAT_DISTANCE = 40; // Distance at which blocks become fully "cold" (blue)
+
+// --- Waypoint Arrow Constants ---
+const ARROW_SIZE = 12; // Size of waypoint arrows
+const ARROW_MARGIN = 20; // Distance from viewport edge
+
+// --- Pan Trail Constants ---
+const MAX_TRAIL_POINTS = 50; // Maximum points to track
+const TRAIL_FADE_DURATION = 3000; // 3 seconds for trail to fade
+const SPLINE_COLOR = '#FFFFFF'; // White for straight spline
+const CURVE_COLOR = '#0066FF'; // Blue for curved spline
+const TRAIL_LINE_WIDTH = 2;
+
 interface CursorTrailPosition {
     x: number;
     y: number;
+    timestamp: number;
+}
+
+interface PanTrailPoint {
+    worldX: number;
+    worldY: number;
     timestamp: number;
 }
 
@@ -34,6 +66,179 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
     const [cursorTrail, setCursorTrail] = useState<CursorTrailPosition[]>([]);
     const lastCursorPosRef = useRef<Point | null>(null);
+    
+    // Pan trail tracking
+    const [panTrail, setPanTrail] = useState<PanTrailPoint[]>([]);
+    const lastViewOffsetRef = useRef<Point | null>(null);
+
+    // --- Heat Map Color Functions ---
+    const interpolateColor = useCallback((color1: {r: number, g: number, b: number}, color2: {r: number, g: number, b: number}, factor: number) => {
+        return {
+            r: Math.round(color1.r + factor * (color2.r - color1.r)),
+            g: Math.round(color1.g + factor * (color2.g - color1.g)),
+            b: Math.round(color1.b + factor * (color2.b - color1.b))
+        };
+    }, []);
+
+    const getHeatMapColor = useCallback((distance: number): string => {
+        // Normalize distance to 0-1 range
+        const normalizedDistance = Math.min(distance / MAX_HEAT_DISTANCE, 1);
+        
+        // Calculate which color segment we're in
+        const segmentSize = 1 / (HEAT_MAP_COLORS.length - 1);
+        const segmentIndex = Math.floor(normalizedDistance / segmentSize);
+        const segmentProgress = (normalizedDistance % segmentSize) / segmentSize;
+        
+        // Handle edge case for maximum distance
+        if (segmentIndex >= HEAT_MAP_COLORS.length - 1) {
+            const color = HEAT_MAP_COLORS[HEAT_MAP_COLORS.length - 1];
+            return `rgb(${color.r}, ${color.g}, ${color.b})`;
+        }
+        
+        // Interpolate between two adjacent colors
+        const color1 = HEAT_MAP_COLORS[segmentIndex];
+        const color2 = HEAT_MAP_COLORS[segmentIndex + 1];
+        const interpolated = interpolateColor(color1, color2, segmentProgress);
+        
+        return `rgb(${interpolated.r}, ${interpolated.g}, ${interpolated.b})`;
+    }, [interpolateColor]);
+
+    // --- Waypoint Arrow Functions ---
+    const isBlockInViewport = useCallback((worldX: number, worldY: number, viewBounds: {minX: number, maxX: number, minY: number, maxY: number}): boolean => {
+        return worldX >= viewBounds.minX && worldX <= viewBounds.maxX && 
+               worldY >= viewBounds.minY && worldY <= viewBounds.maxY;
+    }, []);
+
+    const getViewportEdgeIntersection = useCallback((centerX: number, centerY: number, targetX: number, targetY: number, viewportWidth: number, viewportHeight: number) => {
+        const dx = targetX - centerX;
+        const dy = targetY - centerY;
+        
+        // Calculate the direction vector
+        const length = Math.sqrt(dx * dx + dy * dy);
+        if (length === 0) return null;
+        
+        const dirX = dx / length;
+        const dirY = dy / length;
+        
+        // Find intersection with viewport edges
+        const halfWidth = viewportWidth / 2;
+        const halfHeight = viewportHeight / 2;
+        
+        // Calculate intersection with each edge
+        const tTop = -halfHeight / dirY;
+        const tBottom = halfHeight / dirY;
+        const tLeft = -halfWidth / dirX;
+        const tRight = halfWidth / dirX;
+        
+        // Find the smallest positive t (closest edge intersection)
+        const validTs = [tTop, tBottom, tLeft, tRight].filter(t => t > 0);
+        if (validTs.length === 0) return null;
+        
+        const t = Math.min(...validTs);
+        
+        return {
+            x: centerX + t * dirX,
+            y: centerY + t * dirY,
+            angle: Math.atan2(dy, dx) // Angle for arrow direction
+        };
+    }, []);
+
+    const drawArrow = useCallback((ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, color: string) => {
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        
+        // Translate to arrow position and rotate
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        
+        // Draw arrow shape (pointing right, will be rotated)
+        ctx.beginPath();
+        ctx.moveTo(ARROW_SIZE, 0);
+        ctx.lineTo(-ARROW_SIZE/2, -ARROW_SIZE/2);
+        ctx.lineTo(-ARROW_SIZE/4, 0);
+        ctx.lineTo(-ARROW_SIZE/2, ARROW_SIZE/2);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.restore();
+    }, []);
+
+    // --- Pan Trail Drawing Functions ---
+    const drawStraightSpline = useCallback((ctx: CanvasRenderingContext2D, points: PanTrailPoint[], currentZoom: number, currentOffset: Point) => {
+        if (points.length < 2) return;
+        
+        const now = Date.now();
+        ctx.strokeStyle = SPLINE_COLOR;
+        ctx.lineWidth = TRAIL_LINE_WIDTH;
+        ctx.setLineDash([]);
+        
+        // Convert trail points to screen coordinates
+        const screenPoints = points.map(point => ({
+            ...engine.worldToScreen(point.worldX, point.worldY, currentZoom, currentOffset),
+            timestamp: point.timestamp
+        }));
+        
+        // Draw straight line segments between points
+        ctx.beginPath();
+        ctx.moveTo(screenPoints[0].x, screenPoints[0].y);
+        
+        for (let i = 1; i < screenPoints.length; i++) {
+            const age = now - screenPoints[i].timestamp;
+            const opacity = Math.max(0, 1 - (age / TRAIL_FADE_DURATION));
+            
+            if (opacity > 0) {
+                ctx.globalAlpha = opacity;
+                ctx.lineTo(screenPoints[i].x, screenPoints[i].y);
+            }
+        }
+        
+        ctx.stroke();
+        ctx.globalAlpha = 1; // Reset opacity
+    }, [engine]);
+
+    const drawCurvedSpline = useCallback((ctx: CanvasRenderingContext2D, points: PanTrailPoint[], currentZoom: number, currentOffset: Point) => {
+        if (points.length < 3) return;
+        
+        const now = Date.now();
+        ctx.strokeStyle = CURVE_COLOR;
+        ctx.lineWidth = TRAIL_LINE_WIDTH;
+        ctx.setLineDash([]);
+        
+        // Convert trail points to screen coordinates
+        const screenPoints = points.map(point => ({
+            ...engine.worldToScreen(point.worldX, point.worldY, currentZoom, currentOffset),
+            timestamp: point.timestamp
+        }));
+        
+        // Draw smooth curves using quadratic Bezier curves
+        for (let i = 0; i < screenPoints.length - 2; i++) {
+            const age = now - screenPoints[i + 1].timestamp;
+            const opacity = Math.max(0, 1 - (age / TRAIL_FADE_DURATION));
+            
+            if (opacity > 0) {
+                ctx.globalAlpha = opacity;
+                ctx.beginPath();
+                
+                const p0 = screenPoints[i];
+                const p1 = screenPoints[i + 1];
+                const p2 = screenPoints[i + 2];
+                
+                // Calculate control points for smooth curve
+                const cp1x = p0.x + (p1.x - p0.x) * 0.5;
+                const cp1y = p0.y + (p1.y - p0.y) * 0.5;
+                const cp2x = p1.x + (p2.x - p1.x) * 0.5;
+                const cp2y = p1.y + (p2.y - p1.y) * 0.5;
+                
+                ctx.moveTo(cp1x, cp1y);
+                ctx.quadraticCurveTo(p1.x, p1.y, cp2x, cp2y);
+                ctx.stroke();
+            }
+        }
+        
+        ctx.globalAlpha = 1; // Reset opacity
+    }, [engine]);
 
     // Refs for smooth panning
     const panStartInfoRef = useRef<PanStartInfo | null>(null);
@@ -96,6 +301,39 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
         }
     }, [engine.cursorPos]);
 
+    // Track pan movement for trail effect
+    useEffect(() => {
+        if (typeof window === 'undefined') return; // Skip during SSR
+        
+        // Get viewport center in world coordinates (like the debug circles)
+        const viewportCenter = engine.getViewportCenter ? engine.getViewportCenter() : null;
+        if (!viewportCenter) return;
+        
+        // Only add to trail if viewport center has actually changed
+        if (!lastViewOffsetRef.current || 
+            viewportCenter.x !== lastViewOffsetRef.current.x || 
+            viewportCenter.y !== lastViewOffsetRef.current.y) {
+            
+            const now = Date.now();
+            const newTrailPoint = {
+                worldX: viewportCenter.x,
+                worldY: viewportCenter.y,
+                timestamp: now
+            };
+            
+            setPanTrail(prev => {
+                // Add new point and filter out old ones
+                const cutoffTime = now - TRAIL_FADE_DURATION;
+                const updated = [newTrailPoint, ...prev.filter(point => point.timestamp >= cutoffTime)];
+                
+                // Limit to maximum trail points
+                return updated.slice(0, MAX_TRAIL_POINTS);
+            });
+            
+            lastViewOffsetRef.current = {...viewportCenter};
+        }
+    }, [engine.viewOffset, engine.zoomLevel, engine.getViewportCenter]); // Include zoom since it affects viewport center
+
     // --- Drawing Logic ---
     const draw = useCallback(() => {
         const canvas = canvasRef.current;
@@ -152,6 +390,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
         ctx.fillStyle = TEXT_COLOR;
         const verticalTextOffset = (effectiveCharHeight - effectiveFontSize) / 2 + (effectiveFontSize * 0.1);
         for (const key in engine.worldData) {
+            // Skip block data - we'll render those separately
+            if (key.startsWith('block_')) continue;
+            
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
@@ -161,6 +402,202 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
                     ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
                 }
             }
+        }
+
+        // === Debug Scaffolds === (Green dot removed)
+
+        // === Render Pan Trails ===
+        if (panTrail.length > 0) {
+            // Draw only straight spline (removed blue curved spline)
+            drawStraightSpline(ctx, panTrail, currentZoom, currentOffset);
+        }
+        
+        // === Render Angle Calculation Points ===
+        const debugData = engine.getAngleDebugData();
+        if (debugData) {
+            // Draw current point (most recent) as filled cell
+            const currentScreen = engine.worldToScreen(debugData.firstPoint.x, debugData.firstPoint.y, currentZoom, currentOffset);
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(currentScreen.x, currentScreen.y, effectiveCharWidth, effectiveCharHeight);
+            
+            // Draw previous point as filled cell
+            const previousScreen = engine.worldToScreen(debugData.lastPoint.x, debugData.lastPoint.y, currentZoom, currentOffset);
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(previousScreen.x, previousScreen.y, effectiveCharWidth, effectiveCharHeight);
+            
+            // Draw line between center of cells
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 5]); // Dashed line
+            ctx.beginPath();
+            ctx.moveTo(currentScreen.x + effectiveCharWidth/2, currentScreen.y + effectiveCharHeight/2);
+            ctx.lineTo(previousScreen.x + effectiveCharWidth/2, previousScreen.y + effectiveCharHeight/2);
+            ctx.stroke();
+            ctx.setLineDash([]); // Reset dash
+        }
+
+        // === Render Blocks with Heat Map Colors ===
+        const blocksToDebug = []; // Store block positions for debug lines
+        for (const key in engine.worldData) {
+            if (key.startsWith('block_')) {
+                const coords = key.substring('block_'.length);
+                const [xStr, yStr] = coords.split(',');
+                const worldX = parseInt(xStr, 10);
+                const worldY = parseInt(yStr, 10);
+                
+                if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                    if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                        // Calculate distance from cursor to this block
+                        const deltaX = worldX - engine.cursorPos.x;
+                        const deltaY = worldY - engine.cursorPos.y;
+                        const distanceFromCursor = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                        
+                        // Get heat map color based on distance
+                        const heatColor = getHeatMapColor(distanceFromCursor);
+                        ctx.fillStyle = heatColor;
+                        
+                        // Fill entire cell with heat-mapped color
+                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        
+                        // Store for debug lines
+                        blocksToDebug.push({
+                            worldX, worldY, screenPos, heatColor
+                        });
+                    }
+                }
+            }
+        }
+        
+        // === Debug Connection Lines ===
+        if (SHOW_DEBUG_SCAFFOLDS && engine.getViewportCenter && blocksToDebug.length > 0) {
+            const center = engine.getViewportCenter();
+            const centerScreen = engine.worldToScreen(center.x, center.y, currentZoom, currentOffset);
+            
+            // Draw lines from center to each block
+            for (const block of blocksToDebug) {
+                ctx.strokeStyle = block.heatColor;
+                ctx.lineWidth = 1 / dpr;
+                ctx.setLineDash([2, 2]); // Dashed lines
+                ctx.globalAlpha = 0.6; // Semi-transparent
+                
+                ctx.beginPath();
+                ctx.moveTo(
+                    centerScreen.x + effectiveCharWidth/2, 
+                    centerScreen.y + effectiveCharHeight/2
+                );
+                ctx.lineTo(
+                    block.screenPos.x + effectiveCharWidth/2, 
+                    block.screenPos.y + effectiveCharHeight/2
+                );
+                ctx.stroke();
+            }
+            
+            // Draw individual boundary circles around each block
+            for (const block of blocksToDebug) {
+                const blockCenter = {
+                    x: block.screenPos.x + effectiveCharWidth/2,
+                    y: block.screenPos.y + effectiveCharHeight/2
+                };
+                
+                // Small spawn boundary around block (lighter color)
+                ctx.strokeStyle = block.heatColor;
+                ctx.globalAlpha = 0.3;
+                ctx.lineWidth = 1 / dpr;
+                ctx.setLineDash([1, 1]);
+                ctx.beginPath();
+                const blockSpawnRadius = 6 * effectiveCharWidth; // MIN_BLOCK_DISTANCE
+                ctx.arc(blockCenter.x, blockCenter.y, blockSpawnRadius, 0, 2 * Math.PI);
+                ctx.stroke();
+                
+                // Tiny center dot for block
+                ctx.fillStyle = block.heatColor;
+                ctx.globalAlpha = 0.8;
+                ctx.beginPath();
+                ctx.arc(blockCenter.x, blockCenter.y, 2, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+            
+            ctx.globalAlpha = 1; // Reset
+            ctx.setLineDash([]); // Reset
+        }
+
+        // === Render Waypoint Arrows for Off-Screen Blocks ===
+        const viewBounds = {
+            minX: Math.floor(startWorldX),
+            maxX: Math.ceil(endWorldX),
+            minY: Math.floor(startWorldY),
+            maxY: Math.ceil(endWorldY)
+        };
+        
+        const viewportCenterScreen = { x: cssWidth / 2, y: cssHeight / 2 };
+        
+        for (const key in engine.worldData) {
+            if (key.startsWith('block_')) {
+                const coords = key.substring('block_'.length);
+                const [xStr, yStr] = coords.split(',');
+                const worldX = parseInt(xStr, 10);
+                const worldY = parseInt(yStr, 10);
+                
+                // Check if block is outside viewport
+                if (!isBlockInViewport(worldX, worldY, viewBounds)) {
+                    // Convert world position to screen coordinates for direction calculation
+                    const blockScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                    
+                    // Find intersection point on viewport edge
+                    const intersection = getViewportEdgeIntersection(
+                        viewportCenterScreen.x, 
+                        viewportCenterScreen.y,
+                        blockScreenPos.x, 
+                        blockScreenPos.y,
+                        cssWidth, 
+                        cssHeight
+                    );
+                    
+                    if (intersection) {
+                        // Calculate distance from cursor for heat map color
+                        const deltaX = worldX - engine.cursorPos.x;
+                        const deltaY = worldY - engine.cursorPos.y;
+                        const distanceFromCursor = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                        
+                        // Get heat map color
+                        const heatColor = getHeatMapColor(distanceFromCursor);
+                        
+                        // Adjust intersection point to be within margin from edge
+                        const edgeBuffer = ARROW_MARGIN;
+                        let adjustedX = intersection.x;
+                        let adjustedY = intersection.y;
+                        
+                        // Clamp to viewport bounds with margin
+                        adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
+                        adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
+                        
+                        // Draw the waypoint arrow
+                        drawArrow(ctx, adjustedX, adjustedY, intersection.angle, heatColor);
+                    }
+                }
+            }
+        }
+
+        // === Render Panning Direction ===
+        if (engine.panningDirection !== null && engine.getViewportCenter) {
+            const center = engine.getViewportCenter();
+            const centerScreen = engine.worldToScreen(center.x, center.y, currentZoom, currentOffset);
+            
+            const lineLength = 50; // Length of the direction indicator line in pixels
+            const angle = engine.panningDirection;
+
+            const startX = centerScreen.x + (effectiveCharWidth / 2);
+            const startY = centerScreen.y + (effectiveCharHeight / 2);
+            const endX = startX + lineLength * Math.cos(angle);
+            const endY = startY + lineLength * Math.sin(angle);
+
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.strokeStyle = 'rgba(0, 102, 255, 0.8)'; // Blue color for the line
+            ctx.lineWidth = 2;
+            ctx.stroke();
         }
 
         // Draw cursor trail (older positions first, for proper layering)
@@ -224,35 +661,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
             }
         }
 
-        // Draw selection rectangle if engine has a selection
-        if (engine.selectionStart && engine.selectionEnd) {
-            const { width: effectiveCharWidth, height: effectiveCharHeight } = engine.getEffectiveCharDims(currentZoom);
-
-            // Ensure start is top-left and end is bottom-right for screen coordinates
-            const screenStart = engine.worldToScreen(engine.selectionStart.x, engine.selectionStart.y, currentZoom, currentOffset);
-            const screenEnd = engine.worldToScreen(engine.selectionEnd.x, engine.selectionEnd.y, currentZoom, currentOffset);
-
-            // Calculate screen rectangle coordinates, ensuring start is top-left
-            const rectX = Math.min(screenStart.x, screenEnd.x);
-            const rectY = Math.min(screenStart.y, screenEnd.y);
-            // Width/Height calculation needs to account for the character dimensions
-            const selStartXWorld = Math.min(engine.selectionStart.x, engine.selectionEnd.x);
-            const selStartYWorld = Math.min(engine.selectionStart.y, engine.selectionEnd.y);
-            const selEndXWorld = Math.max(engine.selectionStart.x, engine.selectionEnd.x);
-            const selEndYWorld = Math.max(engine.selectionStart.y, engine.selectionEnd.y);
-
-            const rectWidth = (selEndXWorld - selStartXWorld + 1) * effectiveCharWidth;
-            const rectHeight = (selEndYWorld - selStartYWorld + 1) * effectiveCharHeight;
-
-
-            // Draw semi-transparent selection
-            ctx.fillStyle = 'rgba(255, 165, 0, 0.3)';
-            ctx.fillRect(rectX, rectY, rectWidth, rectHeight);
-        }
-
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail]);
+    }, [engine, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline]);
 
 
     // --- Drawing Loop Effect ---

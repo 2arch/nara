@@ -5,6 +5,7 @@ import React, { useState, useEffect } from 'react';
 import { useWorldEngine } from '@/app/bitworld/world.engine';
 import { BitCanvas } from '@/app/bitworld/bit.canvas';
 import SpaceBackground from '@/app/bitworld/canvas.bg';
+import Debug from '@/app/debug';
 
 // --- Constants ---
 const CURSOR_BLINK_RATE = 200;
@@ -26,6 +27,14 @@ export default function CorbuType() {
         }, CURSOR_BLINK_RATE);
         return () => clearInterval(blinkInterval);
     }, []);
+
+    // --- Block Management Effect ---
+    useEffect(() => {
+        // Manage blocks when viewport center or cursor position changes
+        if (engine && engine.manageBlocks) {
+            engine.manageBlocks();
+        }
+    }, [engine.cursorPos, engine.viewOffset, engine.zoomLevel, engine.manageBlocks]);
 
 
     return (
@@ -61,6 +70,9 @@ export default function CorbuType() {
                     cursorColorAlternate={cursorColorAlternate}
                     // className="bit-canvas" // Add className if needed for styling
                 />
+                
+                <Debug engine={engine} />
+                
                 {/* Optional Debug Info */}
                 {/* <div style={{ position: 'absolute', bottom: 5, left: 5, background: 'rgba(0,0,0,0.6)', color: 'white', padding: '2px 5px', fontSize: '10px', pointerEvents: 'none'}}>
                     Zoom: {engine.zoomLevel.toFixed(2)} | Offset: ({engine.viewOffset.x.toFixed(0)}, {engine.viewOffset.y.toFixed(0)}) | Cursor: ({engine.cursorPos.x}, {engine.cursorPos.y}) | Sel: {engine.selectionStart ? `(${engine.selectionStart.x},${engine.selectionStart.y})->(${engine.selectionEnd?.x},${engine.selectionEnd?.y})` : 'None'}

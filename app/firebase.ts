@@ -6,13 +6,13 @@ import { getDatabase, connectDatabaseEmulator, ref, onValue, set, get } from "fi
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyCVOk85t5xkRIrEz5g9EuNxQcTWTTdKR68",
-  authDomain: "j72n-ca622.firebaseapp.com",
-  databaseURL: "https://j72n-ca622-default-rtdb.firebaseio.com",
-  projectId: "j72n-ca622",
-  storageBucket: "j72n-ca622.firebasestorage.app",
-  messagingSenderId: "1081387839640",
-  appId: "1:1081387839640:web:55e2fa9a52d01297a3e0ed"
+  apiKey: "AIzaSyBNVepLdEbdKckcSUadJgzCHsoDK1KVysU",
+  authDomain: "synthe-314f6.firebaseapp.com",
+  databaseURL: "https://synthe-314f6-default-rtdb.firebaseio.com",
+  projectId: "synthe-314f6",
+  storageBucket: "synthe-314f6.firebasestorage.app",
+  messagingSenderId: "42128889382",
+  appId: "1:42128889382:web:cd0d4450fc33f73615b8e7"
 };
 
 // Initialize Firebase

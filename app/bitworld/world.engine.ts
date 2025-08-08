@@ -12,6 +12,23 @@ const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 5.0;
 const ZOOM_SENSITIVITY = 0.002;
 
+// --- Block Management Constants ---
+const BLOCK_PREFIX = 'block_';
+const MAX_BLOCKS_TOTAL = 8;
+const BLOCK_SPAWN_RADIUS = 40;  // Where blocks appear
+const BLOCK_DESPAWN_RADIUS = 60; // Where blocks get removed (must be larger than spawn)
+const BLOCKS_PER_REGION = 5;
+// Circle packing constants
+const MIN_BLOCK_DISTANCE = 6;  // Minimum cells between blocks
+const MAX_BLOCK_DISTANCE = 12; // Maximum cells between blocks
+
+// Phyllotactic and directional spawning constants
+const GOLDEN_ANGLE = 137.5;    // Golden angle in degrees for phyllotactic spirals
+const DIRECTIONAL_BLOCKS = 4;  // Number of blocks to spawn directionally (out of 5 total)
+const FAN_SPREAD_ANGLE = 60;   // Degrees for fan spread around panning direction
+const FAN_SPAWN_RADIUS = 40;       // Spawn exactly at the green circle boundary (same as BLOCK_SPAWN_RADIUS)
+const FAN_ARC_SEGMENTS = 4;        // Number of positions in the fan arc
+
 // --- Interfaces ---
 export interface WorldData { [key: string]: string; }
 export interface Point { x: number; y: number; }
@@ -51,6 +68,13 @@ export interface WorldEngine {
     isLoadingWorld: boolean;
     isSavingWorld: boolean;
     worldPersistenceError: string | null;
+    getViewportCenter: () => Point;
+    getCursorDistanceFromCenter: () => number;
+    manageBlocks: () => void;
+    getBlocksInRegion: (center: Point, radius: number) => Point[];
+    isBlock: (x: number, y: number) => boolean;
+    directionPoints: { current: Point & { timestamp: number } | null, previous: Point & { timestamp: number } | null };
+    getAngleDebugData: () => { firstPoint: Point & { timestamp: number }, lastPoint: Point & { timestamp: number }, angle: number, degrees: number, pointCount: number } | null;
 }
 
 // --- Hook Input ---
@@ -80,6 +104,128 @@ export function useWorldEngine({
     const [selectionStart, setSelectionStart] = useState<Point | null>(null);
     const [selectionEnd, setSelectionEnd] = useState<Point | null>(null);
     const clipboardRef = useRef<{ text: string, width: number, height: number } | null>(null);
+    
+    // Simple two-point tracking for direction calculation
+    const [directionPoints, setDirectionPoints] = useState<{
+        current: {x: number, y: number, timestamp: number} | null;
+        previous: {x: number, y: number, timestamp: number} | null;
+    }>({ current: null, previous: null });
+    const [panningDirection, setPanningDirection] = useState<number | null>(null);
+    
+    // Direction tracking constants
+    const MIN_DISTANCE_THRESHOLD = 2; // Minimum distance to update direction
+    const MAX_TIME_INTERVAL = 3000; // 3 seconds max between updates
+    const MIN_MOVEMENT_THRESHOLD = 0.5; // Minimum movement to count as significant
+    
+    // Cursor spawning constants
+    const CURSOR_SPAWN_DISTANCE = 8; // Distance from center to spawn cursors
+
+    // Function to spawn 3 cursors ahead using phyllotactic arrangement
+    const spawnThreeCursors = useCallback((centerX: number, centerY: number) => {
+        // Get current panning direction
+        const direction = getPanningDirection();
+        
+        // Clear all existing blocks first
+        setWorldData(prev => {
+            const newData = { ...prev };
+            // Remove all blocks (keys that start with 'block_')
+            Object.keys(newData).forEach(key => {
+                if (key.startsWith('block_')) {
+                    delete newData[key];
+                }
+            });
+            return newData;
+        });
+
+        if (direction === null) {
+            // If no direction, spawn in default forward pattern
+            const angles = [0, (2 * Math.PI) / 3, (4 * Math.PI) / 3]; // 0°, 120°, 240°
+            
+            setWorldData(prev => {
+                const newData = { ...prev };
+                angles.forEach((angle, index) => {
+                    const cursorX = Math.round(centerX + CURSOR_SPAWN_DISTANCE * Math.cos(angle));
+                    const cursorY = Math.round(centerY + CURSOR_SPAWN_DISTANCE * Math.sin(angle));
+                    const key = `block_${cursorX},${cursorY}`;
+                    newData[key] = '●';
+                });
+                return newData;
+            });
+            return;
+        }
+
+        // Spawn cursors ahead using phyllotactic arrangement
+        const GOLDEN_ANGLE_RAD = 137.5 * Math.PI / 180; // Golden angle in radians
+        const FORWARD_OFFSET = CURSOR_SPAWN_DISTANCE; // Base distance ahead
+        const SPREAD_ANGLE = 30 * Math.PI / 180; // 30-degree spread for variety
+        
+        setWorldData(prev => {
+            const newData = { ...prev };
+            
+            for (let i = 0; i < 3; i++) {
+                // Pure phyllotactic spiral calculation
+                const phyllotacticAngle = i * GOLDEN_ANGLE_RAD;
+                const spiralRadius = Math.sqrt(i + 1) * 3; // Phyllotactic radius scaling
+                
+                // Calculate the forward direction with phyllotactic offset
+                const spreadOffset = (Math.sin(phyllotacticAngle) * SPREAD_ANGLE);
+                const forwardAngle = direction + spreadOffset;
+                
+                // Position ahead in the movement direction with phyllotactic spacing
+                const totalDistance = FORWARD_OFFSET + spiralRadius;
+                const cursorX = Math.round(centerX + totalDistance * Math.cos(forwardAngle));
+                const cursorY = Math.round(centerY + totalDistance * Math.sin(forwardAngle));
+                
+                const key = `block_${cursorX},${cursorY}`;
+                newData[key] = '●';
+                
+                console.log(`Spawning cursor ${i} at (${cursorX}, ${cursorY}) - Direction: ${(direction * 180/Math.PI).toFixed(1)}°`);
+            }
+            
+            return newData;
+        });
+    }, [CURSOR_SPAWN_DISTANCE, getPanningDirection]);
+
+    // Function to update direction tracking points
+    const updateDirectionPoint = useCallback((x: number, y: number) => {
+        if (typeof window === 'undefined') return;
+        
+        const now = Date.now();
+        
+        setDirectionPoints(prev => {
+            // If no current point, set as current and spawn cursors
+            if (!prev.current) {
+                spawnThreeCursors(x, y);
+                
+                return {
+                    current: { x, y, timestamp: now },
+                    previous: null
+                };
+            }
+            
+            // Calculate distance from current point
+            const dx = x - prev.current.x;
+            const dy = y - prev.current.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            // Check if we should update based on distance or time
+            const timeSinceUpdate = now - prev.current.timestamp;
+            const shouldUpdateByDistance = distance >= MIN_DISTANCE_THRESHOLD;
+            const shouldUpdateByTime = timeSinceUpdate >= MAX_TIME_INTERVAL;
+            
+            if (shouldUpdateByDistance || shouldUpdateByTime) {
+                // Spawn 3 cursors at the new position
+                spawnThreeCursors(x, y);
+                
+                return {
+                    current: { x, y, timestamp: now },
+                    previous: prev.current
+                };
+            }
+            
+            return prev; // No update needed
+        });
+    }, [MIN_DISTANCE_THRESHOLD, MAX_TIME_INTERVAL, spawnThreeCursors]);
 
     // === Persistence ===
     const {
@@ -374,8 +520,21 @@ export function useWorldEngine({
                 let x = cursorPos.x - 1;
                 let passedContent = false;
                 
+                // Find the leftmost character on this line to determine search range
+                let leftmostX = x;
+                for (const k in worldData) {
+                    const [xStr, yStr] = k.split(',');
+                    const checkY = parseInt(yStr, 10);
+                    if (checkY === cursorPos.y) {
+                        const checkX = parseInt(xStr, 10);
+                        if (checkX < leftmostX) {
+                            leftmostX = checkX;
+                        }
+                    }
+                }
+                
                 // First, skip any spaces to the left
-                while (x >= 0) {
+                while (x >= leftmostX) {
                     const key = `${x},${cursorPos.y}`;
                     const char = worldData[key];
                     if (!char || char === ' ' || char === '\t') {
@@ -388,8 +547,8 @@ export function useWorldEngine({
                 
                 // If we found content, continue to find the beginning of the word
                 if (passedContent) {
-                    // Continue until we find a space or beginning of line
-                    while (x >= 0) {
+                    // Continue until we find a space or beginning of content
+                    while (x >= leftmostX) {
                         const key = `${x-1},${cursorPos.y}`; // Look ahead by 1
                         const char = worldData[key];
                         if (!char || char === ' ' || char === '\t') {
@@ -399,7 +558,7 @@ export function useWorldEngine({
                     }
                 }
                 
-                nextCursorPos.x = Math.max(0, x);
+                nextCursorPos.x = x;
             } else {
                 nextCursorPos.x -= 1;
             }
@@ -410,19 +569,33 @@ export function useWorldEngine({
                 let x = cursorPos.x;
                 let currentLine = cursorPos.y;
                 
+                // Find the rightmost character on this line to determine search range
+                let rightmostX = x;
+                for (const k in worldData) {
+                    const [xStr, yStr] = k.split(',');
+                    const checkY = parseInt(yStr, 10);
+                    if (checkY === cursorPos.y) {
+                        const checkX = parseInt(xStr, 10);
+                        if (checkX > rightmostX) {
+                            rightmostX = checkX;
+                        }
+                    }
+                }
+                
                 // First, see if we're in the middle of a word
                 const startKey = `${x},${currentLine}`;
                 const startChar = worldData[startKey];
                 let inWord = !!startChar && startChar !== ' ' && startChar !== '\t';
                 
                 // Find the end of current word or beginning of next word
-                while (true) {
+                while (x <= rightmostX) {
                     const key = `${x},${currentLine}`;
                     const char = worldData[key];
                     
                     if (!char) {
-                        // We've reached the end of content
-                        break;
+                        // No character at this position, keep looking
+                        x++;
+                        continue;
                     }
                     
                     const isSpace = char === ' ' || char === '\t';
@@ -458,8 +631,21 @@ export function useWorldEngine({
                 let deletedAny = false;
                 let x = cursorPos.x - 1; // Start from the character to the left of cursor
                 
-                // Continue deleting until we hit a space or there's no character
-                while (x >= 0) {
+                // Find the leftmost character on this line to determine range
+                let leftmostX = cursorPos.x - 1;
+                for (const k in worldData) {
+                    const [xStr, yStr] = k.split(',');
+                    const checkY = parseInt(yStr, 10);
+                    if (checkY === cursorPos.y) {
+                        const checkX = parseInt(xStr, 10);
+                        if (checkX < leftmostX) {
+                            leftmostX = checkX;
+                        }
+                    }
+                }
+                
+                // Continue deleting until we've checked all possible positions to the left
+                while (x >= leftmostX) {
                     const key = `${x},${cursorPos.y}`;
                     const char = worldData[key];
                     
@@ -489,9 +675,8 @@ export function useWorldEngine({
                 if (deletedAny) {
                     worldDataChanged = true;
                     nextCursorPos.x = x + 1; // Move cursor to where we stopped
-                } else if (cursorPos.x > 0) {
-                    // If we didn't delete anything but cursor isn't at leftmost position,
-                    // perform regular backspace behavior
+                } else {
+                    // If we didn't delete anything, perform regular backspace behavior
                     const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
                     if (worldData[deleteKey]) {
                         delete nextWorldData[deleteKey];
@@ -682,19 +867,47 @@ export function useWorldEngine({
         const deltaWorldX = dx / effectiveCharWidth;
         const deltaWorldY = dy / effectiveCharHeight;
 
-        // Return the calculated offset, don't set state here
-        return {
+        // Calculate new offset
+        const newOffset = {
             x: panStartInfo.startOffset.x - deltaWorldX,
             y: panStartInfo.startOffset.y - deltaWorldY,
         };
-    }, [zoomLevel, getEffectiveCharDims, viewOffset]); // Include viewOffset just in case
+        
+        // Track viewport history with throttling to prevent infinite loops
+        if (typeof window !== 'undefined' && effectiveCharWidth > 0 && effectiveCharHeight > 0) {
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
+            const centerX = newOffset.x + (viewportWidth / effectiveCharWidth) / 2;
+            const centerY = newOffset.y + (viewportHeight / effectiveCharHeight) / 2;
+            
+            // Update direction tracking with viewport center during panning
+            updateDirectionPoint(centerX, centerY);
+        }
+        
+        return newOffset;
+    }, [zoomLevel, getEffectiveCharDims, viewOffset]);
 
     const handlePanEnd = useCallback((newOffset: Point): void => {
         if (isPanningRef.current) {
             isPanningRef.current = false;
             setViewOffset(newOffset); // Set final state
+            
+            // Track viewport center for direction calculation
+            if (typeof window !== 'undefined') {
+                // Calculate center inline to avoid dependency issues
+                const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
+                if (effectiveCharWidth > 0 && effectiveCharHeight > 0) {
+                    const viewportWidth = window.innerWidth;
+                    const viewportHeight = window.innerHeight;
+                    const centerX = newOffset.x + (viewportWidth / effectiveCharWidth) / 2;
+                    const centerY = newOffset.y + (viewportHeight / effectiveCharHeight) / 2;
+                    
+                    // Update direction tracking with final viewport center
+                    updateDirectionPoint(centerX, centerY);
+                }
+            }
         }
-    }, []);
+    }, [zoomLevel, getEffectiveCharDims, updateDirectionPoint]);
 
     const handleSelectionStart = useCallback((canvasRelativeX: number, canvasRelativeY: number): void => {
         const worldPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
@@ -734,11 +947,289 @@ export function useWorldEngine({
         setWorldData(newWorldData);
     }, [worldData]);
 
+    const getViewportCenter = useCallback((): Point => {
+        // Calculate center of viewport in world coordinates
+        const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
+        if (effectiveCharWidth === 0 || effectiveCharHeight === 0) {
+            return { x: 0, y: 0 };
+        }
+        
+        // Check if we're in browser environment
+        if (typeof window === 'undefined') {
+            return { x: 0, y: 0 };
+        }
+        
+        // Use window dimensions for viewport size
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        
+        // Center of screen in screen coordinates
+        const centerScreenX = viewportWidth / 2;
+        const centerScreenY = viewportHeight / 2;
+        
+        // Convert to world coordinates
+        return screenToWorld(centerScreenX, centerScreenY, zoomLevel, viewOffset);
+    }, [zoomLevel, viewOffset, getEffectiveCharDims, screenToWorld]);
+
+    const getCursorDistanceFromCenter = useCallback((): number => {
+        const center = getViewportCenter();
+        const deltaX = cursorPos.x - center.x;
+        const deltaY = cursorPos.y - center.y;
+        
+        // Pythagorean theorem: distance = sqrt(deltaX^2 + deltaY^2)
+        return Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    }, [cursorPos, getViewportCenter]);
+
+    // --- Block Management Functions ---
+    const getExistingBlocks = useCallback((): Point[] => {
+        const blocks: Point[] = [];
+        for (const key in worldData) {
+            if (key.startsWith(BLOCK_PREFIX)) {
+                const coords = key.substring(BLOCK_PREFIX.length);
+                const [xStr, yStr] = coords.split(',');
+                const x = parseInt(xStr, 10);
+                const y = parseInt(yStr, 10);
+                if (!isNaN(x) && !isNaN(y)) {
+                    blocks.push({ x, y });
+                }
+            }
+        }
+        return blocks;
+    }, [worldData]);
+
+    const isPositionInViewport = useCallback((pos: Point): boolean => {
+        const center = getViewportCenter();
+        
+        // Calculate direction using our two-point tracking
+        if (!directionPoints.current || !directionPoints.previous) {
+            // Fallback to distance-based if no direction data
+            const distance = Math.sqrt(
+                Math.pow(pos.x - center.x, 2) + Math.pow(pos.y - center.y, 2)
+            );
+            return distance <= BLOCK_DESPAWN_RADIUS;
+        }
+        
+        // Simple direction from current direction points
+        const dx = directionPoints.current.x - directionPoints.previous.x;
+        const dy = directionPoints.current.y - directionPoints.previous.y;
+        const movementDistance = Math.sqrt(dx*dx + dy*dy);
+        
+        if (movementDistance < 0.5) {
+            // Not enough movement, keep all blocks for now
+            return true;
+        }
+        
+        const currentDirection = Math.atan2(dy, dx);
+        
+        // Calculate angle from center to block position
+        const blockAngle = Math.atan2(pos.y - center.y, pos.x - center.x);
+        
+        // Calculate angle difference from current movement direction
+        let angleDiff = Math.abs(blockAngle - currentDirection);
+        if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff; // Handle wrap-around
+        
+        const isInFront = angleDiff <= Math.PI / 2;
+        
+        // Debug logging for first few calls
+        if (Math.random() < 0.1) { // 10% sample rate
+            console.log(`Block at (${pos.x},${pos.y}) - Movement: ${movementDistance.toFixed(2)}, AngleDiff: ${(angleDiff * 180/Math.PI).toFixed(1)}°, InFront: ${isInFront}`);
+        }
+        
+        // Keep blocks that are within 90 degrees (π/2) of forward direction
+        // Despawn blocks that are more than 90 degrees away (i.e., "behind" us)
+        return isInFront;
+    }, [getViewportCenter, directionPoints]);
+
+    const calculateBlockDistance = useCallback((pos1: Point, pos2: Point): number => {
+        return Math.sqrt(Math.pow(pos1.x - pos2.x, 2) + Math.pow(pos1.y - pos2.y, 2));
+    }, []);
+
+    const isValidBlockPosition = useCallback((newPos: Point, existingBlocks: Point[]): boolean => {
+        for (const existingBlock of existingBlocks) {
+            const distance = calculateBlockDistance(newPos, existingBlock);
+            if (distance < MIN_BLOCK_DISTANCE) {
+                return false; // Too close to existing block
+            }
+        }
+        return true;
+    }, [calculateBlockDistance]);
+
+    const generateRandomPosition = useCallback((centerPoint: Point, existingBlocks: Point[]): Point => {
+        let attempts = 0;
+        const maxAttempts = 100;
+        
+        while (attempts < maxAttempts) {
+            // Generate random position within spawn radius
+            const angle = Math.random() * 2 * Math.PI;
+            const radius = Math.random() * BLOCK_SPAWN_RADIUS;
+            
+            const candidatePos = {
+                x: Math.round(centerPoint.x + radius * Math.cos(angle)),
+                y: Math.round(centerPoint.y + radius * Math.sin(angle))
+            };
+            
+            // Check if position meets distance constraints
+            if (isValidBlockPosition(candidatePos, existingBlocks)) {
+                return candidatePos;
+            }
+            
+            attempts++;
+        }
+        
+        // If we can't find a valid position with constraints, fallback to simple random
+        // This happens when the area is too crowded
+        const angle = Math.random() * 2 * Math.PI;
+        const radius = Math.random() * BLOCK_SPAWN_RADIUS;
+        
+        return {
+            x: Math.round(centerPoint.x + radius * Math.cos(angle)),
+            y: Math.round(centerPoint.y + radius * Math.sin(angle))
+        };
+    }, [isValidBlockPosition]);
+
+    // Calculate panning direction from two-point tracking
+    const getPanningDirection = useCallback((): number | null => {
+        if (typeof window === 'undefined') return null;
+        
+        // Need both current and previous points
+        if (!directionPoints.current || !directionPoints.previous) return null;
+        
+        const dx = directionPoints.current.x - directionPoints.previous.x;
+        const dy = directionPoints.current.y - directionPoints.previous.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        // Skip if movement is too small
+        if (distance < MIN_MOVEMENT_THRESHOLD) return null;
+        
+        return Math.atan2(dy, dx);
+    }, [directionPoints, MIN_MOVEMENT_THRESHOLD]);
+
+    // Generate arc/fan positions at spawn boundary
+    const generateFanArcPosition = useCallback((index: number, centerPoint: Point, baseDirection: number): Point => {
+        // Convert to radians
+        const fanSpreadRad = (FAN_SPREAD_ANGLE * Math.PI) / 180;
+        
+        // Create evenly distributed arc positions
+        if (FAN_ARC_SEGMENTS <= 1) {
+            // Single block: spawn directly ahead
+            return {
+                x: Math.round(centerPoint.x + FAN_SPAWN_RADIUS * Math.cos(baseDirection)),
+                y: Math.round(centerPoint.y + FAN_SPAWN_RADIUS * Math.sin(baseDirection))
+            };
+        }
+        
+        // Calculate angle for this segment of the arc
+        // Distribute evenly across the fan spread, centered on baseDirection
+        const segmentStep = fanSpreadRad / (FAN_ARC_SEGMENTS - 1);
+        const startAngle = baseDirection - (fanSpreadRad / 2);
+        const segmentAngle = startAngle + (index * segmentStep);
+        
+        // All blocks spawn at exactly the same radius (green circle boundary)
+        return {
+            x: Math.round(centerPoint.x + FAN_SPAWN_RADIUS * Math.cos(segmentAngle)),
+            y: Math.round(centerPoint.y + FAN_SPAWN_RADIUS * Math.sin(segmentAngle))
+        };
+    }, []);
+
+    // Generate directional positions based on panning direction
+    const generateDirectionalPositions = useCallback((centerPoint: Point, count: number): Point[] => {
+        const baseDirection = getPanningDirection();
+        if (baseDirection === null) {
+            // Use direction from direction points or default
+            const lastDirection = (directionPoints.current && directionPoints.previous) ? 
+                Math.atan2(
+                    directionPoints.current.y - directionPoints.previous.y,
+                    directionPoints.current.x - directionPoints.previous.x
+                ) : 0; // Default to rightward (0 radians)
+            
+            const positions: Point[] = [];
+            for (let i = 0; i < count; i++) {
+                positions.push(generateFanArcPosition(i, centerPoint, lastDirection));
+            }
+            return positions;
+        }
+        
+        const positions: Point[] = [];
+        for (let i = 0; i < count; i++) {
+            positions.push(generateFanArcPosition(i, centerPoint, baseDirection));
+        }
+        
+        return positions;
+    }, [getPanningDirection, generateFanArcPosition, generateRandomPosition, directionPoints]);
+
+    // Simple block management - now handled by direction point updates
+    const manageBlocks = useCallback((): void => {
+        // Block management is now handled by spawnThreeCursors in updateDirectionPoint
+        // This function is kept for compatibility but does nothing
+    }, []);
+
+    const getBlocksInRegion = useCallback((center: Point, radius: number): Point[] => {
+        const blocksInRegion: Point[] = [];
+        for (const key in worldData) {
+            if (key.startsWith(BLOCK_PREFIX)) {
+                const coords = key.substring(BLOCK_PREFIX.length);
+                const [xStr, yStr] = coords.split(',');
+                const x = parseInt(xStr, 10);
+                const y = parseInt(yStr, 10);
+                if (!isNaN(x) && !isNaN(y)) {
+                    const distance = Math.sqrt(Math.pow(x - center.x, 2) + Math.pow(y - center.y, 2));
+                    if (distance <= radius) {
+                        blocksInRegion.push({ x, y });
+                    }
+                }
+            }
+        }
+        return blocksInRegion;
+    }, [worldData]);
+
+    const isBlock = useCallback((x: number, y: number): boolean => {
+        const key = `${BLOCK_PREFIX}${x},${y}`;
+        return !!worldData[key];
+    }, [worldData]);
+
+    // Continuously track viewport center for direction calculation
+    useEffect(() => {
+        const interval = setInterval(() => {
+            if (typeof window !== 'undefined') {
+                const center = getViewportCenter();
+                updateDirectionPoint(center.x, center.y);
+            }
+        }, 100); // Update every 100ms
+
+        return () => clearInterval(interval);
+    }, [getViewportCenter, updateDirectionPoint]);
+
+    useEffect(() => {
+        setPanningDirection(getPanningDirection());
+    }, [directionPoints, getPanningDirection]);
+
+    // Helper function to get angle calculation data for debug
+    const getAngleDebugData = useCallback(() => {
+        if (typeof window === 'undefined') return null;
+        
+        // Need both current and previous points
+        if (!directionPoints.current || !directionPoints.previous) return null;
+        
+        const dx = directionPoints.current.x - directionPoints.previous.x;
+        const dy = directionPoints.current.y - directionPoints.previous.y;
+        const angle = Math.atan2(dy, dx);
+        const degrees = (angle * 180 / Math.PI + 360) % 360;
+        
+        return {
+            firstPoint: directionPoints.current,
+            lastPoint: directionPoints.previous,
+            angle,
+            degrees,
+            pointCount: 2
+        };
+    }, [directionPoints]);
+
     return {
         worldData,
         viewOffset,
         cursorPos,
         zoomLevel,
+        panningDirection,
         getEffectiveCharDims,
         screenToWorld,
         worldToScreen,
@@ -763,5 +1254,12 @@ export function useWorldEngine({
         isLoadingWorld,
         isSavingWorld,
         worldPersistenceError,
+        getViewportCenter,
+        getCursorDistanceFromCenter,
+        manageBlocks,
+        getBlocksInRegion,
+        isBlock,
+        directionPoints,
+        getAngleDebugData,
     };
 }
