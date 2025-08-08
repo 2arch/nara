@@ -1,6 +1,7 @@
 // components/BitCanvas.tsx
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import type { WorldData, Point, WorldEngine, PanStartInfo } from './world.engine'; // Adjust path as needed
+import { useDialogue } from './dialogue';
 
 // --- Constants --- (Copied and relevant ones kept)
 const FONT_FAMILY = 'IBM Plex Mono';
@@ -42,6 +43,7 @@ const SPLINE_COLOR = '#FFFFFF'; // White for straight spline
 const CURVE_COLOR = '#0066FF'; // Blue for curved spline
 const TRAIL_LINE_WIDTH = 2;
 
+
 interface CursorTrailPosition {
     x: number;
     y: number;
@@ -66,6 +68,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
     const [cursorTrail, setCursorTrail] = useState<CursorTrailPosition[]>([]);
     const lastCursorPosRef = useRef<Point | null>(null);
+    
+    // Dialogue system
+    const { renderDialogue } = useDialogue();
     
     // Pan trail tracking
     const [panTrail, setPanTrail] = useState<PanTrailPoint[]>([]);
@@ -198,6 +203,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
         ctx.globalAlpha = 1; // Reset opacity
     }, [engine]);
 
+
     const drawCurvedSpline = useCallback((ctx: CanvasRenderingContext2D, points: PanTrailPoint[], currentZoom: number, currentOffset: Point) => {
         if (points.length < 3) return;
         
@@ -300,6 +306,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
             lastCursorPosRef.current = {...currentPos};
         }
     }, [engine.cursorPos]);
+
 
     // Track pan movement for trail effect
     useEffect(() => {
@@ -600,6 +607,35 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
             ctx.stroke();
         }
 
+        // === Render Selection Area ===
+        if (engine.selectionStart && engine.selectionEnd) {
+            const start = engine.selectionStart;
+            const end = engine.selectionEnd;
+            
+            // Calculate selection bounds
+            const minX = Math.min(start.x, end.x);
+            const maxX = Math.max(start.x, end.x);
+            const minY = Math.min(start.y, end.y);
+            const maxY = Math.max(start.y, end.y);
+            
+            // Use light transparent version of cursor primary color
+            const selectionColor = `rgba(${hexToRgb(CURSOR_COLOR_PRIMARY)}, 0.3)`;
+            ctx.fillStyle = selectionColor;
+            
+            // Fill each cell in the selection area
+            for (let worldY = minY; worldY <= maxY; worldY++) {
+                for (let worldX = minX; worldX <= maxX; worldX++) {
+                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                    
+                    // Only draw if cell is visible on screen
+                    if (screenPos.x >= -effectiveCharWidth && screenPos.x <= cssWidth && 
+                        screenPos.y >= -effectiveCharHeight && screenPos.y <= cssHeight) {
+                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                    }
+                }
+            }
+        }
+
         // Draw cursor trail (older positions first, for proper layering)
         const now = Date.now();
         for (let i = cursorTrail.length - 1; i >= 0; i--) {
@@ -661,9 +697,19 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
             }
         }
 
+        // === Render Dialogue ===
+        renderDialogue({
+            canvasWidth: cssWidth,
+            canvasHeight: cssHeight,
+            effectiveCharWidth,
+            effectiveCharHeight,
+            verticalTextOffset,
+            ctx
+        });
+
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline]);
+    }, [engine, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue]);
 
 
     // --- Drawing Loop Effect ---
