@@ -28,13 +28,6 @@ export default function CorbuType() {
     }, []);
 
     // --- Block Management Effect ---
-    useEffect(() => {
-        // Manage blocks when viewport center or cursor position changes
-        if (engine && engine.manageBlocks) {
-            engine.manageBlocks();
-        }
-    }, [engine.cursorPos, engine.viewOffset, engine.zoomLevel, engine.manageBlocks]);
-
 
     return (
         <div style={{

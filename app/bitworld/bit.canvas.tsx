@@ -452,35 +452,35 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
 
         // === Debug Scaffolds === (Green dot removed)
 
-        // === Render Pan Trails ===
-        if (panTrail.length > 0) {
-            // Draw only straight spline (removed blue curved spline)
-            drawStraightSpline(ctx, panTrail, currentZoom, currentOffset);
-        }
+        // // === Render Pan Trails ===
+        // if (panTrail.length > 0) {
+        //     // Draw only straight spline (removed blue curved spline)
+        //     drawStraightSpline(ctx, panTrail, currentZoom, currentOffset);
+        // }
         
-        // === Render Angle Calculation Points ===
-        const debugData = engine.getAngleDebugData();
-        if (debugData) {
-            // Draw current point (most recent) as filled cell
-            const currentScreen = engine.worldToScreen(debugData.firstPoint.x, debugData.firstPoint.y, currentZoom, currentOffset);
-            ctx.fillStyle = '#000000';
-            ctx.fillRect(currentScreen.x, currentScreen.y, effectiveCharWidth, effectiveCharHeight);
+        // // === Render Angle Calculation Points ===
+        // const debugData = engine.getAngleDebugData();
+        // if (debugData) {
+        //     // Draw current point (most recent) as filled cell
+        //     const currentScreen = engine.worldToScreen(debugData.firstPoint.x, debugData.firstPoint.y, currentZoom, currentOffset);
+        //     ctx.fillStyle = '#000000';
+        //     ctx.fillRect(currentScreen.x, currentScreen.y, effectiveCharWidth, effectiveCharHeight);
             
-            // Draw previous point as filled cell
-            const previousScreen = engine.worldToScreen(debugData.lastPoint.x, debugData.lastPoint.y, currentZoom, currentOffset);
-            ctx.fillStyle = '#000000';
-            ctx.fillRect(previousScreen.x, previousScreen.y, effectiveCharWidth, effectiveCharHeight);
+        //     // Draw previous point as filled cell
+        //     const previousScreen = engine.worldToScreen(debugData.lastPoint.x, debugData.lastPoint.y, currentZoom, currentOffset);
+        //     ctx.fillStyle = '#000000';
+        //     ctx.fillRect(previousScreen.x, previousScreen.y, effectiveCharWidth, effectiveCharHeight);
             
-            // Draw line between center of cells
-            ctx.strokeStyle = '#000000';
-            ctx.lineWidth = 1;
-            ctx.setLineDash([5, 5]); // Dashed line
-            ctx.beginPath();
-            ctx.moveTo(currentScreen.x + effectiveCharWidth/2, currentScreen.y + effectiveCharHeight/2);
-            ctx.lineTo(previousScreen.x + effectiveCharWidth/2, previousScreen.y + effectiveCharHeight/2);
-            ctx.stroke();
-            ctx.setLineDash([]); // Reset dash
-        }
+        //     // Draw line between center of cells
+        //     ctx.strokeStyle = '#000000';
+        //     ctx.lineWidth = 1;
+        //     ctx.setLineDash([5, 5]); // Dashed line
+        //     ctx.beginPath();
+        //     ctx.moveTo(currentScreen.x + effectiveCharWidth/2, currentScreen.y + effectiveCharHeight/2);
+        //     ctx.lineTo(previousScreen.x + effectiveCharWidth/2, previousScreen.y + effectiveCharHeight/2);
+        //     ctx.stroke();
+        //     ctx.setLineDash([]); // Reset dash
+        // }
 
         // === Render Deepspawn Objects with Heat Map Colors ===
         for (const key in engine.deepspawnData) {
