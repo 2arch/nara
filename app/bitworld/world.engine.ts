@@ -1,6 +1,7 @@
 // hooks/useWorldEngine.ts
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useWorldSave } from './world.save'; // Import the new hook
+import { set } from 'firebase/database';
 
 // --- Constants --- (Copied and relevant ones kept)
 const BASE_FONT_SIZE = 16;
@@ -23,9 +24,19 @@ export interface PanStartInfo {
     startOffset: Point;
 }
 
+export interface CommandState {
+    isActive: boolean;
+    input: string;
+    matchedCommands: string[];
+    selectedIndex: number;
+    commandStartPos: Point;
+}
+
 export interface WorldEngine {
     worldData: WorldData;
     deepspawnData: WorldData;
+    commandData: WorldData;
+    commandState: CommandState;
     viewOffset: Point;
     cursorPos: Point;
     zoomLevel: number;
@@ -82,9 +93,17 @@ export function useWorldEngine({
     // === State ===
     const [worldData, setWorldData] = useState<WorldData>(initialWorldData);
     const [deepspawnData, setDeepspawnData] = useState<WorldData>({});
+    const [commandData, setCommandData] = useState<WorldData>({});
     const [cursorPos, setCursorPos] = useState<Point>(initialCursorPos);
     const [viewOffset, setViewOffset] = useState<Point>(initialViewOffset);
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
+    const [commandState, setCommandState] = useState<CommandState>({
+        isActive: false,
+        input: '',
+        matchedCommands: [],
+        selectedIndex: 0,
+        commandStartPos: { x: 0, y: 0 }
+    });
     const isPanningRef = useRef(false);
     const [isSelecting, setIsSelecting] = useState(false);
     const [selectionStart, setSelectionStart] = useState<Point | null>(null);
@@ -108,11 +127,45 @@ export function useWorldEngine({
     const CURSOR_SPAWN_DISTANCE = 8; // Distance from center to spawn cursors
     const CURSOR_BOUNDARY_RADIUS = MIN_BLOCK_DISTANCE; // Use the same radius as the visual boundary circles
     
+    // Available commands
+    const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'modes', 'settings'];
+    
+    // Command utility functions
+    const matchCommands = useCallback((input: string): string[] => {
+        if (!input) return AVAILABLE_COMMANDS;
+        const lowerInput = input.toLowerCase();
+        return AVAILABLE_COMMANDS.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
+    }, []);
+    
+    const executeCommand = useCallback((command: string) => {
+        console.log(`Executing command: ${command}`);
+        // TODO: Implement command execution logic
+        switch (command) {
+            case 'summarize':
+                console.log('Summarize command executed');
+                break;
+            case 'transform':
+                console.log('Transform command executed');
+                break;
+            case 'explain':
+                console.log('Explain command executed');
+                break;
+            case 'label':
+                console.log('Label command executed');
+                break;
+            case 'modes':
+                console.log('Modes command executed');
+                break;
+            default:
+                console.log(`Unknown command: ${command}`);
+        }
+    }, []);
+    
     // Deepspawn multi-row object definition (29 characters total, 3 rows max)
     const DEEPSPAWN_PATTERN = [
-        "        ",  // Row 1 - 10 chars
-        "           ",   // Row 2 - 9 chars  
-        "          "   // Row 3 - 10 chars
+        "Have you ever thought",  // Row 1 - 10 chars
+        "to construct something",   // Row 2 - 9 chars  
+        "totally imaginary?"   // Row 3 - 10 chars
     ]; // Total: 29 characters
     
     // Calculate deepspawn object dimensions
@@ -534,6 +587,174 @@ export function useWorldEngine({
         const isMod = ctrlKey || metaKey; // Modifier key check
         const currentSelectionActive = !!(selectionStart && selectionEnd && (selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y));
 
+        // === Command Handling ===
+        if (commandState.isActive) {
+            if (key === 'Escape') {
+                // Cancel command mode
+                setCommandState({
+                    isActive: false,
+                    input: '',
+                    matchedCommands: [],
+                    selectedIndex: 0
+                });
+                setCommandData({}); // Clear command display
+                return true;
+            } else if (key === 'Enter') {
+                // Execute selected command
+                const selectedCommand = commandState.matchedCommands[commandState.selectedIndex];
+                if (selectedCommand) {
+                    executeCommand(selectedCommand);
+                }
+                // Clear command state and display
+                setCommandState({
+                    isActive: false,
+                    input: '',
+                    matchedCommands: [],
+                    selectedIndex: 0
+                });
+                setCommandData({}); // Clear command display
+                return true;
+            } else if (key === 'ArrowUp') {
+                // Navigate up in command list
+                setCommandState(prev => ({
+                    ...prev,
+                    selectedIndex: Math.max(0, prev.selectedIndex - 1)
+                }));
+                return true;
+            } else if (key === 'ArrowDown') {
+                // Navigate down in command list
+                setCommandState(prev => ({
+                    ...prev,
+                    selectedIndex: Math.min(prev.matchedCommands.length - 1, prev.selectedIndex + 1)
+                }));
+                return true;
+            } else if (key === 'Backspace') {
+                // If no input characters, exit command mode by deleting the '/'
+                if (commandState.input.length === 0) {
+                    // Exit command mode and clear command data
+                    setCommandState({
+                        isActive: false,
+                        input: '',
+                        matchedCommands: [],
+                        selectedIndex: 0,
+                        commandStartPos: { x: 0, y: 0 }
+                    });
+                    setCommandData({});
+                    // Move cursor backward to delete the '/' character
+                    setCursorPos(prev => ({ x: prev.x - 1, y: prev.y }));
+                    return true;
+                }
+                
+                // Remove last character from command input and display
+                setCommandState(prev => {
+                    const newInput = prev.input.slice(0, -1);
+                    const newMatchedCommands = matchCommands(newInput);
+                    
+                    // Update command display
+                    const newCommandData: WorldData = {};
+                    const commandText = `/${newInput}`;
+                    
+                    // Draw command text at original command start position
+                    for (let i = 0; i < commandText.length; i++) {
+                        const key = `${prev.commandStartPos.x + i},${prev.commandStartPos.y}`;
+                        newCommandData[key] = commandText[i];
+                    }
+                    
+                    // Draw autocomplete suggestions below
+                    newMatchedCommands.forEach((command, index) => {
+                        const suggestionY = commandState.commandStartPos.y + 1 + index;
+                        for (let i = 0; i < command.length; i++) {
+                            const key = `${commandState.commandStartPos.x + i},${suggestionY}`;
+                            newCommandData[key] = command[i];
+                        }
+                    });
+                    
+                    setCommandData(newCommandData);
+                    
+                    return {
+                        ...prev,
+                        input: newInput,
+                        matchedCommands: newMatchedCommands,
+                        selectedIndex: Math.min(prev.selectedIndex, newMatchedCommands.length - 1)
+                    };
+                });
+                // Move cursor backward since we deleted a character
+                setCursorPos(prev => ({ x: prev.x - 1, y: prev.y }));
+                return true;
+            } else if (key.length === 1 && !isMod) {
+                // Add character to command input and display
+                setCommandState(prev => {
+                    const newInput = prev.input + key;
+                    const newMatchedCommands = matchCommands(newInput);
+                    
+                    // Update command display at original command start position
+                    const newCommandData: WorldData = {};
+                    const commandText = `/${newInput}`;
+                    
+                    // Draw command text at original command start position
+                    for (let i = 0; i < commandText.length; i++) {
+                        const key = `${prev.commandStartPos.x + i},${prev.commandStartPos.y}`;
+                        newCommandData[key] = commandText[i];
+                    }
+                    
+                    // Draw autocomplete suggestions below
+                    newMatchedCommands.forEach((command, index) => {
+                        const suggestionY = commandState.commandStartPos.y + 1 + index;
+                        for (let i = 0; i < command.length; i++) {
+                            const key = `${prev.commandStartPos.x + i},${suggestionY}`;
+                            newCommandData[key] = command[i];
+                        }
+                    });
+                    
+                    setCommandData(newCommandData);
+                    
+                    return {
+                        ...prev,
+                        input: newInput,
+                        matchedCommands: newMatchedCommands,
+                        selectedIndex: 0
+                    };
+                });
+                // Move cursor to next position
+                setCursorPos({ x: cursorPos.x + 1, y: cursorPos.y });
+                return true;
+            }
+            // For command mode, prevent all other key handling
+            return true;
+        }
+
+        // Check if starting command mode with '/'
+        if (key === '/' && !isMod && !currentSelectionActive) {
+            // Initialize command display
+            const newCommandData: WorldData = {};
+            const commandText = '/';
+            
+            // Draw initial '/' at cursor position
+            const key = `${cursorPos.x},${cursorPos.y}`;
+            newCommandData[key] = '/';
+            
+            // Draw all available commands below
+            AVAILABLE_COMMANDS.forEach((command, index) => {
+                const suggestionY = cursorPos.y + 1 + index;
+                for (let i = 0; i < command.length; i++) {
+                    const key = `${cursorPos.x + i},${suggestionY}`;
+                    newCommandData[key] = command[i];
+                }
+            });
+            
+            setCommandData(newCommandData);
+            setCommandState({
+                isActive: true,
+                input: '',
+                matchedCommands: AVAILABLE_COMMANDS,
+                selectedIndex: 0,
+                commandStartPos: { x: cursorPos.x, y: cursorPos.y }
+            });
+            // Move cursor to next position
+            setCursorPos({ x: cursorPos.x + 1, y: cursorPos.y });
+            return true;
+        }
+
         // Function to clear selection state
         const clearSelectionState = () => {
             setSelectionStart(null);
@@ -896,8 +1117,8 @@ export function useWorldEngine({
 
         return preventDefault;
     }, [
-        cursorPos, worldData, selectionStart, selectionEnd, // State dependencies
-        getNormalizedSelection, deleteSelectedCharacters, copySelectedCharacters, cutSelection, pasteText, // Callback dependencies
+        cursorPos, worldData, selectionStart, selectionEnd, commandState, // State dependencies
+        getNormalizedSelection, deleteSelectedCharacters, copySelectedCharacters, cutSelection, pasteText, matchCommands, executeCommand, // Callback dependencies
         // Include setters used directly in the handler (if any, preferably avoid)
         // setCursorPos, setWorldData, setSelectionStart, setSelectionEnd // Setters are stable, no need to list
     ]);
@@ -1175,6 +1396,8 @@ export function useWorldEngine({
     return {
         worldData,
         deepspawnData,
+        commandData,
+        commandState,
         viewOffset,
         cursorPos,
         zoomLevel,

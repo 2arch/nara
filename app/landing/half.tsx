@@ -7,9 +7,9 @@ type HalfProps = {
 
 const Half: React.FC<HalfProps> = ({ children }) => {
   return (
-    <div className="h-[30vh] w-full flex bg-gray-900 text-white">
+    <div className="h-[60vh] w-full flex text-white border border-white">
       {/* Left side for animation */}
-      <div className="w-1/2 h-full bg-gray-800 flex items-center justify-center">
+      <div className="w-1/2 h-full flex items-center justify-center">
         <p>Animation Placeholder</p>
       </div>
       {/* Right side for content */}

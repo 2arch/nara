@@ -62,7 +62,7 @@ const Carousel: React.FC<CarouselProps> = ({ items }) => {
   }, [items.length, currentIndex]);
 
   return (
-    <div className="h-[30vh] w-full flex flex-col bg-gray-900">
+    <div className="h-[60vh] w-full flex flex-col border border-white">
       <div
         ref={trackRef}
         className="flex overflow-x-auto cursor-grab active:cursor-grabbing no-scrollbar h-full"
@@ -73,7 +73,7 @@ const Carousel: React.FC<CarouselProps> = ({ items }) => {
       >
         {items.map((item, index) => (
           <div key={item.id} className="w-[50vw] flex-shrink-0 p-4 h-full">
-            <div className="bg-gray-700 w-full h-full rounded-lg flex items-center justify-center text-white relative">
+            <div className="w-full h-full rounded-lg flex items-center justify-center text-white border border-white relative">
               {item.content}
               {index === items.length - 1 && (
                 <button className="absolute bottom-4 right-4 bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-3 rounded text-sm">

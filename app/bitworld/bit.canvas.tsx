@@ -401,8 +401,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
         ctx.fillStyle = TEXT_COLOR;
         const verticalTextOffset = (effectiveCharHeight - effectiveFontSize) / 2 + (effectiveFontSize * 0.1);
         for (const key in engine.worldData) {
-            // Skip block data - we'll render those separately
-            if (key.startsWith('block_')) continue;
+            // Skip block and deepspawn data - we render those separately
+            if (key.startsWith('block_') || key.startsWith('deepspawn_')) continue;
             
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
@@ -414,6 +414,41 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
                 }
             }
         }
+
+        // === Render Command Data ===
+        if (engine.commandState.isActive) {
+            // First, draw background for selected command
+            const selectedCommandY = engine.commandState.commandStartPos.y + 1 + engine.commandState.selectedIndex;
+            const selectedCommand = engine.commandState.matchedCommands[engine.commandState.selectedIndex];
+            if (selectedCommand) {
+                const selectedScreenPos = engine.worldToScreen(engine.commandState.commandStartPos.x, selectedCommandY, currentZoom, currentOffset);
+                if (selectedScreenPos.x > -effectiveCharWidth * 2 && selectedScreenPos.x < cssWidth + effectiveCharWidth && selectedScreenPos.y > -effectiveCharHeight * 2 && selectedScreenPos.y < cssHeight + effectiveCharHeight) {
+                    ctx.fillStyle = 'rgba(255, 107, 53, 0.3)'; // Highlight background
+                    ctx.fillRect(selectedScreenPos.x, selectedScreenPos.y, selectedCommand.length * effectiveCharWidth, effectiveCharHeight);
+                }
+            }
+        }
+        
+        for (const key in engine.commandData) {
+            const [xStr, yStr] = key.split(',');
+            const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
+            if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                const char = engine.commandData[key];
+                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                    // Use different colors: orange for command line, gray for suggestions, white for selected
+                    if (worldY === engine.commandState.commandStartPos.y) {
+                        ctx.fillStyle = '#FF6B35'; // Orange for command line
+                    } else if (engine.commandState.isActive && worldY === engine.commandState.commandStartPos.y + 1 + engine.commandState.selectedIndex) {
+                        ctx.fillStyle = '#FFFFFF'; // White for selected suggestion
+                    } else {
+                        ctx.fillStyle = '#888888'; // Gray for other suggestions
+                    }
+                    ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                }
+            }
+        }
+        ctx.fillStyle = TEXT_COLOR; // Reset to normal text color
 
         // === Debug Scaffolds === (Green dot removed)
 
@@ -448,7 +483,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
         }
 
         // === Render Deepspawn Objects with Heat Map Colors ===
-        for (const key in engine.worldData) {
+        for (const key in engine.deepspawnData) {
             if (key.startsWith('deepspawn_')) {
                 const coords = key.substring('deepspawn_'.length);
                 const [xStr, yStr] = coords.split(',');
@@ -471,7 +506,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
                         ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
                         
                         // Render the deepspawn character on top
-                        const char = engine.worldData[key];
+                        const char = engine.deepspawnData[key];
                         ctx.fillStyle = '#000000'; // Black text on colored background
                         ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
                     }
@@ -754,9 +789,10 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
             debugText
         });
 
+
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue, renderDebugDialogue, debugText]);
+    }, [engine, engine.deepspawnData, engine.commandData, engine.commandState, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue, renderDebugDialogue, debugText]);
 
 
     // --- Drawing Loop Effect ---
