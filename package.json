@@ -16,7 +16,9 @@
   "dependencies": {
     "@sanity/diff-match-patch": "^3.2.0",
     "@types/three": "^0.174.0",
+    "@types/uuid": "^10.0.0",
     "firebase": "^11.5.0",
+    "lucide-react": "^0.539.0",
     "next": "15.2.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
