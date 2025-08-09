@@ -216,7 +216,13 @@ export function useCommandSystem() {
         }
 
         // Handle command mode keys
-        if (key === 'Enter') {
+        if (key === '/') {
+            // If '/' is pressed while command is active, restart command at new position
+            startCommand(cursorPos);
+            // Move cursor to next position
+            setCursorPos({ x: cursorPos.x + 1, y: cursorPos.y });
+            return true;
+        } else if (key === 'Enter') {
             return executeCommand();
         } else if (key === 'Escape') {
             // Exit command mode without executing

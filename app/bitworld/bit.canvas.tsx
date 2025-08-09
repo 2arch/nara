@@ -72,7 +72,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
     const lastCursorPosRef = useRef<Point | null>(null);
     
     // Dialogue system
-    const { renderDialogue, renderDebugDialogue } = useDialogue();
+    const { renderDialogue, renderDebugDialogue, renderHeaderDialogue } = useDialogue();
     
     // Debug dialogue system
     const { debugText } = useDebugDialogue(engine);
@@ -918,6 +918,13 @@ ${getHelpText()}` : '';
                 debugText: enhancedDebugText
             });
         }
+
+        // === Render Header Dialogue ===
+        renderHeaderDialogue({
+            canvasWidth: cssWidth,
+            canvasHeight: cssHeight,
+            ctx
+        });
 
 
         ctx.restore();

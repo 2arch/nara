@@ -12,6 +12,9 @@ const DIALOGUE_MAX_WIDTH_CHARS = 60;
 const DIALOGUE_MARGIN_CHARS = 4;
 const DIALOGUE_BACKGROUND_COLOR = 'rgba(0, 0, 0, 0.8)';
 const DIALOGUE_TEXT_COLOR = '#FFFFFF';
+const HEADER_TEXT_COLOR = '#FFFFFF';
+const HEADER_FONT_SIZE = 14;
+const HEADER_MARGIN_CHARS = 2;
 
 export interface DialogueLayout {
     lines: string[];
@@ -182,9 +185,39 @@ export function useDialogue() {
         ctx.restore();
     }, [calculateDebugLayout]);
 
+    const renderHeaderDialogue = useCallback((props: DialogueProps) => {
+        const { canvasWidth, canvasHeight, ctx } = props;
+        const charHeight = HEADER_FONT_SIZE;
+        const charWidth = HEADER_FONT_SIZE * CHAR_WIDTH_RATIO;
+        const topY = HEADER_MARGIN_CHARS * charHeight / 2;
+
+        ctx.save();
+        ctx.font = `${HEADER_FONT_SIZE}px "${FONT_FAMILY}"`;
+        ctx.textBaseline = 'top';
+
+        // Draw "nara" on the left
+        const leftText = "nara—1";
+        const leftX = HEADER_MARGIN_CHARS * charWidth;
+        ctx.fillStyle = DIALOGUE_BACKGROUND_COLOR;
+        ctx.fillRect(leftX, topY, leftText.length * charWidth, charHeight);
+        ctx.fillStyle = HEADER_TEXT_COLOR;
+        ctx.fillText(leftText, leftX, topY);
+
+        // Draw "v 1.0.0" on the right
+        const rightText = "v 1.0.0";
+        const rightX = canvasWidth - ((rightText.length + HEADER_MARGIN_CHARS) * charWidth);
+        ctx.fillStyle = DIALOGUE_BACKGROUND_COLOR;
+        ctx.fillRect(rightX, topY, rightText.length * charWidth, charHeight);
+        ctx.fillStyle = HEADER_TEXT_COLOR;
+        ctx.fillText(rightText, rightX, topY);
+
+        ctx.restore();
+    }, []);
+
     return {
         renderDialogue,
-        renderDebugDialogue
+        renderDebugDialogue,
+        renderHeaderDialogue,
     };
 }
 

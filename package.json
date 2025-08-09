@@ -14,6 +14,7 @@
     "build:electron": "npm run electron:build"
   },
   "dependencies": {
+    "@google/genai": "^1.13.0",
     "@sanity/diff-match-patch": "^3.2.0",
     "@stripe/react-stripe-js": "^3.9.0",
     "@stripe/stripe-js": "^7.8.0",

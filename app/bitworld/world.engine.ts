@@ -96,6 +96,7 @@ export function useWorldEngine({
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
     const [dialogueText, setDialogueText] = useState('Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.');
     
+    
     // === Settings System ===
     const { settings, setSettings, updateSettings } = useWorldSettings();
 
@@ -206,6 +207,25 @@ export function useWorldEngine({
         const endY = Math.max(selectionStart.y, selectionEnd.y);
         return { startX, startY, endX, endY };
     }, [selectionStart, selectionEnd]);
+
+    // Helper function to get selected text as string
+    const getSelectedText = useCallback(() => {
+        const selection = getNormalizedSelection();
+        if (!selection) return '';
+        
+        let selectedText = '';
+        for (let y = selection.startY; y <= selection.endY; y++) {
+            let rowText = '';
+            for (let x = selection.startX; x <= selection.endX; x++) {
+                const key = `${x},${y}`;
+                const char = worldData[key] || ' ';
+                rowText += char;
+            }
+            if (y > selection.startY) selectedText += '\n';
+            selectedText += rowText.trimEnd(); // Remove trailing spaces from each row
+        }
+        return selectedText.trim();
+    }, [getNormalizedSelection, worldData]);
 
     // Define deleteSelectedCharacters BEFORE cutSelection and pasteText
     const deleteSelectedCharacters = useCallback(() => {
@@ -398,6 +418,8 @@ export function useWorldEngine({
                     const newSettings = { isDebugVisible: false };
                     updateSettings(newSettings);
                     saveSettingsToFirebase(newSettings);
+                } else {
+                    setDialogueText("Usage: /debug [on|off] - Toggle debug information display");
                 }
             } else if (exec.command === 'deepspawn') {
                 if (exec.args[0] === 'on') {
@@ -408,14 +430,54 @@ export function useWorldEngine({
                     const newSettings = { isDeepspawnVisible: false };
                     updateSettings(newSettings);
                     saveSettingsToFirebase(newSettings);
+                } else {
+                    setDialogueText("Usage: /deepspawn [on|off] - Toggle deepspawn objects visibility");
+                }
+            } else if (exec.command === 'transform') {
+                const currentSelection = getSelectedText();
+                if (currentSelection && exec.args.length > 0) {
+                    const instructions = exec.args.join(' ');
+                    setDialogueText(`Here is the transformed "${currentSelection}" according to "${instructions}"`);
+                } else if (!currentSelection) {
+                    setDialogueText("Select a region of text first, then use: /transform [instructions]");
+                } else {
+                    setDialogueText("Usage: /transform [instructions] (e.g., /transform make uppercase, /transform convert to bullet points)");
+                }
+            } else if (exec.command === 'explain') {
+                const currentSelection = getSelectedText();
+                if (currentSelection) {
+                    const instructions = exec.args.length > 0 ? exec.args.join(' ') : 'analysis';
+                    setDialogueText(`Here is the explanation for your "${currentSelection}" according to ${instructions}`);
+                } else {
+                    setDialogueText("Select a region of text first, then use: /explain [optional: how to explain]");
                 }
             } else if (exec.command === 'summarize') {
-                setDialogueText("Here is a summary of what you've written so far.");
+                const currentSelection = getSelectedText();
+                if (currentSelection) {
+                    setDialogueText(`Here is the summary of "${currentSelection}"`);
+                } else {
+                    setDialogueText("Select a region of text first, then use: /summarize");
+                }
+            } else if (exec.command === 'modes') {
+                setDialogueText("Available modes: edit, view, select. Usage: /modes [mode] (coming soon)");
+            } else if (exec.command === 'settings') {
+                setDialogueText("Settings menu: /settings [option] [value] (coming soon)");
             } else if (exec.command === 'label') {
-                if (exec.args.length >= 2) {
-                    const color = exec.args.pop() as string;
-                    const text = exec.args.join(' ');
-                    const position = { x: exec.commandStartPos.x, y: exec.commandStartPos.y + 1 };
+                if (exec.args.length >= 1) {
+                    let color = 'black';
+                    let text = '';
+                    const lastArg = exec.args[exec.args.length - 1].toLowerCase();
+                    const commonColors = ['black', 'white', 'red', 'green', 'blue', 'yellow', 'purple', 'orange', 'pink', 'cyan', 'magenta'];
+                    const isLastArgColor = lastArg.startsWith('#') || commonColors.includes(lastArg);
+
+                    if (exec.args.length > 1 && isLastArgColor) {
+                        color = exec.args.pop() as string;
+                        text = exec.args.join(' ');
+                    } else {
+                        text = exec.args.join(' ');
+                    }
+                    
+                    const position = { x: exec.commandStartPos.x + 1, y: exec.commandStartPos.y };
                     const key = `label_${position.x},${position.y}`;
                     const value = JSON.stringify({ text, color });
                     
@@ -423,13 +485,20 @@ export function useWorldEngine({
                         ...prev,
                         [key]: value
                     }));
+                } else {
+                    setDialogueText("Usage: /label [text] [color] (e.g., /label important note red, /label heading blue)");
                 }
             }
+            
+            // Return cursor to command start position
+            setCursorPos(exec.commandStartPos);
+            
             return true; // Command was handled
         } else if (commandResult === true) {
             // Command mode handled the key, but didn't execute a command
             return true;
         }
+
 
         // Function to clear selection state
         const clearSelectionState = () => {
@@ -814,7 +883,7 @@ export function useWorldEngine({
         return preventDefault;
     }, [
         cursorPos, worldData, selectionStart, selectionEnd, commandState, // State dependencies
-        getNormalizedSelection, deleteSelectedCharacters, copySelectedCharacters, cutSelection, pasteText, // Callback dependencies
+        getNormalizedSelection, deleteSelectedCharacters, copySelectedCharacters, cutSelection, pasteText, getSelectedText, // Callback dependencies
         handleCommandKeyDown
         // Include setters used directly in the handler (if any, preferably avoid)
         // setCursorPos, setWorldData, setSelectionStart, setSelectionEnd // Setters are stable, no need to list
