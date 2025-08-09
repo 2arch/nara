@@ -88,10 +88,10 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
         registerGroup(createCameraController(engine));
     }, [registerGroup]);
     
-    // Enhanced debug text with monogram info
-    const enhancedDebugText = `${debugText}
+    // Enhanced debug text with monogram info - only calculate if debug is visible
+    const enhancedDebugText = engine.settings.isDebugVisible ? `${debugText}
 Monogram: ${monogramSystem.options.enabled ? 'ON' : 'OFF'} | Mode: ${monogramSystem.options.mode} | Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem.options.complexity.toFixed(1)}
-${getHelpText()}`;
+${getHelpText()}` : '';
     
     // Pan trail tracking
     const [panTrail, setPanTrail] = useState<PanTrailPoint[]>([]);
@@ -437,7 +437,7 @@ ${getHelpText()}`;
                     // Only render if there's no regular text at this position
                     const textKey = `${worldX},${worldY}`;
                     const char = engine.worldData[textKey];
-                    if ((!char || char.trim() === '') && !engine.commandData[textKey] && !(engine.isDeepspawnVisible && engine.deepspawnData[`deepspawn_${textKey}`])) {
+                    if ((!char || char.trim() === '') && !engine.commandData[textKey] && !(engine.settings.isDeepspawnVisible && engine.deepspawnData[`deepspawn_${textKey}`])) {
                         // Set color and render character
                         ctx.fillStyle = cell.color;
                         ctx.globalAlpha = Math.min(0.7, cell.intensity); // Semi-transparent so it doesn't overpower text
@@ -450,8 +450,8 @@ ${getHelpText()}`;
 
         ctx.fillStyle = TEXT_COLOR;
         for (const key in engine.worldData) {
-            // Skip block and deepspawn data - we render those separately
-            if (key.startsWith('block_') || key.startsWith('deepspawn_')) continue;
+            // Skip block, deepspawn, and label data - we render those separately
+            if (key.startsWith('block_') || key.startsWith('deepspawn_') || key.startsWith('label_')) continue;
             
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
@@ -534,7 +534,7 @@ ${getHelpText()}`;
         // }
 
         // === Render Deepspawn Objects with Heat Map Colors ===
-        if (engine.isDeepspawnVisible) {
+        if (engine.settings.isDeepspawnVisible) {
             for (const key in engine.deepspawnData) {
                 if (key.startsWith('deepspawn_')) {
                     const coords = key.substring('deepspawn_'.length);
@@ -563,6 +563,95 @@ ${getHelpText()}`;
                             ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
                         }
                     }
+                }
+            }
+        }
+
+        // === Render Labels ===
+        const viewBounds = {
+            minX: Math.floor(startWorldX),
+            maxX: Math.ceil(endWorldX),
+            minY: Math.floor(startWorldY),
+            maxY: Math.ceil(endWorldY)
+        };
+        const viewportCenterScreen = { x: cssWidth / 2, y: cssHeight / 2 };
+
+        for (const key in engine.worldData) {
+            if (key.startsWith('label_')) {
+                const coordsStr = key.substring('label_'.length);
+                const [xStr, yStr] = coordsStr.split(',');
+                const worldX = parseInt(xStr, 10);
+                const worldY = parseInt(yStr, 10);
+
+                try {
+                    const labelData = JSON.parse(engine.worldData[key]);
+                    const text = labelData.text || '';
+                    const color = labelData.color || '#000000';
+                    const labelWidthInChars = text.length;
+
+                    const isVisible = worldX <= viewBounds.maxX && (worldX + labelWidthInChars) >= viewBounds.minX &&
+                                      worldY >= viewBounds.minY && worldY <= viewBounds.maxY;
+
+                    if (isVisible) {
+                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                        
+                        ctx.fillStyle = color;
+                        ctx.fillRect(screenPos.x, screenPos.y, labelWidthInChars * effectiveCharWidth, effectiveCharHeight);
+
+                        ctx.fillStyle = CURSOR_TEXT_COLOR;
+                        ctx.fillText(text, screenPos.x, screenPos.y + verticalTextOffset);
+                    } else {
+                        const labelScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                        const intersection = getViewportEdgeIntersection(
+                            viewportCenterScreen.x, viewportCenterScreen.y,
+                            labelScreenPos.x, labelScreenPos.y,
+                            cssWidth, cssHeight
+                        );
+
+                        if (intersection) {
+                            const edgeBuffer = ARROW_MARGIN;
+                            let adjustedX = intersection.x;
+                            let adjustedY = intersection.y;
+                            
+                            adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
+                            adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
+                            
+                            drawArrow(ctx, adjustedX, adjustedY, intersection.angle, color);
+
+                            // Draw the label text next to the arrow
+                            if (text) {
+                                ctx.fillStyle = color;
+                                ctx.font = `12px ${FONT_FAMILY}`;
+                                const textOffset = ARROW_SIZE * 1.5;
+                                
+                                let textX = adjustedX - Math.cos(intersection.angle) * textOffset;
+                                let textY = adjustedY - Math.sin(intersection.angle) * textOffset;
+
+                                // Adjust alignment to keep text inside the screen bounds
+                                if (Math.abs(intersection.angle) < Math.PI / 2) {
+                                    ctx.textAlign = 'right';
+                                } else {
+                                    ctx.textAlign = 'left';
+                                }
+
+                                if (intersection.angle > Math.PI / 4 && intersection.angle < 3 * Math.PI / 4) {
+                                    ctx.textBaseline = 'bottom';
+                                } else if (intersection.angle < -Math.PI / 4 && intersection.angle > -3 * Math.PI / 4) {
+                                    ctx.textBaseline = 'top';
+                                } else {
+                                    ctx.textBaseline = 'middle';
+                                }
+
+                                ctx.fillText(text, textX, textY);
+
+                                // Reset to defaults
+                                ctx.textAlign = 'left';
+                                ctx.textBaseline = 'top';
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error(`Error parsing label data for key ${key}:`, e);
                 }
             }
         }
@@ -654,15 +743,6 @@ ${getHelpText()}`;
         // }
 
         // === Render Waypoint Arrows for Off-Screen Blocks ===
-        const viewBounds = {
-            minX: Math.floor(startWorldX),
-            maxX: Math.ceil(endWorldX),
-            minY: Math.floor(startWorldY),
-            maxY: Math.ceil(endWorldY)
-        };
-        
-        const viewportCenterScreen = { x: cssWidth / 2, y: cssHeight / 2 };
-        
         for (const key in engine.worldData) {
             if (key.startsWith('block_')) {
                 const coords = key.substring('block_'.length);
@@ -830,7 +910,7 @@ ${getHelpText()}`;
         });
 
         // === Render Debug Dialogue ===
-        if (engine.isDebugVisible) {
+        if (engine.settings.isDebugVisible) {
             renderDebugDialogue({
                 canvasWidth: cssWidth,
                 canvasHeight: cssHeight,

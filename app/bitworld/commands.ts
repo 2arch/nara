@@ -13,6 +13,7 @@ export interface CommandState {
 export interface CommandExecution {
     command: string;
     args: string[];
+    commandStartPos: Point;
 }
 
 // --- Command System Constants ---
@@ -191,7 +192,7 @@ export function useCommandSystem() {
         if (selectedCommand.toLowerCase().startsWith(commandName.toLowerCase())) {
             const args = inputParts.slice(1);
             console.log('Executing command:', selectedCommand, 'with args:', args);
-            return { command: selectedCommand, args };
+            return { command: selectedCommand, args, commandStartPos: commandState.commandStartPos };
         }
         
         return null;

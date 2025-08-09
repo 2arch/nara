@@ -197,7 +197,10 @@ export function useDebugDialogue(engine: WorldEngine) {
     }, []);
     
     useEffect(() => {
-        if (!isClient) return;
+        if (!isClient || !engine.settings.isDebugVisible) {
+            setDebugText('');
+            return;
+        }
         
         const distance = engine.getCursorDistanceFromCenter ? engine.getCursorDistanceFromCenter() : 0;
         const angleData = engine.getAngleDebugData ? engine.getAngleDebugData() : null;
@@ -218,7 +221,7 @@ export function useDebugDialogue(engine: WorldEngine) {
         ].join('\n');
         
         setDebugText(text);
-    }, [isClient, engine.cursorPos, engine.viewOffset, engine.getCursorDistanceFromCenter, engine.getAngleDebugData]);
+    }, [isClient, engine.cursorPos, engine.viewOffset, engine.getCursorDistanceFromCenter, engine.getAngleDebugData, engine.settings.isDebugVisible]);
     
     return { debugText };
 }

@@ -4,6 +4,7 @@ import { ref, set, onValue, off, DataSnapshot } from 'firebase/database';
 // Import functions and constants directly from @sanity/diff-match-patch
 import { makeDiff, DIFF_EQUAL } from '@sanity/diff-match-patch';
 import type { WorldData } from './world.engine'; // Adjust path if needed
+import type { WorldSettings } from './settings';
 
 // Debounce delay for saving (in milliseconds)
 const SAVE_DEBOUNCE_DELAY = 100; // 1 second
@@ -11,7 +12,9 @@ const SAVE_DEBOUNCE_DELAY = 100; // 1 second
 export function useWorldSave(
     worldId: string | null,
     localWorldData: WorldData,
-    setLocalWorldData: (data: WorldData) => void
+    setLocalWorldData: (data: WorldData) => void,
+    localSettings: WorldSettings,
+    setLocalSettings: (settings: WorldSettings) => void
 ) {
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -19,14 +22,16 @@ export function useWorldSave(
 
     // Store the last version of data known to be saved or received from Firebase
     const lastSyncedDataRef = useRef<WorldData | null>(null);
+    const lastSyncedSettingsRef = useRef<WorldSettings | null>(null);
     const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-    // No need for dmpRef instance anymore
+    const settingsSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     const worldDataRefPath = worldId ? `worlds/${worldId}/data` : null;
+    const settingsRefPath = worldId ? `worlds/${worldId}/settings` : null;
 
-    // --- Load Initial Data ---
+    // --- Load Initial Data & Settings ---
     useEffect(() => {
-        if (!worldId || !worldDataRefPath) {
+        if (!worldId) {
             setIsLoading(false);
             console.warn('useWorldSave: No worldId provided, persistence disabled.');
             return;
@@ -34,19 +39,25 @@ export function useWorldSave(
 
         setIsLoading(true);
         setError(null);
-        const dbRef = ref(database, worldDataRefPath);
+        
+        const dataRef = ref(database, `worlds/${worldId}/data`);
+        const settingsRef = ref(database, `worlds/${worldId}/settings`);
 
         const handleData = (snapshot: DataSnapshot) => {
             const data = snapshot.val() as WorldData | null;
-            const initialData = data || {}; // Use empty object if no data exists yet
-
-            // Only update local state if it's truly different from remote
+            const initialData = data || {};
             if (JSON.stringify(initialData) !== JSON.stringify(lastSyncedDataRef.current)) {
-                console.log('Firebase: Received updated data for', worldId);
                 setLocalWorldData(initialData);
-                lastSyncedDataRef.current = { ...initialData }; // Store a copy
+                lastSyncedDataRef.current = { ...initialData };
             }
-            setIsLoading(false);
+        };
+
+        const handleSettings = (snapshot: DataSnapshot) => {
+            const settings = snapshot.val() as WorldSettings | null;
+            if (settings) {
+                setLocalSettings(settings);
+                lastSyncedSettingsRef.current = { ...settings };
+            }
         };
 
         const handleError = (err: Error) => {
@@ -55,15 +66,20 @@ export function useWorldSave(
             setIsLoading(false);
         };
 
-        onValue(dbRef, handleData, handleError);
+        const worldRef = ref(database, `worlds/${worldId}`);
+        onValue(worldRef, (snapshot) => {
+            const world = snapshot.val();
+            handleData(snapshot.child('data'));
+            handleSettings(snapshot.child('settings'));
+            setIsLoading(false);
+        }, handleError);
 
         return () => {
-            off(dbRef, 'value', handleData);
-            if (saveTimeoutRef.current) {
-                clearTimeout(saveTimeoutRef.current);
-            }
+            off(worldRef);
+            if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+            if (settingsSaveTimeoutRef.current) clearTimeout(settingsSaveTimeoutRef.current);
         };
-    }, [worldId, setLocalWorldData, worldDataRefPath]);
+    }, [worldId, setLocalWorldData, setLocalSettings]);
 
     // --- Save Data on Change (Debounced) ---
     useEffect(() => {
@@ -75,18 +91,14 @@ export function useWorldSave(
             clearTimeout(saveTimeoutRef.current);
         }
 
-        // Use DMP to check if a *meaningful* change occurred
         const lastSyncedStr = JSON.stringify(lastSyncedDataRef.current || {});
         const currentStr = JSON.stringify(localWorldData || {});
 
-        // Use the imported makeDiff function directly
         const diff = makeDiff(lastSyncedStr, currentStr);
-        // Check if the diff array has more than one element,
-        // or if the single element is not an EQUAL diff.
         const hasChanges = diff.length > 1 || (diff.length === 1 && diff[0][0] !== DIFF_EQUAL);
 
         if (!hasChanges) {
-            return; // No actual change, don't schedule a save
+            return;
         }
 
         saveTimeoutRef.current = setTimeout(async () => {
@@ -112,7 +124,47 @@ export function useWorldSave(
                 clearTimeout(saveTimeoutRef.current);
             }
         };
-    }, [localWorldData, isLoading, worldId, worldDataRefPath]); // Keep dependencies
+    }, [localWorldData, isLoading, worldId, worldDataRefPath]);
+
+    // --- Save Settings on Change (Debounced) ---
+    useEffect(() => {
+        if (isLoading || !worldId || !settingsRefPath || !lastSyncedSettingsRef.current) {
+            return;
+        }
+
+        if (settingsSaveTimeoutRef.current) {
+            clearTimeout(settingsSaveTimeoutRef.current);
+        }
+
+        if (JSON.stringify(localSettings) === JSON.stringify(lastSyncedSettingsRef.current)) {
+            return;
+        }
+
+        settingsSaveTimeoutRef.current = setTimeout(async () => {
+            if (!worldId || !settingsRefPath) return;
+
+            setIsSaving(true);
+            setError(null);
+            const dbRef = ref(database, settingsRefPath);
+
+            try {
+                await set(dbRef, localSettings);
+                lastSyncedSettingsRef.current = { ...localSettings };
+            } catch (err: any) {
+                console.error("Firebase: Error saving settings:", err);
+                setError(`Failed to save settings: ${err.message}`);
+            } finally {
+                setIsSaving(false);
+            }
+        }, SAVE_DEBOUNCE_DELAY);
+
+        return () => {
+            if (settingsSaveTimeoutRef.current) {
+                clearTimeout(settingsSaveTimeoutRef.current);
+            }
+        };
+    }, [localSettings, isLoading, worldId, settingsRefPath]);
 
     return { isLoading, isSaving, error };
-} 
+}
+ 

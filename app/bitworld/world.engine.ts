@@ -3,7 +3,9 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useWorldSave } from './world.save'; // Import the new hook
 import { useCommandSystem, CommandState, CommandExecution } from './commands'; // Import command system
 import { useDeepspawnSystem } from './deepspawn'; // Import deepspawn system
-import { set } from 'firebase/database';
+import { useWorldSettings, WorldSettings } from './settings';
+import { set, ref } from 'firebase/database';
+import { database } from '@/app/firebase';
 
 // --- Constants --- (Copied and relevant ones kept)
 const BASE_FONT_SIZE = 16;
@@ -65,8 +67,7 @@ export interface WorldEngine {
     isBlock: (x: number, y: number) => boolean;
     directionPoints: { current: Point & { timestamp: number } | null, previous: Point & { timestamp: number } | null };
     getAngleDebugData: () => { firstPoint: Point & { timestamp: number }, lastPoint: Point & { timestamp: number }, angle: number, degrees: number, pointCount: number } | null;
-    isDebugVisible: boolean;
-    isDeepspawnVisible: boolean;
+    settings: WorldSettings;
     dialogueText: string;
     setDialogueText: (text: string) => void;
 }
@@ -93,10 +94,25 @@ export function useWorldEngine({
     const [cursorPos, setCursorPos] = useState<Point>(initialCursorPos);
     const [viewOffset, setViewOffset] = useState<Point>(initialViewOffset);
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
-    const [isDebugVisible, setIsDebugVisible] = useState(true);
-    const [isDeepspawnVisible, setIsDeepspawnVisible] = useState(true);
     const [dialogueText, setDialogueText] = useState('Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.');
     
+    // === Settings System ===
+    const { settings, setSettings, updateSettings } = useWorldSettings();
+
+    // === Immediate Settings Save Function ===
+    const saveSettingsToFirebase = useCallback(async (newSettings: Partial<WorldSettings>) => {
+        if (!worldId) return;
+        
+        try {
+            const settingsRef = ref(database, `worlds/${worldId}/settings`);
+            const updatedSettings = { ...settings, ...newSettings };
+            await set(settingsRef, updatedSettings);
+            console.log('Settings saved immediately to Firebase:', updatedSettings);
+        } catch (error) {
+            console.error('Failed to save settings to Firebase:', error);
+        }
+    }, [worldId, settings]);
+
     // === Command System ===
     const { commandState, commandData, handleKeyDown: handleCommandKeyDown } = useCommandSystem();
     
@@ -122,10 +138,34 @@ export function useWorldEngine({
         isLoading: isLoadingWorld,
         isSaving: isSavingWorld,
         error: worldPersistenceError
-    } = useWorldSave(worldId, worldData, setWorldData); // Pass state and setter
+    } = useWorldSave(worldId, worldData, setWorldData, settings, setSettings); // Pass state and setter
 
     // === Refs === (Keep refs for things not directly tied to re-renders or persistence)
     const charSizeCacheRef = useRef<{ [key: number]: { width: number; height: number; fontSize: number } }>({});
+
+    const findLabelAt = useCallback((x: number, y: number): { key: string, data: { text: string, color: string } } | null => {
+        for (const key in worldData) {
+            if (key.startsWith('label_')) {
+                const coordsStr = key.substring('label_'.length);
+                const [lxStr, lyStr] = coordsStr.split(',');
+                const lx = parseInt(lxStr, 10);
+                const ly = parseInt(lyStr, 10);
+
+                try {
+                    const data = JSON.parse(worldData[key]);
+                    const text = data.text || '';
+                    const width = text.length;
+
+                    if (y === ly && x >= lx && x < lx + width) {
+                        return { key, data };
+                    }
+                } catch (e) {
+                    // Ignore parsing errors
+                }
+            }
+        }
+        return null;
+    }, [worldData]);
 
     // === Helper Functions (Largely unchanged, but use state variables) ===
     const getEffectiveCharDims = useCallback((zoom: number): { width: number; height: number; fontSize: number } => {
@@ -174,6 +214,8 @@ export function useWorldEngine({
 
         let newWorldData = { ...worldData };
         let deleted = false;
+
+        // Delete single characters within selection
         for (let y = selection.startY; y <= selection.endY; y++) {
             for (let x = selection.startX; x <= selection.endX; x++) {
                 const key = `${x},${y}`;
@@ -182,6 +224,38 @@ export function useWorldEngine({
                     deleted = true;
                 }
             }
+        }
+
+        // Find and delete labels intersecting with selection
+        const labelsToDelete = new Set<string>();
+        for (const key in newWorldData) {
+            if (key.startsWith('label_')) {
+                const coordsStr = key.substring('label_'.length);
+                const [lxStr, lyStr] = coordsStr.split(',');
+                const lx = parseInt(lxStr, 10);
+                const ly = parseInt(lyStr, 10);
+
+                try {
+                    const data = JSON.parse(newWorldData[key]);
+                    const text = data.text || '';
+                    const width = text.length;
+                    const endX = lx + width - 1;
+
+                    // Check for intersection between label bounds and selection bounds
+                    if (lx <= selection.endX && endX >= selection.startX && ly >= selection.startY && ly <= selection.endY) {
+                        labelsToDelete.add(key);
+                    }
+                } catch (e) {
+                    // ignore
+                }
+            }
+        }
+
+        if (labelsToDelete.size > 0) {
+            deleted = true;
+            labelsToDelete.forEach(key => {
+                delete newWorldData[key];
+            });
         }
 
         if (deleted) {
@@ -317,18 +391,39 @@ export function useWorldEngine({
             const exec = commandResult as CommandExecution;
             if (exec.command === 'debug') {
                 if (exec.args[0] === 'on') {
-                    setIsDebugVisible(true);
+                    const newSettings = { isDebugVisible: true };
+                    updateSettings(newSettings);
+                    saveSettingsToFirebase(newSettings);
                 } else if (exec.args[0] === 'off') {
-                    setIsDebugVisible(false);
+                    const newSettings = { isDebugVisible: false };
+                    updateSettings(newSettings);
+                    saveSettingsToFirebase(newSettings);
                 }
             } else if (exec.command === 'deepspawn') {
                 if (exec.args[0] === 'on') {
-                    setIsDeepspawnVisible(true);
+                    const newSettings = { isDeepspawnVisible: true };
+                    updateSettings(newSettings);
+                    saveSettingsToFirebase(newSettings);
                 } else if (exec.args[0] === 'off') {
-                    setIsDeepspawnVisible(false);
+                    const newSettings = { isDeepspawnVisible: false };
+                    updateSettings(newSettings);
+                    saveSettingsToFirebase(newSettings);
                 }
             } else if (exec.command === 'summarize') {
                 setDialogueText("Here is a summary of what you've written so far.");
+            } else if (exec.command === 'label') {
+                if (exec.args.length >= 2) {
+                    const color = exec.args.pop() as string;
+                    const text = exec.args.join(' ');
+                    const position = { x: exec.commandStartPos.x, y: exec.commandStartPos.y + 1 };
+                    const key = `label_${position.x},${position.y}`;
+                    const value = JSON.stringify({ text, color });
+                    
+                    setWorldData(prev => ({
+                        ...prev,
+                        [key]: value
+                    }));
+                }
             }
             return true; // Command was handled
         } else if (commandResult === true) {
@@ -600,16 +695,28 @@ export function useWorldEngine({
                     }
                     nextCursorPos.x -= 1;
                 }
-            }
-            else {
-                // Regular Backspace: Delete one character to the left
-                const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
-                if (worldData[deleteKey]) {
-                    nextWorldData = { ...worldData }; // Create copy before modifying
-                    delete nextWorldData[deleteKey]; // Remove char from world
+            } else {
+                // Regular Backspace: Check for label first
+                const labelToDelete = findLabelAt(cursorPos.x - 1, cursorPos.y);
+                if (labelToDelete) {
+                    nextWorldData = { ...worldData };
+                    delete nextWorldData[labelToDelete.key];
                     worldDataChanged = true;
+                    // Move cursor to the start of where the label was
+                    const coordsStr = labelToDelete.key.substring('label_'.length);
+                    const [lxStr, lyStr] = coordsStr.split(',');
+                    nextCursorPos.x = parseInt(lxStr, 10);
+                    nextCursorPos.y = parseInt(lyStr, 10);
+                } else {
+                    // Delete one character to the left
+                    const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
+                    if (worldData[deleteKey]) {
+                        nextWorldData = { ...worldData }; // Create copy before modifying
+                        delete nextWorldData[deleteKey]; // Remove char from world
+                        worldDataChanged = true;
+                    }
+                    nextCursorPos.x -= 1; // Move cursor left regardless
                 }
-                nextCursorPos.x -= 1; // Move cursor left regardless
             }
             moved = true; // Cursor position changed or selection was deleted
         } else if (key === 'Delete') {
@@ -618,16 +725,22 @@ export function useWorldEngine({
                     // State updates happen inside deleteSelectedCharacters
                     nextCursorPos = { x: selectionStart?.x ?? cursorPos.x, y: selectionStart?.y ?? cursorPos.y };
                  }
-            }
-            else {
-                // Delete char at current cursor pos, cursor doesn't move
-                const deleteKey = `${cursorPos.x},${cursorPos.y}`;
-                if (worldData[deleteKey]) {
-                    nextWorldData = { ...worldData }; // Create copy before modifying
-                    delete nextWorldData[deleteKey];
+            } else {
+                // Delete char at current cursor pos, check for label first
+                const labelToDelete = findLabelAt(cursorPos.x, cursorPos.y);
+                if (labelToDelete) {
+                    nextWorldData = { ...worldData };
+                    delete nextWorldData[labelToDelete.key];
                     worldDataChanged = true;
+                    // Cursor does not move
+                } else {
+                    const deleteKey = `${cursorPos.x},${cursorPos.y}`;
+                    if (worldData[deleteKey]) {
+                        nextWorldData = { ...worldData }; // Create copy before modifying
+                        delete nextWorldData[deleteKey];
+                        worldDataChanged = true;
+                    }
                 }
-                // Cursor doesn't move, so moved = false unless selection was active
             }
              // Treat deletion as a cursor-affecting action for selection clearing logic below
              moved = true; // Set moved to true to trigger selection update/clear logic
@@ -976,8 +1089,7 @@ export function useWorldEngine({
         isBlock,
         directionPoints,
         getAngleDebugData,
-        isDebugVisible,
-        isDeepspawnVisible,
+        settings,
         dialogueText,
         setDialogueText,
     };
