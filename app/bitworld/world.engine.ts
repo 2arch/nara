@@ -6,6 +6,7 @@ import { useDeepspawnSystem } from './deepspawn'; // Import deepspawn system
 import { useWorldSettings, WorldSettings } from './settings';
 import { set, ref } from 'firebase/database';
 import { database } from '@/app/firebase';
+import { transformText, explainText, summarizeText, createSubtitleCycler, chatWithAI, clearChatHistory } from './ai';
 
 // --- Constants --- (Copied and relevant ones kept)
 const BASE_FONT_SIZE = 16;
@@ -33,6 +34,7 @@ export interface WorldEngine {
     deepspawnData: WorldData;
     commandData: WorldData;
     commandState: CommandState;
+    chatData: WorldData;
     viewOffset: Point;
     cursorPos: Point;
     zoomLevel: number;
@@ -70,6 +72,18 @@ export interface WorldEngine {
     settings: WorldSettings;
     dialogueText: string;
     setDialogueText: (text: string) => void;
+    chatMode: {
+        isActive: boolean;
+        currentInput: string;
+        inputPositions: Point[];
+        isProcessing: boolean;
+    };
+    setChatMode: React.Dispatch<React.SetStateAction<{
+        isActive: boolean;
+        currentInput: string;
+        inputPositions: Point[];
+        isProcessing: boolean;
+    }>>;
 }
 
 // --- Hook Input ---
@@ -96,6 +110,20 @@ export function useWorldEngine({
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
     const [dialogueText, setDialogueText] = useState('Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.');
     
+    // === Chat Mode State ===
+    const [chatMode, setChatMode] = useState<{
+        isActive: boolean;
+        currentInput: string;
+        inputPositions: Point[];
+        isProcessing: boolean;
+    }>({
+        isActive: false,
+        currentInput: '',
+        inputPositions: [],
+        isProcessing: false
+    });
+    
+    const [chatData, setChatData] = useState<WorldData>({});
     
     // === Settings System ===
     const { settings, setSettings, updateSettings } = useWorldSettings();
@@ -404,6 +432,90 @@ export function useWorldEngine({
         const isMod = ctrlKey || metaKey; // Modifier key check
         const currentSelectionActive = !!(selectionStart && selectionEnd && (selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y));
 
+        // === Chat Mode Handling ===
+        if (chatMode.isActive && !commandState.isActive) {
+            if (key === 'Enter') {
+                // Send chat message
+                if (chatMode.currentInput.trim()) {
+                    setChatMode(prev => ({ ...prev, isProcessing: true }));
+                    setDialogueText("Processing...");
+                    
+                    chatWithAI(chatMode.currentInput.trim()).then((response) => {
+                        createSubtitleCycler(response, setDialogueText);
+                        // Clear current input from chat data
+                        setChatData({});
+                        setChatMode(prev => ({
+                            ...prev,
+                            currentInput: '',
+                            inputPositions: [],
+                            isProcessing: false
+                        }));
+                    }).catch(() => {
+                        setDialogueText("Could not process chat message");
+                        setChatMode(prev => ({ ...prev, isProcessing: false }));
+                    });
+                }
+                return true;
+            } else if (key === 'Escape') {
+                // Exit chat mode
+                setChatMode({
+                    isActive: false,
+                    currentInput: '',
+                    inputPositions: [],
+                    isProcessing: false
+                });
+                // Clear any chat input
+                setChatData({});
+                setDialogueText("Chat mode deactivated.");
+                return true;
+            } else if (key.length === 1) {
+                // Add character to chat input
+                const newInput = chatMode.currentInput + key;
+                const currentKey = `${cursorPos.x},${cursorPos.y}`;
+                
+                setChatMode(prev => ({
+                    ...prev,
+                    currentInput: newInput,
+                    inputPositions: [...prev.inputPositions, cursorPos]
+                }));
+                
+                // Add to chatData instead of worldData
+                setChatData(prev => ({
+                    ...prev,
+                    [currentKey]: key
+                }));
+                
+                nextCursorPos = { x: cursorPos.x + 1, y: cursorPos.y };
+                moved = true;
+                return true;
+            } else if (key === 'Backspace') {
+                if (chatMode.currentInput.length > 0) {
+                    // Remove last character from chat input
+                    const newInput = chatMode.currentInput.slice(0, -1);
+                    const lastPos = chatMode.inputPositions[chatMode.inputPositions.length - 1];
+                    
+                    if (lastPos) {
+                        setChatMode(prev => ({
+                            ...prev,
+                            currentInput: newInput,
+                            inputPositions: prev.inputPositions.slice(0, -1)
+                        }));
+                        
+                        // Remove from chatData
+                        setChatData(prev => {
+                            const newChatData = { ...prev };
+                            delete newChatData[`${lastPos.x},${lastPos.y}`];
+                            return newChatData;
+                        });
+                        
+                        nextCursorPos = { x: lastPos.x, y: lastPos.y };
+                        moved = true;
+                    }
+                }
+                return true;
+            }
+        }
+
         // === Command Handling ===
         const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos);
         if (commandResult && typeof commandResult === 'object') {
@@ -437,7 +549,14 @@ export function useWorldEngine({
                 const currentSelection = getSelectedText();
                 if (currentSelection && exec.args.length > 0) {
                     const instructions = exec.args.join(' ');
-                    setDialogueText(`Here is the transformed "${currentSelection}" according to "${instructions}"`);
+                    setDialogueText("Processing transformation...");
+                    
+                    // Use AI to transform the text
+                    transformText(currentSelection, instructions).then((result) => {
+                        createSubtitleCycler(result, setDialogueText);
+                    }).catch(() => {
+                        setDialogueText(`Could not transform text`);
+                    });
                 } else if (!currentSelection) {
                     setDialogueText("Select a region of text first, then use: /transform [instructions]");
                 } else {
@@ -447,16 +566,53 @@ export function useWorldEngine({
                 const currentSelection = getSelectedText();
                 if (currentSelection) {
                     const instructions = exec.args.length > 0 ? exec.args.join(' ') : 'analysis';
-                    setDialogueText(`Here is the explanation for your "${currentSelection}" according to ${instructions}`);
+                    setDialogueText("Processing explanation...");
+                    
+                    // Use AI to explain the text
+                    explainText(currentSelection, instructions).then((result) => {
+                        createSubtitleCycler(result, setDialogueText);
+                    }).catch(() => {
+                        setDialogueText(`Could not explain text`);
+                    });
                 } else {
                     setDialogueText("Select a region of text first, then use: /explain [optional: how to explain]");
                 }
             } else if (exec.command === 'summarize') {
                 const currentSelection = getSelectedText();
                 if (currentSelection) {
-                    setDialogueText(`Here is the summary of "${currentSelection}"`);
+                    const focus = exec.args.length > 0 ? exec.args.join(' ') : undefined;
+                    setDialogueText("Processing summary...");
+                    
+                    // Use AI to summarize the text
+                    summarizeText(currentSelection, focus).then((result) => {
+                        createSubtitleCycler(result, setDialogueText);
+                    }).catch(() => {
+                        setDialogueText(`Could not summarize text`);
+                    });
                 } else {
-                    setDialogueText("Select a region of text first, then use: /summarize");
+                    setDialogueText("Select a region of text first, then use: /summarize [optional focus]");
+                }
+            } else if (exec.command === 'chat') {
+                if (!chatMode.isActive) {
+                    // Enter chat mode
+                    setChatMode({
+                        isActive: true,
+                        currentInput: '',
+                        inputPositions: [],
+                        isProcessing: false
+                    });
+                    setDialogueText("Chat mode activated. Type anywhere and press Enter to chat. Use /exit to leave chat mode.");
+                } else {
+                    // Exit chat mode
+                    setChatMode({
+                        isActive: false,
+                        currentInput: '',
+                        inputPositions: [],
+                        isProcessing: false
+                    });
+                    // Clear any chat input
+                    setChatData({});
+                    setDialogueText("Chat mode deactivated.");
                 }
             } else if (exec.command === 'modes') {
                 setDialogueText("Available modes: edit, view, select. Usage: /modes [mode] (coming soon)");
@@ -882,7 +1038,7 @@ export function useWorldEngine({
 
         return preventDefault;
     }, [
-        cursorPos, worldData, selectionStart, selectionEnd, commandState, // State dependencies
+        cursorPos, worldData, selectionStart, selectionEnd, commandState, chatMode, chatData, // State dependencies
         getNormalizedSelection, deleteSelectedCharacters, copySelectedCharacters, cutSelection, pasteText, getSelectedText, // Callback dependencies
         handleCommandKeyDown
         // Include setters used directly in the handler (if any, preferably avoid)
@@ -891,6 +1047,16 @@ export function useWorldEngine({
 
     const handleCanvasClick = useCallback((canvasRelativeX: number, canvasRelativeY: number, clearSelection: boolean = false, shiftKey: boolean = false): void => {
         const newCursorPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
+        
+        // If in chat mode, clear previous input when clicking
+        if (chatMode.isActive && chatMode.currentInput) {
+            setChatData({});
+            setChatMode(prev => ({
+                ...prev,
+                currentInput: '',
+                inputPositions: []
+            }));
+        }
 
         // Determine if click is inside current selection (if any)
         let clickedInsideSelection = false;
@@ -920,7 +1086,7 @@ export function useWorldEngine({
             // Just move the cursor without affecting selection
             setCursorPos(newCursorPos);
         }
-    }, [zoomLevel, viewOffset, screenToWorld, selectionStart, selectionEnd]);
+    }, [zoomLevel, viewOffset, screenToWorld, selectionStart, selectionEnd, chatMode]);
 
     const handleCanvasWheel = useCallback((deltaX: number, deltaY: number, canvasRelativeX: number, canvasRelativeY: number, ctrlOrMetaKey: boolean): void => {
         if (ctrlOrMetaKey) {
@@ -1124,6 +1290,7 @@ export function useWorldEngine({
         deepspawnData,
         commandData,
         commandState,
+        chatData,
         viewOffset,
         cursorPos,
         zoomLevel,
@@ -1161,5 +1328,7 @@ export function useWorldEngine({
         settings,
         dialogueText,
         setDialogueText,
+        chatMode,
+        setChatMode,
     };
 }

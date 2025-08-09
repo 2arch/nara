@@ -17,7 +17,7 @@ export interface CommandExecution {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'modes', 'settings', 'debug', 'deepspawn'];
+const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'modes', 'settings', 'debug', 'deepspawn', 'chat'];
 
 // --- Command System Hook ---
 export function useCommandSystem() {

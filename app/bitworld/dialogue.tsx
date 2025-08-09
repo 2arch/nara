@@ -196,7 +196,7 @@ export function useDialogue() {
         ctx.textBaseline = 'top';
 
         // Draw "nara" on the left
-        const leftText = "nara—1";
+        const leftText = "nara web services";
         const leftX = HEADER_MARGIN_CHARS * charWidth;
         ctx.fillStyle = DIALOGUE_BACKGROUND_COLOR;
         ctx.fillRect(leftX, topY, leftText.length * charWidth, charHeight);
