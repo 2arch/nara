@@ -435,14 +435,14 @@ export function useWorldEngine({
         // === Chat Mode Handling ===
         if (chatMode.isActive && !commandState.isActive) {
             if (key === 'Enter') {
-                // Send chat message
-                if (chatMode.currentInput.trim()) {
+                // Send chat message - prevent if already processing
+                if (chatMode.currentInput.trim() && !chatMode.isProcessing) {
                     setChatMode(prev => ({ ...prev, isProcessing: true }));
                     setDialogueText("Processing...");
                     
                     chatWithAI(chatMode.currentInput.trim()).then((response) => {
                         createSubtitleCycler(response, setDialogueText);
-                        // Clear current input from chat data
+                        // Clear current input from chat data after response
                         setChatData({});
                         setChatMode(prev => ({
                             ...prev,
@@ -452,7 +452,14 @@ export function useWorldEngine({
                         }));
                     }).catch(() => {
                         setDialogueText("Could not process chat message");
-                        setChatMode(prev => ({ ...prev, isProcessing: false }));
+                        // Clear chat data even on error
+                        setChatData({});
+                        setChatMode(prev => ({ 
+                            ...prev, 
+                            currentInput: '',
+                            inputPositions: [],
+                            isProcessing: false 
+                        }));
                     });
                 }
                 return true;
@@ -485,8 +492,8 @@ export function useWorldEngine({
                     [currentKey]: key
                 }));
                 
-                nextCursorPos = { x: cursorPos.x + 1, y: cursorPos.y };
-                moved = true;
+                // Move cursor immediately for chat mode
+                setCursorPos({ x: cursorPos.x + 1, y: cursorPos.y });
                 return true;
             } else if (key === 'Backspace') {
                 if (chatMode.currentInput.length > 0) {
@@ -508,8 +515,8 @@ export function useWorldEngine({
                             return newChatData;
                         });
                         
-                        nextCursorPos = { x: lastPos.x, y: lastPos.y };
-                        moved = true;
+                        // Move cursor immediately for chat mode
+                        setCursorPos({ x: lastPos.x, y: lastPos.y });
                     }
                 }
                 return true;

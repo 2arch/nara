@@ -46,8 +46,8 @@ const useMonogramSystem = () => {
     });
 
     const timeRef = useRef<number>(0);
-    const animationFrameRef = useRef<number>();
-
+    const animationFrameRef = useRef<number>(0);
+    
     // Update time for animations
     useEffect(() => {
         const updateTime = () => {

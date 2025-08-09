@@ -1,6 +1,7 @@
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, User, GoogleAuthProvider, OAuthProvider, signInWithPopup } from 'firebase/auth';
 import { auth } from '../firebase';
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 const Auth = () => {
   const [email, setEmail] = useState('');
@@ -8,6 +9,7 @@ const Auth = () => {
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -18,6 +20,13 @@ const Auth = () => {
     // Cleanup subscription on unmount
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (user) {
+      router.push('/home');
+    }
+  }, [user, router]);
+
 
   const handleSignUp = async () => {
     setError(null);
@@ -78,13 +87,7 @@ const Auth = () => {
 
       {user ? (
         <div className="text-center">
-          <p className="mb-4">You are logged in.</p>
-          <button
-            onClick={handleSignOut}
-            className="w-full py-2 px-4 rounded-md hover:opacity-80 transition-colors"
-          >
-            Sign Out
-          </button>
+          <p className="mb-4">Redirecting...</p>
         </div>
       ) : (
         <>

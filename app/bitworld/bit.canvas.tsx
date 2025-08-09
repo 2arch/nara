@@ -7,14 +7,14 @@ import { useControllerSystem, createMonogramController, createCameraController }
 
 // --- Constants --- (Copied and relevant ones kept)
 const FONT_FAMILY = 'IBM Plex Mono';
-const GRID_COLOR = '#F2F2F2';
+const GRID_COLOR = '#333333';
 const TEXT_COLOR = '#161616';
 const CURSOR_COLOR_PRIMARY = '#FF6B35';
 const CURSOR_COLOR_SECONDARY = '#FFA500';
 const CURSOR_COLOR_SAVE = '#FFFF00'; // Green color for saving state
 const CURSOR_COLOR_ERROR = '#FF0000'; // Red color for error state
 const CURSOR_TEXT_COLOR = '#FFFFFF';
-const BACKGROUND_COLOR = '#FFFFFF55';
+const BACKGROUND_COLOR = '#33333355';
 const DRAW_GRID = true;
 const GRID_LINE_WIDTH = 1;
 const CURSOR_TRAIL_FADE_MS = 200; // Time in ms for trail to fully fade
@@ -274,6 +274,9 @@ ${getHelpText()}` : '';
 
     // Ref for tracking selection drag state (mouse button down)
     const isSelectingMouseDownRef = useRef(false);
+    
+    // Ref for tracking when cursor movement is from click (to skip trail)
+    const isClickMovementRef = useRef(false);
 
     // --- Resize Handler (Canvas specific) ---
     const handleResize = useCallback(() => {
@@ -304,6 +307,13 @@ ${getHelpText()}` : '';
     // Track cursor movement for trail effect
     useEffect(() => {
         const currentPos = engine.cursorPos;
+        
+        // Skip trail if movement is from click
+        if (isClickMovementRef.current) {
+            isClickMovementRef.current = false; // Reset flag
+            lastCursorPosRef.current = {...currentPos}; // Update last position without adding to trail
+            return;
+        }
         
         // Only add to trail if cursor has actually moved
         if (!lastCursorPosRef.current || 
@@ -460,6 +470,27 @@ ${getHelpText()}` : '';
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
                     if (char && char.trim() !== '') {
+                        ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                    }
+                }
+            }
+        }
+
+        // === Render Chat Data (Black Background, White Text) ===
+        for (const key in engine.chatData) {
+            const [xStr, yStr] = key.split(',');
+            const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
+            if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                const char = engine.chatData[key];
+                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                    if (char && char.trim() !== '') {
+                        // Draw black background
+                        ctx.fillStyle = '#000000';
+                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        
+                        // Draw white text
+                        ctx.fillStyle = '#FFFFFF';
                         ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
                     }
                 }
@@ -855,6 +886,10 @@ ${getHelpText()}` : '';
                 trailPos.x === engine.cursorPos.x && 
                 trailPos.y === engine.cursorPos.y) continue;
             
+            // Skip positions that have chat data (chat data has its own styling)
+            const trailKey = `${trailPos.x},${trailPos.y}`;
+            if (engine.chatData[trailKey]) continue;
+            
             // Calculate opacity based on age (1.0 to 0.0)
             const opacity = 1 - (age / CURSOR_TRAIL_FADE_MS);
             
@@ -884,20 +919,24 @@ ${getHelpText()}` : '';
 
         const cursorScreenPos = engine.worldToScreen(engine.cursorPos.x, engine.cursorPos.y, currentZoom, currentOffset);
         if (cursorScreenPos.x >= -effectiveCharWidth && cursorScreenPos.x <= cssWidth && cursorScreenPos.y >= -effectiveCharHeight && cursorScreenPos.y <= cssHeight) {
-            // Determine cursor color based on engine state
-            if (engine.worldPersistenceError) {
-                ctx.fillStyle = CURSOR_COLOR_ERROR;
-            } else if (engine.isSavingWorld) {
-                ctx.fillStyle = CURSOR_COLOR_SAVE;
-            } else {
-                ctx.fillStyle = cursorColorAlternate ? CURSOR_COLOR_SECONDARY : CURSOR_COLOR_PRIMARY;
-            }
-            
-            ctx.fillRect(cursorScreenPos.x, cursorScreenPos.y, effectiveCharWidth, effectiveCharHeight);
             const key = `${engine.cursorPos.x},${engine.cursorPos.y}`;
-            if (engine.worldData[key]) {
-                ctx.fillStyle = CURSOR_TEXT_COLOR;
-                ctx.fillText(engine.worldData[key], cursorScreenPos.x, cursorScreenPos.y + verticalTextOffset);
+            
+            // Don't render cursor if there's chat data at this position (chat data already has its own styling)
+            if (!engine.chatData[key]) {
+                // Determine cursor color based on engine state
+                if (engine.worldPersistenceError) {
+                    ctx.fillStyle = CURSOR_COLOR_ERROR;
+                } else if (engine.isSavingWorld) {
+                    ctx.fillStyle = CURSOR_COLOR_SAVE;
+                } else {
+                    ctx.fillStyle = cursorColorAlternate ? CURSOR_COLOR_SECONDARY : CURSOR_COLOR_PRIMARY;
+                }
+                
+                ctx.fillRect(cursorScreenPos.x, cursorScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                if (engine.worldData[key]) {
+                    ctx.fillStyle = CURSOR_TEXT_COLOR;
+                    ctx.fillText(engine.worldData[key], cursorScreenPos.x, cursorScreenPos.y + verticalTextOffset);
+                }
             }
         }
 
@@ -984,6 +1023,9 @@ ${getHelpText()}` : '';
         // Get canvas-relative coordinates
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return;
+        
+        // Set flag to prevent trail creation from click movement
+        isClickMovementRef.current = true;
         
         // Pass false for clearSelection - let the engine decide
         engine.handleCanvasClick(e.clientX - rect.left, e.clientY - rect.top, false, e.shiftKey);
