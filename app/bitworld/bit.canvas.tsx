@@ -2,6 +2,7 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import type { WorldData, Point, WorldEngine, PanStartInfo } from './world.engine'; // Adjust path as needed
 import { useDialogue, useDebugDialogue } from './dialogue';
+import { useMonogramSystem } from './monogram';
 
 // --- Constants --- (Copied and relevant ones kept)
 const FONT_FAMILY = 'IBM Plex Mono';
@@ -75,6 +76,14 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
     // Debug dialogue system
     const { debugText } = useDebugDialogue(engine);
     const { renderDebugDialogue } = useDialogue();
+    
+    // Monogram system for psychedelic patterns
+    const monogramSystem = useMonogramSystem();
+    
+    // Enhanced debug text with monogram info
+    const enhancedDebugText = `${debugText}
+Monogram: ${monogramSystem.options.enabled ? 'ON' : 'OFF'} | Mode: ${monogramSystem.options.mode} | Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem.options.complexity.toFixed(1)}
+Controls: Ctrl+M (toggle) | Ctrl+N (cycle mode) | Ctrl+/- (speed) | Ctrl+[/] (complexity)`;
     
     // Pan trail tracking
     const [panTrail, setPanTrail] = useState<PanTrailPoint[]>([]);
@@ -320,6 +329,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
         const viewportCenter = engine.getViewportCenter ? engine.getViewportCenter() : null;
         if (!viewportCenter) return;
         
+        
         // Only add to trail if viewport center has actually changed
         if (!lastViewOffsetRef.current || 
             viewportCenter.x !== lastViewOffsetRef.current.x || 
@@ -364,6 +374,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
 
         // Use intermediate offset if panning, otherwise use engine's state
         const currentOffset = isMiddleMouseDownRef.current ? intermediatePanOffsetRef.current : engine.viewOffset;
+        const verticalTextOffset = (effectiveCharHeight - effectiveFontSize) / 2 + (effectiveFontSize * 0.1);
 
         // --- Actual Drawing (Copied from previous `draw` function) ---
         ctx.save();
@@ -398,8 +409,37 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
             ctx.stroke();
         }
 
+        // === Render Monogram Patterns ===
+        const monogramPattern = monogramSystem.generateMonogramPattern(
+            startWorldX, startWorldY, endWorldX, endWorldY
+        );
+        
+        for (const key in monogramPattern) {
+            const [xStr, yStr] = key.split(',');
+            const worldX = parseInt(xStr, 10);
+            const worldY = parseInt(yStr, 10);
+            
+            if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && 
+                    screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                    
+                    const cell = monogramPattern[key];
+                    
+                    // Only render if there's no regular text at this position
+                    const textKey = `${worldX},${worldY}`;
+                    if (!engine.worldData[textKey] && !engine.commandData[textKey] && !engine.deepspawnData[`deepspawn_${textKey}`]) {
+                        // Set color and render character
+                        ctx.fillStyle = cell.color;
+                        ctx.globalAlpha = Math.min(0.7, cell.intensity); // Semi-transparent so it doesn't overpower text
+                        ctx.fillText(cell.char, screenPos.x, screenPos.y + verticalTextOffset);
+                        ctx.globalAlpha = 1; // Reset alpha
+                    }
+                }
+            }
+        }
+
         ctx.fillStyle = TEXT_COLOR;
-        const verticalTextOffset = (effectiveCharHeight - effectiveFontSize) / 2 + (effectiveFontSize * 0.1);
         for (const key in engine.worldData) {
             // Skip block and deepspawn data - we render those separately
             if (key.startsWith('block_') || key.startsWith('deepspawn_')) continue;
@@ -786,13 +826,13 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
             effectiveCharHeight,
             verticalTextOffset,
             ctx,
-            debugText
+            debugText: enhancedDebugText
         });
 
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.deepspawnData, engine.commandData, engine.commandState, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue, renderDebugDialogue, debugText]);
+    }, [engine, engine.deepspawnData, engine.commandData, engine.commandState, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue, renderDebugDialogue, enhancedDebugText, monogramSystem]);
 
 
     // --- Drawing Loop Effect ---
@@ -919,12 +959,43 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
     }, [engine]);
 
     const handleCanvasKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
-        // Pass shift key status to the engine's handler
+        // Handle monogram controls first (with Ctrl/Cmd modifier to avoid conflicts)
+        if (e.ctrlKey || e.metaKey) {
+            switch (e.key.toLowerCase()) {
+                case 'm':
+                    monogramSystem.toggleEnabled();
+                    e.preventDefault();
+                    return;
+                case 'n':
+                    monogramSystem.cycleMode();
+                    e.preventDefault();
+                    return;
+                case '=':
+                case '+':
+                    monogramSystem.updateOption('speed', Math.min(3.0, monogramSystem.options.speed + 0.2));
+                    e.preventDefault();
+                    return;
+                case '-':
+                    monogramSystem.updateOption('speed', Math.max(0.1, monogramSystem.options.speed - 0.2));
+                    e.preventDefault();
+                    return;
+                case ']':
+                    monogramSystem.updateOption('complexity', Math.min(2.0, monogramSystem.options.complexity + 0.2));
+                    e.preventDefault();
+                    return;
+                case '[':
+                    monogramSystem.updateOption('complexity', Math.max(0.1, monogramSystem.options.complexity - 0.2));
+                    e.preventDefault();
+                    return;
+            }
+        }
+        
+        // Pass to engine's handler for regular controls
         const preventDefault = engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey, e.shiftKey);
         if (preventDefault) {
             e.preventDefault();
         }
-    }, [engine]);
+    }, [engine, monogramSystem]);
 
     return (
         <canvas

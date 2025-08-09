@@ -23,7 +23,7 @@ const Header = () => {
               </a>
             </li>
             <li>
-              <a href="#" className="bg-white text-black font-semibold py-2 px-4 rounded-md hover:bg-gray-200 transition-colors text-sm">
+              <a href="/funnel" className="bg-white text-black font-semibold py-2 px-4 rounded-md hover:bg-gray-200 transition-colors text-sm">
                 Try Today
               </a>
             </li>
