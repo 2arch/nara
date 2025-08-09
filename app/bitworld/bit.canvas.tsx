@@ -3,6 +3,7 @@ import React, { useRef, useEffect, useCallback, useState } from 'react';
 import type { WorldData, Point, WorldEngine, PanStartInfo } from './world.engine'; // Adjust path as needed
 import { useDialogue, useDebugDialogue } from './dialogue';
 import { useMonogramSystem } from './monogram';
+import { useControllerSystem, createMonogramController, createCameraController } from './controllers';
 
 // --- Constants --- (Copied and relevant ones kept)
 const FONT_FAMILY = 'IBM Plex Mono';
@@ -71,19 +72,26 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
     const lastCursorPosRef = useRef<Point | null>(null);
     
     // Dialogue system
-    const { renderDialogue } = useDialogue();
+    const { renderDialogue, renderDebugDialogue } = useDialogue();
     
     // Debug dialogue system
     const { debugText } = useDebugDialogue(engine);
-    const { renderDebugDialogue } = useDialogue();
     
     // Monogram system for psychedelic patterns
     const monogramSystem = useMonogramSystem();
+
+    // Controller system for handling keyboard inputs
+    const { registerGroup, handleKeyDown: handleKeyDownFromController, getHelpText } = useControllerSystem();
+
+    useEffect(() => {
+        registerGroup(createMonogramController(monogramSystem));
+        registerGroup(createCameraController(engine));
+    }, [registerGroup]);
     
     // Enhanced debug text with monogram info
     const enhancedDebugText = `${debugText}
 Monogram: ${monogramSystem.options.enabled ? 'ON' : 'OFF'} | Mode: ${monogramSystem.options.mode} | Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem.options.complexity.toFixed(1)}
-Controls: Ctrl+M (toggle) | Ctrl+N (cycle mode) | Ctrl+/- (speed) | Ctrl+[/] (complexity)`;
+${getHelpText()}`;
     
     // Pan trail tracking
     const [panTrail, setPanTrail] = useState<PanTrailPoint[]>([]);
@@ -428,7 +436,8 @@ Controls: Ctrl+M (toggle) | Ctrl+N (cycle mode) | Ctrl+/- (speed) | Ctrl+[/] (co
                     
                     // Only render if there's no regular text at this position
                     const textKey = `${worldX},${worldY}`;
-                    if (!engine.worldData[textKey] && !engine.commandData[textKey] && !engine.deepspawnData[`deepspawn_${textKey}`]) {
+                    const char = engine.worldData[textKey];
+                    if ((!char || char.trim() === '') && !engine.commandData[textKey] && !(engine.isDeepspawnVisible && engine.deepspawnData[`deepspawn_${textKey}`])) {
                         // Set color and render character
                         ctx.fillStyle = cell.color;
                         ctx.globalAlpha = Math.min(0.7, cell.intensity); // Semi-transparent so it doesn't overpower text
@@ -450,7 +459,9 @@ Controls: Ctrl+M (toggle) | Ctrl+N (cycle mode) | Ctrl+/- (speed) | Ctrl+[/] (co
                 const char = engine.worldData[key];
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-                    ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                    if (char && char.trim() !== '') {
+                        ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                    }
                 }
             }
         }
@@ -523,32 +534,34 @@ Controls: Ctrl+M (toggle) | Ctrl+N (cycle mode) | Ctrl+/- (speed) | Ctrl+[/] (co
         // }
 
         // === Render Deepspawn Objects with Heat Map Colors ===
-        for (const key in engine.deepspawnData) {
-            if (key.startsWith('deepspawn_')) {
-                const coords = key.substring('deepspawn_'.length);
-                const [xStr, yStr] = coords.split(',');
-                const worldX = parseInt(xStr, 10);
-                const worldY = parseInt(yStr, 10);
-                
-                if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                    if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-                        // Calculate distance from cursor to this deepspawn character
-                        const deltaX = worldX - engine.cursorPos.x;
-                        const deltaY = worldY - engine.cursorPos.y;
-                        const distanceFromCursor = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-                        
-                        // Get heat map color based on distance
-                        const heatColor = getHeatMapColor(distanceFromCursor);
-                        ctx.fillStyle = heatColor;
-                        
-                        // Fill entire cell with heat-mapped color
-                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                        
-                        // Render the deepspawn character on top
-                        const char = engine.deepspawnData[key];
-                        ctx.fillStyle = '#000000'; // Black text on colored background
-                        ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+        if (engine.isDeepspawnVisible) {
+            for (const key in engine.deepspawnData) {
+                if (key.startsWith('deepspawn_')) {
+                    const coords = key.substring('deepspawn_'.length);
+                    const [xStr, yStr] = coords.split(',');
+                    const worldX = parseInt(xStr, 10);
+                    const worldY = parseInt(yStr, 10);
+                    
+                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                        if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                            // Calculate distance from cursor to this deepspawn character
+                            const deltaX = worldX - engine.cursorPos.x;
+                            const deltaY = worldY - engine.cursorPos.y;
+                            const distanceFromCursor = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                            
+                            // Get heat map color based on distance
+                            const heatColor = getHeatMapColor(distanceFromCursor);
+                            ctx.fillStyle = heatColor;
+                            
+                            // Fill entire cell with heat-mapped color
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            
+                            // Render the deepspawn character on top
+                            const char = engine.deepspawnData[key];
+                            ctx.fillStyle = '#000000'; // Black text on colored background
+                            ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                        }
                     }
                 }
             }
@@ -812,22 +825,19 @@ Controls: Ctrl+M (toggle) | Ctrl+N (cycle mode) | Ctrl+/- (speed) | Ctrl+[/] (co
         renderDialogue({
             canvasWidth: cssWidth,
             canvasHeight: cssHeight,
-            effectiveCharWidth,
-            effectiveCharHeight,
-            verticalTextOffset,
-            ctx
+            ctx,
+            dialogueText: engine.dialogueText
         });
 
         // === Render Debug Dialogue ===
-        renderDebugDialogue({
-            canvasWidth: cssWidth,
-            canvasHeight: cssHeight,
-            effectiveCharWidth,
-            effectiveCharHeight,
-            verticalTextOffset,
-            ctx,
-            debugText: enhancedDebugText
-        });
+        if (engine.isDebugVisible) {
+            renderDebugDialogue({
+                canvasWidth: cssWidth,
+                canvasHeight: cssHeight,
+                ctx,
+                debugText: enhancedDebugText
+            });
+        }
 
 
         ctx.restore();
@@ -959,43 +969,15 @@ Controls: Ctrl+M (toggle) | Ctrl+N (cycle mode) | Ctrl+/- (speed) | Ctrl+[/] (co
     }, [engine]);
 
     const handleCanvasKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
-        // Handle monogram controls first (with Ctrl/Cmd modifier to avoid conflicts)
-        if (e.ctrlKey || e.metaKey) {
-            switch (e.key.toLowerCase()) {
-                case 'm':
-                    monogramSystem.toggleEnabled();
-                    e.preventDefault();
-                    return;
-                case 'n':
-                    monogramSystem.cycleMode();
-                    e.preventDefault();
-                    return;
-                case '=':
-                case '+':
-                    monogramSystem.updateOption('speed', Math.min(3.0, monogramSystem.options.speed + 0.2));
-                    e.preventDefault();
-                    return;
-                case '-':
-                    monogramSystem.updateOption('speed', Math.max(0.1, monogramSystem.options.speed - 0.2));
-                    e.preventDefault();
-                    return;
-                case ']':
-                    monogramSystem.updateOption('complexity', Math.min(2.0, monogramSystem.options.complexity + 0.2));
-                    e.preventDefault();
-                    return;
-                case '[':
-                    monogramSystem.updateOption('complexity', Math.max(0.1, monogramSystem.options.complexity - 0.2));
-                    e.preventDefault();
-                    return;
+        const handled = handleKeyDownFromController(e);
+        if (!handled) {
+            // Pass to engine's handler for regular controls if not handled by controller system
+            const preventDefault = engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey, e.shiftKey);
+            if (preventDefault) {
+                e.preventDefault();
             }
         }
-        
-        // Pass to engine's handler for regular controls
-        const preventDefault = engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey, e.shiftKey);
-        if (preventDefault) {
-            e.preventDefault();
-        }
-    }, [engine, monogramSystem]);
+    }, [engine, handleKeyDownFromController]);
 
     return (
         <canvas

@@ -10,8 +10,13 @@ export interface CommandState {
     commandStartPos: Point;
 }
 
+export interface CommandExecution {
+    command: string;
+    args: string[];
+}
+
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'modes', 'settings'];
+const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'modes', 'settings', 'debug', 'deepspawn'];
 
 // --- Command System Hook ---
 export function useCommandSystem() {
@@ -28,7 +33,7 @@ export function useCommandSystem() {
     // Utility function to match commands based on input
     const matchCommands = useCallback((input: string): string[] => {
         if (!input) return AVAILABLE_COMMANDS;
-        const lowerInput = input.toLowerCase();
+        const lowerInput = input.toLowerCase().split(' ')[0];
         return AVAILABLE_COMMANDS.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
     }, []);
 
@@ -165,8 +170,13 @@ export function useCommandSystem() {
     }, []);
 
     // Execute selected command
-    const executeCommand = useCallback(() => {
+    const executeCommand = useCallback((): CommandExecution | null => {
+        if (commandState.matchedCommands.length === 0) return null;
+
         const selectedCommand = commandState.matchedCommands[commandState.selectedIndex];
+        const fullInput = commandState.input.trim();
+        const inputParts = fullInput.split(/\s+/);
+        const commandName = inputParts[0];
         
         // Clear command mode
         setCommandState({
@@ -178,18 +188,21 @@ export function useCommandSystem() {
         });
         setCommandData({});
         
-        // TODO: Implement actual command execution logic
-        console.log('Executing command:', selectedCommand);
+        if (selectedCommand.toLowerCase().startsWith(commandName.toLowerCase())) {
+            const args = inputParts.slice(1);
+            console.log('Executing command:', selectedCommand, 'with args:', args);
+            return { command: selectedCommand, args };
+        }
         
-        return selectedCommand;
-    }, [commandState.matchedCommands, commandState.selectedIndex]);
+        return null;
+    }, [commandState]);
 
     // Handle keyboard events for command mode
     const handleKeyDown = useCallback((
         key: string, 
         cursorPos: Point,
         setCursorPos: (pos: Point | ((prev: Point) => Point)) => void
-    ): boolean => {
+    ): boolean | CommandExecution | null => {
         if (!commandState.isActive) {
             // Check if starting command mode with '/'
             if (key === '/') {
@@ -203,8 +216,7 @@ export function useCommandSystem() {
 
         // Handle command mode keys
         if (key === 'Enter') {
-            executeCommand();
-            return true;
+            return executeCommand();
         } else if (key === 'Escape') {
             // Exit command mode without executing
             setCommandState({

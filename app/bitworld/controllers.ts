@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 
 // --- Controller System Types ---
@@ -28,23 +28,23 @@ export interface ControllerSystem {
 
 // --- Controller System Hook ---
 export function useControllerSystem(): ControllerSystem {
-    const groups: ControllerGroup[] = [];
+    const [groups, setGroups] = useState<ControllerGroup[]>([]);
 
     const registerGroup = useCallback((group: ControllerGroup) => {
-        const existingIndex = groups.findIndex(g => g.name === group.name);
-        if (existingIndex >= 0) {
-            groups[existingIndex] = group;
-        } else {
-            groups.push(group);
-        }
-    }, [groups]);
+        setGroups(prevGroups => {
+            const existingIndex = prevGroups.findIndex(g => g.name === group.name);
+            if (existingIndex >= 0) {
+                const newGroups = [...prevGroups];
+                newGroups[existingIndex] = group;
+                return newGroups;
+            } else {
+                return [...prevGroups, group];
+            }});
+    }, []);
 
     const unregisterGroup = useCallback((name: string) => {
-        const index = groups.findIndex(g => g.name === name);
-        if (index >= 0) {
-            groups.splice(index, 1);
-        }
-    }, [groups]);
+        setGroups(prevGroups => prevGroups.filter(g => g.name !== name));
+    }, []);
 
     const handleKeyDown = useCallback((e: KeyboardEvent<HTMLElement>): boolean => {
         // Check all enabled controller groups
@@ -57,10 +57,7 @@ export function useControllerSystem(): ControllerSystem {
                 const shiftMatches = !binding.shift || e.shiftKey;
                 const altMatches = !binding.alt || e.altKey;
 
-                // If ctrl/meta is required, make sure at least one is pressed
-                const ctrlRequired = binding.ctrlOrMeta && !(e.ctrlKey || e.metaKey);
-
-                if (keyMatches && ctrlMatches && shiftMatches && altMatches && !ctrlRequired) {
+                if (keyMatches && ctrlMatches && shiftMatches && altMatches) {
                     binding.action();
                     e.preventDefault();
                     return true; // Handled
@@ -127,31 +124,31 @@ export function createMonogramController(monogramSystem: any): ControllerGroup {
                 key: '=',
                 ctrlOrMeta: true,
                 description: 'Increase animation speed',
-                action: () => monogramSystem.updateOption('speed', Math.min(3.0, monogramSystem.options.speed + 0.2))
+                action: () => monogramSystem.updateOption('speed', (speed: number) => Math.min(3.0, speed + 0.2))
             },
             {
                 key: '+',
                 ctrlOrMeta: true,
                 description: 'Increase animation speed',
-                action: () => monogramSystem.updateOption('speed', Math.min(3.0, monogramSystem.options.speed + 0.2))
+                action: () => monogramSystem.updateOption('speed', (speed: number) => Math.min(3.0, speed + 0.2))
             },
             {
                 key: '-',
                 ctrlOrMeta: true,
                 description: 'Decrease animation speed',
-                action: () => monogramSystem.updateOption('speed', Math.max(0.1, monogramSystem.options.speed - 0.2))
+                action: () => monogramSystem.updateOption('speed', (speed: number) => Math.max(0.1, speed - 0.2))
             },
             {
                 key: ']',
                 ctrlOrMeta: true,
                 description: 'Increase complexity',
-                action: () => monogramSystem.updateOption('complexity', Math.min(2.0, monogramSystem.options.complexity + 0.2))
+                action: () => monogramSystem.updateOption('complexity', (complexity: number) => Math.min(2.0, complexity + 0.2))
             },
             {
                 key: '[',
                 ctrlOrMeta: true,
                 description: 'Decrease complexity',
-                action: () => monogramSystem.updateOption('complexity', Math.max(0.1, monogramSystem.options.complexity - 0.2))
+                action: () => monogramSystem.updateOption('complexity', (complexity: number) => Math.max(0.1, complexity - 0.2))
             },
             {
                 key: 'r',

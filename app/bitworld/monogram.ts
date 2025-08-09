@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import type { Point } from './world.engine';
 
 // --- Monogram Pattern Types ---
-export type MonogramMode = 'mandelbrot' | 'plasma' | 'waves' | 'cellular' | 'spiral' | 'noise';
+export type MonogramMode = 'plasma' | 'waves' | 'cellular' | 'spiral' | 'noise';
 
 export interface MonogramCell {
     char: string;
@@ -69,12 +69,11 @@ const useMonogramSystem = () => {
     // Character sets for different intensities
     const getCharForIntensity = useCallback((intensity: number, mode: MonogramMode): string => {
         const chars = {
-            mandelbrot: [' ', '·', '∘', '○', '●', '◉', '⬢', '⬣', '◆', '█'],
             plasma: [' ', '░', '▒', '▓', '█'],
-            waves: [' ', '˜', '~', '≈', '∿', '〜', '∼', '∾', '∽', '▓'],
-            cellular: [' ', '·', '∘', '○', '●', '◉', '⬢', '⬣', '◆', '█'],
-            spiral: [' ', '·', '∘', '◯', '⊙', '⊚', '⊛', '◉', '●', '█'],
-            noise: [' ', '░', '▒', '▓', '▉', '▊', '▋', '▌', '▍', '█']
+            waves: [' ', '░', '▒', '▓', '█'],
+            cellular: [' ', '░', '▒', '▓', '█'],
+            spiral: [' ', '░', '▒', '▓', '█'],
+            noise: [' ', '░', '▒', '▓', '█'],
         };
         
         const charSet = chars[mode] || chars.plasma;
@@ -84,43 +83,10 @@ const useMonogramSystem = () => {
 
     // Get color from palette based on value
     const getColorFromPalette = useCallback((value: number, mode: MonogramMode): string => {
-        const palettes = {
-            mandelbrot: COSMIC_COLORS,
-            plasma: PLASMA_COLORS,
-            waves: RAINBOW_COLORS,
-            cellular: COSMIC_COLORS,
-            spiral: RAINBOW_COLORS,
-            noise: PLASMA_COLORS
-        };
-        
-        const palette = palettes[mode] || PLASMA_COLORS;
-        const normalizedValue = (value + options.colorShift) % (Math.PI * 2);
-        const index = ((normalizedValue / (Math.PI * 2)) * palette.length) % palette.length;
-        return palette[Math.floor(index)];
-    }, [options.colorShift]);
-
-    // Mandelbrot set calculation
-    const calculateMandelbrot = useCallback((x: number, y: number, time: number): number => {
-        const scale = 0.1 * options.complexity;
-        const centerX = Math.sin(time * 0.1) * 0.5;
-        const centerY = Math.cos(time * 0.1) * 0.5;
-        
-        const cx = (x - centerX) * scale;
-        const cy = (y - centerY) * scale;
-        
-        let zx = 0, zy = 0;
-        let iterations = 0;
-        const maxIterations = 20;
-        
-        while (iterations < maxIterations && (zx * zx + zy * zy) < 4) {
-            const newZx = zx * zx - zy * zy + cx;
-            zy = 2 * zx * zy + cy;
-            zx = newZx;
-            iterations++;
-        }
-        
-        return iterations / maxIterations;
-    }, [options.complexity]);
+        // Monochromatic scheme: vary lightness, keep hue/saturation constant
+        const lightness = 50 + (value % 1) * 50; // Vary lightness from 50% to 100%
+        return `hsl(0, 0%, ${lightness}%)`;
+    }, []);
 
     // Plasma effect
     const calculatePlasma = useCallback((x: number, y: number, time: number): number => {
@@ -202,7 +168,6 @@ const useMonogramSystem = () => {
     // Main pattern calculation function
     const calculatePattern = useCallback((x: number, y: number, time: number, mode: MonogramMode): number => {
         switch (mode) {
-            case 'mandelbrot': return calculateMandelbrot(x, y, time);
             case 'plasma': return calculatePlasma(x, y, time);
             case 'waves': return calculateWaves(x, y, time);
             case 'cellular': return calculateCellular(x, y, time);
@@ -210,7 +175,7 @@ const useMonogramSystem = () => {
             case 'noise': return calculateNoise(x, y, time);
             default: return calculatePlasma(x, y, time);
         }
-    }, [calculateMandelbrot, calculatePlasma, calculateWaves, calculateCellular, calculateSpiral, calculateNoise]);
+    }, [calculatePlasma, calculateWaves, calculateCellular, calculateSpiral, calculateNoise]);
 
     // Generate monogram pattern for given viewport bounds
     const generateMonogramPattern = useCallback((
@@ -259,11 +224,13 @@ const useMonogramSystem = () => {
 
     // Cycle to next mode
     const cycleMode = useCallback(() => {
-        const modes: MonogramMode[] = ['plasma', 'mandelbrot', 'waves', 'spiral', 'cellular', 'noise'];
-        const currentIndex = modes.indexOf(options.mode);
-        const nextIndex = (currentIndex + 1) % modes.length;
-        setOptions(prev => ({ ...prev, mode: modes[nextIndex] }));
-    }, [options.mode]);
+        const modes: MonogramMode[] = ['plasma', 'waves', 'spiral', 'cellular', 'noise'];
+        setOptions(prev => {
+            const currentIndex = modes.indexOf(prev.mode);
+            const nextIndex = (currentIndex + 1) % modes.length;
+            return { ...prev, mode: modes[nextIndex] };
+        });
+    }, []);
 
     // Toggle enabled state
     const toggleEnabled = useCallback(() => {
@@ -271,8 +238,16 @@ const useMonogramSystem = () => {
     }, []);
 
     // Update specific option
-    const updateOption = useCallback(<K extends keyof MonogramOptions>(key: K, value: MonogramOptions[K]) => {
-        setOptions(prev => ({ ...prev, [key]: value }));
+    const updateOption = useCallback(<K extends keyof MonogramOptions>(
+        key: K, 
+        value: MonogramOptions[K] | ((prevValue: MonogramOptions[K]) => MonogramOptions[K])
+    ) => {
+        setOptions(prev => {
+            const newValue = typeof value === 'function' 
+                ? (value as (prevValue: MonogramOptions[K]) => MonogramOptions[K])(prev[key])
+                : value;
+            return { ...prev, [key]: newValue };
+        });
     }, []);
 
     return {

@@ -1,7 +1,7 @@
 // hooks/useWorldEngine.ts
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useWorldSave } from './world.save'; // Import the new hook
-import { useCommandSystem, CommandState } from './commands'; // Import command system
+import { useCommandSystem, CommandState, CommandExecution } from './commands'; // Import command system
 import { useDeepspawnSystem } from './deepspawn'; // Import deepspawn system
 import { set } from 'firebase/database';
 
@@ -65,6 +65,10 @@ export interface WorldEngine {
     isBlock: (x: number, y: number) => boolean;
     directionPoints: { current: Point & { timestamp: number } | null, previous: Point & { timestamp: number } | null };
     getAngleDebugData: () => { firstPoint: Point & { timestamp: number }, lastPoint: Point & { timestamp: number }, angle: number, degrees: number, pointCount: number } | null;
+    isDebugVisible: boolean;
+    isDeepspawnVisible: boolean;
+    dialogueText: string;
+    setDialogueText: (text: string) => void;
 }
 
 // --- Hook Input ---
@@ -89,6 +93,9 @@ export function useWorldEngine({
     const [cursorPos, setCursorPos] = useState<Point>(initialCursorPos);
     const [viewOffset, setViewOffset] = useState<Point>(initialViewOffset);
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
+    const [isDebugVisible, setIsDebugVisible] = useState(true);
+    const [isDeepspawnVisible, setIsDeepspawnVisible] = useState(true);
+    const [dialogueText, setDialogueText] = useState('Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.');
     
     // === Command System ===
     const { commandState, commandData, handleKeyDown: handleCommandKeyDown } = useCommandSystem();
@@ -304,8 +311,28 @@ export function useWorldEngine({
         const currentSelectionActive = !!(selectionStart && selectionEnd && (selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y));
 
         // === Command Handling ===
-        const commandHandled = handleCommandKeyDown(key, cursorPos, setCursorPos);
-        if (commandHandled) {
+        const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos);
+        if (commandResult && typeof commandResult === 'object') {
+            // It's a command execution object
+            const exec = commandResult as CommandExecution;
+            if (exec.command === 'debug') {
+                if (exec.args[0] === 'on') {
+                    setIsDebugVisible(true);
+                } else if (exec.args[0] === 'off') {
+                    setIsDebugVisible(false);
+                }
+            } else if (exec.command === 'deepspawn') {
+                if (exec.args[0] === 'on') {
+                    setIsDeepspawnVisible(true);
+                } else if (exec.args[0] === 'off') {
+                    setIsDeepspawnVisible(false);
+                }
+            } else if (exec.command === 'summarize') {
+                setDialogueText("Here is a summary of what you've written so far.");
+            }
+            return true; // Command was handled
+        } else if (commandResult === true) {
+            // Command mode handled the key, but didn't execute a command
             return true;
         }
 
@@ -438,7 +465,7 @@ export function useWorldEngine({
                 if (passedContent) {
                     // Continue until we find a space or beginning of content
                     while (x >= leftmostX) {
-                        const key = `${x-1},${cursorPos.y}`; // Look ahead by 1
+                        const key = `${x-1},${cursorPos.y}`;
                         const char = worldData[key];
                         if (!char || char === ' ' || char === '\t') {
                             break;
@@ -573,7 +600,8 @@ export function useWorldEngine({
                     }
                     nextCursorPos.x -= 1;
                 }
-            } else {
+            }
+            else {
                 // Regular Backspace: Delete one character to the left
                 const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
                 if (worldData[deleteKey]) {
@@ -590,7 +618,8 @@ export function useWorldEngine({
                     // State updates happen inside deleteSelectedCharacters
                     nextCursorPos = { x: selectionStart?.x ?? cursorPos.x, y: selectionStart?.y ?? cursorPos.y };
                  }
-            } else {
+            }
+            else {
                 // Delete char at current cursor pos, cursor doesn't move
                 const deleteKey = `${cursorPos.x},${cursorPos.y}`;
                 if (worldData[deleteKey]) {
@@ -673,6 +702,7 @@ export function useWorldEngine({
     }, [
         cursorPos, worldData, selectionStart, selectionEnd, commandState, // State dependencies
         getNormalizedSelection, deleteSelectedCharacters, copySelectedCharacters, cutSelection, pasteText, // Callback dependencies
+        handleCommandKeyDown
         // Include setters used directly in the handler (if any, preferably avoid)
         // setCursorPos, setWorldData, setSelectionStart, setSelectionEnd // Setters are stable, no need to list
     ]);
@@ -946,5 +976,9 @@ export function useWorldEngine({
         isBlock,
         directionPoints,
         getAngleDebugData,
+        isDebugVisible,
+        isDeepspawnVisible,
+        dialogueText,
+        setDialogueText,
     };
 }
