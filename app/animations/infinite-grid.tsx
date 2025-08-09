@@ -17,9 +17,9 @@ const InfiniteGridAnimation = () => {
     if (!ctx) return;
 
     let frameId: number;
-    const speed = 0.3;
-    const gridSize = 30;
-    const fadeDuration = 15;
+    const speed = 0.5;
+    const gridSize = 55;
+    const fadeDuration = 2;
 
     let verticalLines: Line[] = [];
     let horizontalLines: Line[] = [];
@@ -34,7 +34,7 @@ const InfiniteGridAnimation = () => {
       horizontalLines = [];
       const width = canvas.width;
       const height = canvas.height;
-      const horizonY = height * 0.4;
+      const horizonY = height * 0.6;
 
       for (let i = 0; i < width / 2; i += gridSize) {
         verticalLines.push({ pos: i, opacity: 1 });
@@ -49,10 +49,10 @@ const InfiniteGridAnimation = () => {
       const width = canvas.width;
       const height = canvas.height;
       const centerX = width / 2;
-      const horizonY = height * 0.4;
+      const horizonY = height * 0.6;
 
       ctx.clearRect(0, 0, width, height);
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 2;
 
       // --- Horizontal Lines ---
       lastHLine += speed;
@@ -81,7 +81,7 @@ const InfiniteGridAnimation = () => {
         const x1 = startX + p * (endX - startX);
         const x2 = width - x1; // Symmetrical on the other side
 
-        ctx.strokeStyle = `rgba(136, 136, 136, ${line.opacity})`;
+        ctx.strokeStyle = `rgba(0, 0, 0, ${line.opacity})`;
         ctx.beginPath();
         ctx.moveTo(x1, y);
         ctx.lineTo(x2, y);
@@ -101,7 +101,7 @@ const InfiniteGridAnimation = () => {
         line.pos += speed;
         line.opacity = Math.min(1, line.pos / fadeDuration);
         
-        ctx.strokeStyle = `rgba(136, 136, 136, ${line.opacity})`;
+        ctx.strokeStyle = `rgba(0, 0, 0, ${line.opacity})`;
         
         // Define how wide the grid is at the horizon
         const horizonWidthFactor = 0.3; 
@@ -135,7 +135,7 @@ const InfiniteGridAnimation = () => {
     };
   }, []);
 
-  return <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full z-0" />;
+  return <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full z-0 transform -translate-y-16" />;
 };
 
 export default InfiniteGridAnimation;

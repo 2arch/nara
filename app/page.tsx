@@ -4,8 +4,10 @@ import Half from './landing/half';
 import Carousel from './landing/carousel';
 import Footer from './landing/footer';
 import DialogueHeader from './landing/dialogue-header';
+import BouncingBallAnimation from './animations/main';
 import InfiniteGridAnimation from './animations/infinite-grid';
-import BouncingBallAnimation from './animations/bouncing-ball';
+import GesturesAnimation from './animations/gestures';
+import CopilotAnimation from './animations/copilot';
 
 export default function Home() {
   const carouselItems1 = [
@@ -62,10 +64,10 @@ export default function Home() {
       {/* Another Carousel Section */}
       <section className="my-8">
         <div className="px-4 pb-2">
-          <h2 className="inline-block line-height-1" style={{ backgroundColor: 'rgba(0,0,0,1)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>gestures</h2>
+          <h2 className="inline-block px-2 py-1" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>gestures</h2>
         </div>
-        <Half animation={<BouncingBallAnimation />}>
-          <div className="inline-block line-height-1" style={{ backgroundColor: 'rgba(0,0,0,1)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>
+        <Half animation={<GesturesAnimation />}>
+          <div className="inline-block px-2 py-1" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>
             <p>Content for the right side of the Half component.</p>
           </div>
         </Half>
@@ -75,10 +77,10 @@ export default function Home() {
       {/* Another Carousel Section */}
       <section className="my-8">
         <div className="px-4 pb-2">
-          <h2 className="inline-block line-height-1" style={{ backgroundColor: 'rgba(0,0,0,1)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>co-pilot</h2>
+          <h2 className="inline-block px-2 py-1" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>co-pilot</h2>
         </div>
-        <Half animation={<BouncingBallAnimation />}>
-          <div className="inline-block line-height-1" style={{ backgroundColor: 'rgba(0,0,0,1)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>
+        <Half animation={<CopilotAnimation />}>
+          <div className="inline-block px-2 py-1" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>
             <p>Content for the right side of the Half component.</p>
           </div>
         </Half>
