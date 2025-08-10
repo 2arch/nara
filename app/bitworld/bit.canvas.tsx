@@ -63,9 +63,10 @@ interface BitCanvasProps {
     cursorColorAlternate: boolean;
     className?: string;
     showCursor?: boolean;
+    overlapRects?: DOMRect[];
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, overlapRects = [] }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -405,6 +406,12 @@ ${getHelpText()}` : '';
         } else {
             // Clear canvas for transparency
             ctx.clearRect(0, 0, cssWidth, cssHeight);
+        }
+
+        // Draw blue rectangles for overlapping areas
+        ctx.fillStyle = 'blue';
+        for (const rect of overlapRects) {
+            ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
         }
         
         ctx.imageSmoothingEnabled = false;

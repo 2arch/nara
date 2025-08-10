@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useWorldEngine } from './world.engine';
 import { BitCanvas } from './bit.canvas';
 
@@ -9,19 +9,35 @@ interface InteractiveBitCanvasProps {
 
 const InteractiveBitCanvas: React.FC<InteractiveBitCanvasProps> = ({ initialBackgroundColor = '#FFFFFF' }) => {
   const [cursorAlternate, setCursorAlternate] = useState(false);
+  const [overlapRects, setOverlapRects] = useState<DOMRect[]>([]);
   
-  // Use the custom hook to get the world engine instance
   const engine = useWorldEngine({ worldId: 'main', initialBackgroundColor });
+
+  const updateOverlapRects = useCallback(() => {
+    const elements = document.querySelectorAll('[id="animate"]');
+    const rects = Array.from(elements).map(el => el.getBoundingClientRect());
+    setOverlapRects(rects);
+  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {
       setCursorAlternate(prev => !prev);
     }, 500);
 
+    window.addEventListener('scroll', updateOverlapRects, true);
+    window.addEventListener('resize', updateOverlapRects);
+    updateOverlapRects();
+
+    const observer = new MutationObserver(updateOverlapRects);
+    observer.observe(document.body, { childList: true, subtree: true });
+
     return () => {
       clearInterval(interval);
+      window.removeEventListener('scroll', updateOverlapRects, true);
+      window.removeEventListener('resize', updateOverlapRects);
+      observer.disconnect();
     };
-  }, []);
+  }, [updateOverlapRects]);
 
   if (engine.isLoadingWorld) {
     return <div>Loading World...</div>;
@@ -34,6 +50,7 @@ const InteractiveBitCanvas: React.FC<InteractiveBitCanvasProps> = ({ initialBack
         cursorColorAlternate={cursorAlternate}
         className="w-full h-full"
         showCursor={false}
+        overlapRects={overlapRects}
       />
     </div>
   );

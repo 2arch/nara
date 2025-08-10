@@ -3,7 +3,7 @@ import React from 'react';
 
 const Footer = () => {
   return (
-    <footer className="bg-black text-gray-400">
+    <footer id="animate" className="bg-black text-gray-400">
       <div className="container mx-auto px-6 py-12 flex justify-center items-center">
         {/* Centered Copyright */}
         <div>

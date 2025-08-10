@@ -15,7 +15,7 @@ const FullScreenAnimation: React.FC<FullScreenAnimationProps> = ({ blurb, animat
       {animation}
       
       {/* Centered content on top of the canvas */}
-      <div className="relative z-10 flex flex-col items-center text-white">
+      <div id="animate" className="relative z-10 flex flex-col items-center text-white">
         {/* Dialogue-styled blurb */}
         <div 
           className="inline-block mt-96 mb-6"

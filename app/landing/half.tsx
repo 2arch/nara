@@ -14,7 +14,7 @@ const Half: React.FC<HalfProps> = ({ children, animation }) => {
         {animation}
       </div>
       {/* Right side for content */}
-      <div className="w-1/2 h-full flex items-center justify-center p-4">
+      <div id="animate" className="w-1/2 h-full flex items-center justify-center p-4">
         {children}
       </div>
     </div>
