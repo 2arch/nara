@@ -155,7 +155,9 @@ export function useDeepspawnSystem() {
             angles.forEach((angle, index) => {
                 const deepspawnX = Math.round(centerX + CURSOR_SPAWN_DISTANCE * Math.cos(angle));
                 const deepspawnY = Math.round(centerY + CURSOR_SPAWN_DISTANCE * Math.sin(angle));
-                placeDeepspawnObject(newDeepspawnData, deepspawnX, deepspawnY, questionsToUse);
+                if (questionsToUse[index]) {
+                    placeDeepspawnObject(newDeepspawnData, deepspawnX, deepspawnY, questionsToUse[index]);
+                }
             });
             setDeepspawnData(newDeepspawnData);
             return;
@@ -192,7 +194,9 @@ export function useDeepspawnSystem() {
             // Find a valid position that doesn't collide
             const validPos = findValidPosition(baseX, baseY, placedDeepspawns);
             
-            placeDeepspawnObject(newDeepspawnData, validPos.x, validPos.y, questionsToUse);
+            if (questionsToUse[i]) {
+                placeDeepspawnObject(newDeepspawnData, validPos.x, validPos.y, questionsToUse[i]);
+            }
             placedDeepspawns.push(validPos); // Add to collision tracking
             
             console.log(`Spawning forward cursor ${i} at (${validPos.x}, ${validPos.y}) - Direction: ${(direction * 180/Math.PI).toFixed(1)}°${i === 0 ? ' (lead cursor)' : ''} ${validPos.x !== baseX || validPos.y !== baseY ? '(adjusted for collision)' : ''}`);
@@ -211,14 +215,17 @@ export function useDeepspawnSystem() {
             // Find a valid position that doesn't collide
             const validPos = findValidPosition(baseX, baseY, placedDeepspawns);
             
-            placeDeepspawnObject(newDeepspawnData, validPos.x, validPos.y, questionsToUse);
+            const questionIndex = 3 + index;
+            if (questionsToUse[questionIndex]) {
+                placeDeepspawnObject(newDeepspawnData, validPos.x, validPos.y, questionsToUse[questionIndex]);
+            }
             placedDeepspawns.push(validPos); // Add to collision tracking
             
             console.log(`Spawning orthogonal cursor ${index} at (${validPos.x}, ${validPos.y}) - Angle: ${(angle * 180/Math.PI).toFixed(1)}° ${validPos.x !== baseX || validPos.y !== baseY ? '(adjusted for collision)' : ''}`);
         });
         
         setDeepspawnData(newDeepspawnData);
-    }, [CURSOR_SPAWN_DISTANCE, directionPoints, MIN_MOVEMENT_THRESHOLD, lastKnownDirection, findValidPosition, placeDeepspawnObject]);
+    }, [CURSOR_SPAWN_DISTANCE, directionPoints, MIN_MOVEMENT_THRESHOLD, lastKnownDirection, findValidPosition, placeDeepspawnObject, generateNewQuestions, deepspawnQuestions]);
 
     // Function to update direction tracking points
     const updateDirectionPoint = useCallback((x: number, y: number, recentText?: string) => {

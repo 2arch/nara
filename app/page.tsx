@@ -5,7 +5,7 @@ import Carousel from './landing/carousel';
 import Footer from './landing/footer';
 import DialogueHeader from './landing/dialogue-header';
 import BouncingBallAnimation from './landing/animations/main';
-import InfiniteGridAnimation from './landing/animations/infinite-grid';
+import InfiniteGridAnimation from './landing/animations/grid';
 import GesturesAnimation from './landing/animations/gestures';
 import CopilotAnimation from './landing/animations/copilot';
 

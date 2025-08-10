@@ -74,7 +74,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
     const router = useRouter();
     
     // Dialogue system
-    const { renderDialogue, renderDebugDialogue, renderHeaderDialogue, checkHeaderClick } = useDialogue();
+    const { renderDialogue, renderDebugDialogue } = useDialogue();
     
     // Debug dialogue system
     const { debugText } = useDebugDialogue(engine);
@@ -598,16 +598,12 @@ ${getHelpText()}` : '';
                             const deltaY = worldY - engine.cursorPos.y;
                             const distanceFromCursor = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
                             
-                            // Get heat map color based on distance
+                            // Get heat map color based on distance, but make it translucent
                             const heatColor = getHeatMapColor(distanceFromCursor);
-                            ctx.fillStyle = heatColor;
                             
-                            // Fill entire cell with heat-mapped color
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                            
-                            // Render the deepspawn character on top
+                            // Render the deepspawn character
                             const char = engine.deepspawnData[key];
-                            ctx.fillStyle = '#000000'; // Black text on colored background
+                            ctx.fillStyle = 'rgba(136, 136, 136, 0.7)'; // Translucent gray, similar to command suggestions
                             ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
                         }
                     }
@@ -975,13 +971,6 @@ ${getHelpText()}` : '';
             });
         }
 
-        // === Render Header Dialogue ===
-        renderHeaderDialogue({
-            canvasWidth: cssWidth,
-            canvasHeight: cssHeight,
-            ctx
-        });
-
 
         ctx.restore();
         // --- End Drawing ---
@@ -1044,20 +1033,13 @@ ${getHelpText()}` : '';
         const clickX = e.clientX - rect.left;
         const clickY = e.clientY - rect.top;
         
-        // Check for header clicks first
-        const headerClickResult = checkHeaderClick(clickX, clickY, canvasSize.width, canvasSize.height);
-        if (headerClickResult === 'home') {
-            router.push('/');
-            return;
-        }
-        
         // Set flag to prevent trail creation from click movement
         isClickMovementRef.current = true;
         
         // Pass false for clearSelection - let the engine decide
         engine.handleCanvasClick(clickX, clickY, false, e.shiftKey);
         canvasRef.current?.focus(); // Ensure focus for keyboard
-    }, [engine, checkHeaderClick, canvasSize, router]);
+    }, [engine, canvasSize, router]);
     
     const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();

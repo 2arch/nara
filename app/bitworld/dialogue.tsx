@@ -191,60 +191,9 @@ export function useDialogue() {
         ctx.restore();
     }, [calculateDebugLayout]);
 
-    const renderHeaderDialogue = useCallback((props: HeaderDialogueProps) => {
-        const { canvasWidth, canvasHeight, ctx, onHeaderClick } = props;
-        const charHeight = HEADER_FONT_SIZE;
-        const charWidth = HEADER_FONT_SIZE * CHAR_WIDTH_RATIO;
-        const topY = HEADER_MARGIN_CHARS * charHeight / 2;
-
-        ctx.save();
-        ctx.font = `${HEADER_FONT_SIZE}px "${FONT_FAMILY}"`;
-        ctx.textBaseline = 'top';
-
-        // Draw "nara" on the left
-        const leftText = "nara web services";
-        const leftX = HEADER_MARGIN_CHARS * charWidth;
-        ctx.fillStyle = DIALOGUE_BACKGROUND_COLOR;
-        ctx.fillRect(leftX, topY, leftText.length * charWidth, charHeight);
-        ctx.fillStyle = HEADER_TEXT_COLOR;
-        ctx.fillText(leftText, leftX, topY);
-
-        // Draw "v 1.0.0" on the right
-        const rightText = "v 1.0.0";
-        const rightX = canvasWidth - ((rightText.length + HEADER_MARGIN_CHARS) * charWidth);
-        ctx.fillStyle = DIALOGUE_BACKGROUND_COLOR;
-        ctx.fillRect(rightX, topY, rightText.length * charWidth, charHeight);
-        ctx.fillStyle = HEADER_TEXT_COLOR;
-        ctx.fillText(rightText, rightX, topY);
-
-        ctx.restore();
-    }, []);
-
-    const checkHeaderClick = useCallback((x: number, y: number, canvasWidth: number, canvasHeight: number) => {
-        const charHeight = HEADER_FONT_SIZE;
-        const charWidth = HEADER_FONT_SIZE * CHAR_WIDTH_RATIO;
-        const topY = HEADER_MARGIN_CHARS * charHeight / 2;
-        
-        // Check if click is in header area
-        if (y >= topY && y <= topY + charHeight) {
-            const leftText = "nara web services";
-            const leftX = HEADER_MARGIN_CHARS * charWidth;
-            const leftTextWidth = leftText.length * charWidth;
-            
-            // Check if click is on "nara web services" text
-            if (x >= leftX && x <= leftX + leftTextWidth) {
-                return 'home';
-            }
-        }
-        
-        return null;
-    }, []);
-
     return {
         renderDialogue,
         renderDebugDialogue,
-        renderHeaderDialogue,
-        checkHeaderClick,
     };
 }
 
