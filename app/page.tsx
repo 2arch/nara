@@ -14,26 +14,33 @@ import { parseGIF, decompressFrames } from 'gifuct-js';
 import { processGifFrame, PixelatedFrame } from './bitworld/gif.utils';
 
 export default function Home() {
-  const [overlayGifFrames, setOverlayGifFrames] = useState<PixelatedFrame[]>([]);
+  const [gifLibrary, setGifLibrary] = useState<{[key: string]: PixelatedFrame[]}>({});
 
-  // Load main.gif for overlay rendering
+  // Load multiple GIFs for overlay rendering
   useEffect(() => {
-    const loadMainGif = async () => {
-      try {
-        const response = await fetch('/main.gif');
-        if (response.ok) {
-          const buffer = await response.arrayBuffer();
-          const gif = parseGIF(buffer);
-          const frames = decompressFrames(gif, true);
-          const processedFrames = frames.map(frame => processGifFrame(frame));
-          setOverlayGifFrames(processedFrames);
+    const loadGifs = async () => {
+      const gifs = ['main', 'bike']; // Add more GIF names here as needed
+      const gifData: {[key: string]: PixelatedFrame[]} = {};
+
+      for (const gifName of gifs) {
+        try {
+          const response = await fetch(`/${gifName}.gif`);
+          if (response.ok) {
+            const buffer = await response.arrayBuffer();
+            const gif = parseGIF(buffer);
+            const frames = decompressFrames(gif, true);
+            const processedFrames = frames.map(frame => processGifFrame(frame));
+            gifData[gifName] = processedFrames;
+          }
+        } catch (err) {
+          console.error(`Error loading ${gifName}.gif for overlays:`, err);
         }
-      } catch (err) {
-        console.error('Error loading main.gif for overlays:', err);
       }
+
+      setGifLibrary(gifData);
     };
 
-    loadMainGif();
+    loadGifs();
   }, []);
 
   const infiniteCarouselItems = [
@@ -64,7 +71,7 @@ export default function Home() {
   return (
     <div className="relative">
       <div className="fixed top-0 left-0 w-screen h-screen z-0">
-        <InteractiveBitCanvas monogramEnabled={true} dialogueEnabled={false} overlayGifFrames={overlayGifFrames} />
+        <InteractiveBitCanvas monogramEnabled={true} dialogueEnabled={false} gifLibrary={gifLibrary} />
       </div>
       <main className="relative z-10">
         {/* Interactive Dialogue Header */}
@@ -96,7 +103,7 @@ export default function Home() {
           <div className="px-4 pb-2">
             <h2 className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>truly infinite</h2>
           </div>
-          <Half animation={<InfiniteGridAnimation />}>
+          <Half animation={<InfiniteGridAnimation />} gifName="main">
             <div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '16px', maxWidth: '400px' }}>
               <p className="mb-4">break free from the constraints of traditional documents and linear thinking</p>
               <p className="mb-4">nara provides an infinite canvas where ideas can grow organically</p>
@@ -111,7 +118,7 @@ export default function Home() {
           <div className="px-4 pb-2">
             <h2 className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>gestures</h2>
           </div>
-          <Half animation={<GesturesAnimation />}>
+          <Half animation={<GesturesAnimation />} gifName="bike">
             <div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '16px', maxWidth: '400px' }}>
               <p className="mb-4">every interaction feels natural and responsive</p>
               <p className="mb-4">middle-click to pan smoothly across your workspace</p>

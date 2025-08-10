@@ -9,18 +9,43 @@ interface InteractiveBitCanvasProps {
   gifFrames?: PixelatedFrame[];
   monogramEnabled?: boolean;
   dialogueEnabled?: boolean;
-  overlayGifFrames?: PixelatedFrame[];
+  overlayGifFrames?: PixelatedFrame[]; // Keep for backward compatibility
+  gifLibrary?: {[key: string]: PixelatedFrame[]}; // New multi-GIF system
 }
 
-const InteractiveBitCanvas: React.FC<InteractiveBitCanvasProps> = ({ initialBackgroundColor = '#FFFFFF', gifFrames = [], monogramEnabled = true, dialogueEnabled = true, overlayGifFrames = [] }) => {
+const InteractiveBitCanvas: React.FC<InteractiveBitCanvasProps> = ({ initialBackgroundColor = '#FFFFFF', gifFrames = [], monogramEnabled = true, dialogueEnabled = true, overlayGifFrames = [], gifLibrary = {} }) => {
   const [cursorAlternate, setCursorAlternate] = useState(false);
-  const [overlapRects, setOverlapRects] = useState<DOMRect[]>([]);
+  const [overlapRects, setOverlapRects] = useState<{rect: DOMRect, gifName: string}[]>([]);
   
   const engine = useWorldEngine({ worldId: 'main', initialBackgroundColor });
 
   const updateOverlapRects = useCallback(() => {
-    const elements = document.querySelectorAll('[id="animate"]');
-    const rects = Array.from(elements).map(el => el.getBoundingClientRect());
+    // Look for both old 'animate' ID and new 'animation-{gifName}' pattern
+    const animateElements = document.querySelectorAll('[id="animate"]');
+    const animationElements = document.querySelectorAll('[id^="animation-"]');
+    
+    const rects: {rect: DOMRect, gifName: string}[] = [];
+    
+    // Handle backward compatibility with old 'animate' ID
+    Array.from(animateElements).forEach(el => {
+      rects.push({
+        rect: el.getBoundingClientRect(),
+        gifName: 'main' // Default to main.gif for backward compatibility
+      });
+    });
+    
+    // Handle new animation-{gifName} pattern
+    Array.from(animationElements).forEach(el => {
+      const id = el.getAttribute('id');
+      if (id && id.startsWith('animation-')) {
+        const gifName = id.replace('animation-', '');
+        rects.push({
+          rect: el.getBoundingClientRect(),
+          gifName: gifName
+        });
+      }
+    });
+    
     setOverlapRects(rects);
   }, []);
 
@@ -58,6 +83,7 @@ const InteractiveBitCanvas: React.FC<InteractiveBitCanvasProps> = ({ initialBack
         overlapRects={overlapRects}
         gifFrames={gifFrames}
         overlayGifFrames={overlayGifFrames}
+        gifLibrary={gifLibrary}
         monogramEnabled={monogramEnabled}
         dialogueEnabled={dialogueEnabled}
       />

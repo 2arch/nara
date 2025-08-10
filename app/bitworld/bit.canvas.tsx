@@ -65,14 +65,15 @@ interface BitCanvasProps {
     cursorColorAlternate: boolean;
     className?: string;
     showCursor?: boolean;
-    overlapRects?: DOMRect[];
+    overlapRects?: {rect: DOMRect, gifName: string}[];
     gifFrames?: PixelatedFrame[];
     monogramEnabled?: boolean;
     dialogueEnabled?: boolean;
-    overlayGifFrames?: PixelatedFrame[]; // GIF frames for overlay rendering
+    overlayGifFrames?: PixelatedFrame[]; // GIF frames for overlay rendering (backward compatibility)
+    gifLibrary?: {[key: string]: PixelatedFrame[]}; // New multi-GIF system
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, overlapRects = [], gifFrames = [], monogramEnabled = true, dialogueEnabled = true, overlayGifFrames = [] }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, overlapRects = [], gifFrames = [], monogramEnabled = true, dialogueEnabled = true, overlayGifFrames = [], gifLibrary = {} }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -418,65 +419,105 @@ ${getHelpText()}` : '';
         }
 
         // === Render Overlay GIF Data for Overlapping Areas ===
-        if (overlayGifFrames.length > 0 && overlapRects.length > 0) {
-            const frameIndex = Math.floor(Date.now() / 100) % overlayGifFrames.length;
-            const frame = overlayGifFrames[frameIndex];
-            
-            if (frame) {
-                for (const rect of overlapRects) {
-                    // Convert pixel coordinates to grid coordinates
+        if (overlapRects.length > 0) {
+            for (const {rect, gifName} of overlapRects) {
+                // Get the appropriate GIF frames for this element
+                let gifFramesToUse: PixelatedFrame[] = [];
+                
+                // Try new multi-GIF system first
+                if (gifLibrary[gifName]) {
+                    gifFramesToUse = gifLibrary[gifName];
+                } 
+                // Fallback to backward compatibility with overlayGifFrames for 'main'
+                else if (gifName === 'main' && overlayGifFrames.length > 0) {
+                    gifFramesToUse = overlayGifFrames;
+                }
+                
+                if (gifFramesToUse.length > 0) {
+                    const frameIndex = Math.floor(Date.now() / 100) % gifFramesToUse.length;
+                    const frame = gifFramesToUse[frameIndex];
+                    
+                    if (frame) {
+                        // Convert pixel coordinates to grid coordinates
+                        const startGridX = Math.floor(rect.x / effectiveCharWidth);
+                        const startGridY = Math.floor(rect.y / effectiveCharHeight);
+                        const endGridX = Math.ceil((rect.x + rect.width) / effectiveCharWidth);
+                        const endGridY = Math.ceil((rect.y + rect.height) / effectiveCharHeight);
+                        
+                        const overlapWidth = endGridX - startGridX;
+                        const overlapHeight = endGridY - startGridY;
+                        
+                        // Calculate aspect ratios for proper scaling
+                        const overlapAspectRatio = overlapWidth / overlapHeight;
+                        const gifAspectRatio = frame.width / frame.height;
+                        
+                        // Calculate scaling to fill the overlap area (like object-fit: cover)
+                        let scaleX, scaleY, offsetX, offsetY;
+                        if (overlapAspectRatio > gifAspectRatio) {
+                            // Overlap is wider than GIF - scale by width
+                            scaleX = overlapWidth / frame.width;
+                            scaleY = scaleX;
+                            offsetX = 0;
+                            offsetY = (overlapHeight - (frame.height * scaleY)) / 2;
+                        } else {
+                            // Overlap is taller than GIF - scale by height
+                            scaleY = overlapHeight / frame.height;
+                            scaleX = scaleY;
+                            offsetX = (overlapWidth - (frame.width * scaleX)) / 2;
+                            offsetY = 0;
+                        }
+                        
+                        // Render GIF scaled to fill the entire overlap area
+                        for (let gridY = startGridY; gridY < endGridY; gridY++) {
+                            for (let gridX = startGridX; gridX < endGridX; gridX++) {
+                                const cellX = gridX * effectiveCharWidth;
+                                const cellY = gridY * effectiveCharHeight;
+                                
+                                // Map grid position to scaled gif coordinates
+                                const localGridX = gridX - startGridX;
+                                const localGridY = gridY - startGridY;
+                                
+                                // Apply scaling and offset to map to GIF coordinates
+                                const scaledX = (localGridX - offsetX) / scaleX;
+                                const scaledY = (localGridY - offsetY) / scaleY;
+                                
+                                const gifX = Math.floor(scaledX);
+                                const gifY = Math.floor(scaledY);
+                                
+                                if (gifX >= 0 && gifX < frame.width && gifY >= 0 && gifY < frame.height) {
+                                    const pixelIndex = gifY * frame.width + gifX;
+                                    const pixel = frame.data[pixelIndex];
+                                    
+                                    if (pixel && pixel.char.trim() !== '' && pixel.color !== 'transparent') {
+                                        ctx.fillStyle = pixel.color;
+                                        
+                                        // Always fill the entire cell to match 1:2 aspect ratio
+                                        ctx.fillRect(cellX, cellY, effectiveCharWidth, effectiveCharHeight);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Fallback to colored rectangles if no gif frames found
+                    const fallbackColors: {[key: string]: string} = {
+                        'main': 'blue',
+                        'bike': 'green',
+                        'default': 'red'
+                    };
+                    ctx.fillStyle = fallbackColors[gifName] || fallbackColors['default'];
+                    
                     const startGridX = Math.floor(rect.x / effectiveCharWidth);
                     const startGridY = Math.floor(rect.y / effectiveCharHeight);
                     const endGridX = Math.ceil((rect.x + rect.width) / effectiveCharWidth);
                     const endGridY = Math.ceil((rect.y + rect.height) / effectiveCharHeight);
                     
-                    const overlapWidth = endGridX - startGridX;
-                    const overlapHeight = endGridY - startGridY;
-                    
-                    // Scale and render GIF to fit exactly within this overlap area
                     for (let gridY = startGridY; gridY < endGridY; gridY++) {
                         for (let gridX = startGridX; gridX < endGridX; gridX++) {
                             const cellX = gridX * effectiveCharWidth;
                             const cellY = gridY * effectiveCharHeight;
-                            
-                            // Map grid position to processed gif frame coordinates
-                            const localGridX = gridX - startGridX;
-                            const localGridY = gridY - startGridY;
-                            
-                            // Scale to fit the overlap area (using the processed frame dimensions)
-                            const gifX = Math.floor((localGridX / overlapWidth) * frame.width);
-                            const gifY = Math.floor((localGridY / overlapHeight) * frame.height);
-                            
-                            if (gifX < frame.width && gifY < frame.height) {
-                                const pixelIndex = gifY * frame.width + gifX;
-                                const pixel = frame.data[pixelIndex];
-                                
-                                if (pixel && pixel.char.trim() !== '' && pixel.color !== 'transparent') {
-                                    ctx.fillStyle = pixel.color;
-                                    
-                                    // Always fill the entire cell to match 1:2 aspect ratio
-                                    // This ensures proper alignment with the interactive canvas grid
-                                    ctx.fillRect(cellX, cellY, effectiveCharWidth, effectiveCharHeight);
-                                }
-                            }
+                            ctx.fillRect(cellX, cellY, effectiveCharWidth, effectiveCharHeight);
                         }
-                    }
-                }
-            }
-        } else if (overlapRects.length > 0) {
-            // Fallback to blue rectangles if no gif frames provided
-            ctx.fillStyle = 'blue';
-            for (const rect of overlapRects) {
-                const startGridX = Math.floor(rect.x / effectiveCharWidth);
-                const startGridY = Math.floor(rect.y / effectiveCharHeight);
-                const endGridX = Math.ceil((rect.x + rect.width) / effectiveCharWidth);
-                const endGridY = Math.ceil((rect.y + rect.height) / effectiveCharHeight);
-                
-                for (let gridY = startGridY; gridY < endGridY; gridY++) {
-                    for (let gridX = startGridX; gridX < endGridX; gridX++) {
-                        const cellX = gridX * effectiveCharWidth;
-                        const cellY = gridY * effectiveCharHeight;
-                        ctx.fillRect(cellX, cellY, effectiveCharWidth, effectiveCharHeight);
                     }
                 }
             }
