@@ -64,7 +64,6 @@ export default function DialogueHeader({ dialogueType, className }: DialogueHead
 
   return (
     <div
-      id="animate"
       className={className}
       style={{
         position: 'absolute',

@@ -4,7 +4,9 @@ import { useRouter } from 'next/navigation';
 import type { WorldData, Point, WorldEngine, PanStartInfo } from './world.engine'; // Adjust path as needed
 import { useDialogue, useDebugDialogue } from './dialogue';
 import { useMonogramSystem } from './monogram';
+import { useGifViewportSystem } from './gif-viewport';
 import { useControllerSystem, createMonogramController, createCameraController } from './controllers';
+import { PixelatedFrame } from './gif.utils';
 
 // --- Constants --- (Copied and relevant ones kept)
 const FONT_FAMILY = 'IBM Plex Mono';
@@ -64,9 +66,13 @@ interface BitCanvasProps {
     className?: string;
     showCursor?: boolean;
     overlapRects?: DOMRect[];
+    gifFrames?: PixelatedFrame[];
+    monogramEnabled?: boolean;
+    dialogueEnabled?: boolean;
+    overlayGifFrames?: PixelatedFrame[]; // GIF frames for overlay rendering
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, overlapRects = [] }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, overlapRects = [], gifFrames = [], monogramEnabled = true, dialogueEnabled = true, overlayGifFrames = [] }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -82,6 +88,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     
     // Monogram system for psychedelic patterns
     const monogramSystem = useMonogramSystem();
+
+    // GIF viewport system for animated GIF rendering
+    const gifViewportSystem = useGifViewportSystem();
 
     // Controller system for handling keyboard inputs
     const { registerGroup, handleKeyDown: handleKeyDownFromController, getHelpText } = useControllerSystem();
@@ -408,10 +417,69 @@ ${getHelpText()}` : '';
             ctx.clearRect(0, 0, cssWidth, cssHeight);
         }
 
-        // Draw blue rectangles for overlapping areas
-        ctx.fillStyle = 'blue';
-        for (const rect of overlapRects) {
-            ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+        // === Render Overlay GIF Data for Overlapping Areas ===
+        if (overlayGifFrames.length > 0 && overlapRects.length > 0) {
+            const frameIndex = Math.floor(Date.now() / 100) % overlayGifFrames.length;
+            const frame = overlayGifFrames[frameIndex];
+            
+            if (frame) {
+                for (const rect of overlapRects) {
+                    // Convert pixel coordinates to grid coordinates
+                    const startGridX = Math.floor(rect.x / effectiveCharWidth);
+                    const startGridY = Math.floor(rect.y / effectiveCharHeight);
+                    const endGridX = Math.ceil((rect.x + rect.width) / effectiveCharWidth);
+                    const endGridY = Math.ceil((rect.y + rect.height) / effectiveCharHeight);
+                    
+                    const overlapWidth = endGridX - startGridX;
+                    const overlapHeight = endGridY - startGridY;
+                    
+                    // Scale and render GIF to fit exactly within this overlap area
+                    for (let gridY = startGridY; gridY < endGridY; gridY++) {
+                        for (let gridX = startGridX; gridX < endGridX; gridX++) {
+                            const cellX = gridX * effectiveCharWidth;
+                            const cellY = gridY * effectiveCharHeight;
+                            
+                            // Map grid position to processed gif frame coordinates
+                            const localGridX = gridX - startGridX;
+                            const localGridY = gridY - startGridY;
+                            
+                            // Scale to fit the overlap area (using the processed frame dimensions)
+                            const gifX = Math.floor((localGridX / overlapWidth) * frame.width);
+                            const gifY = Math.floor((localGridY / overlapHeight) * frame.height);
+                            
+                            if (gifX < frame.width && gifY < frame.height) {
+                                const pixelIndex = gifY * frame.width + gifX;
+                                const pixel = frame.data[pixelIndex];
+                                
+                                if (pixel && pixel.char.trim() !== '' && pixel.color !== 'transparent') {
+                                    ctx.fillStyle = pixel.color;
+                                    
+                                    // Always fill the entire cell to match 1:2 aspect ratio
+                                    // This ensures proper alignment with the interactive canvas grid
+                                    ctx.fillRect(cellX, cellY, effectiveCharWidth, effectiveCharHeight);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (overlapRects.length > 0) {
+            // Fallback to blue rectangles if no gif frames provided
+            ctx.fillStyle = 'blue';
+            for (const rect of overlapRects) {
+                const startGridX = Math.floor(rect.x / effectiveCharWidth);
+                const startGridY = Math.floor(rect.y / effectiveCharHeight);
+                const endGridX = Math.ceil((rect.x + rect.width) / effectiveCharWidth);
+                const endGridY = Math.ceil((rect.y + rect.height) / effectiveCharHeight);
+                
+                for (let gridY = startGridY; gridY < endGridY; gridY++) {
+                    for (let gridX = startGridX; gridX < endGridX; gridX++) {
+                        const cellX = gridX * effectiveCharWidth;
+                        const cellY = gridY * effectiveCharHeight;
+                        ctx.fillRect(cellX, cellY, effectiveCharWidth, effectiveCharHeight);
+                    }
+                }
+            }
         }
         
         ctx.imageSmoothingEnabled = false;
@@ -422,6 +490,39 @@ ${getHelpText()}` : '';
         const startWorldY = currentOffset.y;
         const endWorldX = startWorldX + (cssWidth / effectiveCharWidth);
         const endWorldY = startWorldY + (cssHeight / effectiveCharHeight);
+
+        // === Render GIF Viewport Data ===
+        if (gifFrames.length > 0) {
+            const gifViewportData = gifViewportSystem.generateGifViewportData(
+                gifFrames, startWorldX, startWorldY, endWorldX, endWorldY
+            );
+            
+            for (const key in gifViewportData) {
+                const [xStr, yStr] = key.split(',');
+                const worldX = parseInt(xStr, 10);
+                const worldY = parseInt(yStr, 10);
+                
+                if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && 
+                    worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                    if (screenPos.x > -effectiveCharWidth && screenPos.x < cssWidth + effectiveCharWidth && 
+                        screenPos.y > -effectiveCharHeight && screenPos.y < cssHeight + effectiveCharHeight) {
+                        
+                        const cell = gifViewportData[key];
+                        
+                        if (cell.type === 'border') {
+                            // Render border as filled rectangles
+                            ctx.fillStyle = cell.color;
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        } else {
+                            // Render content characters
+                            ctx.fillStyle = cell.color;
+                            ctx.fillText(cell.char, screenPos.x, screenPos.y + verticalTextOffset);
+                        }
+                    }
+                }
+            }
+        }
 
         if (DRAW_GRID && effectiveCharWidth > 2 && effectiveCharHeight > 2) {
             ctx.strokeStyle = GRID_COLOR;
@@ -439,31 +540,33 @@ ${getHelpText()}` : '';
         }
 
         // === Render Monogram Patterns ===
-        const monogramPattern = monogramSystem.generateMonogramPattern(
-            startWorldX, startWorldY, endWorldX, endWorldY
-        );
-        
-        for (const key in monogramPattern) {
-            const [xStr, yStr] = key.split(',');
-            const worldX = parseInt(xStr, 10);
-            const worldY = parseInt(yStr, 10);
+        if (monogramEnabled) {
+            const monogramPattern = monogramSystem.generateMonogramPattern(
+                startWorldX, startWorldY, endWorldX, endWorldY
+            );
             
-            if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && 
-                    screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-                    
-                    const cell = monogramPattern[key];
-                    
-                    // Only render if there's no regular text at this position
-                    const textKey = `${worldX},${worldY}`;
-                    const char = engine.worldData[textKey];
-                    if ((!char || char.trim() === '') && !engine.commandData[textKey] && !(engine.settings.isDeepspawnVisible && engine.deepspawnData[`deepspawn_${textKey}`])) {
-                        // Set color and render character
-                        ctx.fillStyle = cell.color;
-                        ctx.globalAlpha = Math.min(0.7, cell.intensity); // Semi-transparent so it doesn't overpower text
-                        ctx.fillText(cell.char, screenPos.x, screenPos.y + verticalTextOffset);
-                        ctx.globalAlpha = 1; // Reset alpha
+            for (const key in monogramPattern) {
+                const [xStr, yStr] = key.split(',');
+                const worldX = parseInt(xStr, 10);
+                const worldY = parseInt(yStr, 10);
+                
+                if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                    if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && 
+                        screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                        
+                        const cell = monogramPattern[key];
+                        
+                        // Only render if there's no regular text at this position
+                        const textKey = `${worldX},${worldY}`;
+                        const char = engine.worldData[textKey];
+                        if ((!char || char.trim() === '') && !engine.commandData[textKey] && !(engine.settings.isDeepspawnVisible && engine.deepspawnData[`deepspawn_${textKey}`])) {
+                            // Set color and render character
+                            ctx.fillStyle = cell.color;
+                            ctx.globalAlpha = Math.min(0.7, cell.intensity); // Semi-transparent so it doesn't overpower text
+                            ctx.fillText(cell.char, screenPos.x, screenPos.y + verticalTextOffset);
+                            ctx.globalAlpha = 1; // Reset alpha
+                        }
                     }
                 }
             }
@@ -966,12 +1069,14 @@ ${getHelpText()}` : '';
         }
 
         // === Render Dialogue ===
-        renderDialogue({
-            canvasWidth: cssWidth,
-            canvasHeight: cssHeight,
-            ctx,
-            dialogueText: engine.dialogueText
-        });
+        if (dialogueEnabled) {
+            renderDialogue({
+                canvasWidth: cssWidth,
+                canvasHeight: cssHeight,
+                ctx,
+                dialogueText: engine.dialogueText
+            });
+        }
 
         // === Render Debug Dialogue ===
         if (engine.settings.isDebugVisible) {
@@ -986,7 +1091,7 @@ ${getHelpText()}` : '';
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.deepspawnData, engine.commandData, engine.commandState, engine.lightModeData, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue, renderDebugDialogue, enhancedDebugText, monogramSystem, showCursor]);
+    }, [engine, engine.backgroundMode, engine.deepspawnData, engine.commandData, engine.commandState, engine.lightModeData, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue, renderDebugDialogue, enhancedDebugText, monogramSystem, gifViewportSystem, showCursor, monogramEnabled, dialogueEnabled, gifFrames, overlayGifFrames, overlapRects]);
 
 
     // --- Drawing Loop Effect ---

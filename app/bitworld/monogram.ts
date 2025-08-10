@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Point } from './world.engine';
 
 // --- Monogram Pattern Types ---
@@ -21,19 +21,6 @@ export interface MonogramOptions {
     colorShift: number; // Color phase shift (0 - 6.28)
     enabled: boolean;
 }
-
-// --- Psychedelic Color Palettes ---
-const RAINBOW_COLORS = [
-    '#FF0080', '#FF4000', '#FF8000', '#FFD000', '#80FF00', '#00FF80', '#00D0FF', '#0080FF', '#4000FF', '#8000FF'
-];
-
-const PLASMA_COLORS = [
-    '#FF006E', '#FB5607', '#FFBE0B', '#8338EC', '#3A86FF'
-];
-
-const COSMIC_COLORS = [
-    '#FF00FF', '#FF0040', '#FF4000', '#FFFF00', '#40FF00', '#00FF40', '#00FFFF', '#0040FF', '#4000FF', '#8000FF'
-];
 
 // --- Mathematical Pattern Generators ---
 const useMonogramSystem = () => {

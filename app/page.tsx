@@ -1,4 +1,5 @@
 "use client";
+import React, { useState, useEffect } from 'react';
 import FullScreenAnimation from './landing/full';
 import Half from './landing/half';
 import Carousel from './landing/carousel';
@@ -9,8 +10,31 @@ import InfiniteGridAnimation from './landing/animations/grid';
 import GesturesAnimation from './landing/animations/gestures';
 import CopilotAnimation from './landing/animations/copilot';
 import InteractiveBitCanvas from './bitworld/interactive.canvas';
+import { parseGIF, decompressFrames } from 'gifuct-js';
+import { processGifFrame, PixelatedFrame } from './bitworld/gif.utils';
 
 export default function Home() {
+  const [overlayGifFrames, setOverlayGifFrames] = useState<PixelatedFrame[]>([]);
+
+  // Load main.gif for overlay rendering
+  useEffect(() => {
+    const loadMainGif = async () => {
+      try {
+        const response = await fetch('/main.gif');
+        if (response.ok) {
+          const buffer = await response.arrayBuffer();
+          const gif = parseGIF(buffer);
+          const frames = decompressFrames(gif, true);
+          const processedFrames = frames.map(frame => processGifFrame(frame));
+          setOverlayGifFrames(processedFrames);
+        }
+      } catch (err) {
+        console.error('Error loading main.gif for overlays:', err);
+      }
+    };
+
+    loadMainGif();
+  }, []);
 
   const infiniteCarouselItems = [
     { id: 1, content: <div className="p-4"><div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '8px' }}>unlimited canvas space - expand in any direction</div></div> },
@@ -40,7 +64,7 @@ export default function Home() {
   return (
     <div className="relative">
       <div className="fixed top-0 left-0 w-screen h-screen z-0">
-        <InteractiveBitCanvas />
+        <InteractiveBitCanvas monogramEnabled={true} dialogueEnabled={false} overlayGifFrames={overlayGifFrames} />
       </div>
       <main className="relative z-10">
         {/* Interactive Dialogue Header */}

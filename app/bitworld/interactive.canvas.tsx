@@ -2,12 +2,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useWorldEngine } from './world.engine';
 import { BitCanvas } from './bit.canvas';
+import { PixelatedFrame } from './gif.utils';
 
 interface InteractiveBitCanvasProps {
   initialBackgroundColor?: string;
+  gifFrames?: PixelatedFrame[];
+  monogramEnabled?: boolean;
+  dialogueEnabled?: boolean;
+  overlayGifFrames?: PixelatedFrame[];
 }
 
-const InteractiveBitCanvas: React.FC<InteractiveBitCanvasProps> = ({ initialBackgroundColor = '#FFFFFF' }) => {
+const InteractiveBitCanvas: React.FC<InteractiveBitCanvasProps> = ({ initialBackgroundColor = '#FFFFFF', gifFrames = [], monogramEnabled = true, dialogueEnabled = true, overlayGifFrames = [] }) => {
   const [cursorAlternate, setCursorAlternate] = useState(false);
   const [overlapRects, setOverlapRects] = useState<DOMRect[]>([]);
   
@@ -51,6 +56,10 @@ const InteractiveBitCanvas: React.FC<InteractiveBitCanvasProps> = ({ initialBack
         className="w-full h-full"
         showCursor={false}
         overlapRects={overlapRects}
+        gifFrames={gifFrames}
+        overlayGifFrames={overlayGifFrames}
+        monogramEnabled={monogramEnabled}
+        dialogueEnabled={dialogueEnabled}
       />
     </div>
   );

@@ -10,11 +10,11 @@ const Half: React.FC<HalfProps> = ({ children, animation }) => {
   return (
     <div className="h-[30vh] w-full flex text-black">
       {/* Left side for animation */}
-      <div className="w-1/2 h-full relative">
+      <div id="animate" className="w-1/2 h-full relative">
         {animation}
       </div>
       {/* Right side for content */}
-      <div id="animate" className="w-1/2 h-full flex items-center justify-center p-4">
+      <div  className="w-1/2 h-full flex items-center justify-center p-4">
         {children}
       </div>
     </div>

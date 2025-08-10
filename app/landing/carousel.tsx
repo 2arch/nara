@@ -73,7 +73,7 @@ const Carousel: React.FC<CarouselProps> = ({ items }) => {
       >
         {items.map((item, index) => (
           <div key={item.id} className="w-[50vw] flex-shrink-0 p-4 h-full">
-            <div id="animate" className="w-full h-full rounded-lg flex items-center justify-center text-black border border-white relative">
+            <div className="w-full h-full rounded-lg flex items-center justify-center text-black border border-white relative">
               {item.content}
               {index === items.length - 1 && (
                 <button className="absolute bottom-4 right-4 bg-green-500 hover:bg-green-700 text-black font-bold py-2 px-3 rounded text-sm">
