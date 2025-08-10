@@ -24,6 +24,7 @@ export interface DialogueHeaderType {
     tryToday?: boolean;
     features?: boolean;
   };
+  onTryTodayClick?: () => void;
 }
 
 interface DialogueHeaderProps {
@@ -82,7 +83,11 @@ export default function DialogueHeader({ dialogueType, className }: DialogueHead
         // Check "try today" button click
         if (dialogueType.interactive?.tryToday && 
             x >= tryTodayX && x <= tryTodayX + tryTodayText.length * charWidth) {
-          navigateToFunnel();
+          if (dialogueType.onTryTodayClick) {
+            dialogueType.onTryTodayClick();
+          } else {
+            navigateToFunnel();
+          }
           return;
         }
       }

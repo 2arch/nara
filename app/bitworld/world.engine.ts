@@ -35,6 +35,7 @@ export interface WorldEngine {
     commandData: WorldData;
     commandState: CommandState;
     chatData: WorldData;
+    lightModeData: WorldData;
     viewOffset: Point;
     cursorPos: Point;
     zoomLevel: number;
@@ -143,7 +144,14 @@ export function useWorldEngine({
     }, [worldId, settings]);
 
     // === Command System ===
-    const { commandState, commandData, handleKeyDown: handleCommandKeyDown } = useCommandSystem();
+    const { 
+        commandState, 
+        commandData, 
+        handleKeyDown: handleCommandKeyDown,
+        currentMode,
+        addEphemeralText,
+        lightModeData 
+    } = useCommandSystem();
     
     // === Deepspawn System ===
     const { 
@@ -153,6 +161,31 @@ export function useWorldEngine({
         getPanningDirection, 
         getAngleDebugData 
     } = useDeepspawnSystem();
+
+    // Helper function to extract recent text from world data around a position
+    const getRecentText = useCallback((centerX: number, centerY: number, radius: number = 20): string => {
+        const textChunks: string[] = [];
+        
+        // Collect text in a radius around the center position
+        for (let y = centerY - radius; y <= centerY + radius; y++) {
+            let rowText = '';
+            for (let x = centerX - radius; x <= centerX + radius; x++) {
+                const key = `${x},${y}`;
+                const char = worldData[key];
+                if (char && char.trim() !== '' && !key.startsWith('block_') && !key.startsWith('deepspawn_') && !key.startsWith('label_')) {
+                    rowText += char;
+                } else {
+                    rowText += ' ';
+                }
+            }
+            if (rowText.trim()) {
+                textChunks.push(rowText.trim());
+            }
+        }
+        
+        // Join and clean up the text
+        return textChunks.join(' ').replace(/\s+/g, ' ').trim();
+    }, [worldData]);
     
     // Calculate panning direction (memoized to avoid recalculating on every render)
     const panningDirection = useMemo(() => getPanningDirection(), [getPanningDirection]);
@@ -1005,13 +1038,47 @@ export function useWorldEngine({
                 }
             }
 
-            // Now type the character
-            nextWorldData = { ...dataToDeleteFrom }; // Start with data after potential deletion
-            const currentKey = `${cursorAfterDelete.x},${cursorAfterDelete.y}`;
-            nextWorldData[currentKey] = key;
+            // Now type the character - handle different modes
             nextCursorPos = { x: cursorAfterDelete.x + 1, y: cursorAfterDelete.y }; // Move cursor right
             moved = true;
-            worldDataChanged = true; // Mark that synchronous data change occurred
+            
+            if (currentMode === 'light') {
+                // Light mode: Add ephemeral text that disappears after 2 seconds
+                addEphemeralText(cursorAfterDelete, key);
+                // Don't modify worldData in light mode
+            } else if (currentMode === 'chat') {
+                // Chat mode: Use existing chat functionality
+                if (chatMode.isActive) {
+                    // Add to chat data instead of world data
+                    setChatData(prev => ({
+                        ...prev,
+                        [`${cursorAfterDelete.x},${cursorAfterDelete.y}`]: key
+                    }));
+                    setChatMode(prev => ({
+                        ...prev,
+                        currentInput: prev.currentInput + key,
+                        inputPositions: [...prev.inputPositions, cursorAfterDelete]
+                    }));
+                } else {
+                    // If not in active chat mode but mode is chat, activate it
+                    setChatMode({
+                        isActive: true,
+                        currentInput: key,
+                        inputPositions: [cursorAfterDelete],
+                        isProcessing: false
+                    });
+                    setChatData({
+                        [`${cursorAfterDelete.x},${cursorAfterDelete.y}`]: key
+                    });
+                    setDialogueText("Chat mode activated. Type anywhere and press Enter to chat. Use /exit to leave chat mode.");
+                }
+            } else {
+                // Air mode (default): Normal text input to worldData
+                nextWorldData = { ...dataToDeleteFrom }; // Start with data after potential deletion
+                const currentKey = `${cursorAfterDelete.x},${cursorAfterDelete.y}`;
+                nextWorldData[currentKey] = key;
+                worldDataChanged = true; // Mark that synchronous data change occurred
+            }
         }
         // --- Other ---
         else {
@@ -1046,6 +1113,7 @@ export function useWorldEngine({
         return preventDefault;
     }, [
         cursorPos, worldData, selectionStart, selectionEnd, commandState, chatMode, chatData, // State dependencies
+        currentMode, addEphemeralText, // Mode system dependencies
         getNormalizedSelection, deleteSelectedCharacters, copySelectedCharacters, cutSelection, pasteText, getSelectedText, // Callback dependencies
         handleCommandKeyDown
         // Include setters used directly in the handler (if any, preferably avoid)
@@ -1155,11 +1223,12 @@ export function useWorldEngine({
             const centerY = newOffset.y + (viewportHeight / effectiveCharHeight) / 2;
             
             // Update direction tracking with viewport center during panning
-            updateDirectionPoint(centerX, centerY);
+            const recentText = getRecentText(centerX, centerY);
+            updateDirectionPoint(centerX, centerY, recentText);
         }
         
         return newOffset;
-    }, [zoomLevel, getEffectiveCharDims, viewOffset]);
+    }, [zoomLevel, getEffectiveCharDims, viewOffset, getRecentText]);
 
     const handlePanEnd = useCallback((newOffset: Point): void => {
         if (isPanningRef.current) {
@@ -1177,11 +1246,12 @@ export function useWorldEngine({
                     const centerY = newOffset.y + (viewportHeight / effectiveCharHeight) / 2;
                     
                     // Update direction tracking with final viewport center
-                    updateDirectionPoint(centerX, centerY);
+                    const recentText = getRecentText(centerX, centerY);
+                    updateDirectionPoint(centerX, centerY, recentText);
                 }
             }
         }
-    }, [zoomLevel, getEffectiveCharDims, updateDirectionPoint]);
+    }, [zoomLevel, getEffectiveCharDims, updateDirectionPoint, getRecentText]);
 
     const handleSelectionStart = useCallback((canvasRelativeX: number, canvasRelativeY: number): void => {
         const worldPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
@@ -1279,17 +1349,29 @@ export function useWorldEngine({
         return !!worldData[key];
     }, [worldData]);
 
+    // Track last known position to avoid idle updates
+    const lastKnownPositionRef = useRef<Point | null>(null);
+
     // Continuously track viewport center for direction calculation
     useEffect(() => {
         const interval = setInterval(() => {
             if (typeof window !== 'undefined') {
                 const center = getViewportCenter();
-                updateDirectionPoint(center.x, center.y);
+                
+                // Only update if position has actually changed
+                if (!lastKnownPositionRef.current || 
+                    Math.abs(center.x - lastKnownPositionRef.current.x) > 0.1 ||
+                    Math.abs(center.y - lastKnownPositionRef.current.y) > 0.1) {
+                    
+                    const recentText = getRecentText(center.x, center.y);
+                    updateDirectionPoint(center.x, center.y, recentText);
+                    lastKnownPositionRef.current = { x: center.x, y: center.y };
+                }
             }
         }, 100); // Update every 100ms
 
         return () => clearInterval(interval);
-    }, [getViewportCenter, updateDirectionPoint]);
+    }, [getViewportCenter, updateDirectionPoint, getRecentText]);
 
 
     return {
@@ -1298,6 +1380,7 @@ export function useWorldEngine({
         commandData,
         commandState,
         chatData,
+        lightModeData,
         viewOffset,
         cursorPos,
         zoomLevel,

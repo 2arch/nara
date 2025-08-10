@@ -1,26 +1,40 @@
-// app/page.tsx
+"use client";
 import FullScreenAnimation from './landing/full';
 import Half from './landing/half';
 import Carousel from './landing/carousel';
 import Footer from './landing/footer';
 import DialogueHeader from './landing/dialogue-header';
-import BouncingBallAnimation from './animations/main';
-import InfiniteGridAnimation from './animations/infinite-grid';
-import GesturesAnimation from './animations/gestures';
-import CopilotAnimation from './animations/copilot';
+import BouncingBallAnimation from './landing/animations/main';
+import InfiniteGridAnimation from './landing/animations/infinite-grid';
+import GesturesAnimation from './landing/animations/gestures';
+import CopilotAnimation from './landing/animations/copilot';
 
 export default function Home() {
-  const carouselItems1 = [
-    { id: 1, content: <p>Item 1</p> },
-    { id: 2, content: <p>Item 2</p> },
-    { id: 3, content: <p>Item 3 with Learn More</p> },
+
+  const infiniteCarouselItems = [
+    { id: 1, content: <div className="p-4"><div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '8px' }}>unlimited canvas space - expand in any direction</div></div> },
+    { id: 2, content: <div className="p-4"><div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '8px' }}>no boundaries - think beyond traditional documents</div></div> },
+    { id: 3, content: <div className="p-4"><div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '8px' }}>scale from notes to complex systems seamlessly</div></div> },
+  ];
+
+  const gestureCarouselItems = [
+    { id: 1, content: <div className="p-4"><div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '8px' }}>intuitive mouse and keyboard controls</div></div> },
+    { id: 2, content: <div className="p-4"><div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '8px' }}>pan, zoom, and navigate with precision</div></div> },
+    { id: 3, content: <div className="p-4"><div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '8px' }}>feel the interface respond to your intentions</div></div> },
+  ];
+
+  const copilotCarouselItems = [
+    { id: 1, content: <div className="p-4"><div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '8px' }}>AI assists your thought process</div></div> },
+    { id: 2, content: <div className="p-4"><div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '8px' }}>intelligent suggestions and completions</div></div> },
+    { id: 3, content: <div className="p-4"><div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '8px' }}>amplify your creativity, don't replace it</div></div> },
   ];
 
   const finalCarouselItems = [
-    { id: 1, content: <p>Feature One</p> },
-    { id: 2, content: <p>Feature Two</p> },
-    { id: 3, content: <p>Final Feature</p> },
+    { id: 1, content: <div className="p-4"><div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '8px' }}>collaborative workspaces</div></div> },
+    { id: 2, content: <div className="p-4"><div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '8px' }}>visual programming environments</div></div> },
+    { id: 3, content: <div className="p-4"><div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '8px' }}>extensible with plugins and integrations</div></div> },
   ];
+
 
   return (
     <main className="bg-white">
@@ -36,7 +50,7 @@ export default function Home() {
           interactive: {
             features: true,
             tryToday: true
-          }
+          },
         }}
         className="fixed top-0 left-0 z-50"
       />
@@ -51,40 +65,48 @@ export default function Home() {
           <h1 className="inline-block line-height-1" style={{ backgroundColor: 'rgba(0,0,0,1)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>features</h1>
         </div>
         <div className="px-4 pb-2">
-          <h2 className="inline-block px-2 py-1" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>truly infinite</h2>
+          <h2 className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>truly infinite</h2>
         </div>
         <Half animation={<InfiniteGridAnimation />}>
-          <div className="inline-block px-2 py-1" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>
-            <p>Content for the right side of the Half component.</p>
+          <div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '16px', maxWidth: '400px' }}>
+            <p className="mb-4">break free from the constraints of traditional documents and linear thinking</p>
+            <p className="mb-4">nara provides an infinite canvas where ideas can grow organically</p>
+            <p>zoom out to see the big picture, zoom in for details - your workspace adapts to your needs</p>
           </div>
         </Half>
-        <Carousel items={carouselItems1} />
+        <Carousel items={infiniteCarouselItems} />
       </section>
       
       {/* Another Carousel Section */}
       <section className="my-8">
         <div className="px-4 pb-2">
-          <h2 className="inline-block px-2 py-1" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>gestures</h2>
+          <h2 className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>gestures</h2>
         </div>
         <Half animation={<GesturesAnimation />}>
-          <div className="inline-block px-2 py-1" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>
-            <p>Content for the right side of the Half component.</p>
+          <div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '16px', maxWidth: '400px' }}>
+            <p className="mb-4">every interaction feels natural and responsive</p>
+            <p className="mb-4">middle-click to pan smoothly across your workspace</p>
+            <p className="mb-4">scroll to zoom with precision control</p>
+            <p>keyboard shortcuts for power users who think fast</p>
           </div>
         </Half>
-        <Carousel items={carouselItems1} />
+        <Carousel items={gestureCarouselItems} />
       </section>
 
       {/* Another Carousel Section */}
       <section className="my-8">
         <div className="px-4 pb-2">
-          <h2 className="inline-block px-2 py-1" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>co-pilot</h2>
+          <h2 className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>co-pilot</h2>
         </div>
         <Half animation={<CopilotAnimation />}>
-          <div className="inline-block px-2 py-1" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>
-            <p>Content for the right side of the Half component.</p>
+          <div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '16px', maxWidth: '400px' }}>
+            <p className="mb-4">intelligence that understands your workflow</p>
+            <p className="mb-4">contextual suggestions that feel like mind-reading</p>
+            <p className="mb-4">collaborative AI that enhances rather than interrupts</p>
+            <p>your thoughts, amplified - not automated</p>
           </div>
         </Half>
-        <Carousel items={carouselItems1} />
+        <Carousel items={copilotCarouselItems} />
       </section>
 
       {/* Title / Carousel */}

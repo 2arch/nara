@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Point, WorldData } from './world.engine';
 
 // --- Command System Types ---
@@ -16,11 +17,21 @@ export interface CommandExecution {
     commandStartPos: Point;
 }
 
+// --- Mode System Types ---
+export type CanvasMode = 'air' | 'light' | 'chat';
+
+export interface ModeState {
+    currentMode: CanvasMode;
+    lightModeData: WorldData; // Ephemeral text data for light mode
+}
+
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'modes', 'settings', 'debug', 'deepspawn', 'chat'];
+const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'deepspawn', 'chat'];
+const MODE_COMMANDS = ['air', 'light', 'chat'];
 
 // --- Command System Hook ---
 export function useCommandSystem() {
+    const router = useRouter();
     const [commandState, setCommandState] = useState<CommandState>({
         isActive: false,
         input: '',
@@ -30,13 +41,72 @@ export function useCommandSystem() {
     });
     
     const [commandData, setCommandData] = useState<WorldData>({});
+    
+    // Mode system state
+    const [modeState, setModeState] = useState<ModeState>({
+        currentMode: 'air',
+        lightModeData: {}
+    });
 
     // Utility function to match commands based on input
     const matchCommands = useCallback((input: string): string[] => {
         if (!input) return AVAILABLE_COMMANDS;
         const lowerInput = input.toLowerCase().split(' ')[0];
+        
+        // Special handling for mode command with subcommands
+        if (lowerInput === 'mode') {
+            const parts = input.toLowerCase().split(' ');
+            if (parts.length > 1) {
+                // Show mode subcommands that match the second part
+                const modeInput = parts[1];
+                return MODE_COMMANDS
+                    .filter(mode => mode.startsWith(modeInput))
+                    .map(mode => `mode ${mode}`);
+            }
+            return MODE_COMMANDS.map(mode => `mode ${mode}`);
+        }
+        
         return AVAILABLE_COMMANDS.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
     }, []);
+
+    // Mode switching functionality
+    const switchMode = useCallback((newMode: CanvasMode) => {
+        setModeState(prev => {
+            // Clear light mode data when switching away from light mode
+            const lightModeData = newMode === 'light' ? prev.lightModeData : {};
+            
+            return {
+                currentMode: newMode,
+                lightModeData
+            };
+        });
+    }, []);
+
+    // Add ephemeral text in light mode (disappears after 2 seconds)
+    const addEphemeralText = useCallback((pos: Point, char: string) => {
+        if (modeState.currentMode !== 'light') return;
+        
+        const key = `${pos.x},${pos.y}`;
+        setModeState(prev => ({
+            ...prev,
+            lightModeData: {
+                ...prev.lightModeData,
+                [key]: char
+            }
+        }));
+        
+        // Remove the text after 2 seconds
+        setTimeout(() => {
+            setModeState(prev => {
+                const newLightModeData = { ...prev.lightModeData };
+                delete newLightModeData[key];
+                return {
+                    ...prev,
+                    lightModeData: newLightModeData
+                };
+            });
+        }, 2000);
+    }, [modeState.currentMode]);
 
     // Start command mode when '/' is pressed
     const startCommand = useCallback((cursorPos: Point) => {
@@ -175,9 +245,38 @@ export function useCommandSystem() {
         if (commandState.matchedCommands.length === 0) return null;
 
         const selectedCommand = commandState.matchedCommands[commandState.selectedIndex];
+        if (!selectedCommand) return null; // Safety check for undefined command
+        
         const fullInput = commandState.input.trim();
         const inputParts = fullInput.split(/\s+/);
         const commandName = inputParts[0];
+        
+        // Handle mode switching commands directly
+        if (selectedCommand.startsWith('mode ')) {
+            const modeArg = selectedCommand.split(' ')[1] as CanvasMode;
+            if (MODE_COMMANDS.includes(modeArg)) {
+                if (modeArg === 'chat') {
+                    // For chat mode, redirect to /chat
+                    router.push('/chat');
+                } else {
+                    // For other modes, switch mode in current context
+                    switchMode(modeArg);
+                    console.log(`Switched to ${modeArg} mode`);
+                }
+            }
+            
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 }
+            });
+            setCommandData({});
+            
+            return null; // Mode switches don't need further processing
+        }
         
         // Clear command mode
         setCommandState({
@@ -196,7 +295,7 @@ export function useCommandSystem() {
         }
         
         return null;
-    }, [commandState]);
+    }, [commandState, switchMode]);
 
     // Handle keyboard events for command mode
     const handleKeyDown = useCallback((
@@ -262,6 +361,12 @@ export function useCommandSystem() {
         commandState,
         commandData,
         handleKeyDown,
-        isCommandMode: commandState.isActive
+        isCommandMode: commandState.isActive,
+        // Mode system exports
+        modeState,
+        switchMode,
+        addEphemeralText,
+        currentMode: modeState.currentMode,
+        lightModeData: modeState.lightModeData
     };
 }

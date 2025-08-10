@@ -1,5 +1,6 @@
 // components/BitCanvas.tsx
 import React, { useRef, useEffect, useCallback, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { WorldData, Point, WorldEngine, PanStartInfo } from './world.engine'; // Adjust path as needed
 import { useDialogue, useDebugDialogue } from './dialogue';
 import { useMonogramSystem } from './monogram';
@@ -7,14 +8,14 @@ import { useControllerSystem, createMonogramController, createCameraController }
 
 // --- Constants --- (Copied and relevant ones kept)
 const FONT_FAMILY = 'IBM Plex Mono';
-const GRID_COLOR = '#333333';
-const TEXT_COLOR = '#161616';
+const GRID_COLOR = '#F2F2F2';
+const TEXT_COLOR = '#000000';
 const CURSOR_COLOR_PRIMARY = '#FF6B35';
 const CURSOR_COLOR_SECONDARY = '#FFA500';
 const CURSOR_COLOR_SAVE = '#FFFF00'; // Green color for saving state
 const CURSOR_COLOR_ERROR = '#FF0000'; // Red color for error state
 const CURSOR_TEXT_COLOR = '#FFFFFF';
-const BACKGROUND_COLOR = '#33333355';
+const BACKGROUND_COLOR = '#FFFFFF55';
 const DRAW_GRID = true;
 const GRID_LINE_WIDTH = 1;
 const CURSOR_TRAIL_FADE_MS = 200; // Time in ms for trail to fully fade
@@ -70,9 +71,10 @@ export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvas
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
     const [cursorTrail, setCursorTrail] = useState<CursorTrailPosition[]>([]);
     const lastCursorPosRef = useRef<Point | null>(null);
+    const router = useRouter();
     
     // Dialogue system
-    const { renderDialogue, renderDebugDialogue, renderHeaderDialogue } = useDialogue();
+    const { renderDialogue, renderDebugDialogue, renderHeaderDialogue, checkHeaderClick } = useDialogue();
     
     // Debug dialogue system
     const { debugText } = useDebugDialogue(engine);
@@ -179,12 +181,11 @@ ${getHelpText()}` : '';
         ctx.translate(x, y);
         ctx.rotate(angle);
         
-        // Draw arrow shape (pointing right, will be rotated)
+        // Draw simple triangle (pointing right, will be rotated)
         ctx.beginPath();
-        ctx.moveTo(ARROW_SIZE, 0);
-        ctx.lineTo(-ARROW_SIZE/2, -ARROW_SIZE/2);
-        ctx.lineTo(-ARROW_SIZE/4, 0);
-        ctx.lineTo(-ARROW_SIZE/2, ARROW_SIZE/2);
+        ctx.moveTo(ARROW_SIZE, 0);                    // Tip of triangle
+        ctx.lineTo(-ARROW_SIZE/2, -ARROW_SIZE/2);     // Top back corner
+        ctx.lineTo(-ARROW_SIZE/2, ARROW_SIZE/2);      // Bottom back corner
         ctx.closePath();
         ctx.fill();
         
@@ -453,6 +454,22 @@ ${getHelpText()}` : '';
                         ctx.globalAlpha = Math.min(0.7, cell.intensity); // Semi-transparent so it doesn't overpower text
                         ctx.fillText(cell.char, screenPos.x, screenPos.y + verticalTextOffset);
                         ctx.globalAlpha = 1; // Reset alpha
+                    }
+                }
+            }
+        }
+
+        // === Render Light Mode Data (Ephemeral Text) ===
+        ctx.fillStyle = '#808080'; // Gray color for light mode text
+        for (const key in engine.lightModeData) {
+            const [xStr, yStr] = key.split(',');
+            const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
+            if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                const char = engine.lightModeData[key];
+                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                    if (char && char.trim() !== '') {
+                        ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
                     }
                 }
             }
@@ -968,7 +985,7 @@ ${getHelpText()}` : '';
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.deepspawnData, engine.commandData, engine.commandState, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue, renderDebugDialogue, enhancedDebugText, monogramSystem]);
+    }, [engine, engine.deepspawnData, engine.commandData, engine.commandState, engine.lightModeData, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue, renderDebugDialogue, enhancedDebugText, monogramSystem]);
 
 
     // --- Drawing Loop Effect ---
@@ -1023,14 +1040,24 @@ ${getHelpText()}` : '';
         // Get canvas-relative coordinates
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return;
+
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
+        
+        // Check for header clicks first
+        const headerClickResult = checkHeaderClick(clickX, clickY, canvasSize.width, canvasSize.height);
+        if (headerClickResult === 'home') {
+            router.push('/');
+            return;
+        }
         
         // Set flag to prevent trail creation from click movement
         isClickMovementRef.current = true;
         
         // Pass false for clearSelection - let the engine decide
-        engine.handleCanvasClick(e.clientX - rect.left, e.clientY - rect.top, false, e.shiftKey);
+        engine.handleCanvasClick(clickX, clickY, false, e.shiftKey);
         canvasRef.current?.focus(); // Ensure focus for keyboard
-    }, [engine]);
+    }, [engine, checkHeaderClick, canvasSize, router]);
     
     const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();

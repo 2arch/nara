@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import type { Point, WorldData } from './world.engine';
+import { generateDeepspawnQuestions } from './ai';
 
 // --- Deepspawn System Constants ---
 const MIN_BLOCK_DISTANCE = 6;  // Minimum cells between blocks
@@ -25,33 +26,36 @@ export function useDeepspawnSystem() {
     const CURSOR_SPAWN_DISTANCE = 8; // Distance from center to spawn cursors
     const CURSOR_BOUNDARY_RADIUS = MIN_BLOCK_DISTANCE; // Use the same radius as the visual boundary circles
     
-    // Deepspawn multi-row object definition (29 characters total, 3 rows max)
-    const DEEPSPAWN_PATTERN = [
-        "Have you ever thought",  // Row 1 - 22 chars
-        "to construct something", // Row 2 - 19 chars  
-        "totally imaginary?"      // Row 3 - 18 chars
-    ]; // Total: 59 characters (not 29 as originally stated)
+    // Dynamic deepspawn questions state
+    const [deepspawnQuestions, setDeepspawnQuestions] = useState<string[]>([
+        "Why not?",
+        "What if...",
+        "How else?",
+        "But what about...",
+        "Consider..."
+    ]);
     
-    // Calculate deepspawn object dimensions
-    const DEEPSPAWN_WIDTH = Math.max(...DEEPSPAWN_PATTERN.map(row => row.length));
-    const DEEPSPAWN_HEIGHT = DEEPSPAWN_PATTERN.length;
+    // Calculate deepspawn object dimensions dynamically
+    const DEEPSPAWN_WIDTH = Math.max(...deepspawnQuestions.map(row => row.length));
+    const DEEPSPAWN_HEIGHT = deepspawnQuestions.length;
     
-    // Helper function to place a multi-row deepspawn object at given center position
-    const placeDeepspawnObject = useCallback((newData: WorldData, centerX: number, centerY: number) => {
-        // Calculate top-left corner of deepspawn object (centered on given position)
-        const startX = centerX - Math.floor(DEEPSPAWN_WIDTH / 2);
-        const startY = centerY - Math.floor(DEEPSPAWN_HEIGHT / 2);
+    // Helper function to place a single deepspawn question at given center position
+    const placeDeepspawnObject = useCallback((newData: WorldData, centerX: number, centerY: number, question: string) => {
+        // Calculate dimensions for this single question
+        const width = question.length;
         
-        // Place each character of the deepspawn pattern
-        DEEPSPAWN_PATTERN.forEach((row, rowIndex) => {
-            for (let colIndex = 0; colIndex < row.length; colIndex++) {
-                const char = row[colIndex];
-                const worldX = startX + colIndex;
-                const worldY = startY + rowIndex;
-                const key = `deepspawn_${worldX},${worldY}`;
-                newData[key] = char;
-            }
-        });
+        // Calculate starting position (centered horizontally)
+        const startX = centerX - Math.floor(width / 2);
+        const startY = centerY; // Single line, so no vertical centering needed
+        
+        // Place each character of the deepspawn question
+        for (let colIndex = 0; colIndex < question.length; colIndex++) {
+            const char = question[colIndex];
+            const worldX = startX + colIndex;
+            const worldY = startY;
+            const key = `deepspawn_${worldX},${worldY}`;
+            newData[key] = char;
+        }
     }, []);
 
     // Helper function to check if a deepspawn's boundary circle collides with existing deepspawns
@@ -97,8 +101,32 @@ export function useDeepspawnSystem() {
         return { x: baseX, y: baseY };
     }, [isPositionValidForDeepspawn]);
 
+    // Function to generate new deepspawn questions based on recent text
+    const generateNewQuestions = useCallback(async (recentText: string) => {
+        try {
+            console.log('Generating new deepspawn questions based on:', recentText);
+            const newQuestions = await generateDeepspawnQuestions(recentText);
+            setDeepspawnQuestions(newQuestions);
+            return newQuestions;
+        } catch (error) {
+            console.error('Failed to generate deepspawn questions:', error);
+            // Keep existing questions on error
+            return deepspawnQuestions;
+        }
+    }, [deepspawnQuestions]);
+
     // Function to spawn 5 cursors: 3 ahead using phyllotactic arrangement + 2 orthogonal
-    const spawnThreeCursors = useCallback((centerX: number, centerY: number, newDirection?: number | null) => {
+    const spawnThreeCursors = useCallback(async (centerX: number, centerY: number, newDirection?: number | null, recentText?: string) => {
+        // Generate new questions if recent text is provided
+        let questionsToUse = deepspawnQuestions;
+        if (recentText && recentText.trim().length > 10) {
+            try {
+                questionsToUse = await generateNewQuestions(recentText);
+            } catch (error) {
+                console.warn('Using default questions due to generation error:', error);
+            }
+        }
+
         // Use provided direction or calculate from current direction points
         let direction: number | null = newDirection || null;
         
@@ -127,7 +155,7 @@ export function useDeepspawnSystem() {
             angles.forEach((angle, index) => {
                 const deepspawnX = Math.round(centerX + CURSOR_SPAWN_DISTANCE * Math.cos(angle));
                 const deepspawnY = Math.round(centerY + CURSOR_SPAWN_DISTANCE * Math.sin(angle));
-                placeDeepspawnObject(newDeepspawnData, deepspawnX, deepspawnY);
+                placeDeepspawnObject(newDeepspawnData, deepspawnX, deepspawnY, questionsToUse);
             });
             setDeepspawnData(newDeepspawnData);
             return;
@@ -164,7 +192,7 @@ export function useDeepspawnSystem() {
             // Find a valid position that doesn't collide
             const validPos = findValidPosition(baseX, baseY, placedDeepspawns);
             
-            placeDeepspawnObject(newDeepspawnData, validPos.x, validPos.y);
+            placeDeepspawnObject(newDeepspawnData, validPos.x, validPos.y, questionsToUse);
             placedDeepspawns.push(validPos); // Add to collision tracking
             
             console.log(`Spawning forward cursor ${i} at (${validPos.x}, ${validPos.y}) - Direction: ${(direction * 180/Math.PI).toFixed(1)}°${i === 0 ? ' (lead cursor)' : ''} ${validPos.x !== baseX || validPos.y !== baseY ? '(adjusted for collision)' : ''}`);
@@ -183,7 +211,7 @@ export function useDeepspawnSystem() {
             // Find a valid position that doesn't collide
             const validPos = findValidPosition(baseX, baseY, placedDeepspawns);
             
-            placeDeepspawnObject(newDeepspawnData, validPos.x, validPos.y);
+            placeDeepspawnObject(newDeepspawnData, validPos.x, validPos.y, questionsToUse);
             placedDeepspawns.push(validPos); // Add to collision tracking
             
             console.log(`Spawning orthogonal cursor ${index} at (${validPos.x}, ${validPos.y}) - Angle: ${(angle * 180/Math.PI).toFixed(1)}° ${validPos.x !== baseX || validPos.y !== baseY ? '(adjusted for collision)' : ''}`);
@@ -193,7 +221,7 @@ export function useDeepspawnSystem() {
     }, [CURSOR_SPAWN_DISTANCE, directionPoints, MIN_MOVEMENT_THRESHOLD, lastKnownDirection, findValidPosition, placeDeepspawnObject]);
 
     // Function to update direction tracking points
-    const updateDirectionPoint = useCallback((x: number, y: number) => {
+    const updateDirectionPoint = useCallback((x: number, y: number, recentText?: string) => {
         if (typeof window === 'undefined') return;
         
         const now = Date.now();
@@ -201,7 +229,7 @@ export function useDeepspawnSystem() {
         setDirectionPoints(prev => {
             // If no current point, set as current and spawn cursors
             if (!prev.current) {
-                spawnThreeCursors(x, y);
+                spawnThreeCursors(x, y, null, recentText);
                 
                 return {
                     current: { x, y, timestamp: now },
@@ -244,7 +272,7 @@ export function useDeepspawnSystem() {
                 }
                 
                 // Always spawn cursors with the determined direction
-                spawnThreeCursors(x, y, directionToUse);
+                spawnThreeCursors(x, y, directionToUse, recentText);
                 
                 return {
                     current: { x, y, timestamp: now },
@@ -301,6 +329,8 @@ export function useDeepspawnSystem() {
         updateDirectionPoint,
         getPanningDirection,
         getAngleDebugData,
-        spawnThreeCursors
+        spawnThreeCursors,
+        generateNewQuestions,
+        deepspawnQuestions
     };
 }

@@ -197,3 +197,71 @@ export function clearChatHistory(): void {
 export function getChatHistory(): ChatMessage[] {
     return [...chatHistory];
 }
+
+/**
+ * Generate deepspawn questions/suggestions based on recent text
+ */
+export async function generateDeepspawnQuestions(recentText: string): Promise<string[]> {
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.0-flash-001',
+            contents: `Based on this text: "${recentText}"
+
+Generate exactly 5 very short writing prompts that encourage deeper thinking. Each must be:
+- Under 20 characters total
+- Single phrase or short question
+- Thought-provoking
+- Related to the content
+
+Examples: "Why not?", "What if...", "How else?", "But what about...", "Consider..."
+
+Format as a numbered list:
+1. [prompt]
+2. [prompt] 
+3. [prompt]
+4. [prompt]
+5. [prompt]`,
+            config: {
+                maxOutputTokens: 300,
+                temperature: 0.8,
+                systemInstruction: 'You generate creative, thought-provoking questions and suggestions to inspire deeper thinking and writing exploration.'
+            }
+        });
+
+        const responseText = response.text?.trim() || '';
+        
+        // Parse the numbered list into an array
+        const questions = responseText
+            .split('\n')
+            .filter(line => line.match(/^\d+\./))
+            .map(line => line.replace(/^\d+\.\s*/, '').trim())
+            .filter(q => q.length > 0);
+
+        // Filter questions to ensure they're under 20 characters
+        const validQuestions = questions.filter(q => q.length <= 20);
+        
+        // If we don't get exactly 5 valid questions, fall back to defaults
+        if (validQuestions.length !== 5) {
+            console.warn('Deepspawn AI returned unexpected format, using fallbacks');
+            return [
+                "Why not?",
+                "What if...",
+                "How else?",
+                "But what about...",
+                "Consider..."
+            ];
+        }
+
+        return validQuestions;
+    } catch (error) {
+        console.error('Error generating deepspawn questions:', error);
+        // Return fallback questions on error
+        return [
+            "Why not?",
+            "What if...",
+            "How else?", 
+            "But what about...",
+            "Consider..."
+        ];
+    }
+}

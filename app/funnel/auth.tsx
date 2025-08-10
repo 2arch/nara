@@ -1,15 +1,18 @@
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, User, GoogleAuthProvider, OAuthProvider, signInWithPopup } from 'firebase/auth';
-import { auth } from '../firebase';
+import { auth, database } from '../firebase';
+import { ref, set } from 'firebase/database';
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 
-const Auth = () => {
+interface AuthProps {
+  onAuthComplete?: () => void;
+}
+
+const Auth: React.FC<AuthProps> = ({ onAuthComplete }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const router = useRouter();
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -23,15 +26,30 @@ const Auth = () => {
 
   useEffect(() => {
     if (user) {
-      router.push('/home');
+      onAuthComplete?.();
     }
-  }, [user, router]);
+  }, [user, onAuthComplete]);
+
+  const createUserRecord = async (user: User, isNewUser: boolean = false) => {
+    try {
+      const userRef = ref(database, `users/${user.uid}`);
+      await set(userRef, {
+        email: user.email,
+        createdAt: new Date().toISOString(),
+        premium: false,
+        lastLogin: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error('Error creating user record:', err);
+    }
+  };
 
 
   const handleSignUp = async () => {
     setError(null);
     try {
-      await createUserWithEmailAndPassword(auth, email, password);
+      const result = await createUserWithEmailAndPassword(auth, email, password);
+      await createUserRecord(result.user, true);
     } catch (err: any) {
       setError(err.message);
     }
@@ -40,7 +58,8 @@ const Auth = () => {
   const handleSignIn = async () => {
     setError(null);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const result = await signInWithEmailAndPassword(auth, email, password);
+      await createUserRecord(result.user);
     } catch (err: any) {
       setError(err.message);
     }
@@ -50,7 +69,8 @@ const Auth = () => {
     setError(null);
     try {
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      const result = await signInWithPopup(auth, provider);
+      await createUserRecord(result.user);
     } catch (err: any) {
       setError(err.message);
     }
@@ -60,7 +80,8 @@ const Auth = () => {
     setError(null);
     try {
       const provider = new OAuthProvider('apple.com');
-      await signInWithPopup(auth, provider);
+      const result = await signInWithPopup(auth, provider);
+      await createUserRecord(result.user);
     } catch (err: any) {
       setError(err.message);
     }

@@ -1,5 +1,6 @@
 // components/Dialogue.tsx
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import type { WorldEngine } from './world.engine';
 
 // --- Dialogue Constants ---
@@ -29,6 +30,11 @@ export interface DialogueProps {
     canvasWidth: number;
     canvasHeight: number;
     ctx: CanvasRenderingContext2D;
+}
+
+// Props for header dialogue with click handler
+export interface HeaderDialogueProps extends DialogueProps {
+    onHeaderClick?: (x: number, y: number) => void;
 }
 
 // Debug dialogue constants
@@ -185,8 +191,8 @@ export function useDialogue() {
         ctx.restore();
     }, [calculateDebugLayout]);
 
-    const renderHeaderDialogue = useCallback((props: DialogueProps) => {
-        const { canvasWidth, canvasHeight, ctx } = props;
+    const renderHeaderDialogue = useCallback((props: HeaderDialogueProps) => {
+        const { canvasWidth, canvasHeight, ctx, onHeaderClick } = props;
         const charHeight = HEADER_FONT_SIZE;
         const charWidth = HEADER_FONT_SIZE * CHAR_WIDTH_RATIO;
         const topY = HEADER_MARGIN_CHARS * charHeight / 2;
@@ -214,10 +220,31 @@ export function useDialogue() {
         ctx.restore();
     }, []);
 
+    const checkHeaderClick = useCallback((x: number, y: number, canvasWidth: number, canvasHeight: number) => {
+        const charHeight = HEADER_FONT_SIZE;
+        const charWidth = HEADER_FONT_SIZE * CHAR_WIDTH_RATIO;
+        const topY = HEADER_MARGIN_CHARS * charHeight / 2;
+        
+        // Check if click is in header area
+        if (y >= topY && y <= topY + charHeight) {
+            const leftText = "nara web services";
+            const leftX = HEADER_MARGIN_CHARS * charWidth;
+            const leftTextWidth = leftText.length * charWidth;
+            
+            // Check if click is on "nara web services" text
+            if (x >= leftX && x <= leftX + leftTextWidth) {
+                return 'home';
+            }
+        }
+        
+        return null;
+    }, []);
+
     return {
         renderDialogue,
         renderDebugDialogue,
         renderHeaderDialogue,
+        checkHeaderClick,
     };
 }
 
