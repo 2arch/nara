@@ -1,7 +1,7 @@
 // hooks/useWorldEngine.ts
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useWorldSave } from './world.save'; // Import the new hook
-import { useCommandSystem, CommandState, CommandExecution } from './commands'; // Import command system
+import { useCommandSystem, CommandState, CommandExecution, BackgroundMode } from './commands'; // Import command system
 import { useDeepspawnSystem } from './deepspawn'; // Import deepspawn system
 import { useWorldSettings, WorldSettings } from './settings';
 import { set, ref } from 'firebase/database';
@@ -40,6 +40,9 @@ export interface WorldEngine {
     cursorPos: Point;
     zoomLevel: number;
     panningDirection: number | null;
+    backgroundMode: BackgroundMode;
+    backgroundColor: string;
+    textColor: string;
     getEffectiveCharDims: (zoom: number) => { width: number; height: number; fontSize: number; };
     screenToWorld: (screenX: number, screenY: number, currentZoom: number, currentOffset: Point) => Point;
     worldToScreen: (worldX: number, worldY: number, currentZoom: number, currentOffset: Point) => Point;
@@ -94,6 +97,7 @@ interface UseWorldEngineProps {
     initialViewOffset?: Point;
     initialZoomLevel?: number;
     worldId: string | null; // Add worldId for persistence
+    initialBackgroundColor?: string;
 }
 
 // --- The Hook ---
@@ -103,6 +107,7 @@ export function useWorldEngine({
     initialViewOffset = { x: 0, y: 0 },
     initialZoomLevel = 1, // Default zoom level index
     worldId = null,      // Default to no persistence
+    initialBackgroundColor,
 }: UseWorldEngineProps): WorldEngine {
     // === State ===
     const [worldData, setWorldData] = useState<WorldData>(initialWorldData);
@@ -150,8 +155,11 @@ export function useWorldEngine({
         handleKeyDown: handleCommandKeyDown,
         currentMode,
         addEphemeralText,
-        lightModeData 
-    } = useCommandSystem();
+        lightModeData,
+        backgroundMode,
+        backgroundColor,
+        textColor,
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor });
     
     // === Deepspawn System ===
     const { 
@@ -1385,6 +1393,9 @@ export function useWorldEngine({
         cursorPos,
         zoomLevel,
         panningDirection,
+        backgroundMode,
+        backgroundColor,
+        textColor,
         getEffectiveCharDims,
         screenToWorld,
         worldToScreen,

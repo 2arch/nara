@@ -8,8 +8,7 @@ import { useControllerSystem, createMonogramController, createCameraController }
 
 // --- Constants --- (Copied and relevant ones kept)
 const FONT_FAMILY = 'IBM Plex Mono';
-const GRID_COLOR = '#F2F2F2';
-const TEXT_COLOR = '#000000';
+const GRID_COLOR = '#F2F2F233';
 const CURSOR_COLOR_PRIMARY = '#FF6B35';
 const CURSOR_COLOR_SECONDARY = '#FFA500';
 const CURSOR_COLOR_SAVE = '#FFFF00'; // Green color for saving state
@@ -63,9 +62,10 @@ interface BitCanvasProps {
     engine: WorldEngine;
     cursorColorAlternate: boolean;
     className?: string;
+    showCursor?: boolean;
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -399,10 +399,13 @@ ${getHelpText()}` : '';
         ctx.save();
         ctx.scale(dpr, dpr);
         
-        // Replace fillRect with clearRect for transparency
-        // ctx.clearRect(0, 0, cssWidth, cssHeight);
-        ctx.fillStyle = BACKGROUND_COLOR;
-        ctx.fillRect(0, 0, cssWidth, cssHeight);
+        if (engine.backgroundMode === 'color') {
+            ctx.fillStyle = engine.backgroundColor;
+            ctx.fillRect(0, 0, cssWidth, cssHeight);
+        } else {
+            // Clear canvas for transparency
+            ctx.clearRect(0, 0, cssWidth, cssHeight);
+        }
         
         ctx.imageSmoothingEnabled = false;
         ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
@@ -475,7 +478,7 @@ ${getHelpText()}` : '';
             }
         }
 
-        ctx.fillStyle = TEXT_COLOR;
+        ctx.fillStyle = engine.textColor;
         for (const key in engine.worldData) {
             // Skip block, deepspawn, and label data - we render those separately
             if (key.startsWith('block_') || key.startsWith('deepspawn_') || key.startsWith('label_')) continue;
@@ -547,7 +550,7 @@ ${getHelpText()}` : '';
                 }
             }
         }
-        ctx.fillStyle = TEXT_COLOR; // Reset to normal text color
+        ctx.fillStyle = engine.textColor; // Reset to normal text color
 
         // === Debug Scaffolds === (Green dot removed)
 
@@ -884,71 +887,73 @@ ${getHelpText()}` : '';
             }
         }
 
-        // Draw cursor trail (older positions first, for proper layering)
-        const now = Date.now();
-        for (let i = cursorTrail.length - 1; i >= 0; i--) {
-            const trailPos = cursorTrail[i];
-            const age = now - trailPos.timestamp;
-            
-            // Skip positions that are too old
-            if (age > CURSOR_TRAIL_FADE_MS) continue;
-            
-            // Skip the current position only if it perfectly matches the cursor
-            // (avoid duplicate rendering at exact same spot)
-            if (age < 20 && 
-                trailPos.x === engine.cursorPos.x && 
-                trailPos.y === engine.cursorPos.y) continue;
-            
-            // Skip positions that have chat data (chat data has its own styling)
-            const trailKey = `${trailPos.x},${trailPos.y}`;
-            if (engine.chatData[trailKey]) continue;
-            
-            // Calculate opacity based on age (1.0 to 0.0)
-            const opacity = 1 - (age / CURSOR_TRAIL_FADE_MS);
-            
-            const trailScreenPos = engine.worldToScreen(
-                trailPos.x, trailPos.y, 
-                currentZoom, currentOffset
-            );
-            
-            // Only draw if visible on screen
-            if (trailScreenPos.x >= -effectiveCharWidth && 
-                trailScreenPos.x <= cssWidth && 
-                trailScreenPos.y >= -effectiveCharHeight && 
-                trailScreenPos.y <= cssHeight) {
+        if (showCursor) {
+            // Draw cursor trail (older positions first, for proper layering)
+            const now = Date.now();
+            for (let i = cursorTrail.length - 1; i >= 0; i--) {
+                const trailPos = cursorTrail[i];
+                const age = now - trailPos.timestamp;
                 
-                // Draw faded cursor rectangle
-                const baseColor = cursorColorAlternate ? 
-                    CURSOR_COLOR_SECONDARY : CURSOR_COLOR_PRIMARY;
-                ctx.fillStyle = `rgba(${hexToRgb(baseColor)}, ${opacity})`;
-                ctx.fillRect(
-                    trailScreenPos.x, 
-                    trailScreenPos.y, 
-                    effectiveCharWidth, 
-                    effectiveCharHeight
+                // Skip positions that are too old
+                if (age > CURSOR_TRAIL_FADE_MS) continue;
+                
+                // Skip the current position only if it perfectly matches the cursor
+                // (avoid duplicate rendering at exact same spot)
+                if (age < 20 && 
+                    trailPos.x === engine.cursorPos.x && 
+                    trailPos.y === engine.cursorPos.y) continue;
+                
+                // Skip positions that have chat data (chat data has its own styling)
+                const trailKey = `${trailPos.x},${trailPos.y}`;
+                if (engine.chatData[trailKey]) continue;
+                
+                // Calculate opacity based on age (1.0 to 0.0)
+                const opacity = 1 - (age / CURSOR_TRAIL_FADE_MS);
+                
+                const trailScreenPos = engine.worldToScreen(
+                    trailPos.x, trailPos.y, 
+                    currentZoom, currentOffset
                 );
-            }
-        }
-
-        const cursorScreenPos = engine.worldToScreen(engine.cursorPos.x, engine.cursorPos.y, currentZoom, currentOffset);
-        if (cursorScreenPos.x >= -effectiveCharWidth && cursorScreenPos.x <= cssWidth && cursorScreenPos.y >= -effectiveCharHeight && cursorScreenPos.y <= cssHeight) {
-            const key = `${engine.cursorPos.x},${engine.cursorPos.y}`;
-            
-            // Don't render cursor if there's chat data at this position (chat data already has its own styling)
-            if (!engine.chatData[key]) {
-                // Determine cursor color based on engine state
-                if (engine.worldPersistenceError) {
-                    ctx.fillStyle = CURSOR_COLOR_ERROR;
-                } else if (engine.isSavingWorld) {
-                    ctx.fillStyle = CURSOR_COLOR_SAVE;
-                } else {
-                    ctx.fillStyle = cursorColorAlternate ? CURSOR_COLOR_SECONDARY : CURSOR_COLOR_PRIMARY;
-                }
                 
-                ctx.fillRect(cursorScreenPos.x, cursorScreenPos.y, effectiveCharWidth, effectiveCharHeight);
-                if (engine.worldData[key]) {
-                    ctx.fillStyle = CURSOR_TEXT_COLOR;
-                    ctx.fillText(engine.worldData[key], cursorScreenPos.x, cursorScreenPos.y + verticalTextOffset);
+                // Only draw if visible on screen
+                if (trailScreenPos.x >= -effectiveCharWidth && 
+                    trailScreenPos.x <= cssWidth && 
+                    trailScreenPos.y >= -effectiveCharHeight && 
+                    trailScreenPos.y <= cssHeight) {
+                    
+                    // Draw faded cursor rectangle
+                    const baseColor = cursorColorAlternate ? 
+                        CURSOR_COLOR_SECONDARY : CURSOR_COLOR_PRIMARY;
+                    ctx.fillStyle = `rgba(${hexToRgb(baseColor)}, ${opacity})`;
+                    ctx.fillRect(
+                        trailScreenPos.x, 
+                        trailScreenPos.y, 
+                        effectiveCharWidth, 
+                        effectiveCharHeight
+                    );
+                }
+            }
+
+            const cursorScreenPos = engine.worldToScreen(engine.cursorPos.x, engine.cursorPos.y, currentZoom, currentOffset);
+            if (cursorScreenPos.x >= -effectiveCharWidth && cursorScreenPos.x <= cssWidth && cursorScreenPos.y >= -effectiveCharHeight && cursorScreenPos.y <= cssHeight) {
+                const key = `${engine.cursorPos.x},${engine.cursorPos.y}`;
+                
+                // Don't render cursor if there's chat data at this position (chat data already has its own styling)
+                if (!engine.chatData[key]) {
+                    // Determine cursor color based on engine state
+                    if (engine.worldPersistenceError) {
+                        ctx.fillStyle = CURSOR_COLOR_ERROR;
+                    } else if (engine.isSavingWorld) {
+                        ctx.fillStyle = CURSOR_COLOR_SAVE;
+                    } else {
+                        ctx.fillStyle = cursorColorAlternate ? CURSOR_COLOR_SECONDARY : CURSOR_COLOR_PRIMARY;
+                    }
+                    
+                    ctx.fillRect(cursorScreenPos.x, cursorScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                    if (engine.worldData[key]) {
+                        ctx.fillStyle = CURSOR_TEXT_COLOR;
+                        ctx.fillText(engine.worldData[key], cursorScreenPos.x, cursorScreenPos.y + verticalTextOffset);
+                    }
                 }
             }
         }
@@ -974,7 +979,7 @@ ${getHelpText()}` : '';
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.deepspawnData, engine.commandData, engine.commandState, engine.lightModeData, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue, renderDebugDialogue, enhancedDebugText, monogramSystem]);
+    }, [engine, engine.backgroundMode, engine.deepspawnData, engine.commandData, engine.commandState, engine.lightModeData, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue, renderDebugDialogue, enhancedDebugText, monogramSystem, showCursor]);
 
 
     // --- Drawing Loop Effect ---

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Point, WorldData } from './world.engine';
 
@@ -19,18 +19,28 @@ export interface CommandExecution {
 
 // --- Mode System Types ---
 export type CanvasMode = 'air' | 'light' | 'chat';
+export type BackgroundMode = 'transparent' | 'color';
 
 export interface ModeState {
     currentMode: CanvasMode;
     lightModeData: WorldData; // Ephemeral text data for light mode
+    backgroundMode: BackgroundMode;
+    backgroundColor: string;
+    textColor: string;
+}
+
+interface UseCommandSystemProps {
+    setDialogueText: (text: string) => void;
+    initialBackgroundColor?: string;
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'deepspawn', 'chat'];
+const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'deepspawn', 'chat', 'bg'];
 const MODE_COMMANDS = ['air', 'light', 'chat'];
+const BG_COMMANDS = ['clear', 'white', 'black'];
 
 // --- Command System Hook ---
-export function useCommandSystem() {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor }: UseCommandSystemProps) {
     const router = useRouter();
     const [commandState, setCommandState] = useState<CommandState>({
         isActive: false,
@@ -45,7 +55,10 @@ export function useCommandSystem() {
     // Mode system state
     const [modeState, setModeState] = useState<ModeState>({
         currentMode: 'air',
-        lightModeData: {}
+        lightModeData: {},
+        backgroundMode: 'transparent',
+        backgroundColor: '#FFFFFF',
+        textColor: '#000000',
     });
 
     // Utility function to match commands based on input
@@ -65,6 +78,23 @@ export function useCommandSystem() {
             }
             return MODE_COMMANDS.map(mode => `mode ${mode}`);
         }
+
+        if (lowerInput === 'bg') {
+            const parts = input.toLowerCase().split(' ');
+            if (parts.length > 1) {
+                const bgInput = parts[1];
+                const suggestions = BG_COMMANDS
+                    .filter(bg => bg.startsWith(bgInput))
+                    .map(bg => `bg ${bg}`);
+                
+                const currentCommand = `bg ${bgInput}`;
+                if (bgInput.length > 0 && !suggestions.some(s => s === currentCommand)) {
+                     return [currentCommand, ...suggestions];
+                }
+                return suggestions;
+            }
+            return BG_COMMANDS.map(bg => `bg ${bg}`);
+        }
         
         return AVAILABLE_COMMANDS.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
     }, []);
@@ -76,11 +106,53 @@ export function useCommandSystem() {
             const lightModeData = newMode === 'light' ? prev.lightModeData : {};
             
             return {
+                ...prev,
                 currentMode: newMode,
                 lightModeData
             };
         });
     }, []);
+
+    const switchBackgroundMode = useCallback((newMode: BackgroundMode, color?: string): boolean => {
+        if (newMode === 'color' && color) {
+            const colorMap: { [name: string]: string } = {
+                'white': '#FFFFFF',
+                'black': '#000000',
+            };
+            const hexColor = (colorMap[color.toLowerCase()] || color).toUpperCase();
+
+            if (!/^#[0-9A-F]{6}$/i.test(hexColor)) {
+                setDialogueText(`Invalid color: ${color}. Please use a name (e.g., white) or hex code (e.g., #1a1a1a).`);
+                return false;
+            }
+            
+            const rgb = parseInt(hexColor.substring(1), 16);
+            const r = (rgb >> 16) & 0xff;
+            const g = (rgb >>  8) & 0xff;
+            const b = (rgb >>  0) & 0xff;
+            const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            const newTextColor = luma < 128 ? '#FFFFFF' : '#000000';
+
+            setModeState(prev => ({
+                ...prev,
+                backgroundMode: 'color',
+                backgroundColor: hexColor,
+                textColor: newTextColor,
+            }));
+        } else {
+            setModeState(prev => ({
+                ...prev,
+                backgroundMode: 'transparent',
+            }));
+        }
+        return true;
+    }, [setDialogueText]);
+
+    useEffect(() => {
+        if (initialBackgroundColor) {
+            switchBackgroundMode('color', initialBackgroundColor);
+        }
+    }, [initialBackgroundColor, switchBackgroundMode]);
 
     // Add ephemeral text in light mode (disappears after 2 seconds)
     const addEphemeralText = useCallback((pos: Point, char: string) => {
@@ -277,6 +349,31 @@ export function useCommandSystem() {
             
             return null; // Mode switches don't need further processing
         }
+
+        if (selectedCommand.startsWith('bg')) {
+            const inputParts = commandState.input.trim().split(/\s+/);
+            const bgArg = inputParts.length > 1 ? inputParts[1] : undefined;
+
+            if (bgArg === 'clear') {
+                switchBackgroundMode('transparent');
+            } else if (bgArg) {
+                switchBackgroundMode('color', bgArg);
+            } else {
+                switchBackgroundMode('color', '#FFFFFF');
+            }
+            
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 }
+            });
+            setCommandData({});
+            
+            return null;
+        }
         
         // Clear command mode
         setCommandState({
@@ -367,6 +464,9 @@ export function useCommandSystem() {
         switchMode,
         addEphemeralText,
         currentMode: modeState.currentMode,
-        lightModeData: modeState.lightModeData
+        lightModeData: modeState.lightModeData,
+        backgroundMode: modeState.backgroundMode,
+        backgroundColor: modeState.backgroundColor,
+        textColor: modeState.textColor,
     };
 }
