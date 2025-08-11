@@ -96,6 +96,23 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
             }
             return BG_COMMANDS.map(bg => `bg ${bg}`);
         }
+
+        if (lowerInput === 'nav') {
+            const parts = input.toLowerCase().split(' ');
+            if (parts.length > 1) {
+                const navInput = parts[1];
+                const suggestions = NAV_COMMANDS
+                    .filter(nav => nav.startsWith(navInput))
+                    .map(nav => `nav ${nav}`);
+                
+                const currentCommand = `nav ${navInput}`;
+                if (navInput.length > 0 && !suggestions.some(s => s === currentCommand)) {
+                     return [currentCommand, ...suggestions];
+                }
+                return suggestions;
+            }
+            return ['nav', ...NAV_COMMANDS.map(nav => `nav ${nav}`)];
+        }
         
         return AVAILABLE_COMMANDS.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
     }, []);
