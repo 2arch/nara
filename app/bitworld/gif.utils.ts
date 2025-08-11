@@ -1,4 +1,4 @@
-import { Frame } from 'gifuct-js';
+import { Frame, ParsedFrame } from 'gifuct-js';
 
 export interface PixelatedFrame {
     width: number;
@@ -14,7 +14,7 @@ const a = [' ', '░', '▒', '▓', '█'];
 const VIEWPORT_WIDTH = 60; // characters
 const VIEWPORT_HEIGHT = 30; // characters (creates a visually square 60:60 viewport due to 1:2 cell ratio)
 
-export const processGifFrame = (frame: Frame): PixelatedFrame => {
+export const processGifFrame = (frame: ParsedFrame): PixelatedFrame => {
     const { width, height } = frame.dims;
     
     // Create original canvas

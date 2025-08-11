@@ -88,6 +88,17 @@ export interface WorldEngine {
         inputPositions: Point[];
         isProcessing: boolean;
     }>>;
+    // Navigation system properties
+    isNavVisible: boolean;
+    setIsNavVisible: (visible: boolean) => void;
+    navOriginPosition: Point;
+    navColorFilters: Set<string>;
+    navSortMode: 'chronological' | 'closest' | 'farthest';
+    getAllLabels: () => Array<{text: string, x: number, y: number, color: string}>;
+    getSortedLabels: (sortMode: 'chronological' | 'closest' | 'farthest', originPos: Point) => Array<{text: string, x: number, y: number, color: string}>;
+    getUniqueColors: () => string[];
+    toggleColorFilter: (color: string) => void;
+    cycleSortMode: () => void;
 }
 
 // --- Hook Input ---
