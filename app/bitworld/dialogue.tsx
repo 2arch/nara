@@ -40,6 +40,11 @@ export interface HeaderDialogueProps extends DialogueProps {
 // Debug dialogue constants
 const DEBUG_MARGIN_CHARS = 2;
 
+// Nav dialogue constants  
+const NAV_MARGIN_CHARS = 2;
+const NAV_BACKGROUND_COLOR = 'rgba(0, 0, 0, 0.9)';
+const NAV_TEXT_COLOR = '#FFFFFF';
+
 export function useDialogue() {
     // --- Dialogue Text Wrapping Functions ---
     const wrapText = useCallback((text: string, maxWidth: number): string[] => {
@@ -191,9 +196,57 @@ export function useDialogue() {
         ctx.restore();
     }, [calculateDebugLayout]);
 
+    const calculateNavLayout = useCallback((canvasWidth: number, canvasHeight: number, charWidth: number, charHeight: number, navText: string): DialogueLayout => {
+        const availableWidthChars = Math.floor(canvasWidth / charWidth);
+        const availableHeightChars = Math.floor(canvasHeight / charHeight);
+        
+        const lines = navText.split('\n');
+        const dialogueHeight = lines.length;
+        const maxWidthChars = Math.max(...lines.map(l => l.length));
+
+        return {
+            lines,
+            startRow: NAV_MARGIN_CHARS, // Top-aligned
+            startCol: NAV_MARGIN_CHARS, // Left-aligned  
+            maxWidthChars,
+            dialogueHeight
+        };
+    }, []);
+
+    const renderNavDialogue = useCallback((props: DialogueProps & { navText: string }) => {
+        const { canvasWidth, canvasHeight, ctx, navText } = props;
+        
+        // Use fixed dimensions for nav text
+        const charHeight = DIALOGUE_FONT_SIZE;
+        const charWidth = DIALOGUE_FONT_SIZE * CHAR_WIDTH_RATIO;
+        const verticalTextOffset = (charHeight - DIALOGUE_FONT_SIZE) / 2 + (DIALOGUE_FONT_SIZE * 0.1);
+
+        const navLayout = calculateNavLayout(canvasWidth, canvasHeight, charWidth, charHeight, navText);
+        
+        ctx.save();
+        ctx.font = `${DIALOGUE_FONT_SIZE}px "${FONT_FAMILY}"`;
+        ctx.textBaseline = 'top';
+
+        // Draw full-screen background
+        ctx.fillStyle = NAV_BACKGROUND_COLOR;
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+        
+        // Draw text
+        ctx.fillStyle = NAV_TEXT_COLOR;
+        for (let lineIndex = 0; lineIndex < navLayout.lines.length; lineIndex++) {
+            const rowIndex = navLayout.startRow + lineIndex;
+            const line = navLayout.lines[lineIndex];
+            const screenX = navLayout.startCol * charWidth;
+            const screenY = rowIndex * charHeight;
+            ctx.fillText(line, screenX, screenY + verticalTextOffset);
+        }
+        ctx.restore();
+    }, [calculateNavLayout]);
+
     return {
         renderDialogue,
         renderDebugDialogue,
+        renderNavDialogue,
     };
 }
 

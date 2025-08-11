@@ -82,7 +82,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const router = useRouter();
     
     // Dialogue system
-    const { renderDialogue, renderDebugDialogue } = useDialogue();
+    const { renderDialogue, renderDebugDialogue, renderNavDialogue } = useDialogue();
     
     // Debug dialogue system
     const { debugText } = useDebugDialogue(engine);
@@ -1107,6 +1107,16 @@ ${getHelpText()}` : '';
                     }
                 }
             }
+        }
+
+        // === Render Nav Dialogue ===
+        if (engine.isNavVisible) {
+            renderNavDialogue({
+                canvasWidth: cssWidth,
+                canvasHeight: cssHeight,
+                ctx,
+                navText: 'index'
+            });
         }
 
         // === Render Dialogue ===

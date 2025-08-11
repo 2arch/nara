@@ -38,6 +38,7 @@ interface UseCommandSystemProps {
 const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'deepspawn', 'chat', 'bg', 'nav'];
 const MODE_COMMANDS = ['air', 'light', 'chat'];
 const BG_COMMANDS = ['clear', 'white', 'black'];
+const NAV_COMMANDS = ['off'];
 
 // --- Command System Hook ---
 export function useCommandSystem({ setDialogueText, initialBackgroundColor }: UseCommandSystemProps) {
@@ -373,6 +374,21 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
             setCommandData({});
             
             return null;
+        }
+
+        if (selectedCommand === 'nav') {
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 }
+            });
+            setCommandData({});
+            
+            // Return command execution for nav
+            return { command: 'nav', args: [], commandStartPos: commandState.commandStartPos };
         }
         
         // Clear command mode

@@ -133,6 +133,9 @@ export function useWorldEngine({
     
     // === Settings System ===
     const { settings, setSettings, updateSettings } = useWorldSettings();
+    
+    // === Nav Visibility (Ephemeral - Not Persisted) ===
+    const [isNavVisible, setIsNavVisible] = useState(false);
 
     // === Immediate Settings Save Function ===
     const saveSettingsToFirebase = useCallback(async (newSettings: Partial<WorldSettings>) => {
@@ -473,6 +476,12 @@ export function useWorldEngine({
         const isMod = ctrlKey || metaKey; // Modifier key check
         const currentSelectionActive = !!(selectionStart && selectionEnd && (selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y));
 
+        // === Nav Dialogue Handling (Priority) ===
+        if (key === 'Escape' && isNavVisible) {
+            setIsNavVisible(false);
+            return true;
+        }
+
         // === Chat Mode Handling ===
         if (chatMode.isActive && !commandState.isActive) {
             if (key === 'Enter') {
@@ -592,6 +601,13 @@ export function useWorldEngine({
                     saveSettingsToFirebase(newSettings);
                 } else {
                     setDialogueText("Usage: /deepspawn [on|off] - Toggle deepspawn objects visibility");
+                }
+            } else if (exec.command === 'nav') {
+                if (exec.args[0] === 'off') {
+                    setIsNavVisible(false);
+                } else {
+                    // Default to turning nav on
+                    setIsNavVisible(true);
                 }
             } else if (exec.command === 'transform') {
                 const currentSelection = getSelectedText();
@@ -1427,6 +1443,7 @@ export function useWorldEngine({
         directionPoints,
         getAngleDebugData,
         settings,
+        isNavVisible,
         dialogueText,
         setDialogueText,
         chatMode,
