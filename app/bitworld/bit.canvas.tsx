@@ -82,7 +82,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const router = useRouter();
     
     // Dialogue system
-    const { renderDialogue, renderDebugDialogue, renderNavDialogue } = useDialogue();
+    const { renderDialogue, renderDebugDialogue, renderNavDialogue, handleNavClick } = useDialogue();
     
     // Debug dialogue system
     const { debugText } = useDebugDialogue(engine);
@@ -95,6 +95,26 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
     // Controller system for handling keyboard inputs
     const { registerGroup, handleKeyDown: handleKeyDownFromController, getHelpText } = useControllerSystem();
+
+    // Handle navigation coordinate clicks
+    const handleCoordinateClick = useCallback((x: number, y: number) => {
+        // Navigate camera to coordinates
+        engine.setViewOffset({ x: x - (canvasSize.width / engine.getEffectiveCharDims(engine.zoomLevel).width) / 2, 
+                               y: y - (canvasSize.height / engine.getEffectiveCharDims(engine.zoomLevel).height) / 2 });
+        
+        // Close nav dialogue
+        engine.setIsNavVisible(false);
+    }, [engine, canvasSize]);
+
+    // Handle color filter clicks
+    const handleColorFilterClick = useCallback((color: string) => {
+        engine.toggleColorFilter(color);
+    }, [engine]);
+
+    // Handle sort mode clicks  
+    const handleSortModeClick = useCallback(() => {
+        engine.cycleSortMode();
+    }, [engine]);
 
     useEffect(() => {
         registerGroup(createMonogramController(monogramSystem));
@@ -791,13 +811,23 @@ ${getHelpText()}` : '';
                                       worldY >= viewBounds.minY && worldY <= viewBounds.maxY;
 
                     if (isVisible) {
-                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                        // Ensure consistent font settings for labels (same as regular text)
+                        ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
+                        ctx.textBaseline = 'top';
                         
-                        ctx.fillStyle = color;
-                        ctx.fillRect(screenPos.x, screenPos.y, labelWidthInChars * effectiveCharWidth, effectiveCharHeight);
+                        // Render each character of the label individually across cells
+                        for (let charIndex = 0; charIndex < text.length; charIndex++) {
+                            const charWorldX = worldX + charIndex;
+                            const charScreenPos = engine.worldToScreen(charWorldX, worldY, currentZoom, currentOffset);
+                            
+                            // Fill background for this character cell
+                            ctx.fillStyle = color;
+                            ctx.fillRect(charScreenPos.x, charScreenPos.y, effectiveCharWidth, effectiveCharHeight);
 
-                        ctx.fillStyle = CURSOR_TEXT_COLOR;
-                        ctx.fillText(text, screenPos.x, screenPos.y + verticalTextOffset);
+                            // Render the character
+                            ctx.fillStyle = CURSOR_TEXT_COLOR;
+                            ctx.fillText(text[charIndex], charScreenPos.x, charScreenPos.y + verticalTextOffset);
+                        }
                     } else {
                         const labelScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                         const intersection = getViewportEdgeIntersection(
@@ -1115,7 +1145,14 @@ ${getHelpText()}` : '';
                 canvasWidth: cssWidth,
                 canvasHeight: cssHeight,
                 ctx,
-                navText: 'index'
+                labels: engine.getSortedLabels(engine.navSortMode, engine.navOriginPosition),
+                originPosition: engine.navOriginPosition,
+                uniqueColors: engine.getUniqueColors(),
+                activeFilters: engine.navColorFilters,
+                sortMode: engine.navSortMode,
+                onCoordinateClick: handleCoordinateClick,
+                onColorFilterClick: handleColorFilterClick,
+                onSortModeClick: handleSortModeClick
             });
         }
 
@@ -1201,13 +1238,20 @@ ${getHelpText()}` : '';
         const clickX = e.clientX - rect.left;
         const clickY = e.clientY - rect.top;
         
+        // Check for nav coordinate clicks first
+        if (engine.isNavVisible && canvasRef.current) {
+            if (handleNavClick(canvasRef.current, clickX, clickY, handleCoordinateClick, handleColorFilterClick, handleSortModeClick)) {
+                return; // Click was handled by nav, don't process further
+            }
+        }
+        
         // Set flag to prevent trail creation from click movement
         isClickMovementRef.current = true;
         
         // Pass false for clearSelection - let the engine decide
         engine.handleCanvasClick(clickX, clickY, false, e.shiftKey);
         canvasRef.current?.focus(); // Ensure focus for keyboard
-    }, [engine, canvasSize, router]);
+    }, [engine, canvasSize, router, handleNavClick, handleCoordinateClick]);
     
     const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();

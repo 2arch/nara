@@ -136,6 +136,12 @@ export function useWorldEngine({
     
     // === Nav Visibility (Ephemeral - Not Persisted) ===
     const [isNavVisible, setIsNavVisible] = useState(false);
+    const [navOriginPosition, setNavOriginPosition] = useState<Point>({ x: 0, y: 0 });
+    const [navColorFilters, setNavColorFilters] = useState<Set<string>>(new Set());
+    
+    // Sort modes: chronological -> closest -> farthest
+    type NavSortMode = 'chronological' | 'closest' | 'farthest';
+    const [navSortMode, setNavSortMode] = useState<NavSortMode>('chronological');
 
     // === Immediate Settings Save Function ===
     const saveSettingsToFirebase = useCallback(async (newSettings: Partial<WorldSettings>) => {
@@ -606,7 +612,9 @@ export function useWorldEngine({
                 if (exec.args[0] === 'off') {
                     setIsNavVisible(false);
                 } else {
-                    // Default to turning nav on
+                    // Capture current viewport center when opening nav
+                    const currentCenter = getViewportCenter();
+                    setNavOriginPosition(currentCenter);
                     setIsNavVisible(true);
                 }
             } else if (exec.command === 'transform') {
@@ -1368,6 +1376,130 @@ export function useWorldEngine({
         return blocksInRegion;
     }, [worldData]);
 
+    const getAllLabels = useCallback(() => {
+        const labels: Array<{text: string, x: number, y: number, color: string}> = [];
+        for (const key in worldData) {
+            if (key.startsWith('label_')) {
+                const coordsStr = key.substring('label_'.length);
+                const [xStr, yStr] = coordsStr.split(',');
+                const x = parseInt(xStr, 10);
+                const y = parseInt(yStr, 10);
+                if (!isNaN(x) && !isNaN(y)) {
+                    try {
+                        const labelData = JSON.parse(worldData[key]);
+                        const text = labelData.text || '';
+                        const color = labelData.color || '#000000';
+                        if (text.trim()) {
+                            labels.push({ text, x, y, color });
+                        }
+                    } catch (e) {
+                        // Skip invalid label data
+                    }
+                }
+            }
+        }
+        return labels;
+    }, [worldData]);
+
+    const getUniqueColors = useCallback(() => {
+        const colors = new Set<string>();
+        for (const key in worldData) {
+            if (key.startsWith('label_')) {
+                try {
+                    const labelData = JSON.parse(worldData[key]);
+                    const color = labelData.color || '#000000';
+                    colors.add(color);
+                } catch (e) {
+                    // Skip invalid label data
+                }
+            }
+        }
+        return Array.from(colors).sort();
+    }, [worldData]);
+
+    const toggleColorFilter = useCallback((color: string) => {
+        setNavColorFilters(prev => {
+            const newFilters = new Set(prev);
+            if (newFilters.has(color)) {
+                newFilters.delete(color);
+            } else {
+                newFilters.add(color);
+            }
+            return newFilters;
+        });
+    }, []);
+
+    const cycleSortMode = useCallback(() => {
+        setNavSortMode(prev => {
+            const nextMode = (() => {
+                switch (prev) {
+                    case 'chronological': return 'closest';
+                    case 'closest': return 'farthest';
+                    case 'farthest': return 'chronological';
+                    default: return 'chronological';
+                }
+            })();
+            
+            // Update origin position when switching to distance modes to reflect current viewport center
+            if (nextMode === 'closest' || nextMode === 'farthest') {
+                const currentCenter = getViewportCenter();
+                setNavOriginPosition(currentCenter);
+            }
+            
+            return nextMode;
+        });
+    }, [getViewportCenter]);
+
+    const getSortedLabels = useCallback((sortMode: NavSortMode, originPos: Point) => {
+        const labels: Array<{text: string, x: number, y: number, color: string, creationIndex: number}> = [];
+        let creationIndex = 0;
+        
+        // Collect labels with creation order (based on key order in worldData)
+        for (const key in worldData) {
+            if (key.startsWith('label_')) {
+                const coordsStr = key.substring('label_'.length);
+                const [xStr, yStr] = coordsStr.split(',');
+                const x = parseInt(xStr, 10);
+                const y = parseInt(yStr, 10);
+                if (!isNaN(x) && !isNaN(y)) {
+                    try {
+                        const labelData = JSON.parse(worldData[key]);
+                        const text = labelData.text || '';
+                        const color = labelData.color || '#000000';
+                        if (text.trim()) {
+                            labels.push({ text, x, y, color, creationIndex: creationIndex++ });
+                        }
+                    } catch (e) {
+                        // Skip invalid label data
+                    }
+                }
+            }
+        }
+        
+        // Sort based on mode
+        switch (sortMode) {
+            case 'chronological':
+                return labels.sort((a, b) => a.creationIndex - b.creationIndex);
+            
+            case 'closest':
+                return labels.sort((a, b) => {
+                    const distA = Math.sqrt(Math.pow(a.x - originPos.x, 2) + Math.pow(a.y - originPos.y, 2));
+                    const distB = Math.sqrt(Math.pow(b.x - originPos.x, 2) + Math.pow(b.y - originPos.y, 2));
+                    return distA - distB;
+                });
+            
+            case 'farthest':
+                return labels.sort((a, b) => {
+                    const distA = Math.sqrt(Math.pow(a.x - originPos.x, 2) + Math.pow(a.y - originPos.y, 2));
+                    const distB = Math.sqrt(Math.pow(b.x - originPos.x, 2) + Math.pow(b.y - originPos.y, 2));
+                    return distB - distA; // Reverse order for farthest first
+                });
+            
+            default:
+                return labels;
+        }
+    }, [worldData]);
+
     const isBlock = useCallback((x: number, y: number): boolean => {
         const key = `${BLOCK_PREFIX}${x},${y}`;
         return !!worldData[key];
@@ -1439,11 +1571,20 @@ export function useWorldEngine({
         getViewportCenter,
         getCursorDistanceFromCenter,
         getBlocksInRegion,
+        getAllLabels,
+        getSortedLabels,
+        getUniqueColors,
+        toggleColorFilter,
+        navColorFilters,
+        cycleSortMode,
+        navSortMode,
         isBlock,
         directionPoints,
         getAngleDebugData,
         settings,
         isNavVisible,
+        setIsNavVisible,
+        navOriginPosition,
         dialogueText,
         setDialogueText,
         chatMode,

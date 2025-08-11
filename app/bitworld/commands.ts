@@ -393,7 +393,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
             return null;
         }
 
-        if (selectedCommand === 'nav') {
+        if (selectedCommand.startsWith('nav')) {
             // Clear command mode
             setCommandState({
                 isActive: false,
@@ -404,8 +404,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
             });
             setCommandData({});
             
-            // Return command execution for nav
-            return { command: 'nav', args: [], commandStartPos: commandState.commandStartPos };
+            // Parse nav command arguments
+            const inputParts = commandState.input.trim().split(/\s+/);
+            const args = inputParts.slice(1);
+            return { command: 'nav', args, commandStartPos: commandState.commandStartPos };
         }
         
         // Clear command mode
