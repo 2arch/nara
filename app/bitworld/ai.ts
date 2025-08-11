@@ -199,6 +199,37 @@ export function getChatHistory(): ChatMessage[] {
 }
 
 /**
+ * Generate an image from a text prompt using Google GenAI Imagen
+ */
+export async function generateImage(prompt: string): Promise<string | null> {
+    try {
+        const response = await ai.models.generateImages({
+            model: 'imagen-3.0-generate-002',
+            prompt: prompt,
+            config: {
+                numberOfImages: 1,
+                includeRaiReason: true,
+            }
+        });
+
+        // Get the first generated image
+        const generatedImage = response.generatedImages?.[0];
+        if (generatedImage?.image?.imageBytes) {
+            // Convert base64 image bytes to data URL
+            const mimeType = generatedImage.image.mimeType || 'image/png';
+            const dataUrl = `data:${mimeType};base64,${generatedImage.image.imageBytes}`;
+            return dataUrl;
+        }
+
+        console.warn('No image data received from generation');
+        return null;
+    } catch (error) {
+        console.error('Error generating image:', error);
+        return null;
+    }
+}
+
+/**
  * Generate deepspawn questions/suggestions based on recent text
  */
 export async function generateDeepspawnQuestions(recentText: string): Promise<string[]> {

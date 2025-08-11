@@ -433,8 +433,16 @@ ${getHelpText()}` : '';
         if (engine.backgroundMode === 'color') {
             ctx.fillStyle = engine.backgroundColor;
             ctx.fillRect(0, 0, cssWidth, cssHeight);
+        } else if (engine.backgroundMode === 'image' && engine.backgroundImage) {
+            // Clear canvas first
+            ctx.clearRect(0, 0, cssWidth, cssHeight);
+            // Note: Image rendering will be handled via CSS background in parent component
+            // to avoid async loading issues in draw loop
+        } else if (engine.backgroundMode === 'space') {
+            // Clear canvas for space background (handled by SpaceBackground component)
+            ctx.clearRect(0, 0, cssWidth, cssHeight);
         } else {
-            // Clear canvas for transparency
+            // Default transparent mode
             ctx.clearRect(0, 0, cssWidth, cssHeight);
         }
 

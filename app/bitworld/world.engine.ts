@@ -42,6 +42,7 @@ export interface WorldEngine {
     panningDirection: number | null;
     backgroundMode: BackgroundMode;
     backgroundColor: string;
+    backgroundImage?: string;
     textColor: string;
     getEffectiveCharDims: (zoom: number) => { width: number; height: number; fontSize: number; };
     screenToWorld: (screenX: number, screenY: number, currentZoom: number, currentOffset: Point) => Point;
@@ -178,6 +179,7 @@ export function useWorldEngine({
         lightModeData,
         backgroundMode,
         backgroundColor,
+        backgroundImage,
         textColor,
     } = useCommandSystem({ setDialogueText, initialBackgroundColor });
     
@@ -1554,6 +1556,7 @@ export function useWorldEngine({
         panningDirection,
         backgroundMode,
         backgroundColor,
+        backgroundImage,
         textColor,
         getEffectiveCharDims,
         screenToWorld,

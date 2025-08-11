@@ -48,13 +48,19 @@ export default function CorbuType() {
             width: '100vw',
             height: '100vh',
             cursor: 'text', // Default cursor style
-            background: BACKGROUND_COLOR,
+            backgroundColor: engine.backgroundMode === 'image' ? 'transparent' : BACKGROUND_COLOR,
+            backgroundImage: engine.backgroundMode === 'image' && engine.backgroundImage 
+                ? `url(${engine.backgroundImage})` 
+                : 'none',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
             position: 'relative'
         }}>
-            {/* Space background effect */}
-            <SpaceBackground />
+            {/* Conditional background effects */}
+            {engine.backgroundMode === 'space' && <SpaceBackground />}
             
-            {/* Main content - positioned above the space background */}
+            {/* Main content - positioned above the background */}
             <div style={{ position: 'relative', zIndex: 1, width: '100%', height: '100%' }}>
                 <DialogueHeader dialogueType={dialogueType} />
                 

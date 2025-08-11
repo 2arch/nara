@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Point, WorldData } from './world.engine';
+import { generateImage } from './ai';
 
 // --- Command System Types ---
 export interface CommandState {
@@ -19,13 +20,14 @@ export interface CommandExecution {
 
 // --- Mode System Types ---
 export type CanvasMode = 'air' | 'light' | 'chat';
-export type BackgroundMode = 'transparent' | 'color';
+export type BackgroundMode = 'transparent' | 'color' | 'image' | 'space';
 
 export interface ModeState {
     currentMode: CanvasMode;
     lightModeData: WorldData; // Ephemeral text data for light mode
     backgroundMode: BackgroundMode;
     backgroundColor: string;
+    backgroundImage?: string; // URL or data URL for generated images
     textColor: string;
 }
 
@@ -57,9 +59,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
     const [modeState, setModeState] = useState<ModeState>({
         currentMode: 'air',
         lightModeData: {},
-        backgroundMode: 'transparent',
+        backgroundMode: 'space', // Default to space background
         backgroundColor: '#FFFFFF',
-        textColor: '#000000',
+        backgroundImage: undefined,
+        textColor: '#FFFFFF', // White text for space background by default
     });
 
     // Utility function to match commands based on input
@@ -131,36 +134,66 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
         });
     }, []);
 
-    const switchBackgroundMode = useCallback((newMode: BackgroundMode, color?: string): boolean => {
-        if (newMode === 'color' && color) {
+    const switchBackgroundMode = useCallback((newMode: BackgroundMode, bgColor?: string, textColor?: string): boolean => {
+        if (newMode === 'color' && bgColor) {
             const colorMap: { [name: string]: string } = {
                 'white': '#FFFFFF',
                 'black': '#000000',
             };
-            const hexColor = (colorMap[color.toLowerCase()] || color).toUpperCase();
+            const hexBgColor = (colorMap[bgColor.toLowerCase()] || bgColor).toUpperCase();
 
-            if (!/^#[0-9A-F]{6}$/i.test(hexColor)) {
-                setDialogueText(`Invalid color: ${color}. Please use a name (e.g., white) or hex code (e.g., #1a1a1a).`);
+            if (!/^#[0-9A-F]{6}$/i.test(hexBgColor)) {
+                setDialogueText(`Invalid background color: ${bgColor}. Please use a name (e.g., white) or hex code (e.g., #1a1a1a).`);
                 return false;
             }
             
-            const rgb = parseInt(hexColor.substring(1), 16);
-            const r = (rgb >> 16) & 0xff;
-            const g = (rgb >>  8) & 0xff;
-            const b = (rgb >>  0) & 0xff;
-            const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-            const newTextColor = luma < 128 ? '#FFFFFF' : '#000000';
+            let finalTextColor: string;
+            
+            if (textColor) {
+                // User specified text color - validate it
+                const hexTextColor = (colorMap[textColor.toLowerCase()] || textColor).toUpperCase();
+                if (!/^#[0-9A-F]{6}$/i.test(hexTextColor)) {
+                    setDialogueText(`Invalid text color: ${textColor}. Please use a name (e.g., white) or hex code (e.g., #1a1a1a).`);
+                    return false;
+                }
+                finalTextColor = hexTextColor;
+            } else {
+                // Auto-assign text color based on background brightness for optimal contrast
+                const rgb = parseInt(hexBgColor.substring(1), 16);
+                const r = (rgb >> 16) & 0xff;
+                const g = (rgb >>  8) & 0xff;
+                const b = (rgb >>  0) & 0xff;
+                const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                finalTextColor = luma < 128 ? '#FFFFFF' : '#000000';
+            }
 
             setModeState(prev => ({
                 ...prev,
                 backgroundMode: 'color',
-                backgroundColor: hexColor,
-                textColor: newTextColor,
+                backgroundColor: hexBgColor,
+                textColor: finalTextColor,
             }));
-        } else {
+        } else if (newMode === 'transparent') {
             setModeState(prev => ({
                 ...prev,
                 backgroundMode: 'transparent',
+                backgroundImage: undefined,
+                textColor: '#FFFFFF', // Set text to white for transparent background
+            }));
+        } else if (newMode === 'space') {
+            setModeState(prev => ({
+                ...prev,
+                backgroundMode: 'space',
+                backgroundImage: undefined,
+                textColor: '#FFFFFF', // White text for space background
+            }));
+        } else if (newMode === 'image' && bgColor) {
+            // bgColor is actually the image URL/data for image mode
+            setModeState(prev => ({
+                ...prev,
+                backgroundMode: 'image',
+                backgroundImage: bgColor, // Using bgColor parameter as image URL
+                textColor: textColor || '#FFFFFF', // Default to white text on images
             }));
         }
         return true;
@@ -371,11 +404,32 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
         if (selectedCommand.startsWith('bg')) {
             const inputParts = commandState.input.trim().split(/\s+/);
             const bgArg = inputParts.length > 1 ? inputParts[1] : undefined;
+            const restOfInput = inputParts.slice(2).join(' '); // Everything after 'bg clear'
 
             if (bgArg === 'clear') {
-                switchBackgroundMode('transparent');
+                if (restOfInput.trim()) {
+                    // 'bg clear' with a prompt - generate AI image
+                    setDialogueText("Generating background image...");
+                    generateImage(restOfInput).then((imageUrl) => {
+                        if (imageUrl) {
+                            switchBackgroundMode('image', imageUrl);
+                            setDialogueText("Background image generated successfully!");
+                        } else {
+                            // Fallback to space background if image generation fails
+                            switchBackgroundMode('space');
+                            setDialogueText("Image generation not available, using space background.");
+                        }
+                    }).catch(() => {
+                        switchBackgroundMode('space');
+                        setDialogueText("Image generation failed, using space background.");
+                    });
+                } else {
+                    // 'bg clear' without prompt - show space background
+                    switchBackgroundMode('space');
+                }
             } else if (bgArg) {
-                switchBackgroundMode('color', bgArg);
+                const textArg = inputParts.length > 2 ? inputParts[2] : undefined;
+                switchBackgroundMode('color', bgArg, textArg);
             } else {
                 switchBackgroundMode('color', '#FFFFFF');
             }
@@ -502,6 +556,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
         lightModeData: modeState.lightModeData,
         backgroundMode: modeState.backgroundMode,
         backgroundColor: modeState.backgroundColor,
+        backgroundImage: modeState.backgroundImage,
         textColor: modeState.textColor,
     };
 }
