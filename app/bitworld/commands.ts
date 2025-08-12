@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Point, WorldData } from './world.engine';
-import { generateImage } from './ai';
+import { generateImage, generateVideo } from './ai';
 
 // --- Command System Types ---
 export interface CommandState {
@@ -12,6 +12,12 @@ export interface CommandState {
     commandStartPos: Point;
 }
 
+export interface PendingCommand {
+    command: string;
+    args: string[];
+    isWaitingForSelection: boolean;
+}
+
 export interface CommandExecution {
     command: string;
     args: string[];
@@ -20,7 +26,7 @@ export interface CommandExecution {
 
 // --- Mode System Types ---
 export type CanvasMode = 'air' | 'light' | 'chat';
-export type BackgroundMode = 'transparent' | 'color' | 'image' | 'space';
+export type BackgroundMode = 'transparent' | 'color' | 'image' | 'video' | 'space';
 
 export interface ModeState {
     currentMode: CanvasMode;
@@ -28,22 +34,24 @@ export interface ModeState {
     backgroundMode: BackgroundMode;
     backgroundColor: string;
     backgroundImage?: string; // URL or data URL for generated images
+    backgroundVideo?: string; // URL or data URL for generated videos
     textColor: string;
 }
 
 interface UseCommandSystemProps {
     setDialogueText: (text: string) => void;
     initialBackgroundColor?: string;
+    getAllLabels?: () => Array<{text: string, x: number, y: number, color: string}>;
 }
 
 // --- Command System Constants ---
 const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'deepspawn', 'chat', 'bg', 'nav'];
 const MODE_COMMANDS = ['air', 'light', 'chat'];
-const BG_COMMANDS = ['clear', 'white', 'black'];
-const NAV_COMMANDS = ['off'];
+const BG_COMMANDS = ['clear', 'live', 'white', 'black'];
+const NAV_COMMANDS: string[] = [];
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels }: UseCommandSystemProps) {
     const router = useRouter();
     const [commandState, setCommandState] = useState<CommandState>({
         isActive: false,
@@ -54,6 +62,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
     });
     
     const [commandData, setCommandData] = useState<WorldData>({});
+    const [pendingCommand, setPendingCommand] = useState<PendingCommand | null>(null);
     
     // Mode system state
     const [modeState, setModeState] = useState<ModeState>({
@@ -62,6 +71,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
         backgroundMode: 'space', // Default to space background
         backgroundColor: '#FFFFFF',
         backgroundImage: undefined,
+        backgroundVideo: undefined,
         textColor: '#FFFFFF', // White text for space background by default
     });
 
@@ -102,11 +112,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
 
         if (lowerInput === 'nav') {
             const parts = input.toLowerCase().split(' ');
+            const labels = getAllLabels ? getAllLabels() : [];
+            const labelNames = labels.map(label => label.text.toLowerCase());
+            
             if (parts.length > 1) {
                 const navInput = parts[1];
-                const suggestions = NAV_COMMANDS
-                    .filter(nav => nav.startsWith(navInput))
-                    .map(nav => `nav ${nav}`);
+                const suggestions = labelNames
+                    .filter(label => label.startsWith(navInput))
+                    .map(label => `nav ${label}`);
                 
                 const currentCommand = `nav ${navInput}`;
                 if (navInput.length > 0 && !suggestions.some(s => s === currentCommand)) {
@@ -114,11 +127,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
                 }
                 return suggestions;
             }
-            return ['nav', ...NAV_COMMANDS.map(nav => `nav ${nav}`)];
+            return labelNames.length > 0 ? labelNames.map(label => `nav ${label}`) : ['nav'];
         }
         
         return AVAILABLE_COMMANDS.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
-    }, []);
+    }, [getAllLabels]);
 
     // Mode switching functionality
     const switchMode = useCallback((newMode: CanvasMode) => {
@@ -193,7 +206,17 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
                 ...prev,
                 backgroundMode: 'image',
                 backgroundImage: bgColor, // Using bgColor parameter as image URL
+                backgroundVideo: undefined,
                 textColor: textColor || '#FFFFFF', // Default to white text on images
+            }));
+        } else if (newMode === 'video' && bgColor) {
+            // bgColor is actually the video URL/data for video mode
+            setModeState(prev => ({
+                ...prev,
+                backgroundMode: 'video',
+                backgroundImage: undefined,
+                backgroundVideo: bgColor, // Using bgColor parameter as video URL
+                textColor: textColor || '#FFFFFF', // Default to white text on videos
             }));
         }
         return true;
@@ -413,7 +436,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
                     generateImage(restOfInput).then((imageUrl) => {
                         if (imageUrl) {
                             switchBackgroundMode('image', imageUrl);
-                            setDialogueText("Background image generated successfully!");
+                            setDialogueText(`"${restOfInput}"`);
                         } else {
                             // Fallback to space background if image generation fails
                             switchBackgroundMode('space');
@@ -426,6 +449,28 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
                 } else {
                     // 'bg clear' without prompt - show space background
                     switchBackgroundMode('space');
+                }
+            } else if (bgArg === 'live') {
+                if (restOfInput.trim()) {
+                    // 'bg live' with a prompt - generate AI video
+                    setDialogueText("Generating background video...");
+                    generateVideo(restOfInput).then((videoUrl) => {
+                        if (videoUrl) {
+                            switchBackgroundMode('video', videoUrl);
+                            setDialogueText(`"${restOfInput}"`);
+                        } else {
+                            // Fallback to space background if video generation fails
+                            switchBackgroundMode('space');
+                            setDialogueText("Video generation not available, using space background.");
+                        }
+                    }).catch(() => {
+                        switchBackgroundMode('space');
+                        setDialogueText("Video generation failed, using space background.");
+                    });
+                } else {
+                    // 'bg live' without prompt - show space background
+                    switchBackgroundMode('space');
+                    setDialogueText("Video generation requires a prompt. Use: /bg live [your prompt]");
                 }
             } else if (bgArg) {
                 const textArg = inputParts.length > 2 ? inputParts[2] : undefined;
@@ -458,13 +503,54 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
             });
             setCommandData({});
             
-            // Parse nav command arguments
-            const inputParts = commandState.input.trim().split(/\s+/);
-            const args = inputParts.slice(1);
-            return { command: 'nav', args, commandStartPos: commandState.commandStartPos };
+            // Use the selected command instead of the typed input
+            // Extract label name from selected command (format: "nav labelname")
+            const commandParts = selectedCommand.split(' ');
+            const labelQuery = commandParts.slice(1).join(' ');
+            
+            if (labelQuery && getAllLabels) {
+                const labels = getAllLabels();
+                // Find the label that matches the selected command (case insensitive)
+                const targetLabel = labels.find(label => 
+                    label.text.toLowerCase() === labelQuery.toLowerCase()
+                );
+                
+                if (targetLabel) {
+                    return { 
+                        command: 'nav', 
+                        args: [targetLabel.x.toString(), targetLabel.y.toString()], 
+                        commandStartPos: commandState.commandStartPos 
+                    };
+                }
+            }
+            
+            return { command: 'nav', args: [], commandStartPos: commandState.commandStartPos };
         }
         
-        // Clear command mode
+        // Handle commands that need text selection
+        if (['transform', 'explain', 'summarize'].includes(selectedCommand.toLowerCase().split(' ')[0])) {
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 }
+            });
+            setCommandData({});
+            
+            // Set as pending command waiting for selection
+            const args = inputParts.slice(1);
+            setPendingCommand({
+                command: selectedCommand,
+                args: args,
+                isWaitingForSelection: true
+            });
+            
+            return { command: 'pending_selection', args: [selectedCommand], commandStartPos: commandState.commandStartPos };
+        }
+        
+        // Clear command mode for other commands
         setCommandState({
             isActive: false,
             input: '',
@@ -482,6 +568,22 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
         
         return null;
     }, [commandState, switchMode]);
+
+    // Execute pending command with selection
+    const executePendingCommand = useCallback((selectedText: string): CommandExecution | null => {
+        if (!pendingCommand) return null;
+        
+        // Clear pending command state
+        const cmd = pendingCommand;
+        setPendingCommand(null);
+        
+        // Return the command execution with the selected text as first argument
+        return {
+            command: cmd.command,
+            args: [selectedText, ...cmd.args],
+            commandStartPos: { x: 0, y: 0 } // Not relevant for pending commands
+        };
+    }, [pendingCommand]);
 
     // Handle keyboard events for command mode
     const handleKeyDown = useCallback((
@@ -526,6 +628,52 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
         } else if (key === 'ArrowDown') {
             navigateDown();
             return true;
+        } else if (key === 'Tab') {
+            // Tab completion - complete to currently selected suggestion or if there's only one match
+            if (commandState.matchedCommands.length >= 1) {
+                const selectedCommand = commandState.matchedCommands[commandState.selectedIndex];
+                if (selectedCommand) {
+                    // Update input to the selected/completed command
+                    setCommandState(prev => {
+                        const newMatchedCommands = matchCommands(selectedCommand);
+                        
+                        // Update command display
+                        const newCommandData: WorldData = {};
+                        const commandText = `/${selectedCommand}`;
+                        
+                        // Draw command text at original command start position
+                        for (let i = 0; i < commandText.length; i++) {
+                            const key = `${prev.commandStartPos.x + i},${prev.commandStartPos.y}`;
+                            newCommandData[key] = commandText[i];
+                        }
+                        
+                        // Draw autocomplete suggestions below (if any)
+                        newMatchedCommands.forEach((command, index) => {
+                            const suggestionY = prev.commandStartPos.y + 1 + index;
+                            for (let i = 0; i < command.length; i++) {
+                                const key = `${prev.commandStartPos.x + i},${suggestionY}`;
+                                newCommandData[key] = command[i];
+                            }
+                        });
+                        
+                        setCommandData(newCommandData);
+                        
+                        return {
+                            ...prev,
+                            input: selectedCommand,
+                            matchedCommands: newMatchedCommands,
+                            selectedIndex: 0
+                        };
+                    });
+                    
+                    // Move cursor to end of completed command
+                    setCursorPos({ 
+                        x: commandState.commandStartPos.x + selectedCommand.length + 1, // +1 for the '/' 
+                        y: commandState.commandStartPos.y 
+                    });
+                }
+            }
+            return true;
         } else if (key === 'Backspace') {
             const result = handleBackspace();
             if (result.shouldMoveCursor) {
@@ -548,6 +696,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
         commandData,
         handleKeyDown,
         isCommandMode: commandState.isActive,
+        // Pending command system
+        pendingCommand,
+        executePendingCommand,
+        setPendingCommand,
         // Mode system exports
         modeState,
         switchMode,
@@ -557,6 +709,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor }: Us
         backgroundMode: modeState.backgroundMode,
         backgroundColor: modeState.backgroundColor,
         backgroundImage: modeState.backgroundImage,
+        backgroundVideo: modeState.backgroundVideo,
         textColor: modeState.textColor,
     };
 }

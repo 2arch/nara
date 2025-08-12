@@ -48,7 +48,7 @@ export default function CorbuType() {
             width: '100vw',
             height: '100vh',
             cursor: 'text', // Default cursor style
-            backgroundColor: engine.backgroundMode === 'image' ? 'transparent' : BACKGROUND_COLOR,
+            backgroundColor: (engine.backgroundMode === 'image' || engine.backgroundMode === 'video') ? 'transparent' : BACKGROUND_COLOR,
             backgroundImage: engine.backgroundMode === 'image' && engine.backgroundImage 
                 ? `url(${engine.backgroundImage})` 
                 : 'none',
@@ -59,6 +59,26 @@ export default function CorbuType() {
         }}>
             {/* Conditional background effects */}
             {engine.backgroundMode === 'space' && <SpaceBackground />}
+            
+            {/* Video background */}
+            {engine.backgroundMode === 'video' && engine.backgroundVideo && (
+                <video
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        zIndex: 0,
+                    }}
+                    src={engine.backgroundVideo}
+                />
+            )}
             
             {/* Main content - positioned above the background */}
             <div style={{ position: 'relative', zIndex: 1, width: '100%', height: '100%' }}>

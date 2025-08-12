@@ -1,46 +1,94 @@
 "use client";
 import React, { useState, useEffect } from 'react';
 import InteractiveBitCanvas from '../bitworld/interactive.canvas';
-import { parseGIF, decompressFrames } from 'gifuct-js';
-import { processGifFrame, PixelatedFrame } from '../bitworld/gif.utils';
+import { PixelatedFrame } from '../bitworld/gif.utils';
 
 const StagingPage: React.FC = () => {
-  const [gifFrames, setGifFrames] = useState<PixelatedFrame[]>([]);
+  const [pngFrame, setPngFrame] = useState<PixelatedFrame | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const loadMainGif = async () => {
+    const loadMainPng = async () => {
       try {
         setIsLoading(true);
         setError(null);
         
-        const response = await fetch('/main.gif');
+        const response = await fetch('/main.png');
         if (!response.ok) {
-          throw new Error(`Failed to load main.gif: ${response.status} ${response.statusText}`);
+          throw new Error(`Failed to load main.png: ${response.status} ${response.statusText}`);
         }
         
-        const buffer = await response.arrayBuffer();
-        const gif = parseGIF(buffer);
-        const frames = decompressFrames(gif, true);
+        // Create an image element to load the PNG
+        const img = new Image();
+        img.onload = () => {
+          // Create a canvas to process the image data
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            throw new Error('Failed to get canvas context');
+          }
+          
+          canvas.width = img.width;
+          canvas.height = img.height;
+          ctx.drawImage(img, 0, 0);
+          
+          // Get image data
+          const imageData = ctx.getImageData(0, 0, img.width, img.height);
+          
+          // Convert to pixelated frame format
+          const pixelatedFrame: PixelatedFrame = {
+            width: img.width,
+            height: img.height,
+            data: []
+          };
+          
+          // Process pixels (similar to GIF processing)
+          for (let y = 0; y < img.height; y++) {
+            for (let x = 0; x < img.width; x++) {
+              const index = (y * img.width + x) * 4;
+              const r = imageData.data[index];
+              const g = imageData.data[index + 1];
+              const b = imageData.data[index + 2];
+              const a = imageData.data[index + 3];
+              
+              // Convert to hex color
+              const color = a === 0 ? 'transparent' : 
+                `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+              
+              // Use block character for solid pixels, space for transparent
+              const char = a === 0 ? ' ' : '█';
+              
+              pixelatedFrame.data.push({
+                char,
+                color
+              });
+            }
+          }
+          
+          setPngFrame(pixelatedFrame);
+          setIsLoading(false);
+        };
         
-        const processedFrames = frames.map(frame => processGifFrame(frame));
-        setGifFrames(processedFrames);
+        img.onerror = () => {
+          throw new Error('Failed to load image');
+        };
+        
+        img.src = response.url;
       } catch (err) {
-        console.error('Error loading main.gif:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load GIF');
-      } finally {
+        console.error('Error loading main.png:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load PNG');
         setIsLoading(false);
       }
     };
 
-    loadMainGif();
+    loadMainPng();
   }, []);
 
   if (isLoading) {
     return (
       <div className="relative w-screen h-screen flex items-center justify-center">
-        <div className="text-white">Loading main.gif...</div>
+        <div className="text-white">Loading main.png...</div>
       </div>
     );
   }
@@ -53,9 +101,17 @@ const StagingPage: React.FC = () => {
     );
   }
 
+  if (!pngFrame) {
+    return (
+      <div className="relative w-screen h-screen flex items-center justify-center">
+        <div className="text-white">No image loaded</div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative w-screen h-screen">
-      <InteractiveBitCanvas gifFrames={gifFrames} monogramEnabled={false} dialogueEnabled={false} />
+      <InteractiveBitCanvas gifFrames={[pngFrame]} monogramEnabled={false} dialogueEnabled={false} />
     </div>
   );
 };

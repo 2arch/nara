@@ -6,7 +6,7 @@ import { generateDeepspawnQuestions } from './ai';
 const MIN_BLOCK_DISTANCE = 6;  // Minimum cells between blocks
 
 // --- Deepspawn System Hook ---
-export function useDeepspawnSystem() {
+export function useDeepspawnSystem(isDeepspawnVisible: boolean = false) {
     const [deepspawnData, setDeepspawnData] = useState<WorldData>({});
     
     // Simple two-point tracking for direction calculation
@@ -103,6 +103,11 @@ export function useDeepspawnSystem() {
 
     // Function to generate new deepspawn questions based on recent text
     const generateNewQuestions = useCallback(async (recentText: string) => {
+        // Only generate questions if deepspawn is visible
+        if (!isDeepspawnVisible) {
+            return deepspawnQuestions;
+        }
+        
         try {
             console.log('Generating new deepspawn questions based on:', recentText);
             const newQuestions = await generateDeepspawnQuestions(recentText);
@@ -113,13 +118,13 @@ export function useDeepspawnSystem() {
             // Keep existing questions on error
             return deepspawnQuestions;
         }
-    }, [deepspawnQuestions]);
+    }, [isDeepspawnVisible, deepspawnQuestions]);
 
     // Function to spawn 5 cursors: 3 ahead using phyllotactic arrangement + 2 orthogonal
     const spawnThreeCursors = useCallback(async (centerX: number, centerY: number, newDirection?: number | null, recentText?: string) => {
-        // Generate new questions if recent text is provided
+        // Generate new questions if recent text is provided and deepspawn is visible
         let questionsToUse = deepspawnQuestions;
-        if (recentText && recentText.trim().length > 10) {
+        if (isDeepspawnVisible && recentText && recentText.trim().length > 10) {
             try {
                 questionsToUse = await generateNewQuestions(recentText);
             } catch (error) {

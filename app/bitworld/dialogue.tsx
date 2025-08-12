@@ -41,7 +41,7 @@ export interface HeaderDialogueProps extends DialogueProps {
 const DEBUG_MARGIN_CHARS = 2;
 
 // Nav dialogue constants  
-const NAV_MARGIN_CHARS = 4;
+const NAV_MARGIN_CHARS = 2;
 const NAV_BACKGROUND_COLOR = 'rgba(0, 0, 0, 0.4)';
 const NAV_TEXT_COLOR = '#FFFFFF';
 
@@ -304,10 +304,17 @@ export function useDialogue() {
         const dialogueHeight = lines.length;
         const maxWidthChars = Math.max(...lines.map(l => l.length));
 
+        // Add extra top margin to account for the header (60px = ~4 char rows + 2 for breathing room)
+        const headerMargin = 2;
+        // Center the nav content horizontally
+        const totalAvailableWidth = availableWidthChars;
+        const navContentWidth = maxWidthChars;
+        const startCol = Math.max(0, Math.floor((totalAvailableWidth - navContentWidth) / 2));
+        
         return {
             lines,
-            startRow: NAV_MARGIN_CHARS, // Top-aligned
-            startCol: NAV_MARGIN_CHARS, // Left-aligned  
+            startRow: NAV_MARGIN_CHARS + headerMargin, // Top-aligned with header spacing
+            startCol, // Centered
             maxWidthChars,
             dialogueHeight
         };

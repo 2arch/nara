@@ -6,7 +6,7 @@ import { useDeepspawnSystem } from './deepspawn'; // Import deepspawn system
 import { useWorldSettings, WorldSettings } from './settings';
 import { set, ref } from 'firebase/database';
 import { database } from '@/app/firebase';
-import { transformText, explainText, summarizeText, createSubtitleCycler, chatWithAI, clearChatHistory } from './ai';
+import { transformText, explainText, summarizeText, createSubtitleCycler, chatWithAI, clearChatHistory, setDialogueWithRevert } from './ai';
 
 // --- Constants --- (Copied and relevant ones kept)
 const BASE_FONT_SIZE = 16;
@@ -43,6 +43,7 @@ export interface WorldEngine {
     backgroundMode: BackgroundMode;
     backgroundColor: string;
     backgroundImage?: string;
+    backgroundVideo?: string;
     textColor: string;
     getEffectiveCharDims: (zoom: number) => { width: number; height: number; fontSize: number; };
     screenToWorld: (screenX: number, screenY: number, currentZoom: number, currentOffset: Point) => Point;
@@ -169,19 +170,48 @@ export function useWorldEngine({
         }
     }, [worldId, settings]);
 
+        const getAllLabels = useCallback(() => {
+        const labels: Array<{text: string, x: number, y: number, color: string}> = [];
+        for (const key in worldData) {
+            if (key.startsWith('label_')) {
+                const coordsStr = key.substring('label_'.length);
+                const [xStr, yStr] = coordsStr.split(',');
+                const x = parseInt(xStr, 10);
+                const y = parseInt(yStr, 10);
+                if (!isNaN(x) && !isNaN(y)) {
+                    try {
+                        const labelData = JSON.parse(worldData[key]);
+                        const text = labelData.text || '';
+                        const color = labelData.color || '#000000';
+                        if (text.trim()) {
+                            labels.push({ text, x, y, color });
+                        }
+                    } catch (e) {
+                        // Skip invalid label data
+                    }
+                }
+            }
+        }
+        return labels;
+    }, [worldData]);
+
     // === Command System ===
     const { 
         commandState, 
         commandData, 
         handleKeyDown: handleCommandKeyDown,
+        pendingCommand,
+        executePendingCommand,
+        setPendingCommand,
         currentMode,
         addEphemeralText,
         lightModeData,
         backgroundMode,
         backgroundColor,
         backgroundImage,
+        backgroundVideo,
         textColor,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor });
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels });
     
     // === Deepspawn System ===
     const { 
@@ -190,7 +220,7 @@ export function useWorldEngine({
         updateDirectionPoint, 
         getPanningDirection, 
         getAngleDebugData 
-    } = useDeepspawnSystem();
+    } = useDeepspawnSystem(settings.isDeepspawnVisible);
 
     // Helper function to extract recent text from world data around a position
     const getRecentText = useCallback((centerX: number, centerY: number, radius: number = 20): string => {
@@ -607,7 +637,7 @@ export function useWorldEngine({
                     updateSettings(newSettings);
                     saveSettingsToFirebase(newSettings);
                 } else {
-                    setDialogueText("Usage: /debug [on|off] - Toggle debug information display");
+                    setDialogueWithRevert("Usage: /debug [on|off] - Toggle debug information display", setDialogueText);
                 }
             } else if (exec.command === 'deepspawn') {
                 if (exec.args[0] === 'on') {
@@ -619,63 +649,96 @@ export function useWorldEngine({
                     updateSettings(newSettings);
                     saveSettingsToFirebase(newSettings);
                 } else {
-                    setDialogueText("Usage: /deepspawn [on|off] - Toggle deepspawn objects visibility");
+                    setDialogueWithRevert("Usage: /deepspawn [on|off] - Toggle deepspawn objects visibility", setDialogueText);
                 }
             } else if (exec.command === 'nav') {
-                if (exec.args[0] === 'off') {
-                    setIsNavVisible(false);
+                if (exec.args.length === 2) {
+                    // Navigate to specific coordinates (x, y)
+                    const targetX = parseInt(exec.args[0], 10);
+                    const targetY = parseInt(exec.args[1], 10);
+                    
+                    if (!isNaN(targetX) && !isNaN(targetY)) {
+                        // Move camera to center on the target position
+                        if (typeof window !== 'undefined') {
+                            const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
+                            if (effectiveCharWidth > 0 && effectiveCharHeight > 0) {
+                                const viewportWidth = window.innerWidth;
+                                const viewportHeight = window.innerHeight;
+                                
+                                const newViewOffset = {
+                                    x: -targetX + (viewportWidth / (2 * effectiveCharWidth)),
+                                    y: -targetY + (viewportHeight / (2 * effectiveCharHeight))
+                                };
+                                setViewOffset(newViewOffset);
+                            }
+                        }
+                        setIsNavVisible(false);
+                        setDialogueWithRevert(`Navigated to label at (${targetX}, ${targetY})`, setDialogueText);
+                    } else {
+                        setDialogueWithRevert("Invalid coordinates for navigation", setDialogueText);
+                    }
                 } else {
-                    // Capture current viewport center when opening nav
+                    // No arguments or invalid arguments - show nav table of contents
                     const currentCenter = getViewportCenter();
                     setNavOriginPosition(currentCenter);
                     setIsNavVisible(true);
                 }
+            } else if (exec.command === 'pending_selection') {
+                // Show prompt for selection
+                const commandName = exec.args[0];
+                setDialogueWithRevert(`Select a region of text, then press Enter to ${commandName}`, setDialogueText, 5000);
             } else if (exec.command === 'transform') {
-                const currentSelection = getSelectedText();
-                if (currentSelection && exec.args.length > 0) {
-                    const instructions = exec.args.join(' ');
+                // This handles both old system (pre-selected text) and new system (text as first arg)
+                const selectedText = exec.args.length > 0 && exec.args[0].length > 10 ? exec.args[0] : getSelectedText();
+                const instructions = exec.args.length > 1 ? exec.args.slice(1).join(' ') : exec.args.length === 1 && exec.args[0].length <= 10 ? exec.args[0] : '';
+                
+                if (selectedText && instructions) {
                     setDialogueText("Processing transformation...");
                     
                     // Use AI to transform the text
-                    transformText(currentSelection, instructions).then((result) => {
+                    transformText(selectedText, instructions).then((result) => {
                         createSubtitleCycler(result, setDialogueText);
                     }).catch(() => {
                         setDialogueText(`Could not transform text`);
                     });
-                } else if (!currentSelection) {
-                    setDialogueText("Select a region of text first, then use: /transform [instructions]");
+                } else if (!selectedText) {
+                    setDialogueWithRevert("Select a region of text first, then use: /transform [instructions]", setDialogueText);
                 } else {
-                    setDialogueText("Usage: /transform [instructions] (e.g., /transform make uppercase, /transform convert to bullet points)");
+                    setDialogueWithRevert("Usage: /transform [instructions] (e.g., /transform make uppercase, /transform convert to bullet points)", setDialogueText);
                 }
             } else if (exec.command === 'explain') {
-                const currentSelection = getSelectedText();
-                if (currentSelection) {
-                    const instructions = exec.args.length > 0 ? exec.args.join(' ') : 'analysis';
+                // This handles both old system (pre-selected text) and new system (text as first arg)
+                const selectedText = exec.args.length > 0 && exec.args[0].length > 10 ? exec.args[0] : getSelectedText();
+                const instructions = exec.args.length > 1 ? exec.args.slice(1).join(' ') : exec.args.length === 1 && exec.args[0].length <= 10 ? exec.args[0] : 'analysis';
+                
+                if (selectedText) {
                     setDialogueText("Processing explanation...");
                     
                     // Use AI to explain the text
-                    explainText(currentSelection, instructions).then((result) => {
+                    explainText(selectedText, instructions).then((result) => {
                         createSubtitleCycler(result, setDialogueText);
                     }).catch(() => {
                         setDialogueText(`Could not explain text`);
                     });
                 } else {
-                    setDialogueText("Select a region of text first, then use: /explain [optional: how to explain]");
+                    setDialogueWithRevert("Select a region of text first, then use: /explain [optional: how to explain]", setDialogueText);
                 }
             } else if (exec.command === 'summarize') {
-                const currentSelection = getSelectedText();
-                if (currentSelection) {
-                    const focus = exec.args.length > 0 ? exec.args.join(' ') : undefined;
+                // This handles both old system (pre-selected text) and new system (text as first arg)
+                const selectedText = exec.args.length > 0 && exec.args[0].length > 10 ? exec.args[0] : getSelectedText();
+                const focus = exec.args.length > 1 ? exec.args.slice(1).join(' ') : exec.args.length === 1 && exec.args[0].length <= 10 ? exec.args[0] : undefined;
+                
+                if (selectedText) {
                     setDialogueText("Processing summary...");
                     
                     // Use AI to summarize the text
-                    summarizeText(currentSelection, focus).then((result) => {
+                    summarizeText(selectedText, focus).then((result) => {
                         createSubtitleCycler(result, setDialogueText);
                     }).catch(() => {
                         setDialogueText(`Could not summarize text`);
                     });
                 } else {
-                    setDialogueText("Select a region of text first, then use: /summarize [optional focus]");
+                    setDialogueWithRevert("Select a region of text first, then use: /summarize [optional focus]", setDialogueText);
                 }
             } else if (exec.command === 'chat') {
                 if (!chatMode.isActive) {
@@ -697,7 +760,7 @@ export function useWorldEngine({
                     });
                     // Clear any chat input
                     setChatData({});
-                    setDialogueText("Chat mode deactivated.");
+                    setDialogueWithRevert("Chat mode deactivated.", setDialogueText);
                 }
             } else if (exec.command === 'modes') {
                 setDialogueText("Available modes: edit, view, select. Usage: /modes [mode] (coming soon)");
@@ -727,7 +790,7 @@ export function useWorldEngine({
                         [key]: value
                     }));
                 } else {
-                    setDialogueText("Usage: /label [text] [color] (e.g., /label important note red, /label heading blue)");
+                    setDialogueWithRevert("Usage: /label [text] [color] (e.g., /label important note red, /label heading blue)", setDialogueText);
                 }
             }
             
@@ -768,6 +831,57 @@ export function useWorldEngine({
         } else if (isMod && key.toLowerCase() === 'v') {
             pasteText(); // Call async paste, state updates happen inside it
             // Don't set worldDataChanged = true here, paste handles its own state updates
+        }
+        // === Pending Command Handling ===
+        else if (key === 'Enter' && pendingCommand && pendingCommand.isWaitingForSelection) {
+            const currentSelection = getSelectedText();
+            if (currentSelection) {
+                // Execute the pending command with the selected text
+                const commandExecution = executePendingCommand(currentSelection);
+                if (commandExecution) {
+                    // Process the command as if it was just executed
+                    const exec = commandExecution;
+                    if (exec.command === 'transform') {
+                        const selectedText = exec.args[0];
+                        const instructions = exec.args.slice(1).join(' ');
+                        
+                        if (selectedText && instructions) {
+                            setDialogueText("Processing transformation...");
+                            transformText(selectedText, instructions).then((result) => {
+                                createSubtitleCycler(result, setDialogueText);
+                            }).catch(() => {
+                                setDialogueText(`Could not transform text`);
+                            });
+                        }
+                    } else if (exec.command === 'explain') {
+                        const selectedText = exec.args[0];
+                        const instructions = exec.args.length > 1 ? exec.args.slice(1).join(' ') : 'analysis';
+                        
+                        setDialogueText("Processing explanation...");
+                        explainText(selectedText, instructions).then((result) => {
+                            createSubtitleCycler(result, setDialogueText);
+                        }).catch(() => {
+                            setDialogueText(`Could not explain text`);
+                        });
+                    } else if (exec.command === 'summarize') {
+                        const selectedText = exec.args[0];
+                        const focus = exec.args.length > 1 ? exec.args.slice(1).join(' ') : undefined;
+                        
+                        setDialogueText("Processing summary...");
+                        summarizeText(selectedText, focus).then((result) => {
+                            createSubtitleCycler(result, setDialogueText);
+                        }).catch(() => {
+                            setDialogueText(`Could not summarize text`);
+                        });
+                    }
+                }
+                
+                // Clear selection after executing pending command
+                clearSelectionState();
+            } else {
+                setDialogueWithRevert("Please select some text first, then press Enter to execute the command", setDialogueText);
+            }
+            return;
         }
         // --- Movement ---
         else if (key === 'Enter') {
@@ -1389,31 +1503,6 @@ export function useWorldEngine({
         return blocksInRegion;
     }, [worldData]);
 
-    const getAllLabels = useCallback(() => {
-        const labels: Array<{text: string, x: number, y: number, color: string}> = [];
-        for (const key in worldData) {
-            if (key.startsWith('label_')) {
-                const coordsStr = key.substring('label_'.length);
-                const [xStr, yStr] = coordsStr.split(',');
-                const x = parseInt(xStr, 10);
-                const y = parseInt(yStr, 10);
-                if (!isNaN(x) && !isNaN(y)) {
-                    try {
-                        const labelData = JSON.parse(worldData[key]);
-                        const text = labelData.text || '';
-                        const color = labelData.color || '#000000';
-                        if (text.trim()) {
-                            labels.push({ text, x, y, color });
-                        }
-                    } catch (e) {
-                        // Skip invalid label data
-                    }
-                }
-            }
-        }
-        return labels;
-    }, [worldData]);
-
     const getUniqueColors = useCallback(() => {
         const colors = new Set<string>();
         for (const key in worldData) {
@@ -1548,6 +1637,7 @@ export function useWorldEngine({
         deepspawnData,
         commandData,
         commandState,
+        pendingCommand,
         chatData,
         lightModeData,
         viewOffset,
@@ -1557,6 +1647,7 @@ export function useWorldEngine({
         backgroundMode,
         backgroundColor,
         backgroundImage,
+        backgroundVideo,
         textColor,
         getEffectiveCharDims,
         screenToWorld,

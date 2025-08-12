@@ -5,12 +5,26 @@ const ai = new GoogleGenAI({
     apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY
 });
 
+const LOREM_IPSUM = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.';
+
+// Helper function to set dialogue text with automatic revert to lorem ipsum
+export function setDialogueWithRevert(text: string, setDialogueText: (text: string) => void, timeout: number = 2500) {
+    setDialogueText(text);
+    setTimeout(() => {
+        setDialogueText(LOREM_IPSUM);
+    }, timeout);
+}
+
 // Function to cycle through subtitle-style text
 export function createSubtitleCycler(text: string, setDialogueText: (text: string) => void) {
     const MAX_SUBTITLE_LENGTH = 120; // Allow for 2 lines (~60 chars per line)
     
     if (text.length <= MAX_SUBTITLE_LENGTH) {
         setDialogueText(text);
+        // Revert to lorem ipsum after 2.5 seconds for short messages
+        setTimeout(() => {
+            setDialogueText(LOREM_IPSUM);
+        }, 2500);
         return;
     }
     
@@ -37,10 +51,10 @@ export function createSubtitleCycler(text: string, setDialogueText: (text: strin
             chunkIndex++;
             setTimeout(showNextChunk, 2500); // Show each chunk for 2.5 seconds
         } else {
-            // Clear dialogue after all chunks have been shown
+            // Revert to lorem ipsum after all chunks have been shown
             setTimeout(() => {
-                setDialogueText('');
-            }, 2500); // Wait another 2.5 seconds before clearing
+                setDialogueText(LOREM_IPSUM);
+            }, 2500); // Wait another 2.5 seconds before reverting
         }
     };
     
@@ -225,6 +239,43 @@ export async function generateImage(prompt: string): Promise<string | null> {
         return null;
     } catch (error) {
         console.error('Error generating image:', error);
+        return null;
+    }
+}
+
+/**
+ * Generate a video from a text prompt using Google GenAI Veo
+ */
+export async function generateVideo(prompt: string): Promise<string | null> {
+    try {
+        // Start the video generation operation
+        let operation = await ai.models.generateVideos({
+            model: 'veo-3.0-generate-preview',
+            prompt: prompt,
+        });
+
+        // Poll the operation status until the video is ready
+        while (!operation.done) {
+            console.log("Waiting for video generation to complete...");
+            await new Promise((resolve) => setTimeout(resolve, 5000)); // Poll every 5 seconds
+            operation = await ai.operations.getVideosOperation({
+                operation: operation,
+            });
+        }
+
+        // Get the generated video from the completed operation
+        const generatedVideo = operation.response?.generatedVideos?.[0];
+        if (generatedVideo?.video?.videoBytes) {
+            // Convert base64 video bytes to data URL
+            const mimeType = generatedVideo.video.mimeType || 'video/mp4';
+            const dataUrl = `data:${mimeType};base64,${generatedVideo.video.videoBytes}`;
+            return dataUrl;
+        }
+
+        console.warn('No video data received from generation');
+        return null;
+    } catch (error) {
+        console.error('Error generating video:', error);
         return null;
     }
 }
