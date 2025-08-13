@@ -881,7 +881,7 @@ export function useWorldEngine({
             } else {
                 setDialogueWithRevert("Please select some text first, then press Enter to execute the command", setDialogueText);
             }
-            return;
+            return false;
         }
         // --- Movement ---
         else if (key === 'Enter') {
@@ -1637,7 +1637,6 @@ export function useWorldEngine({
         deepspawnData,
         commandData,
         commandState,
-        pendingCommand,
         chatData,
         lightModeData,
         viewOffset,

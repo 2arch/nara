@@ -56,10 +56,11 @@ const useGifViewportSystem = () => {
 
         // Generate border if enabled
         if (options.showBorder) {
+            // Asymmetric borders: 2 cells left/right, 1 cell top/bottom
             const borderStartX = gifWorldStartX - 2;
-            const borderStartY = gifWorldStartY - 2;
+            const borderStartY = gifWorldStartY - 1;
             const borderWidth = frame.width + 4;
-            const borderHeight = frame.height + 4;
+            const borderHeight = frame.height + 2;
 
             // Only generate border cells that are visible in current viewport
             if (borderStartX <= endWorldX && borderStartX + borderWidth >= startWorldX &&
@@ -73,7 +74,8 @@ const useGifViewportSystem = () => {
                         // Check if this cell is visible and is a border cell
                         const isVisible = worldX >= startWorldX - 1 && worldX <= endWorldX + 1 && 
                                          worldY >= startWorldY - 1 && worldY <= endWorldY + 1;
-                        const isBorder = bx < 2 || bx >= borderWidth - 2 || by < 2 || by >= borderHeight - 2;
+                        // Border definition: 2 cells left/right, 1 cell top/bottom
+                        const isBorder = bx < 2 || bx >= borderWidth - 2 || by < 1 || by >= borderHeight - 1;
                         
                         if (isVisible && isBorder) {
                             const key = `${worldX},${worldY}`;

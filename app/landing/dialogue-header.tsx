@@ -66,7 +66,7 @@ export default function DialogueHeader({ dialogueType, className }: DialogueHead
     <div
       className={className}
       style={{
-        position: 'absolute',
+        position: 'fixed',
         top: 0,
         left: 0,
         width: '100%',
@@ -78,7 +78,7 @@ export default function DialogueHeader({ dialogueType, className }: DialogueHead
         fontSize: HEADER_FONT_SIZE,
         color: HEADER_TEXT_COLOR,
         pointerEvents: 'none', // Let clicks pass through the container
-        zIndex: 10,
+        zIndex: 1000,
       }}
     >
       <div style={{ pointerEvents: 'auto', lineHeight: 1, padding: '0 0' }}>

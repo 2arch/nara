@@ -167,10 +167,10 @@ export default function Home() {
               tryToday: true
             },
           }}
-          className="fixed top-0 left-0 z-50"
+          className="fixed top-0 left-0 z-[100]"
         />
 
-        <section className="pt-16">
+        <section className="pt-20">
           <FullScreenAnimation blurb="intelligence, simplified." animation={<BouncingBallAnimation />} />
         </section>
 
