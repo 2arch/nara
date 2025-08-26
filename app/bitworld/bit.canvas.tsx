@@ -73,7 +73,7 @@ interface BitCanvasProps {
     gifLibrary?: {[key: string]: PixelatedFrame[]}; // New multi-GIF system
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, overlapRects = [], gifFrames = [], monogramEnabled = true, dialogueEnabled = true, overlayGifFrames = [], gifLibrary = {} }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, overlapRects = [], gifFrames = [], monogramEnabled = false, dialogueEnabled = true, overlayGifFrames = [], gifLibrary = {} }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -82,7 +82,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const router = useRouter();
     
     // Dialogue system
-    const { renderDialogue, renderDebugDialogue, renderNavDialogue, handleNavClick } = useDialogue();
+    const { renderDialogue, renderDebugDialogue, renderNavDialogue, renderMonogramControls, handleNavClick } = useDialogue();
     
     // Debug dialogue system
     const { debugText } = useDebugDialogue(engine);
@@ -121,10 +121,25 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         registerGroup(createCameraController(engine));
     }, [registerGroup]);
     
-    // Enhanced debug text with monogram info - only calculate if debug is visible
+    // Enhanced debug text without monogram info - only calculate if debug is visible
     const enhancedDebugText = engine.settings.isDebugVisible ? `${debugText}
-Monogram: ${monogramSystem.options.enabled ? 'ON' : 'OFF'} | Mode: ${monogramSystem.options.mode} | Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem.options.complexity.toFixed(1)}
-${getHelpText()}` : '';
+Camera & Viewport Controls:
+  Home: Return to origin
+  Ctrl+H: Reset zoom level` : '';
+    
+    // Monogram controls text - only show if debug is visible
+    const monogramControlsText = engine.settings.isDebugVisible ? `Psychedelic Pattern Controls:
+  Ctrl+M: Toggle monogram on/off
+  Ctrl+N: Cycle pattern mode
+  Ctrl+=: Increase animation speed
+  Ctrl++: Increase animation speed
+  Ctrl+-: Decrease animation speed
+  Ctrl+]: Increase complexity
+  Ctrl+[: Decrease complexity
+  Ctrl+Shift+R: Randomize color shift
+  
+Monogram: ${monogramSystem.options.enabled ? 'ON' : 'OFF'} | Mode: ${monogramSystem.options.mode}
+Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem.options.complexity.toFixed(1)}` : '';
     
     // Pan trail tracking
     const [panTrail, setPanTrail] = useState<PanTrailPoint[]>([]);
@@ -424,7 +439,7 @@ ${getHelpText()}` : '';
 
         // Use intermediate offset if panning, otherwise use engine's state
         const currentOffset = isMiddleMouseDownRef.current ? intermediatePanOffsetRef.current : engine.viewOffset;
-        const verticalTextOffset = (effectiveCharHeight - effectiveFontSize) / 2 + (effectiveFontSize * 0.1);
+        const verticalTextOffset = 0;
 
         // --- Actual Drawing (Copied from previous `draw` function) ---
         ctx.save();
@@ -440,6 +455,9 @@ ${getHelpText()}` : '';
             // to avoid async loading issues in draw loop
         } else if (engine.backgroundMode === 'space') {
             // Clear canvas for space background (handled by SpaceBackground component)
+            ctx.clearRect(0, 0, cssWidth, cssHeight);
+        } else if (engine.backgroundMode === 'stream') {
+            // Clear canvas for stream background (handled by video element in parent)
             ctx.clearRect(0, 0, cssWidth, cssHeight);
         } else {
             // Default transparent mode
@@ -696,6 +714,27 @@ ${getHelpText()}` : '';
             }
         }
 
+        // === Render Search Data (Purple Background, White Text) ===
+        for (const key in engine.searchData) {
+            const [xStr, yStr] = key.split(',');
+            const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
+            if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                const char = engine.searchData[key];
+                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                    if (char && char.trim() !== '') {
+                        // Draw purple background
+                        ctx.fillStyle = '#800080';
+                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        
+                        // Draw white text
+                        ctx.fillStyle = '#FFFFFF';
+                        ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                    }
+                }
+            }
+        }
+
         // === Render Command Data ===
         if (engine.commandState.isActive) {
             // First, draw background for selected command
@@ -793,7 +832,7 @@ ${getHelpText()}` : '';
             }
         }
 
-        // === Render Labels ===
+        // === Render Labels or Search Match Arrows ===
         const viewBounds = {
             minX: Math.floor(startWorldX),
             maxX: Math.ceil(endWorldX),
@@ -802,92 +841,174 @@ ${getHelpText()}` : '';
         };
         const viewportCenterScreen = { x: cssWidth / 2, y: cssHeight / 2 };
 
-        for (const key in engine.worldData) {
-            if (key.startsWith('label_')) {
-                const coordsStr = key.substring('label_'.length);
-                const [xStr, yStr] = coordsStr.split(',');
+        if (engine.isSearchActive && engine.searchPattern) {
+            // When search is active, show arrows to search matches instead of labels
+            const searchMatches = new Map<string, {x: number, y: number, text: string}>();
+            
+            // Collect search match positions (one per match, not per character)
+            for (const key in engine.searchData) {
+                const [xStr, yStr] = key.split(',');
                 const worldX = parseInt(xStr, 10);
                 const worldY = parseInt(yStr, 10);
-
-                try {
-                    const labelData = JSON.parse(engine.worldData[key]);
-                    const text = labelData.text || '';
-                    const color = labelData.color || '#000000';
-                    const labelWidthInChars = text.length;
-
-                    const isVisible = worldX <= viewBounds.maxX && (worldX + labelWidthInChars) >= viewBounds.minX &&
-                                      worldY >= viewBounds.minY && worldY <= viewBounds.maxY;
-
-                    if (isVisible) {
-                        // Ensure consistent font settings for labels (same as regular text)
-                        ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
-                        ctx.textBaseline = 'top';
-                        
-                        // Render each character of the label individually across cells
-                        for (let charIndex = 0; charIndex < text.length; charIndex++) {
-                            const charWorldX = worldX + charIndex;
-                            const charScreenPos = engine.worldToScreen(charWorldX, worldY, currentZoom, currentOffset);
-                            
-                            // Fill background for this character cell
-                            ctx.fillStyle = color;
-                            ctx.fillRect(charScreenPos.x, charScreenPos.y, effectiveCharWidth, effectiveCharHeight);
-
-                            // Render the character
-                            ctx.fillStyle = CURSOR_TEXT_COLOR;
-                            ctx.fillText(text[charIndex], charScreenPos.x, charScreenPos.y + verticalTextOffset);
-                        }
-                    } else {
-                        const labelScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                        const intersection = getViewportEdgeIntersection(
-                            viewportCenterScreen.x, viewportCenterScreen.y,
-                            labelScreenPos.x, labelScreenPos.y,
-                            cssWidth, cssHeight
-                        );
-
-                        if (intersection) {
-                            const edgeBuffer = ARROW_MARGIN;
-                            let adjustedX = intersection.x;
-                            let adjustedY = intersection.y;
-                            
-                            adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
-                            adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
-                            
-                            drawArrow(ctx, adjustedX, adjustedY, intersection.angle, color);
-
-                            // Draw the label text next to the arrow
-                            if (text) {
-                                ctx.fillStyle = color;
-                                ctx.font = `12px ${FONT_FAMILY}`;
-                                const textOffset = ARROW_SIZE * 1.5;
-                                
-                                let textX = adjustedX - Math.cos(intersection.angle) * textOffset;
-                                let textY = adjustedY - Math.sin(intersection.angle) * textOffset;
-
-                                // Adjust alignment to keep text inside the screen bounds
-                                if (Math.abs(intersection.angle) < Math.PI / 2) {
-                                    ctx.textAlign = 'right';
-                                } else {
-                                    ctx.textAlign = 'left';
-                                }
-
-                                if (intersection.angle > Math.PI / 4 && intersection.angle < 3 * Math.PI / 4) {
-                                    ctx.textBaseline = 'bottom';
-                                } else if (intersection.angle < -Math.PI / 4 && intersection.angle > -3 * Math.PI / 4) {
-                                    ctx.textBaseline = 'top';
-                                } else {
-                                    ctx.textBaseline = 'middle';
-                                }
-
-                                ctx.fillText(text, textX, textY);
-
-                                // Reset to defaults
-                                ctx.textAlign = 'left';
-                                ctx.textBaseline = 'top';
-                            }
+                const matchKey = `${worldY}`; // Group by line
+                
+                if (!searchMatches.has(matchKey) || searchMatches.get(matchKey)!.x > worldX) {
+                    // Build the full matched text
+                    let matchText = '';
+                    for (let i = 0; i < engine.searchPattern.length; i++) {
+                        const checkKey = `${worldX + i},${worldY}`;
+                        if (engine.searchData[checkKey]) {
+                            matchText += engine.searchData[checkKey];
                         }
                     }
-                } catch (e) {
-                    console.error(`Error parsing label data for key ${key}:`, e);
+                    searchMatches.set(matchKey, { x: worldX, y: worldY, text: matchText });
+                }
+            }
+
+            // Draw arrows to off-screen search matches
+            for (const match of searchMatches.values()) {
+                const isVisible = match.x <= viewBounds.maxX && (match.x + engine.searchPattern.length) >= viewBounds.minX &&
+                                  match.y >= viewBounds.minY && match.y <= viewBounds.maxY;
+
+                if (!isVisible) {
+                    const matchScreenPos = engine.worldToScreen(match.x, match.y, currentZoom, currentOffset);
+                    const intersection = getViewportEdgeIntersection(
+                        viewportCenterScreen.x, viewportCenterScreen.y,
+                        matchScreenPos.x, matchScreenPos.y,
+                        cssWidth, cssHeight
+                    );
+
+                    if (intersection) {
+                        const edgeBuffer = ARROW_MARGIN;
+                        let adjustedX = intersection.x;
+                        let adjustedY = intersection.y;
+                        
+                        adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
+                        adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
+                        
+                        // Use purple color for search match arrows
+                        drawArrow(ctx, adjustedX, adjustedY, intersection.angle, '#800080');
+
+                        // Draw the search match text next to the arrow
+                        ctx.fillStyle = '#800080';
+                        ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
+                        const textOffset = ARROW_SIZE * 1.5;
+                        
+                        let textX = adjustedX - Math.cos(intersection.angle) * textOffset;
+                        let textY = adjustedY - Math.sin(intersection.angle) * textOffset;
+
+                        // Adjust alignment to keep text inside the screen bounds
+                        if (Math.abs(intersection.angle) < Math.PI / 2) {
+                            ctx.textAlign = 'right';
+                        } else {
+                            ctx.textAlign = 'left';
+                        }
+
+                        if (intersection.angle > Math.PI / 4 && intersection.angle < 3 * Math.PI / 4) {
+                            ctx.textBaseline = 'bottom';
+                        } else if (intersection.angle < -Math.PI / 4 && intersection.angle > -3 * Math.PI / 4) {
+                            ctx.textBaseline = 'top';
+                        } else {
+                            ctx.textBaseline = 'middle';
+                        }
+
+                        ctx.fillText(match.text, textX, textY);
+
+                        // Reset to defaults
+                        ctx.textAlign = 'left';
+                        ctx.textBaseline = 'top';
+                    }
+                }
+            }
+        } else {
+            // Normal label rendering when search is not active
+            for (const key in engine.worldData) {
+                if (key.startsWith('label_')) {
+                    const coordsStr = key.substring('label_'.length);
+                    const [xStr, yStr] = coordsStr.split(',');
+                    const worldX = parseInt(xStr, 10);
+                    const worldY = parseInt(yStr, 10);
+
+                    try {
+                        const labelData = JSON.parse(engine.worldData[key]);
+                        const text = labelData.text || '';
+                        const color = labelData.color || '#000000';
+                        const labelWidthInChars = text.length;
+
+                        const isVisible = worldX <= viewBounds.maxX && (worldX + labelWidthInChars) >= viewBounds.minX &&
+                                          worldY >= viewBounds.minY && worldY <= viewBounds.maxY;
+
+                        if (isVisible) {
+                            // Ensure consistent font settings for labels (same as regular text)
+                            ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
+                            ctx.textBaseline = 'top';
+                            
+                            // Render each character of the label individually across cells
+                            for (let charIndex = 0; charIndex < text.length; charIndex++) {
+                                const charWorldX = worldX + charIndex;
+                                const charScreenPos = engine.worldToScreen(charWorldX, worldY, currentZoom, currentOffset);
+                                
+                                // Fill background for this character cell
+                                ctx.fillStyle = color;
+                                ctx.fillRect(charScreenPos.x, charScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+
+                                // Render the character
+                                ctx.fillStyle = CURSOR_TEXT_COLOR;
+                                ctx.fillText(text[charIndex], charScreenPos.x, charScreenPos.y + verticalTextOffset);
+                            }
+                        } else {
+                            const labelScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                            const intersection = getViewportEdgeIntersection(
+                                viewportCenterScreen.x, viewportCenterScreen.y,
+                                labelScreenPos.x, labelScreenPos.y,
+                                cssWidth, cssHeight
+                            );
+
+                            if (intersection) {
+                                const edgeBuffer = ARROW_MARGIN;
+                                let adjustedX = intersection.x;
+                                let adjustedY = intersection.y;
+                                
+                                adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
+                                adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
+                                
+                                drawArrow(ctx, adjustedX, adjustedY, intersection.angle, color);
+
+                                // Draw the label text next to the arrow
+                                if (text) {
+                                    ctx.fillStyle = color;
+                                    ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
+                                    const textOffset = ARROW_SIZE * 1.5;
+                                    
+                                    let textX = adjustedX - Math.cos(intersection.angle) * textOffset;
+                                    let textY = adjustedY - Math.sin(intersection.angle) * textOffset;
+
+                                    // Adjust alignment to keep text inside the screen bounds
+                                    if (Math.abs(intersection.angle) < Math.PI / 2) {
+                                        ctx.textAlign = 'right';
+                                    } else {
+                                        ctx.textAlign = 'left';
+                                    }
+
+                                    if (intersection.angle > Math.PI / 4 && intersection.angle < 3 * Math.PI / 4) {
+                                        ctx.textBaseline = 'bottom';
+                                    } else if (intersection.angle < -Math.PI / 4 && intersection.angle > -3 * Math.PI / 4) {
+                                        ctx.textBaseline = 'top';
+                                    } else {
+                                        ctx.textBaseline = 'middle';
+                                    }
+
+                                    ctx.fillText(text, textX, textY);
+
+                                    // Reset to defaults
+                                    ctx.textAlign = 'left';
+                                    ctx.textBaseline = 'top';
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error(`Error parsing label data for key ${key}:`, e);
+                    }
                 }
             }
         }
@@ -1182,12 +1303,20 @@ ${getHelpText()}` : '';
                 ctx,
                 debugText: enhancedDebugText
             });
+            
+            // === Render Monogram Controls ===
+            renderMonogramControls({
+                canvasWidth: cssWidth,
+                canvasHeight: cssHeight,
+                ctx,
+                monogramText: monogramControlsText
+            });
         }
 
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.deepspawnData, engine.commandData, engine.commandState, engine.lightModeData, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue, renderDebugDialogue, enhancedDebugText, monogramSystem, gifViewportSystem, showCursor, monogramEnabled, dialogueEnabled, gifFrames, overlayGifFrames, overlapRects]);
+    }, [engine, engine.backgroundMode, engine.deepspawnData, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, gifViewportSystem, showCursor, monogramEnabled, dialogueEnabled, gifFrames, overlayGifFrames, overlapRects]);
 
 
     // --- Drawing Loop Effect ---

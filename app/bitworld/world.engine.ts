@@ -7,6 +7,7 @@ import { useWorldSettings, WorldSettings } from './settings';
 import { set, ref } from 'firebase/database';
 import { database } from '@/app/firebase';
 import { transformText, explainText, summarizeText, createSubtitleCycler, chatWithAI, clearChatHistory, setDialogueWithRevert } from './ai';
+import { get } from 'firebase/database';
 
 // --- Constants --- (Copied and relevant ones kept)
 const BASE_FONT_SIZE = 16;
@@ -36,6 +37,7 @@ export interface WorldEngine {
     commandState: CommandState;
     chatData: WorldData;
     lightModeData: WorldData;
+    searchData: WorldData;
     viewOffset: Point;
     cursorPos: Point;
     zoomLevel: number;
@@ -45,6 +47,9 @@ export interface WorldEngine {
     backgroundImage?: string;
     backgroundVideo?: string;
     textColor: string;
+    searchPattern: string;
+    isSearchActive: boolean;
+    clearSearch: () => void;
     getEffectiveCharDims: (zoom: number) => { width: number; height: number; fontSize: number; };
     screenToWorld: (screenX: number, screenY: number, currentZoom: number, currentOffset: Point) => Point;
     worldToScreen: (worldX: number, worldY: number, currentZoom: number, currentOffset: Point) => Point;
@@ -55,6 +60,7 @@ export interface WorldEngine {
     handlePanEnd: (newOffset: Point) => void;
     handleKeyDown: (key: string, ctrlKey: boolean, metaKey: boolean, shiftKey: boolean) => boolean;
     setViewOffset: React.Dispatch<React.SetStateAction<Point>>;
+    setZoomLevel: React.Dispatch<React.SetStateAction<number>>;
     selectionStart: Point | null;
     selectionEnd: Point | null;
     handleSelectionStart: (canvasRelativeX: number, canvasRelativeY: number) => void;
@@ -127,7 +133,7 @@ export function useWorldEngine({
     const [cursorPos, setCursorPos] = useState<Point>(initialCursorPos);
     const [viewOffset, setViewOffset] = useState<Point>(initialViewOffset);
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
-    const [dialogueText, setDialogueText] = useState('Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.');
+    const [dialogueText, setDialogueText] = useState('');
     
     // === Chat Mode State ===
     const [chatMode, setChatMode] = useState<{
@@ -143,34 +149,19 @@ export function useWorldEngine({
     });
     
     const [chatData, setChatData] = useState<WorldData>({});
+    const [searchData, setSearchData] = useState<WorldData>({});
     
-    // === Settings System ===
-    const { settings, setSettings, updateSettings } = useWorldSettings();
-    
-    // === Nav Visibility (Ephemeral - Not Persisted) ===
-    const [isNavVisible, setIsNavVisible] = useState(false);
-    const [navOriginPosition, setNavOriginPosition] = useState<Point>({ x: 0, y: 0 });
-    const [navColorFilters, setNavColorFilters] = useState<Set<string>>(new Set());
-    
-    // Sort modes: chronological -> closest -> farthest
-    type NavSortMode = 'chronological' | 'closest' | 'farthest';
-    const [navSortMode, setNavSortMode] = useState<NavSortMode>('chronological');
+    // === State Management System ===
+    const [statePrompt, setStatePrompt] = useState<{
+        type: 'load_confirm' | 'save_before_load_confirm' | 'save_before_load_name' | 'delete_confirm' | null;
+        stateName?: string;
+        loadStateName?: string; // The state we want to load after saving
+        inputBuffer?: string;
+    }>({ type: null });
+    const [availableStates, setAvailableStates] = useState<string[]>([]);
+    const [currentStateName, setCurrentStateName] = useState<string | null>(null); // Track which state we're currently in
 
-    // === Immediate Settings Save Function ===
-    const saveSettingsToFirebase = useCallback(async (newSettings: Partial<WorldSettings>) => {
-        if (!worldId) return;
-        
-        try {
-            const settingsRef = ref(database, `worlds/${worldId}/settings`);
-            const updatedSettings = { ...settings, ...newSettings };
-            await set(settingsRef, updatedSettings);
-            console.log('Settings saved immediately to Firebase:', updatedSettings);
-        } catch (error) {
-            console.error('Failed to save settings to Firebase:', error);
-        }
-    }, [worldId, settings]);
-
-        const getAllLabels = useCallback(() => {
+    const getAllLabels = useCallback(() => {
         const labels: Array<{text: string, x: number, y: number, color: string}> = [];
         for (const key in worldData) {
             if (key.startsWith('label_')) {
@@ -210,8 +201,200 @@ export function useWorldEngine({
         backgroundColor,
         backgroundImage,
         backgroundVideo,
+        backgroundStream,
         textColor,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels });
+        searchPattern,
+        isSearchActive,
+        clearSearch,
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates });
+
+    // Generate search data when search pattern changes
+    useEffect(() => {
+        if (!isSearchActive || !searchPattern.trim()) {
+            setSearchData({});
+            return;
+        }
+
+        const newSearchData: WorldData = {};
+        const pattern = searchPattern.toLowerCase();
+
+        // Search through worldData for matches
+        for (const key in worldData) {
+            // Skip special keys (blocks, labels, etc.)
+            if (key.startsWith('block_') || key.startsWith('deepspawn_') || key.startsWith('label_')) {
+                continue;
+            }
+
+            const [xStr, yStr] = key.split(',');
+            const x = parseInt(xStr, 10);
+            const y = parseInt(yStr, 10);
+            const char = worldData[key];
+
+            if (char && !isNaN(x) && !isNaN(y)) {
+                // Check if this position starts a match
+                let matchFound = false;
+                let matchLength = 0;
+
+                // Build text string from current position
+                let textAtPosition = '';
+                for (let i = 0; i < pattern.length; i++) {
+                    const checkKey = `${x + i},${y}`;
+                    const checkChar = worldData[checkKey];
+                    if (checkChar) {
+                        textAtPosition += checkChar.toLowerCase();
+                    } else {
+                        break;
+                    }
+                }
+
+                // Check if the built text matches the pattern
+                if (textAtPosition === pattern) {
+                    matchFound = true;
+                    matchLength = pattern.length;
+                }
+
+                // If match found, mark all characters in the match
+                if (matchFound) {
+                    for (let i = 0; i < matchLength; i++) {
+                        const matchKey = `${x + i},${y}`;
+                        if (worldData[matchKey]) {
+                            newSearchData[matchKey] = worldData[matchKey];
+                        }
+                    }
+                }
+            }
+        }
+
+        setSearchData(newSearchData);
+    }, [isSearchActive, searchPattern, worldData]);
+    
+    // === Settings System ===
+    const { settings, setSettings, updateSettings } = useWorldSettings();
+    
+    // === State Management Functions ===
+    const saveState = useCallback(async (stateName: string): Promise<boolean> => {
+        if (!worldId) return false;
+        
+        try {
+            const stateRef = ref(database, `worlds/${worldId}/states/${stateName}`);
+            const stateData = {
+                worldData,
+                settings,
+                timestamp: Date.now(),
+                cursorPos,
+                viewOffset,
+                zoomLevel
+            };
+            await set(stateRef, stateData);
+            setCurrentStateName(stateName); // Track that we're now in this state
+            return true;
+        } catch (error) {
+            console.error('Error saving state:', error);
+            return false;
+        }
+    }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel]);
+
+    const loadState = useCallback(async (stateName: string): Promise<boolean> => {
+        if (!worldId) return false;
+        
+        try {
+            const stateRef = ref(database, `worlds/${worldId}/states/${stateName}`);
+            const snapshot = await get(stateRef);
+            const stateData = snapshot.val();
+            
+            if (stateData) {
+                setWorldData(stateData.worldData || {});
+                if (stateData.settings) {
+                    setSettings(stateData.settings);
+                }
+                if (stateData.cursorPos) {
+                    setCursorPos(stateData.cursorPos);
+                }
+                if (stateData.viewOffset) {
+                    setViewOffset(stateData.viewOffset);
+                }
+                if (stateData.zoomLevel) {
+                    setZoomLevel(stateData.zoomLevel);
+                }
+                setCurrentStateName(stateName); // Track that we're now in this state
+                return true;
+            }
+            return false;
+        } catch (error) {
+            console.error('Error loading state:', error);
+            return false;
+        }
+    }, [worldId, setSettings]);
+
+    const loadAvailableStates = useCallback(async (): Promise<string[]> => {
+        if (!worldId) return [];
+        
+        try {
+            const statesRef = ref(database, `worlds/${worldId}/states`);
+            const snapshot = await get(statesRef);
+            const statesData = snapshot.val();
+            
+            if (statesData) {
+                return Object.keys(statesData).sort();
+            }
+            return [];
+        } catch (error) {
+            console.error('Error loading available states:', error);
+            return [];
+        }
+    }, [worldId]);
+
+    const deleteState = useCallback(async (stateName: string): Promise<boolean> => {
+        if (!worldId) return false;
+        
+        try {
+            const stateRef = ref(database, `worlds/${worldId}/states/${stateName}`);
+            await set(stateRef, null); // Firebase way to delete
+            
+            // If we're deleting the current state, clear the current state name
+            if (currentStateName === stateName) {
+                setCurrentStateName(null);
+            }
+            
+            return true;
+        } catch (error) {
+            console.error('Error deleting state:', error);
+            return false;
+        }
+    }, [worldId, currentStateName]);
+
+    // Load available states on component mount
+    useEffect(() => {
+        loadAvailableStates().then(setAvailableStates);
+    }, [loadAvailableStates]);
+
+    // Helper function to detect if there's unsaved work
+    const hasUnsavedWork = useCallback((): boolean => {
+        return Object.keys(worldData).length > 0;
+    }, [worldData]);
+    
+    // === Nav Visibility (Ephemeral - Not Persisted) ===
+    const [isNavVisible, setIsNavVisible] = useState(false);
+    const [navOriginPosition, setNavOriginPosition] = useState<Point>({ x: 0, y: 0 });
+    const [navColorFilters, setNavColorFilters] = useState<Set<string>>(new Set());
+    
+    // Sort modes: chronological -> closest -> farthest
+    type NavSortMode = 'chronological' | 'closest' | 'farthest';
+    const [navSortMode, setNavSortMode] = useState<NavSortMode>('chronological');
+
+    // === Immediate Settings Save Function ===
+    const saveSettingsToFirebase = useCallback(async (newSettings: Partial<WorldSettings>) => {
+        if (!worldId) return;
+        
+        try {
+            const settingsRef = ref(database, `worlds/${worldId}/settings`);
+            const updatedSettings = { ...settings, ...newSettings };
+            await set(settingsRef, updatedSettings);
+            console.log('Settings saved immediately to Firebase:', updatedSettings);
+        } catch (error) {
+            console.error('Failed to save settings to Firebase:', error);
+        }
+    }, [worldId, settings]);
     
     // === Deepspawn System ===
     const { 
@@ -260,7 +443,7 @@ export function useWorldEngine({
         isLoading: isLoadingWorld,
         isSaving: isSavingWorld,
         error: worldPersistenceError
-    } = useWorldSave(worldId, worldData, setWorldData, settings, setSettings); // Pass state and setter
+    } = useWorldSave(worldId, worldData, setWorldData, settings, setSettings, false); // Disable auto-loading
 
     // === Refs === (Keep refs for things not directly tied to re-renders or persistence)
     const charSizeCacheRef = useRef<{ [key: number]: { width: number; height: number; fontSize: number } }>({});
@@ -531,6 +714,121 @@ export function useWorldEngine({
             return true;
         }
 
+        // === Search Clearing ===
+        if (key === 'Escape' && isSearchActive) {
+            clearSearch();
+            setDialogueWithRevert("Search cleared", setDialogueText);
+            return true;
+        }
+
+        // === State Prompt Handling ===
+        if (statePrompt.type) {
+            if (key === 'Escape') {
+                setStatePrompt({ type: null });
+                setDialogueText("Operation cancelled");
+                return true;
+            }
+            
+            if (statePrompt.type === 'save_before_load_confirm') {
+                if (key.toLowerCase() === 'y') {
+                    // User wants to save - ask for state name
+                    setStatePrompt({ ...statePrompt, type: 'save_before_load_name', inputBuffer: '' });
+                    setDialogueText("Enter state name for current work: ");
+                    return true;
+                } else if (key.toLowerCase() === 'n') {
+                    // User doesn't want to save - proceed directly to load
+                    const loadStateName = statePrompt.loadStateName!;
+                    setStatePrompt({ type: 'load_confirm', stateName: loadStateName });
+                    setDialogueText(`Load state "${loadStateName}"? This will replace current work. (y/n)`);
+                    return true;
+                }
+            } else if (statePrompt.type === 'save_before_load_name') {
+                if (key === 'Enter') {
+                    const saveStateName = (statePrompt.inputBuffer || '').trim();
+                    if (saveStateName) {
+                        const loadStateName = statePrompt.loadStateName!;
+                        setDialogueText("Saving current work...");
+                        saveState(saveStateName).then((success) => {
+                            if (success) {
+                                loadAvailableStates().then(setAvailableStates);
+                                // Now load the requested state
+                                setDialogueText("Loading requested state...");
+                                loadState(loadStateName).then((loadSuccess) => {
+                                    if (loadSuccess) {
+                                        setDialogueText(`Current work saved as "${saveStateName}", "${loadStateName}" loaded successfully`);
+                                    } else {
+                                        setDialogueText(`Current work saved as "${saveStateName}", but failed to load "${loadStateName}"`);
+                                    }
+                                    setStatePrompt({ type: null });
+                                });
+                            } else {
+                                setDialogueText("Failed to save current work");
+                                setStatePrompt({ type: null });
+                            }
+                        });
+                    } else {
+                        setDialogueText("State name cannot be empty");
+                        setStatePrompt({ type: null });
+                    }
+                    return true;
+                } else if (key === 'Backspace') {
+                    const currentInput = statePrompt.inputBuffer || '';
+                    if (currentInput.length > 0) {
+                        const newInput = currentInput.slice(0, -1);
+                        setStatePrompt(prev => ({ ...prev, inputBuffer: newInput }));
+                        setDialogueText("Enter state name for current work: " + newInput);
+                    }
+                    return true;
+                } else if (key.length === 1) {
+                    const currentInput = statePrompt.inputBuffer || '';
+                    const newInput = currentInput + key;
+                    setStatePrompt(prev => ({ ...prev, inputBuffer: newInput }));
+                    setDialogueText("Enter state name for current work: " + newInput);
+                    return true;
+                }
+            } else if (statePrompt.type === 'load_confirm') {
+                if (key.toLowerCase() === 'y') {
+                    const stateName = statePrompt.stateName!;
+                    setDialogueText("Loading state...");
+                    loadState(stateName).then((success) => {
+                        if (success) {
+                            setDialogueWithRevert(`State "${stateName}" loaded successfully`, setDialogueText);
+                        } else {
+                            setDialogueWithRevert("Failed to load state", setDialogueText);
+                        }
+                        setStatePrompt({ type: null });
+                    });
+                    return true;
+                } else if (key.toLowerCase() === 'n') {
+                    setStatePrompt({ type: null });
+                    setDialogueWithRevert("Load cancelled", setDialogueText);
+                    return true;
+                }
+            } else if (statePrompt.type === 'delete_confirm') {
+                if (key.toLowerCase() === 'y') {
+                    const stateName = statePrompt.stateName!;
+                    setDialogueText("Deleting state...");
+                    deleteState(stateName).then((success) => {
+                        if (success) {
+                            loadAvailableStates().then(setAvailableStates);
+                            setDialogueWithRevert(`State "${stateName}" deleted successfully`, setDialogueText);
+                        } else {
+                            setDialogueWithRevert("Failed to delete state", setDialogueText);
+                        }
+                        setStatePrompt({ type: null });
+                    });
+                    return true;
+                } else if (key.toLowerCase() === 'n') {
+                    setStatePrompt({ type: null });
+                    setDialogueWithRevert("Delete cancelled", setDialogueText);
+                    return true;
+                }
+            }
+            
+            // If we're in a prompt, consume all other keys
+            return true;
+        }
+
         // === Chat Mode Handling ===
         if (chatMode.isActive && !commandState.isActive) {
             if (key === 'Enter') {
@@ -791,6 +1089,69 @@ export function useWorldEngine({
                     }));
                 } else {
                     setDialogueWithRevert("Usage: /label [text] [color] (e.g., /label important note red, /label heading blue)", setDialogueText);
+                }
+            } else if (exec.command === 'state') {
+                if (exec.args.length === 0) {
+                    // No arguments - show usage
+                    setDialogueText(`Usage: /state [name] or /state --rm [name]. Available states: ${availableStates.join(', ')}`);
+                } else if (exec.args[0] === '--rm') {
+                    // Delete state command
+                    if (exec.args.length < 2) {
+                        setDialogueText(`Usage: /state --rm [name]. Available states: ${availableStates.join(', ')}`);
+                    } else {
+                        const stateNameToDelete = exec.args[1];
+                        if (availableStates.includes(stateNameToDelete)) {
+                            // State exists - ask for confirmation
+                            setStatePrompt({ type: 'delete_confirm', stateName: stateNameToDelete });
+                            setDialogueText(`Delete state "${stateNameToDelete}"? This cannot be undone. (y/n)`);
+                        } else {
+                            setDialogueText(`State "${stateNameToDelete}" not found. Available states: ${availableStates.join(', ')}`);
+                        }
+                    }
+                } else {
+                    const stateName = exec.args[0];
+                    if (availableStates.includes(stateName)) {
+                        // State exists - check if we have unsaved work
+                        if (hasUnsavedWork()) {
+                            if (currentStateName) {
+                                // We're in a configured state - auto-save to current state before loading
+                                setDialogueText(`Saving "${currentStateName}" and loading "${stateName}"...`);
+                                saveState(currentStateName).then((success) => {
+                                    if (success) {
+                                        // Now load the requested state
+                                        loadState(stateName).then((loadSuccess) => {
+                                            if (loadSuccess) {
+                                                setDialogueText(`"${currentStateName}" saved, "${stateName}" loaded successfully`);
+                                            } else {
+                                                setDialogueText(`"${currentStateName}" saved, but failed to load "${stateName}"`);
+                                            }
+                                        });
+                                    } else {
+                                        setDialogueText(`Failed to save "${currentStateName}"`);
+                                    }
+                                });
+                            } else {
+                                // No configured state - ask if they want to save current work before loading
+                                setStatePrompt({ type: 'save_before_load_confirm', loadStateName: stateName });
+                                setDialogueText(`Save current work before loading "${stateName}"? (y/n)`);
+                            }
+                        } else {
+                            // No unsaved work - directly prompt to load
+                            setStatePrompt({ type: 'load_confirm', stateName });
+                            setDialogueText(`Load state "${stateName}"? (y/n)`);
+                        }
+                    } else {
+                        // State doesn't exist - automatically save current work as new state
+                        setDialogueText("Saving state...");
+                        saveState(stateName).then((success) => {
+                            if (success) {
+                                loadAvailableStates().then(setAvailableStates);
+                                setDialogueWithRevert(`State "${stateName}" created and saved successfully`, setDialogueText);
+                            } else {
+                                setDialogueWithRevert("Failed to create state", setDialogueText);
+                            }
+                        });
+                    }
                 }
             }
             
@@ -1639,6 +2000,7 @@ export function useWorldEngine({
         commandState,
         chatData,
         lightModeData,
+        searchData,
         viewOffset,
         cursorPos,
         zoomLevel,
@@ -1647,7 +2009,11 @@ export function useWorldEngine({
         backgroundColor,
         backgroundImage,
         backgroundVideo,
+        backgroundStream,
         textColor,
+        searchPattern,
+        isSearchActive,
+        clearSearch,
         getEffectiveCharDims,
         screenToWorld,
         worldToScreen,
@@ -1658,6 +2024,7 @@ export function useWorldEngine({
         handlePanEnd,
         handleKeyDown,
         setViewOffset, // Expose setter
+        setZoomLevel, // Expose zoom setter
         selectionStart,
         selectionEnd,
         handleSelectionStart,

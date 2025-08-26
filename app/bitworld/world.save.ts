@@ -14,7 +14,8 @@ export function useWorldSave(
     localWorldData: WorldData,
     setLocalWorldData: (data: WorldData) => void,
     localSettings: WorldSettings,
-    setLocalSettings: (settings: WorldSettings) => void
+    setLocalSettings: (settings: WorldSettings) => void,
+    autoLoadData: boolean = true
 ) {
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -44,6 +45,14 @@ export function useWorldSave(
         const settingsRef = ref(database, `worlds/${worldId}/settings`);
 
         const handleData = (snapshot: DataSnapshot) => {
+            if (!autoLoadData) {
+                // Don't auto-load data, but still track it for saving purposes
+                const data = snapshot.val() as WorldData | null;
+                const initialData = data || {};
+                lastSyncedDataRef.current = { ...initialData };
+                return;
+            }
+            
             const data = snapshot.val() as WorldData | null;
             const initialData = data || {};
             if (JSON.stringify(initialData) !== JSON.stringify(lastSyncedDataRef.current)) {

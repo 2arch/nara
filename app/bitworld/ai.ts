@@ -248,34 +248,122 @@ export async function generateImage(prompt: string): Promise<string | null> {
  */
 export async function generateVideo(prompt: string): Promise<string | null> {
     try {
+        console.log('Starting video generation with prompt:', prompt);
+        
         // Start the video generation operation
         let operation = await ai.models.generateVideos({
             model: 'veo-3.0-generate-preview',
             prompt: prompt,
         });
 
+        console.log('Initial operation response:', operation);
+
         // Poll the operation status until the video is ready
-        while (!operation.done) {
-            console.log("Waiting for video generation to complete...");
+        let pollCount = 0;
+        let maxPolls = 60; // Maximum 5 minutes of polling (60 * 5 seconds)
+        
+        while (!operation.done && pollCount < maxPolls) {
+            pollCount++;
+            console.log(`Waiting for video generation to complete... (poll ${pollCount})`);
             await new Promise((resolve) => setTimeout(resolve, 5000)); // Poll every 5 seconds
-            operation = await ai.operations.getVideosOperation({
-                operation: operation,
+            
+            try {
+                // The getVideosOperation expects an object with the operation
+                operation = await ai.operations.getVideosOperation({
+                    operation: operation
+                });
+            } catch (pollError) {
+                console.error(`Error polling operation (attempt ${pollCount}):`, pollError);
+                // If the operation is not responding properly, we might have a stale operation
+                // Continue with the existing operation object
+            }
+            
+            console.log(`Poll ${pollCount} response:`, operation);
+            console.log(`Poll ${pollCount} details:`, {
+                done: operation.done,
+                hasResponse: !!operation.response,
+                hasError: !!operation.error,
+                hasMetadata: !!operation.metadata,
+                operationName: operation.name,
+                fullOperation: JSON.stringify(operation, null, 2)
             });
         }
+        
+        if (pollCount >= maxPolls) {
+            console.error('Video generation timed out after 5 minutes');
+            return null;
+        }
+
+        console.log('Operation completed. Full response:', operation);
 
         // Get the generated video from the completed operation
         const generatedVideo = operation.response?.generatedVideos?.[0];
+        console.log('Generated video object:', generatedVideo);
+        
+        // Check if we have video bytes directly
         if (generatedVideo?.video?.videoBytes) {
             // Convert base64 video bytes to data URL
             const mimeType = generatedVideo.video.mimeType || 'video/mp4';
             const dataUrl = `data:${mimeType};base64,${generatedVideo.video.videoBytes}`;
+            console.log('Video data URL created successfully from bytes');
             return dataUrl;
         }
+        
+        // Check if we have a URI to download the video from
+        if (generatedVideo?.video?.uri) {
+            console.log('Video URI received:', generatedVideo.video.uri);
+            
+            try {
+                // Fetch the video from the URI
+                const response = await fetch(generatedVideo.video.uri);
+                if (!response.ok) {
+                    console.error('Failed to fetch video from URI:', response.status, response.statusText);
+                    return null;
+                }
+                
+                // Get the video as a blob
+                const blob = await response.blob();
+                console.log('Video blob received, size:', blob.size, 'type:', blob.type);
+                
+                // Convert blob to data URL
+                return new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        const dataUrl = reader.result as string;
+                        console.log('Video data URL created successfully from URI');
+                        resolve(dataUrl);
+                    };
+                    reader.onerror = () => {
+                        console.error('Failed to convert video blob to data URL');
+                        resolve(null);
+                    };
+                    reader.readAsDataURL(blob);
+                });
+            } catch (fetchError) {
+                console.error('Error fetching video from URI:', fetchError);
+                // As a fallback, just return the URI directly
+                console.log('Returning URI directly as fallback');
+                return generatedVideo.video.uri;
+            }
+        }
 
-        console.warn('No video data received from generation');
+        // Check for RAI (Responsible AI) filtering
+        if (generatedVideo?.raiReason) {
+            console.warn('Video generation blocked by RAI:', generatedVideo.raiReason);
+        }
+
+        console.warn('No video data received from generation. Full response structure:', JSON.stringify(operation, null, 2));
         return null;
     } catch (error) {
         console.error('Error generating video:', error);
+        // Log more details about the error
+        if (error instanceof Error) {
+            console.error('Error details:', {
+                message: error.message,
+                stack: error.stack,
+                name: error.name
+            });
+        }
         return null;
     }
 }

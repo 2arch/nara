@@ -1,7 +1,7 @@
 // components/Dialogue.tsx
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import type { WorldEngine } from './world.engine';
+import type { WorldEngine, WorldData } from './world.engine';
 
 // --- Dialogue Constants ---
 const DIALOGUE_FONT_SIZE = 16; // Fixed font size in pixels
@@ -513,10 +513,69 @@ export function useDialogue() {
         return false;
     }, []);
 
+    const calculateMonogramLayout = useCallback((canvasWidth: number, canvasHeight: number, charWidth: number, charHeight: number, monogramText: string): DialogueLayout => {
+        const availableWidthChars = Math.floor(canvasWidth / charWidth);
+        const availableHeightChars = Math.floor(canvasHeight / charHeight);
+        
+        const lines = monogramText.split('\n');
+        const dialogueHeight = lines.length;
+        const maxWidthChars = Math.max(...lines.map(l => l.length));
+
+        return {
+            lines,
+            startRow: availableHeightChars - dialogueHeight - 1, // Positioned at the bottom
+            startCol: availableWidthChars - maxWidthChars - DEBUG_MARGIN_CHARS, // Right-aligned
+            maxWidthChars,
+            dialogueHeight
+        };
+    }, []);
+
+    const renderMonogramControls = useCallback((props: DialogueProps & { monogramText: string }) => {
+        const { canvasWidth, canvasHeight, ctx, monogramText } = props;
+        
+        // Use fixed dimensions for monogram text
+        const charHeight = DEBUG_FONT_SIZE;
+        const charWidth = DEBUG_FONT_SIZE * CHAR_WIDTH_RATIO;
+        const verticalTextOffset = (charHeight - DEBUG_FONT_SIZE) / 2 + (DEBUG_FONT_SIZE * 0.1);
+
+        const monogramLayout = calculateMonogramLayout(canvasWidth, canvasHeight, charWidth, charHeight, monogramText);
+        
+        ctx.save();
+        ctx.font = `${DEBUG_FONT_SIZE}px "${FONT_FAMILY}"`;
+        ctx.textBaseline = 'top';
+        ctx.textAlign = 'right'; // Set text alignment to right
+
+        // Draw background - need to adjust for right-aligned text
+        ctx.fillStyle = DIALOGUE_BACKGROUND_COLOR;
+        for (let lineIndex = 0; lineIndex < monogramLayout.lines.length; lineIndex++) {
+            const rowIndex = monogramLayout.startRow + lineIndex;
+            const line = monogramLayout.lines[lineIndex];
+            const screenX = (monogramLayout.startCol + monogramLayout.maxWidthChars) * charWidth; // Right edge
+            const screenY = rowIndex * charHeight;
+            const lineWidth = line.length * charWidth;
+            // Draw background from right edge leftward
+            ctx.fillRect(screenX - lineWidth, screenY, lineWidth, charHeight);
+        }
+        
+        // Draw text (right-aligned)
+        ctx.fillStyle = DIALOGUE_TEXT_COLOR;
+        for (let lineIndex = 0; lineIndex < monogramLayout.lines.length; lineIndex++) {
+            const rowIndex = monogramLayout.startRow + lineIndex;
+            const line = monogramLayout.lines[lineIndex];
+            const screenX = (monogramLayout.startCol + monogramLayout.maxWidthChars) * charWidth; // Right edge
+            const screenY = rowIndex * charHeight;
+            ctx.fillText(line, screenX, screenY + verticalTextOffset);
+        }
+        
+        ctx.textAlign = 'left'; // Reset text alignment
+        ctx.restore();
+    }, [calculateMonogramLayout]);
+
     return {
         renderDialogue,
         renderDebugDialogue,
         renderNavDialogue,
+        renderMonogramControls,
         handleNavClick,
     };
 }
@@ -524,10 +583,35 @@ export function useDialogue() {
 export function useDebugDialogue(engine: WorldEngine) {
     const [isClient, setIsClient] = useState(false);
     const [debugText, setDebugText] = useState('');
+    const [lastChar, setLastChar] = useState<{char: string, x: number, y: number} | null>(null);
+    const prevWorldDataRef = useRef<WorldData>({});
     
     useEffect(() => {
         setIsClient(true);
     }, []);
+    
+    // Track worldData changes
+    useEffect(() => {
+        if (!isClient || !engine.settings.isDebugVisible) return;
+        
+        // Find the most recent addition
+        for (const key in engine.worldData) {
+            if (!prevWorldDataRef.current[key] && !key.startsWith('block_') && !key.startsWith('label_') && !key.startsWith('deepspawn_')) {
+                const [xStr, yStr] = key.split(',');
+                const x = parseInt(xStr, 10);
+                const y = parseInt(yStr, 10);
+                const char = engine.worldData[key];
+                
+                if (!isNaN(x) && !isNaN(y) && char) {
+                    setLastChar({ char, x, y });
+                    break;
+                }
+            }
+        }
+        
+        // Update reference
+        prevWorldDataRef.current = { ...engine.worldData };
+    }, [engine.worldData, engine.settings.isDebugVisible, isClient]);
     
     useEffect(() => {
         if (!isClient || !engine.settings.isDebugVisible) {
@@ -540,6 +624,7 @@ export function useDebugDialogue(engine: WorldEngine) {
         
         const text = [
             `Cursor: (${engine.cursorPos.x}, ${engine.cursorPos.y})`,
+            lastChar ? `Last char: ${lastChar.char}, ${lastChar.x}, ${lastChar.y}` : 'Last char: --, --, --',
             `Distance: ${distance.toFixed(2)}`,
             `Points: ${angleData ? 2 : 0}`,
             angleData 
@@ -554,7 +639,7 @@ export function useDebugDialogue(engine: WorldEngine) {
         ].join('\n');
         
         setDebugText(text);
-    }, [isClient, engine.cursorPos, engine.viewOffset, engine.getCursorDistanceFromCenter, engine.getAngleDebugData, engine.settings.isDebugVisible]);
+    }, [isClient, engine.cursorPos, engine.viewOffset, engine.getCursorDistanceFromCenter, engine.getAngleDebugData, engine.settings.isDebugVisible, lastChar]);
     
     return { debugText };
 }

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Point, WorldData } from './world.engine';
 import { generateImage, generateVideo } from './ai';
@@ -26,7 +26,7 @@ export interface CommandExecution {
 
 // --- Mode System Types ---
 export type CanvasMode = 'air' | 'light' | 'chat';
-export type BackgroundMode = 'transparent' | 'color' | 'image' | 'video' | 'space';
+export type BackgroundMode = 'transparent' | 'color' | 'image' | 'video' | 'space' | 'stream';
 
 export interface ModeState {
     currentMode: CanvasMode;
@@ -35,24 +35,30 @@ export interface ModeState {
     backgroundColor: string;
     backgroundImage?: string; // URL or data URL for generated images
     backgroundVideo?: string; // URL or data URL for generated videos
+    backgroundStream?: MediaStream; // MediaStream for screen share
     textColor: string;
+    textBackground?: string; // Background color for text
+    searchPattern: string; // Current search pattern
+    isSearchActive: boolean; // Whether search highlighting is active
 }
 
 interface UseCommandSystemProps {
     setDialogueText: (text: string) => void;
     initialBackgroundColor?: string;
     getAllLabels?: () => Array<{text: string, x: number, y: number, color: string}>;
+    availableStates?: string[];
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'deepspawn', 'chat', 'bg', 'nav'];
+const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'deepspawn', 'chat', 'bg', 'nav', 'search', 'state'];
 const MODE_COMMANDS = ['air', 'light', 'chat'];
-const BG_COMMANDS = ['clear', 'live', 'white', 'black'];
+const BG_COMMANDS = ['clear', 'live', 'white', 'black', 'web'];
 const NAV_COMMANDS: string[] = [];
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates = [] }: UseCommandSystemProps) {
     const router = useRouter();
+    const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const [commandState, setCommandState] = useState<CommandState>({
         isActive: false,
         input: '',
@@ -68,11 +74,15 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
     const [modeState, setModeState] = useState<ModeState>({
         currentMode: 'air',
         lightModeData: {},
-        backgroundMode: 'space', // Default to space background
-        backgroundColor: '#FFFFFF',
+        backgroundMode: 'color', // Default to color background
+        backgroundColor: '#FFFFFF', // White background
         backgroundImage: undefined,
         backgroundVideo: undefined,
-        textColor: '#FFFFFF', // White text for space background by default
+        backgroundStream: undefined,
+        textColor: '#000000', // Black text on white background
+        textBackground: undefined, // No text background by default
+        searchPattern: '', // No search pattern initially
+        isSearchActive: false, // Search not active initially
     });
 
     // Utility function to match commands based on input
@@ -129,9 +139,58 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             }
             return labelNames.length > 0 ? labelNames.map(label => `nav ${label}`) : ['nav'];
         }
+
+        if (lowerInput === 'search') {
+            const parts = input.split(' ');
+            if (parts.length > 1) {
+                // Return the full search command with its arguments
+                return [input];
+            }
+            return ['search'];
+        }
+
+        if (lowerInput === 'state') {
+            const parts = input.toLowerCase().split(' ');
+            if (parts.length > 1) {
+                const secondArg = parts[1];
+                
+                // Handle --rm flag
+                if (secondArg === '--rm') {
+                    if (parts.length > 2) {
+                        // After --rm, show state suggestions that match the input
+                        const stateInput = parts[2];
+                        const suggestions = availableStates
+                            .filter(state => state.toLowerCase().startsWith(stateInput))
+                            .map(state => `state --rm ${state}`);
+                        
+                        const currentCommand = `state --rm ${stateInput}`;
+                        if (stateInput.length > 0 && !suggestions.some(s => s === currentCommand)) {
+                             return [currentCommand, ...suggestions];
+                        }
+                        return suggestions;
+                    }
+                    // Just typed --rm, show all states for deletion
+                    return availableStates.length > 0 ? availableStates.map(state => `state --rm ${state}`) : ['state --rm <name>'];
+                } else {
+                    // Regular state command suggestions
+                    const stateInput = secondArg;
+                    const suggestions = availableStates
+                        .filter(state => state.toLowerCase().startsWith(stateInput))
+                        .map(state => `state ${state}`);
+                    
+                    const currentCommand = `state ${stateInput}`;
+                    if (stateInput.length > 0 && !suggestions.some(s => s === currentCommand)) {
+                         return [currentCommand, ...suggestions];
+                    }
+                    return suggestions;
+                }
+            }
+            // Show only available states as suggestions (no --rm in basic suggestions)
+            return availableStates.length > 0 ? availableStates.map(state => `state ${state}`) : ['state <name>'];
+        }
         
         return AVAILABLE_COMMANDS.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
-    }, [getAllLabels]);
+    }, [getAllLabels, availableStates]);
 
     // Mode switching functionality
     const switchMode = useCallback((newMode: CanvasMode) => {
@@ -147,7 +206,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         });
     }, []);
 
-    const switchBackgroundMode = useCallback((newMode: BackgroundMode, bgColor?: string, textColor?: string): boolean => {
+    const switchBackgroundMode = useCallback((newMode: BackgroundMode, bgColor?: string, textColor?: string, textBg?: string): boolean => {
         if (newMode === 'color' && bgColor) {
             const colorMap: { [name: string]: string } = {
                 'white': '#FFFFFF',
@@ -180,25 +239,39 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 finalTextColor = luma < 128 ? '#FFFFFF' : '#000000';
             }
 
+            let finalTextBg: string | undefined;
+            if (textBg) {
+                // User specified text background - validate it
+                const hexTextBg = (colorMap[textBg.toLowerCase()] || textBg).toUpperCase();
+                if (!/^#[0-9A-F]{6}$/i.test(hexTextBg)) {
+                    setDialogueText(`Invalid text background: ${textBg}. Please use a name (e.g., white) or hex code (e.g., #1a1a1a).`);
+                    return false;
+                }
+                finalTextBg = hexTextBg;
+            }
+
             setModeState(prev => ({
                 ...prev,
                 backgroundMode: 'color',
                 backgroundColor: hexBgColor,
                 textColor: finalTextColor,
+                textBackground: finalTextBg,
             }));
         } else if (newMode === 'transparent') {
             setModeState(prev => ({
                 ...prev,
                 backgroundMode: 'transparent',
                 backgroundImage: undefined,
-                textColor: '#FFFFFF', // Set text to white for transparent background
+                textColor: textColor || '#FFFFFF', // Default to white text for transparent background
+                textBackground: textBg,
             }));
         } else if (newMode === 'space') {
             setModeState(prev => ({
                 ...prev,
                 backgroundMode: 'space',
                 backgroundImage: undefined,
-                textColor: '#FFFFFF', // White text for space background
+                textColor: textColor || '#FFFFFF', // Default to white text for space background
+                textBackground: textBg,
             }));
         } else if (newMode === 'image' && bgColor) {
             // bgColor is actually the image URL/data for image mode
@@ -208,6 +281,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 backgroundImage: bgColor, // Using bgColor parameter as image URL
                 backgroundVideo: undefined,
                 textColor: textColor || '#FFFFFF', // Default to white text on images
+                textBackground: textBg,
             }));
         } else if (newMode === 'video' && bgColor) {
             // bgColor is actually the video URL/data for video mode
@@ -217,16 +291,27 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 backgroundImage: undefined,
                 backgroundVideo: bgColor, // Using bgColor parameter as video URL
                 textColor: textColor || '#FFFFFF', // Default to white text on videos
+                textBackground: textBg,
+            }));
+        } else if (newMode === 'stream') {
+            // Stream mode for screen sharing
+            setModeState(prev => ({
+                ...prev,
+                backgroundMode: 'stream',
+                backgroundImage: undefined,
+                backgroundVideo: undefined,
+                textColor: textColor || '#FFFFFF', // Default to white text on stream
+                textBackground: textBg,
             }));
         }
         return true;
     }, [setDialogueText]);
 
     useEffect(() => {
-        if (initialBackgroundColor) {
+        if (initialBackgroundColor && modeState.backgroundMode !== 'stream') {
             switchBackgroundMode('color', initialBackgroundColor);
         }
-    }, [initialBackgroundColor, switchBackgroundMode]);
+    }, [initialBackgroundColor]); // Removed switchBackgroundMode to avoid dependency issues
 
     // Add ephemeral text in light mode (disappears after 2 seconds)
     const addEphemeralText = useCallback((pos: Point, char: string) => {
@@ -427,55 +512,184 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         if (selectedCommand.startsWith('bg')) {
             const inputParts = commandState.input.trim().split(/\s+/);
             const bgArg = inputParts.length > 1 ? inputParts[1] : undefined;
-            const restOfInput = inputParts.slice(2).join(' '); // Everything after 'bg clear'
+            
+            // Extract optional parameters
+            const param2 = inputParts.length > 2 ? inputParts[2] : undefined;
+            const param3 = inputParts.length > 3 ? inputParts[3] : undefined;
+            const restOfInput = inputParts.slice(2).join(' '); // For AI prompts
 
             if (bgArg === 'clear') {
-                if (restOfInput.trim()) {
+                // Parse quoted prompt and color parameters
+                let prompt = '';
+                let textColorParam: string | undefined;
+                let textBgParam: string | undefined;
+                
+                // Join all parts after 'bg clear' to handle quoted strings
+                const fullInput = inputParts.slice(2).join(' ');
+                
+                // Check if there's a quoted prompt
+                const quoteMatch = fullInput.match(/^'([^']*)'(.*)$/);
+                
+                if (quoteMatch) {
+                    // Quoted prompt found
+                    prompt = quoteMatch[1];
+                    const remainingParams = quoteMatch[2].trim().split(/\s+/).filter(p => p.length > 0);
+                    
+                    if (remainingParams.length > 0) {
+                        textColorParam = remainingParams[0];
+                    }
+                    if (remainingParams.length > 1) {
+                        textBgParam = remainingParams[1];
+                    }
+                } else {
+                    // No quotes - use the old behavior for backward compatibility
+                    // Just take first two params as colors if they exist
+                    if (param2) {
+                        textColorParam = param2;
+                    }
+                    if (param3) {
+                        textBgParam = param3;
+                    }
+                }
+                
+                if (prompt.trim()) {
                     // 'bg clear' with a prompt - generate AI image
                     setDialogueText("Generating background image...");
-                    generateImage(restOfInput).then((imageUrl) => {
+                    generateImage(prompt).then((imageUrl) => {
                         if (imageUrl) {
-                            switchBackgroundMode('image', imageUrl);
-                            setDialogueText(`"${restOfInput}"`);
+                            switchBackgroundMode('image', imageUrl, textColorParam, textBgParam);
+                            setDialogueText(`"${prompt}"`);
                         } else {
                             // Fallback to space background if image generation fails
-                            switchBackgroundMode('space');
+                            switchBackgroundMode('space', undefined, textColorParam, textBgParam);
                             setDialogueText("Image generation not available, using space background.");
                         }
                     }).catch(() => {
-                        switchBackgroundMode('space');
+                        switchBackgroundMode('space', undefined, textColorParam, textBgParam);
                         setDialogueText("Image generation failed, using space background.");
                     });
                 } else {
                     // 'bg clear' without prompt - show space background
-                    switchBackgroundMode('space');
+                    switchBackgroundMode('space', undefined, param2, param3);
                 }
             } else if (bgArg === 'live') {
-                if (restOfInput.trim()) {
+                // Parse quoted prompt and color parameters
+                let prompt = '';
+                let textColorParam: string | undefined;
+                let textBgParam: string | undefined;
+                
+                // Join all parts after 'bg live' to handle quoted strings
+                const fullInput = inputParts.slice(2).join(' ');
+                
+                // Check if there's a quoted prompt
+                const quoteMatch = fullInput.match(/^'([^']*)'(.*)$/);
+                
+                if (quoteMatch) {
+                    // Quoted prompt found
+                    prompt = quoteMatch[1];
+                    const remainingParams = quoteMatch[2].trim().split(/\s+/).filter(p => p.length > 0);
+                    
+                    if (remainingParams.length > 0) {
+                        textColorParam = remainingParams[0];
+                    }
+                    if (remainingParams.length > 1) {
+                        textBgParam = remainingParams[1];
+                    }
+                } else {
+                    // No quotes - use the old behavior for backward compatibility
+                    // Just take first two params as colors if they exist
+                    if (param2) {
+                        textColorParam = param2;
+                    }
+                    if (param3) {
+                        textBgParam = param3;
+                    }
+                }
+                
+                if (prompt.trim()) {
                     // 'bg live' with a prompt - generate AI video
                     setDialogueText("Generating background video...");
-                    generateVideo(restOfInput).then((videoUrl) => {
+                    generateVideo(prompt).then((videoUrl) => {
                         if (videoUrl) {
-                            switchBackgroundMode('video', videoUrl);
-                            setDialogueText(`"${restOfInput}"`);
+                            switchBackgroundMode('video', videoUrl, textColorParam, textBgParam);
+                            setDialogueText(`"${prompt}"`);
                         } else {
                             // Fallback to space background if video generation fails
-                            switchBackgroundMode('space');
+                            switchBackgroundMode('space', undefined, textColorParam, textBgParam);
                             setDialogueText("Video generation not available, using space background.");
                         }
                     }).catch(() => {
-                        switchBackgroundMode('space');
+                        switchBackgroundMode('space', undefined, textColorParam, textBgParam);
                         setDialogueText("Video generation failed, using space background.");
                     });
                 } else {
                     // 'bg live' without prompt - show space background
-                    switchBackgroundMode('space');
-                    setDialogueText("Video generation requires a prompt. Use: /bg live [your prompt]");
+                    switchBackgroundMode('space', undefined, param2, param3);
+                    setDialogueText("Video generation requires a prompt. Use: /bg live 'your prompt'");
+                }
+            } else if (bgArg === 'web') {
+                // Handle web screen sharing with optional text color and background
+                const textColorArg = param2 || '#FFFFFF'; // Default to white text
+                const textBgArg = param3; // Optional text background
+                
+                if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+                    navigator.mediaDevices.getDisplayMedia({
+                        video: true,
+                        audio: false
+                    }).then((stream) => {
+                        // Store stream in ref to persist across renders
+                        backgroundStreamRef.current = stream;
+                        
+                        // Validate and set text color
+                        const colorMap: { [name: string]: string } = {
+                            'white': '#FFFFFF',
+                            'black': '#000000',
+                        };
+                        const hexTextColor = (colorMap[textColorArg.toLowerCase()] || textColorArg).toUpperCase();
+                        const validTextColor = /^#[0-9A-F]{6}$/i.test(hexTextColor) ? hexTextColor : '#FFFFFF';
+                        
+                        // Validate text background if provided
+                        let validTextBg: string | undefined;
+                        if (textBgArg) {
+                            const hexTextBg = (colorMap[textBgArg.toLowerCase()] || textBgArg).toUpperCase();
+                            validTextBg = /^#[0-9A-F]{6}$/i.test(hexTextBg) ? hexTextBg : undefined;
+                        }
+                        
+                        setModeState(prev => ({
+                            ...prev,
+                            backgroundMode: 'stream',
+                            backgroundStream: stream,
+                            textColor: validTextColor,
+                            textBackground: validTextBg,
+                        }));
+                        setDialogueText("Screen sharing active");
+                        
+                        // Listen for stream end
+                        stream.getVideoTracks()[0].onended = () => {
+                            backgroundStreamRef.current = undefined;
+                            setModeState(prev => ({
+                                ...prev,
+                                backgroundMode: 'color',
+                                backgroundColor: '#FFFFFF',
+                                backgroundStream: undefined,
+                                textColor: '#000000',
+                                textBackground: undefined,
+                            }));
+                            setDialogueText("Screen sharing ended");
+                        };
+                    }).catch((err) => {
+                        console.error('Error accessing screen share:', err);
+                        setDialogueText("Screen sharing cancelled or not available");
+                    });
+                } else {
+                    setDialogueText("Screen sharing not supported in this browser");
                 }
             } else if (bgArg) {
-                const textArg = inputParts.length > 2 ? inputParts[2] : undefined;
-                switchBackgroundMode('color', bgArg, textArg);
+                // Format: /bg {backgroundColor} {textColor} {textBackground}
+                // All parameters are optional
+                switchBackgroundMode('color', bgArg, param2, param3);
             } else {
+                // No arguments - default to white background
                 switchBackgroundMode('color', '#FFFFFF');
             }
             
@@ -525,6 +739,65 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             }
             
             return { command: 'nav', args: [], commandStartPos: commandState.commandStartPos };
+        }
+
+        if (selectedCommand.startsWith('search')) {
+            const inputParts = commandState.input.trim().split(/\s+/);
+            const searchTerm = inputParts.slice(1).join(' ');
+            
+            if (searchTerm) {
+                // Activate search with the term
+                setModeState(prev => ({
+                    ...prev,
+                    searchPattern: searchTerm,
+                    isSearchActive: true
+                }));
+                setDialogueText(`Search active: "${searchTerm}" - Press Escape to clear`);
+            } else {
+                // No search term - clear search
+                setModeState(prev => ({
+                    ...prev,
+                    searchPattern: '',
+                    isSearchActive: false
+                }));
+                setDialogueText("Search cleared");
+            }
+            
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 }
+            });
+            setCommandData({});
+            
+            return null;
+        }
+
+        if (selectedCommand.startsWith('state')) {
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 }
+            });
+            setCommandData({});
+            
+            // Use the selected command instead of the typed input
+            // Extract arguments from selected command (format: "state [--rm] statename")
+            const commandParts = selectedCommand.split(' ');
+            const args = commandParts.slice(1); // Everything after 'state'
+            
+            // Return command execution for world engine to handle
+            return {
+                command: 'state',
+                args: args,
+                commandStartPos: commandState.commandStartPos
+            };
         }
         
         // Handle commands that need text selection
@@ -710,6 +983,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         backgroundColor: modeState.backgroundColor,
         backgroundImage: modeState.backgroundImage,
         backgroundVideo: modeState.backgroundVideo,
+        backgroundStream: backgroundStreamRef.current || modeState.backgroundStream,
         textColor: modeState.textColor,
+        textBackground: modeState.textBackground,
+        searchPattern: modeState.searchPattern,
+        isSearchActive: modeState.isSearchActive,
+        clearSearch: () => setModeState(prev => ({ ...prev, searchPattern: '', isSearchActive: false })),
     };
 }

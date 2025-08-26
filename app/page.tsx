@@ -150,7 +150,7 @@ export default function Home() {
   return (
     <div className="relative">
       <div className="fixed top-0 left-0 w-screen h-screen z-0">
-        <InteractiveBitCanvas monogramEnabled={true} dialogueEnabled={false} gifLibrary={gifLibrary} pngLibrary={pngLibrary} />
+        <InteractiveBitCanvas monogramEnabled={false} dialogueEnabled={false} gifLibrary={gifLibrary} />
       </div>
       <main className="relative z-10">
         {/* Interactive Dialogue Header */}
@@ -182,7 +182,7 @@ export default function Home() {
           <div className="px-4 pb-2">
             <h2 className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace' }}>truly infinite</h2>
           </div>
-          <Half animation={<InfiniteGridAnimation />} gifName="main">
+          <Half animation={<InfiniteGridAnimation />} gifName="bike">
             <div className="inline-block" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#FFFFFF', fontFamily: 'IBM Plex Mono, monospace', padding: '16px', maxWidth: '400px' }}>
               <p className="mb-4">break free from the constraints of traditional documents and linear thinking</p>
               <p className="mb-4">nara provides an infinite canvas where ideas can grow organically</p>

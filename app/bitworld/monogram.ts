@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Point } from './world.engine';
 
 // --- Monogram Pattern Types ---
-export type MonogramMode = 'plasma' | 'waves' | 'cellular' | 'spiral' | 'noise';
+export type MonogramMode = 'plasma' | 'spiral' | 'nara';
 
 export interface MonogramCell {
     char: string;
@@ -29,7 +29,7 @@ const useMonogramSystem = () => {
         speed: 1.0,
         complexity: 1.0,
         colorShift: 0,
-        enabled: true
+        enabled: false
     });
 
     const timeRef = useRef<number>(0);
@@ -57,10 +57,8 @@ const useMonogramSystem = () => {
     const getCharForIntensity = useCallback((intensity: number, mode: MonogramMode): string => {
         const chars = {
             plasma: [' ', '░', '▒', '▓', '█'],
-            waves: [' ', '░', '▒', '▓', '█'],
-            cellular: [' ', '░', '▒', '▓', '█'],
             spiral: [' ', '░', '▒', '▓', '█'],
-            noise: [' ', '░', '▒', '▓', '█'],
+            nara: [' ', '.', ':', '+', '#', 'N', 'A', 'R', 'A'],
         };
         
         const charSet = chars[mode] || chars.plasma;
@@ -86,30 +84,6 @@ const useMonogramSystem = () => {
         return (plasma1 + plasma2 + plasma3 + plasma4) / 4;
     }, [options.complexity]);
 
-    // Wave interference patterns
-    const calculateWaves = useCallback((x: number, y: number, time: number): number => {
-        const complexity = options.complexity;
-        const wave1 = Math.sin(Math.sqrt(x * x + y * y) * 0.2 * complexity + time * 2);
-        const wave2 = Math.sin((x - Math.sin(time * 0.5) * 10) * 0.15 * complexity + time);
-        const wave3 = Math.sin((y - Math.cos(time * 0.3) * 10) * 0.15 * complexity + time * 1.5);
-        const wave4 = Math.sin((x + y) * 0.1 * complexity + time * 0.8);
-        
-        return (wave1 + wave2 + wave3 + wave4) / 4;
-    }, [options.complexity]);
-
-    // Cellular automata-like pattern
-    const calculateCellular = useCallback((x: number, y: number, time: number): number => {
-        const complexity = options.complexity;
-        const cellX = Math.floor(x / (4 / complexity));
-        const cellY = Math.floor(y / (4 / complexity));
-        
-        const seed = Math.sin(cellX * 12.9898 + cellY * 78.233 + time * 0.5) * 43758.5453;
-        const noise = (seed % 1 + 1) % 1; // Ensure positive
-        
-        const neighbors = Math.sin(cellX + cellY + time) * 0.5 + 0.5;
-        return (noise + neighbors * 0.7) / 1.7;
-    }, [options.complexity]);
-
     // Spiral pattern
     const calculateSpiral = useCallback((x: number, y: number, time: number): number => {
         const complexity = options.complexity;
@@ -127,42 +101,106 @@ const useMonogramSystem = () => {
         return (spiral + radialWave) / 2;
     }, [options.complexity]);
 
-    // Perlin-like noise pattern
-    const calculateNoise = useCallback((x: number, y: number, time: number): number => {
+    // NARA text with reaction-diffusion
+    const calculateNara = useCallback((x: number, y: number, time: number): number => {
         const complexity = options.complexity;
         
-        // Multi-octave noise simulation
-        let value = 0;
-        let amplitude = 1;
-        let frequency = 0.02 * complexity;
+        // Define NARA text pattern (each letter is ~6 units wide, 5 units tall)
+        const naraPattern = {
+            // N (x: 0-4)
+            'N': (px: number, py: number) => {
+                if (py < 0 || py >= 5) return 0;
+                if (px === 0 || px === 4) return 1;
+                if (px === 1 && py === 1) return 1;
+                if (px === 2 && py === 2) return 1;
+                if (px === 3 && py === 3) return 1;
+                return 0;
+            },
+            // A (x: 6-10)
+            'A': (px: number, py: number) => {
+                if (py < 0 || py >= 5) return 0;
+                if (py === 0 && px >= 1 && px <= 3) return 1;
+                if (py === 2 && px >= 1 && px <= 3) return 1;
+                if ((px === 0 || px === 4) && py >= 1) return 1;
+                return 0;
+            },
+            // R (x: 12-16)
+            'R1': (px: number, py: number) => {
+                if (py < 0 || py >= 5) return 0;
+                if (px === 0) return 1;
+                if (py <= 2 && px === 4) return 1;
+                if ((py === 0 || py === 2) && px >= 1 && px <= 3) return 1;
+                if (py === 3 && px === 2) return 1;
+                if (py === 4 && px === 3) return 1;
+                return 0;
+            },
+            // A (x: 18-22)
+            'A2': (px: number, py: number) => {
+                if (py < 0 || py >= 5) return 0;
+                if (py === 0 && px >= 1 && px <= 3) return 1;
+                if (py === 2 && px >= 1 && px <= 3) return 1;
+                if ((px === 0 || px === 4) && py >= 1) return 1;
+                return 0;
+            }
+        };
         
-        for (let i = 0; i < 4; i++) {
-            const noiseX = x * frequency + time * 0.5;
-            const noiseY = y * frequency + time * 0.3;
-            
-            // Simple noise function using sine waves
-            const noise = Math.sin(noiseX * 12.9898) * Math.sin(noiseY * 78.233) + 
-                         Math.sin(noiseX * 32.421) * Math.sin(noiseY * 19.177);
-            
-            value += noise * amplitude;
-            amplitude *= 0.5;
-            frequency *= 2;
+        // Center the text
+        const centerX = Math.sin(time * 0.1) * 2;
+        const centerY = Math.cos(time * 0.15) * 1;
+        const textX = x - centerX;
+        const textY = y - centerY + 2;
+        
+        // Get base text intensity
+        let textIntensity = 0;
+        
+        // Check N
+        if (textX >= 0 && textX < 5) {
+            textIntensity = naraPattern.N(Math.floor(textX), Math.floor(textY));
+        }
+        // Check A
+        else if (textX >= 6 && textX < 11) {
+            textIntensity = naraPattern.A(Math.floor(textX - 6), Math.floor(textY));
+        }
+        // Check R
+        else if (textX >= 12 && textX < 17) {
+            textIntensity = naraPattern.R1(Math.floor(textX - 12), Math.floor(textY));
+        }
+        // Check A
+        else if (textX >= 18 && textX < 23) {
+            textIntensity = naraPattern.A2(Math.floor(textX - 18), Math.floor(textY));
         }
         
-        return (value + 1) / 2; // Normalize to 0-1
+        // Apply reaction-diffusion effect
+        const reactionA = Math.sin(x * 0.1 * complexity + time) * 0.5 + 0.5;
+        const reactionB = Math.cos(y * 0.1 * complexity + time * 1.2) * 0.5 + 0.5;
+        const diffusion = Math.sin((x + y) * 0.05 * complexity + time * 0.8) * 0.3 + 0.7;
+        
+        // Blend text with reaction-diffusion
+        const fluidEffect = (reactionA * reactionB * diffusion) * 0.6;
+        const distanceFromText = Math.min(
+            Math.abs(textX - 11.5), // Distance from center of "NARA"
+            Math.abs(textY - 2.5)
+        );
+        
+        // Create flowing effect that spreads from text
+        const flowRadius = 8 + Math.sin(time * 0.5) * 3;
+        const flowIntensity = Math.max(0, (flowRadius - distanceFromText) / flowRadius);
+        
+        return Math.max(
+            textIntensity * 0.8, // Original text (slightly dimmed)
+            fluidEffect * flowIntensity * 0.7 // Flowing reaction-diffusion
+        );
     }, [options.complexity]);
 
     // Main pattern calculation function
     const calculatePattern = useCallback((x: number, y: number, time: number, mode: MonogramMode): number => {
         switch (mode) {
             case 'plasma': return calculatePlasma(x, y, time);
-            case 'waves': return calculateWaves(x, y, time);
-            case 'cellular': return calculateCellular(x, y, time);
             case 'spiral': return calculateSpiral(x, y, time);
-            case 'noise': return calculateNoise(x, y, time);
+            case 'nara': return calculateNara(x, y, time);
             default: return calculatePlasma(x, y, time);
         }
-    }, [calculatePlasma, calculateWaves, calculateCellular, calculateSpiral, calculateNoise]);
+    }, [calculatePlasma, calculateSpiral, calculateNara]);
 
     // Generate monogram pattern for given viewport bounds
     const generateMonogramPattern = useCallback((
@@ -211,7 +249,7 @@ const useMonogramSystem = () => {
 
     // Cycle to next mode
     const cycleMode = useCallback(() => {
-        const modes: MonogramMode[] = ['plasma', 'waves', 'spiral', 'cellular', 'noise'];
+        const modes: MonogramMode[] = ['plasma', 'spiral', 'nara'];
         setOptions(prev => {
             const currentIndex = modes.indexOf(prev.mode);
             const nextIndex = (currentIndex + 1) % modes.length;

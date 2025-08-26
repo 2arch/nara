@@ -14,8 +14,11 @@ const BACKGROUND_COLOR = '#000000';
 export default function CorbuType() {
     const worldId = "defaultWorld"; // Provide a default or dynamic ID
 
-    // Pass an object containing the worldId to the hook
-    const engine = useWorldEngine({ worldId });
+    // Pass an object containing the worldId to the hook - start with empty data
+    const engine = useWorldEngine({ 
+        worldId,
+        initialWorldData: {} // Explicitly start with empty world data
+    });
 
     // Keep cursor blink state here, as it's purely visual
     const [cursorColorAlternate, setCursorColorAlternate] = useState(false);
@@ -48,7 +51,7 @@ export default function CorbuType() {
             width: '100vw',
             height: '100vh',
             cursor: 'text', // Default cursor style
-            backgroundColor: (engine.backgroundMode === 'image' || engine.backgroundMode === 'video') ? 'transparent' : BACKGROUND_COLOR,
+            backgroundColor: (engine.backgroundMode === 'image' || engine.backgroundMode === 'video' || engine.backgroundMode === 'stream') ? 'transparent' : BACKGROUND_COLOR,
             backgroundImage: engine.backgroundMode === 'image' && engine.backgroundImage 
                 ? `url(${engine.backgroundImage})` 
                 : 'none',
@@ -80,6 +83,33 @@ export default function CorbuType() {
                 />
             )}
             
+            {/* Stream background (screen share) */}
+            {engine.backgroundMode === 'stream' && engine.backgroundStream && (
+                <video
+                    key="screen-share-video"
+                    autoPlay
+                    muted
+                    playsInline
+                    ref={(videoElement) => {
+                        if (videoElement && engine.backgroundStream) {
+                            // Only set srcObject if it's different to avoid re-renders
+                            if (videoElement.srcObject !== engine.backgroundStream) {
+                                videoElement.srcObject = engine.backgroundStream;
+                            }
+                        }
+                    }}
+                    style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        zIndex: 0,
+                    }}
+                />
+            )}
+            
             {/* Main content - positioned above the background */}
             <div style={{ position: 'relative', zIndex: 1, width: '100%', height: '100%' }}>
                 <DialogueHeader dialogueType={dialogueType} />
@@ -87,6 +117,7 @@ export default function CorbuType() {
                 <BitCanvas
                     engine={engine}
                     cursorColorAlternate={cursorColorAlternate}
+                    monogramEnabled={true}
                 />
             </div>
         </div>

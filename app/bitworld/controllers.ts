@@ -199,12 +199,14 @@ export function createCameraController(engine: any): ControllerGroup {
                 action: () => engine.setViewOffset({ x: 0, y: 0 })
             },
             {
-                key: '0',
+                key: 'h',
                 ctrlOrMeta: true,
-                description: 'Reset zoom level',
+                description: 'Reset zoom level (Home zoom)',
                 action: () => {
-                    // Reset zoom to 1.0 if engine supports it
-                    engine.setZoomLevel?.(1.0);
+                    // Reset zoom to 1.0
+                    if (engine.setZoomLevel) {
+                        engine.setZoomLevel(1.0);
+                    }
                 }
             }
         ]

@@ -1,0 +1,950 @@
+
+> nara-1@0.1.0 dev
+> next dev
+
+ ⚠ Port 3000 is in use, trying 3001 instead.
+ ⚠ Port 3001 is in use, trying 3002 instead.
+   ▲ Next.js 15.2.4
+   - Local:        http://localhost:3002
+   - Network:      http://192.168.68.86:3002
+   - Environments: .env.local, .env
+
+ ✓ Starting...
+ ✓ Ready in 2.7s
+ ○ Compiling /home ...
+ ✓ Compiled /home in 4.9s (899 modules)
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ✓ Compiled in 1093ms (351 modules)
+Connected to Firebase
+ GET /home 200 in 74ms
+ ✓ Compiled in 1183ms (899 modules)
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ GET /home 200 in 207ms
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ⨯ ReferenceError: useRef is not defined
+    at useDebugDialogue (app/bitworld/dialogue.tsx:528:29)
+    at BitCanvas (app/bitworld/bit.canvas.tsx:88:43)
+  526 |     const [debugText, setDebugText] = useState('');
+  527 |     const [lastChar, setLastChar] = useState<{char: string, x: number, y: number} | null>(null);
+> 528 |     const prevWorldDataRef = useRef<WorldData>({});
+      |                             ^
+  529 |     
+  530 |     useEffect(() => {
+  531 |         setIsClient(true); {
+  digest: '2347208765'
+}
+ GET /home 500 in 602ms
+Connected to Firebase
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ✓ Compiled in 858ms (899 modules)
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ GET /home 200 in 959ms
+Connected to Firebase
+ ✓ Compiled in 989ms (899 modules)
+ GET /home 200 in 105ms
+ ✓ Compiled in 524ms (899 modules)
+ GET /home 200 in 79ms
+ ✓ Compiled in 503ms (899 modules)
+ GET /home 200 in 53ms
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ GET /home 200 in 692ms
+Connected to Firebase
+ ✓ Compiled in 883ms (899 modules)
+ GET /home 200 in 89ms
+ ✓ Compiled in 337ms (899 modules)
+ GET /home 200 in 173ms
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ GET /home 200 in 693ms
+Connected to Firebase
+ ✓ Compiled in 926ms (899 modules)
+ GET /home 200 in 153ms
+ ✓ Compiled in 752ms (899 modules)
+ GET /home 200 in 87ms
+ ✓ Compiled in 807ms (899 modules)
+ GET /home 200 in 59ms
+ ✓ Compiled in 514ms (899 modules)
+ GET /home 200 in 104ms
+ ✓ Compiled in 760ms (899 modules)
+ GET /home 200 in 78ms
+ ✓ Compiled in 1307ms (899 modules)
+ GET /home 200 in 130ms
+ ✓ Compiled in 951ms (899 modules)
+ GET /home 200 in 128ms
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ GET /home 200 in 795ms
+Connected to Firebase
+ ✓ Compiled in 909ms (899 modules)
+ GET /home 200 in 201ms
+ ✓ Compiled in 573ms (899 modules)
+ GET /home 200 in 66ms
+ ✓ Compiled in 307ms (899 modules)
+ GET /home 200 in 58ms
+ ✓ Compiled in 535ms (899 modules)
+ GET /home 200 in 220ms
+ ✓ Compiled in 450ms (899 modules)
+ GET /home 200 in 57ms
+ ✓ Compiled in 534ms (899 modules)
+ GET /home 200 in 92ms
+ ✓ Compiled in 448ms (899 modules)
+ GET /home 200 in 52ms
+ ✓ Compiled in 663ms (899 modules)
+ GET /home 200 in 143ms
+ ✓ Compiled in 565ms (899 modules)
+ GET /home 200 in 59ms
+ ✓ Compiled in 597ms (899 modules)
+ GET /home 200 in 95ms
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ GET /home 200 in 680ms
+Connected to Firebase
+ ✓ Compiled in 1825ms (899 modules)
+ GET /home 200 in 169ms
+ ✓ Compiled in 702ms (899 modules)
+ GET /home 200 in 241ms
+ ✓ Compiled in 809ms (899 modules)
+ GET /home 200 in 89ms
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ⨯ ReferenceError: Cannot access 'isSearchActive' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:211:8)
+    at CorbuType (app/home/page.tsx:18:34)
+  209 |
+  210 |         setSearchData(newSearchData);
+> 211 |     }, [isSearchActive, searchPattern, worldData]);
+      |        ^
+  212 |     
+  213 |     // === Settings System ===
+  214 |     const { settings, setSettings, updateSettings } = useWorldSettings(); {
+  digest: '1456298105'
+}
+ GET /home 500 in 538ms
+Connected to Firebase
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ✓ Compiled in 565ms (899 modules)
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ⨯ ReferenceError: Cannot access 'isSearchActive' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:211:8)
+    at CorbuType (app/home/page.tsx:18:34)
+  209 |
+  210 |         setSearchData(newSearchData);
+> 211 |     }, [isSearchActive, searchPattern, worldData]);
+      |        ^
+  212 |     
+  213 |     // === Settings System ===
+  214 |     const { settings, setSettings, updateSettings } = useWorldSettings(); {
+  digest: '1456298105'
+}
+ GET /home 500 in 858ms
+Connected to Firebase
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ✓ Compiled in 527ms (899 modules)
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ⨯ ReferenceError: Cannot access 'isSearchActive' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:211:8)
+    at CorbuType (app/home/page.tsx:18:34)
+  209 |
+  210 |         setSearchData(newSearchData);
+> 211 |     }, [isSearchActive, searchPattern, worldData]);
+      |        ^
+  212 |     
+  213 |     // === Settings System ===
+  214 |     const { settings, setSettings, updateSettings } = useWorldSettings(); {
+  digest: '1456298105'
+}
+ GET /home 500 in 552ms
+Connected to Firebase
+ ⨯ ReferenceError: Cannot access 'isSearchActive' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:211:8)
+    at CorbuType (app/home/page.tsx:18:34)
+  209 |
+  210 |         setSearchData(newSearchData);
+> 211 |     }, [isSearchActive, searchPattern, worldData]);
+      |        ^
+  212 |     
+  213 |     // === Settings System ===
+  214 |     const { settings, setSettings, updateSettings } = useWorldSettings(); {
+  digest: '1456298105'
+}
+ GET /home 500 in 105ms
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ✓ Compiled in 1811ms (899 modules)
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ⨯ ReferenceError: Cannot access 'isSearchActive' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:211:8)
+    at CorbuType (app/home/page.tsx:18:34)
+  209 |
+  210 |         setSearchData(newSearchData);
+> 211 |     }, [isSearchActive, searchPattern, worldData]);
+      |        ^
+  212 |     
+  213 |     // === Settings System ===
+  214 |     const { settings, setSettings, updateSettings } = useWorldSettings(); {
+  digest: '1456298105'
+}
+ GET /home 500 in 1573ms
+Connected to Firebase
+ ⨯ ReferenceError: Cannot access 'isSearchActive' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:211:8)
+    at CorbuType (app/home/page.tsx:18:34)
+  209 |
+  210 |         setSearchData(newSearchData);
+> 211 |     }, [isSearchActive, searchPattern, worldData]);
+      |        ^
+  212 |     
+  213 |     // === Settings System ===
+  214 |     const { settings, setSettings, updateSettings } = useWorldSettings(); {
+  digest: '1456298105'
+}
+ GET /home 500 in 90ms
+ ✓ Compiled in 1059ms (899 modules)
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ⨯ ReferenceError: Cannot access 'isSearchActive' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:211:8)
+    at CorbuType (app/home/page.tsx:18:34)
+  209 |
+  210 |         setSearchData(newSearchData);
+> 211 |     }, [isSearchActive, searchPattern, worldData]);
+      |        ^
+  212 |     
+  213 |     // === Settings System ===
+  214 |     const { settings, setSettings, updateSettings } = useWorldSettings(); {
+  digest: '1456298105'
+}
+ GET /home 500 in 534ms
+Connected to Firebase
+ ✓ Compiled in 450ms (899 modules)
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ⨯ ReferenceError: Cannot access 'isSearchActive' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:211:8)
+    at CorbuType (app/home/page.tsx:18:34)
+  209 |
+  210 |         setSearchData(newSearchData);
+> 211 |     }, [isSearchActive, searchPattern, worldData]);
+      |        ^
+  212 |     
+  213 |     // === Settings System ===
+  214 |     const { settings, setSettings, updateSettings } = useWorldSettings(); {
+  digest: '1456298105'
+}
+ GET /home 500 in 358ms
+Connected to Firebase
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ✓ Compiled in 910ms (899 modules)
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ⨯ ReferenceError: Cannot access 'isSearchActive' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:211:8)
+    at CorbuType (app/home/page.tsx:18:34)
+  209 |
+  210 |         setSearchData(newSearchData);
+> 211 |     }, [isSearchActive, searchPattern, worldData]);
+      |        ^
+  212 |     
+  213 |     // === Settings System ===
+  214 |     const { settings, setSettings, updateSettings } = useWorldSettings(); {
+  digest: '1456298105'
+}
+ GET /home 500 in 765ms
+Connected to Firebase
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ✓ Compiled in 793ms (899 modules)
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ⨯ ReferenceError: Cannot access 'isSearchActive' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:211:8)
+    at CorbuType (app/home/page.tsx:18:34)
+  209 |
+  210 |         setSearchData(newSearchData);
+> 211 |     }, [isSearchActive, searchPattern, worldData]);
+      |        ^
+  212 |     
+  213 |     // === Settings System ===
+  214 |     const { settings, setSettings, updateSettings } = useWorldSettings(); {
+  digest: '1456298105'
+}
+ GET /home 500 in 930ms
+Connected to Firebase
+ ⨯ ReferenceError: Cannot access 'isSearchActive' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:211:8)
+    at CorbuType (app/home/page.tsx:18:34)
+  209 |
+  210 |         setSearchData(newSearchData);
+> 211 |     }, [isSearchActive, searchPattern, worldData]);
+      |        ^
+  212 |     
+  213 |     // === Settings System ===
+  214 |     const { settings, setSettings, updateSettings } = useWorldSettings(); {
+  digest: '1456298105'
+}
+ GET /home 500 in 89ms
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ⨯ ./app/bitworld/world.engine.ts
+Module parse failed: Identifier 'commandState' has already been declared (170:12)
+|     ]);
+|     // === Command System ===
+>     const { commandState, commandData, handleKeyDown: handleCommandKeyDown, pendingCommand, executePendingCommand, setPendingCommand, currentMode, addEphemeralText, lightModeData, backgroundMode, backgroundColor, backgroundImage, backgroundVideo, backgroundStream, textColor, searchPattern, isSearchActive, clearSearch } = useCommandSystem({
+|         setDialogueText,
+|         initialBackgroundColor,
+
+Import trace for requested module:
+./app/bitworld/world.engine.ts
+./app/home/page.tsx
+ ○ Compiling /_error ...
+ ⨯ ./app/bitworld/world.engine.ts
+Module parse failed: Identifier 'commandState' has already been declared (170:12)
+|     ]);
+|     // === Command System ===
+>     const { commandState, commandData, handleKeyDown: handleCommandKeyDown, pendingCommand, executePendingCommand, setPendingCommand, currentMode, addEphemeralText, lightModeData, backgroundMode, backgroundColor, backgroundImage, backgroundVideo, backgroundStream, textColor, searchPattern, isSearchActive, clearSearch } = useCommandSystem({
+|         setDialogueText,
+|         initialBackgroundColor,
+
+Import trace for requested module:
+./app/bitworld/world.engine.ts
+./app/home/page.tsx
+ GET /home 500 in 3101ms
+ GET /home 200 in 1027ms
+ ✓ Compiled /_not-found in 1326ms (1232 modules)
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ GET /_next/static/webpack/81df8f2eeb2ee9db.webpack.hot-update.json 404 in 1110ms
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ⨯ ReferenceError: Cannot access 'getAllLabels' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:173:68)
+    at CorbuType (app/home/page.tsx:18:34)
+  171 |         isSearchActive,
+  172 |         clearSearch,
+> 173 |     } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels });
+      |                                                                    ^
+  174 |
+  175 |     // Generate search data when search pattern changes
+  176 |     useEffect(() => { {
+  digest: '2110902563'
+}
+ GET /home 500 in 508ms
+Connected to Firebase
+ ⨯ ReferenceError: Cannot access 'getAllLabels' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:173:68)
+    at CorbuType (app/home/page.tsx:18:34)
+  171 |         isSearchActive,
+  172 |         clearSearch,
+> 173 |     } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels });
+      |                                                                    ^
+  174 |
+  175 |     // Generate search data when search pattern changes
+  176 |     useEffect(() => { {
+  digest: '2110902563'
+}
+ GET /home 500 in 100ms
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ⨯ ./app/bitworld/world.engine.ts
+Module parse failed: Identifier 'getAllLabels' has already been declared (169:10)
+|         settings
+|     ]);
+>     const getAllLabels = useCallback({
+|         "useWorldEngine.useCallback[getAllLabels]": ()=>{
+|             const labels = [];
+
+Import trace for requested module:
+./app/bitworld/world.engine.ts
+./app/home/page.tsx
+ GET /home 500 in 727ms
+ GET /home 500 in 9ms
+ GET /home 500 in 14ms
+ GET /home 500 in 11ms
+ ✓ Compiled in 864ms (1232 modules)
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ GET /home 200 in 223ms
+ GET /_next/static/webpack/81df8f2eeb2ee9db.webpack.hot-update.json 404 in 845ms
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ GET /home 200 in 109ms
+Connected to Firebase
+ GET /home 200 in 71ms
+ ✓ Compiled in 853ms (1232 modules)
+ GET /home 200 in 182ms
+ ✓ Compiled in 503ms (1228 modules)
+ GET /home 200 in 58ms
+ ✓ Compiled in 961ms (1228 modules)
+ GET /home 200 in 88ms
+ ✓ Compiled in 598ms (1228 modules)
+ GET /home 200 in 63ms
+ ✓ Compiled in 961ms (1228 modules)
+ GET /home 200 in 92ms
+ ✓ Compiled in 1213ms (1228 modules)
+ GET /home 200 in 173ms
+ ✓ Compiled in 558ms (1228 modules)
+ GET /home 200 in 95ms
+ ✓ Compiled in 1002ms (1228 modules)
+ GET /home 200 in 58ms
+ ✓ Compiled in 967ms (1228 modules)
+ GET /home 200 in 138ms
+ ✓ Compiled in 629ms (1228 modules)
+ GET /home 200 in 63ms
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ GET /home 200 in 502ms
+Connected to Firebase
+ ✓ Compiled in 684ms (1228 modules)
+ GET /home 200 in 61ms
+ ✓ Compiled in 689ms (1228 modules)
+ GET /home 200 in 51ms
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ⨯ ReferenceError: Cannot access 'settings' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:206:28)
+    at CorbuType (app/home/page.tsx:18:34)
+  204 |             return false;
+  205 |         }
+> 206 |     }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel]);
+      |                            ^
+  207 |
+  208 |     const loadState = useCallback(async (stateName: string): Promise<boolean> => {
+  209 |         if (!worldId) return false; {
+  digest: '4179989604'
+}
+ GET /home 500 in 415ms
+Connected to Firebase
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ✓ Compiled in 705ms (1228 modules)
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ⨯ ReferenceError: Cannot access 'settings' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:206:28)
+    at CorbuType (app/home/page.tsx:18:34)
+  204 |             return false;
+  205 |         }
+> 206 |     }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel]);
+      |                            ^
+  207 |
+  208 |     const loadState = useCallback(async (stateName: string): Promise<boolean> => {
+  209 |         if (!worldId) return false; {
+  digest: '4179989604'
+}
+ GET /home 500 in 768ms
+Connected to Firebase
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ✓ Compiled in 746ms (1228 modules)
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ⨯ ReferenceError: Cannot access 'settings' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:206:28)
+    at CorbuType (app/home/page.tsx:18:34)
+  204 |             return false;
+  205 |         }
+> 206 |     }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel]);
+      |                            ^
+  207 |
+  208 |     const loadState = useCallback(async (stateName: string): Promise<boolean> => {
+  209 |         if (!worldId) return false; {
+  digest: '4179989604'
+}
+ GET /home 500 in 871ms
+Connected to Firebase
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ✓ Compiled in 977ms (1228 modules)
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ⨯ ReferenceError: Cannot access 'settings' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:206:28)
+    at CorbuType (app/home/page.tsx:18:34)
+  204 |             return false;
+  205 |         }
+> 206 |     }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel]);
+      |                            ^
+  207 |
+  208 |     const loadState = useCallback(async (stateName: string): Promise<boolean> => {
+  209 |         if (!worldId) return false; {
+  digest: '4179989604'
+}
+ GET /home 500 in 1019ms
+Connected to Firebase
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ✓ Compiled in 848ms (1228 modules)
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ⨯ ReferenceError: Cannot access 'settings' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:206:28)
+    at CorbuType (app/home/page.tsx:18:34)
+  204 |             return false;
+  205 |         }
+> 206 |     }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel]);
+      |                            ^
+  207 |
+  208 |     const loadState = useCallback(async (stateName: string): Promise<boolean> => {
+  209 |         if (!worldId) return false; {
+  digest: '4179989604'
+}
+ GET /home 500 in 763ms
+Connected to Firebase
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ✓ Compiled in 1167ms (1228 modules)
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ⨯ ReferenceError: Cannot access 'settings' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:206:28)
+    at CorbuType (app/home/page.tsx:18:34)
+  204 |             return false;
+  205 |         }
+> 206 |     }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel]);
+      |                            ^
+  207 |
+  208 |     const loadState = useCallback(async (stateName: string): Promise<boolean> => {
+  209 |         if (!worldId) return false; {
+  digest: '4179989604'
+}
+ GET /home 500 in 1417ms
+ ⨯ ReferenceError: Cannot access 'settings' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:206:28)
+    at CorbuType (app/home/page.tsx:18:34)
+  204 |             return false;
+  205 |         }
+> 206 |     }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel]);
+      |                            ^
+  207 |
+  208 |     const loadState = useCallback(async (stateName: string): Promise<boolean> => {
+  209 |         if (!worldId) return false; {
+  digest: '4179989604'
+}
+ GET /home 500 in 174ms
+Connected to Firebase
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ✓ Compiled in 1507ms (1228 modules)
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ⨯ ReferenceError: Cannot access 'settings' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:206:28)
+    at CorbuType (app/home/page.tsx:18:34)
+  204 |             return false;
+  205 |         }
+> 206 |     }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel]);
+      |                            ^
+  207 |
+  208 |     const loadState = useCallback(async (stateName: string): Promise<boolean> => {
+  209 |         if (!worldId) return false; {
+  digest: '4179989604'
+}
+ GET /home 500 in 1289ms
+Connected to Firebase
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ✓ Compiled in 1169ms (1228 modules)
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ ⨯ ReferenceError: Cannot access 'settings' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:206:28)
+    at CorbuType (app/home/page.tsx:18:34)
+  204 |             return false;
+  205 |         }
+> 206 |     }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel]);
+      |                            ^
+  207 |
+  208 |     const loadState = useCallback(async (stateName: string): Promise<boolean> => {
+  209 |         if (!worldId) return false; {
+  digest: '4179989604'
+}
+ GET /home 500 in 1192ms
+Connected to Firebase
+ ⨯ ReferenceError: Cannot access 'settings' before initialization
+    at useWorldEngine (app/bitworld/world.engine.ts:206:28)
+    at CorbuType (app/home/page.tsx:18:34)
+  204 |             return false;
+  205 |         }
+> 206 |     }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel]);
+      |                            ^
+  207 |
+  208 |     const loadState = useCallback(async (stateName: string): Promise<boolean> => {
+  209 |         if (!worldId) return false; {
+  digest: '4179989604'
+}
+ GET /home 500 in 66ms
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ✓ Compiled in 1110ms (1228 modules)
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ GET /home 200 in 896ms
+Connected to Firebase
+ ✓ Compiled in 547ms (1228 modules)
+ GET /home 200 in 53ms
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ GET /home 200 in 237ms
+Connected to Firebase
+ GET /home 200 in 113ms
+ ✓ Compiled in 1150ms (1228 modules)
+ GET /home 200 in 93ms
+ ✓ Compiled in 1647ms (1228 modules)
+ GET /home 200 in 156ms
+ ✓ Compiled in 1270ms (1228 modules)
+ GET /home 200 in 135ms
+ ✓ Compiled in 1163ms (1228 modules)
+ GET /home 200 in 169ms
+ ✓ Compiled in 536ms (1228 modules)
+ GET /home 200 in 69ms
+ ✓ Compiled in 1156ms (1228 modules)
+ GET /home 200 in 57ms
+ ✓ Compiled in 519ms (1228 modules)
+ GET /home 200 in 59ms
+ ✓ Compiled in 375ms (1228 modules)
+ GET /home 200 in 59ms
+ ✓ Compiled in 840ms (1228 modules)
+ GET /home 200 in 154ms
+Not connected to Firebase, will use cached data if available
+Connected to Firebase
+ ✓ Compiled in 1935ms (1228 modules)
+ GET /home 200 in 98ms
+ ✓ Compiled in 638ms (1228 modules)
+ GET /home 200 in 88ms
+ ✓ Compiled in 842ms (1228 modules)
+ GET /home 200 in 192ms
+ ✓ Compiled in 1289ms (1228 modules)
+ GET /home 200 in 130ms
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ GET /home 200 in 635ms
+Connected to Firebase
+ ✓ Compiled in 1485ms (1228 modules)
+ GET /home 200 in 93ms
+ ✓ Compiled in 536ms (1228 modules)
+ GET /home 200 in 83ms
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ GET /home 200 in 388ms
+Connected to Firebase
+ ✓ Compiled in 659ms (1228 modules)
+ GET /home 200 in 66ms
+ ✓ Compiled in 641ms (1228 modules)
+ GET /home 200 in 176ms
+ ✓ Compiled in 1770ms (1228 modules)
+ GET /home 200 in 216ms
+ ✓ Compiled in 1486ms (1228 modules)
+ GET /home 200 in 113ms
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ GET /home 200 in 463ms
+Connected to Firebase
+ ✓ Compiled in 682ms (1228 modules)
+ GET /home 200 in 59ms
+ ✓ Compiled in 709ms (1228 modules)
+ GET /home 200 in 78ms
+ ✓ Compiled in 837ms (1228 modules)
+ GET /home 200 in 374ms
+ ✓ Compiled in 1669ms (1228 modules)
+ GET /home 200 in 112ms
+ ✓ Compiled in 1074ms (1228 modules)
+ GET /home 200 in 154ms
+ ✓ Compiled in 1612ms (1228 modules)
+ GET /home 200 in 81ms
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ GET /home 200 in 456ms
+Connected to Firebase
+ ✓ Compiled in 581ms (1228 modules)
+ GET /home 200 in 72ms
+ ✓ Compiled in 597ms (1228 modules)
+ GET /home 200 in 62ms
+ ✓ Compiled in 794ms (1228 modules)
+ GET /home 200 in 419ms
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ GET /home 200 in 561ms
+Connected to Firebase
+ ✓ Compiled in 2.2s (1228 modules)
+ GET /home 200 in 164ms
+ ✓ Compiled in 896ms (1228 modules)
+ GET /home 200 in 253ms
+ ✓ Compiled in 822ms (1228 modules)
+ GET /home 200 in 97ms
+ ✓ Compiled in 818ms (1228 modules)
+ GET /home 200 in 95ms
+ ✓ Compiled in 766ms (1228 modules)
+ GET /home 200 in 411ms
+ ✓ Compiled in 740ms (1228 modules)
+ GET /home 200 in 122ms
+ ✓ Compiled in 937ms (1228 modules)
+ GET /home 200 in 75ms
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ GET /home 200 in 505ms
+Connected to Firebase
+ GET /home 200 in 88ms
+ ✓ Compiled in 1866ms (1228 modules)
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ GET /home 200 in 170ms
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ GET /home 200 in 400ms
+Connected to Firebase
+Not connected to Firebase, will use cached data if available
+Connected to Firebase
+ ✓ Compiled in 1522ms (1228 modules)
+ GET /home 200 in 181ms
+ ✓ Compiled in 652ms (1228 modules)
+ GET /home 200 in 58ms
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+Firebase Realtime Database initialized with default persistence
+Not connected to Firebase, will use cached data if available
+ GET /home 200 in 387ms
+Connected to Firebase
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Not connected to Firebase, will use cached data if available
+Connected to Firebase
+Connected to Firebase
+Connected to Firebase
+Not connected to Firebase, will use cached data if available
+Connected to Firebase
+Not connected to Firebase, will use cached data if available
+Connected to Firebase
+Not connected to Firebase, will use cached data if available
+Connected to Firebase
+Not connected to Firebase, will use cached data if available
+Connected to Firebase
+Not connected to Firebase, will use cached data if available
+Connected to Firebase
