@@ -5,13 +5,13 @@ const ai = new GoogleGenAI({
     apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY
 });
 
-const LOREM_IPSUM = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.';
+const DEFAULT_TEXT = '';
 
-// Helper function to set dialogue text with automatic revert to lorem ipsum
+// Helper function to set dialogue text with automatic revert to default
 export function setDialogueWithRevert(text: string, setDialogueText: (text: string) => void, timeout: number = 2500) {
     setDialogueText(text);
     setTimeout(() => {
-        setDialogueText(LOREM_IPSUM);
+        setDialogueText(DEFAULT_TEXT);
     }, timeout);
 }
 
@@ -21,9 +21,9 @@ export function createSubtitleCycler(text: string, setDialogueText: (text: strin
     
     if (text.length <= MAX_SUBTITLE_LENGTH) {
         setDialogueText(text);
-        // Revert to lorem ipsum after 2.5 seconds for short messages
+        // Revert to default after 2.5 seconds for short messages
         setTimeout(() => {
-            setDialogueText(LOREM_IPSUM);
+            setDialogueText(DEFAULT_TEXT);
         }, 2500);
         return;
     }
@@ -51,9 +51,9 @@ export function createSubtitleCycler(text: string, setDialogueText: (text: strin
             chunkIndex++;
             setTimeout(showNextChunk, 2500); // Show each chunk for 2.5 seconds
         } else {
-            // Revert to lorem ipsum after all chunks have been shown
+            // Revert to default after all chunks have been shown
             setTimeout(() => {
-                setDialogueText(LOREM_IPSUM);
+                setDialogueText(DEFAULT_TEXT);
             }, 2500); // Wait another 2.5 seconds before reverting
         }
     };
