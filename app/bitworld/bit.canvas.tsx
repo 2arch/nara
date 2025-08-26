@@ -1456,12 +1456,18 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     }, [engine]);
 
     const handleCanvasKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
+        // Try controller system first
         const handled = handleKeyDownFromController(e);
-        if (!handled) {
+        if (handled) {
+            // Controller handled it, ensure prevention
+            e.preventDefault();
+            e.stopPropagation();
+        } else {
             // Pass to engine's handler for regular controls if not handled by controller system
             const preventDefault = engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey, e.shiftKey);
             if (preventDefault) {
                 e.preventDefault();
+                e.stopPropagation();
             }
         }
     }, [engine, handleKeyDownFromController]);

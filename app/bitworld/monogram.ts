@@ -223,7 +223,7 @@ const useMonogramSystem = () => {
         const textBitmap = textToBitmap("NARA", 48);
         if (!textBitmap) return 0;
         
-        // Calculate viewport dimensions and center (moved outside naraBitmap)
+        // Calculate viewport dimensions and center
         const viewportWidth = viewportBounds.endX - viewportBounds.startX;
         const viewportHeight = viewportBounds.endY - viewportBounds.startY;
         const centerX = (viewportBounds.startX + viewportBounds.endX) / 2;
@@ -232,62 +232,136 @@ const useMonogramSystem = () => {
         // Scale text to fit viewport nicely (about 1/3 of viewport width)
         const scale = (viewportWidth * 0.4) / textBitmap.width;
         
-        // Optimized bitmap sampling function
+        // Continuous transformation parameters
+        const translationSpeed = 0.3; // Speed of text movement
+        const morphSpeed = 0.5; // Speed of morphing effects
+        
+        // Calculate continuous translation offset
+        const translateX = Math.sin(time * translationSpeed) * viewportWidth * 0.2;
+        const translateY = Math.cos(time * translationSpeed * 0.7) * viewportHeight * 0.1;
+        
+        // Optimized bitmap sampling function with continuous transformations
         const sampleTextBitmap = (screenX: number, screenY: number): number => {
-            // Direct coordinate mapping (much simpler than previous approach)
-            const px = screenX;
-            const py = screenY;
+            // Transform screen coordinates relative to center
+            const relX = screenX - centerX;
+            const relY = screenY - centerY;
             
-            // Calculate noise-based distortion at this screen position
-            const noiseScale = 0.003 * complexity;
-            const noiseValue = perlinNoise(
-                px * noiseScale + time * 0.001,
-                py * noiseScale
+            // Apply continuous translation
+            const transX = relX - translateX;
+            const transY = relY - translateY;
+            
+            // Multi-layered noise for smooth morphing
+            const noiseScale1 = 0.01 * complexity;
+            const noiseScale2 = 0.005 * complexity;
+            
+            // Use time for continuous noise evolution
+            const noiseX1 = perlinNoise(
+                transX * noiseScale1 + Math.cos(time * morphSpeed) * 5,
+                transY * noiseScale1 + Math.sin(time * morphSpeed) * 5
+            );
+            const noiseY1 = perlinNoise(
+                transX * noiseScale1 + Math.sin(time * morphSpeed * 1.3) * 5,
+                transY * noiseScale1 + Math.cos(time * morphSpeed * 1.3) * 5
             );
             
-            // Wave distortion parameters scaled to viewport
-            const waveFreq = 0.008 * (50 / Math.max(viewportWidth, viewportHeight));
-            const waveAmp = Math.min(viewportWidth, viewportHeight) * 0.15 * complexity;
-            const waveOffset = Math.sin(py * waveFreq + time * 0.02) * waveAmp;
+            // Second layer for more complex morphing
+            const noiseX2 = perlinNoise(
+                transX * noiseScale2 + time * morphSpeed * 0.5,
+                transY * noiseScale2 - time * morphSpeed * 0.3
+            );
+            const noiseY2 = perlinNoise(
+                transX * noiseScale2 - time * morphSpeed * 0.3,
+                transY * noiseScale2 + time * morphSpeed * 0.5
+            );
             
-            // Reverse mapping - where should we sample from?
-            const stretchAmt = Math.min(viewportWidth, viewportHeight) * 0.3 * complexity;
-            const sourceX = px - (noiseValue * stretchAmt + waveOffset);
-            const sourceY = py - (noiseValue * stretchAmt * 0.5);
+            // Combine noise layers for smooth morphing
+            const morphAmount = Math.min(viewportWidth, viewportHeight) * 0.15 * complexity;
+            const distortX = (noiseX1 * 0.7 + noiseX2 * 0.3) * morphAmount;
+            const distortY = (noiseY1 * 0.7 + noiseY2 * 0.3) * morphAmount;
+            
+            // Wave distortion that flows continuously
+            const waveFreq = 0.02;
+            const waveAmp = viewportHeight * 0.05 * complexity;
+            const wavePhase = time * 0.8;
+            const waveX = Math.sin(transY * waveFreq + wavePhase) * waveAmp;
+            const waveY = Math.cos(transX * waveFreq * 0.7 + wavePhase * 1.3) * waveAmp * 0.5;
+            
+            // Apply all transformations
+            const finalX = transX - distortX - waveX;
+            const finalY = transY - distortY - waveY;
             
             // Transform to bitmap coordinates
-            const bitmapX = Math.floor((sourceX - centerX) / scale + textBitmap.width / 2);
-            const bitmapY = Math.floor((sourceY - centerY) / scale + textBitmap.height / 2);
+            const bitmapX = Math.floor(finalX / scale + textBitmap.width / 2);
+            const bitmapY = Math.floor(finalY / scale + textBitmap.height / 2);
             
-            // Bounds check
+            // Smooth boundary handling with fade
             if (bitmapX < 0 || bitmapX >= textBitmap.width || 
                 bitmapY < 0 || bitmapY >= textBitmap.height) {
+                // Soft fade at edges instead of hard cutoff
+                const edgeDist = Math.min(
+                    Math.max(-bitmapX, bitmapX - textBitmap.width + 1, 0),
+                    Math.max(-bitmapY, bitmapY - textBitmap.height + 1, 0)
+                );
+                if (edgeDist > 0 && edgeDist < 5) {
+                    return 0.1 * (1 - edgeDist / 5);
+                }
                 return 0;
             }
             
-            // Sample bitmap
+            // Sample bitmap with bilinear interpolation for smoother rendering
             const pixelIndex = (bitmapY * textBitmap.width + bitmapX) * 4;
-            return textBitmap.data[pixelIndex] / 255; // Red channel for white text
+            const brightness = textBitmap.data[pixelIndex] / 255;
+            
+            // Add subtle glow effect
+            if (brightness > 0.5) {
+                const glowRadius = 2;
+                let glowSum = brightness;
+                let glowCount = 1;
+                
+                for (let dy = -glowRadius; dy <= glowRadius; dy++) {
+                    for (let dx = -glowRadius; dx <= glowRadius; dx++) {
+                        if (dx === 0 && dy === 0) continue;
+                        const gx = bitmapX + dx;
+                        const gy = bitmapY + dy;
+                        if (gx >= 0 && gx < textBitmap.width && gy >= 0 && gy < textBitmap.height) {
+                            const gIdx = (gy * textBitmap.width + gx) * 4;
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+                            glowSum += (textBitmap.data[gIdx] / 255) * (1 - dist / glowRadius) * 0.3;
+                            glowCount++;
+                        }
+                    }
+                }
+                return Math.min(1, glowSum / glowCount * 1.2);
+            }
+            
+            return brightness;
         };
         
         // Sample at current position
         let brightness = sampleTextBitmap(x, y);
         
-        // Add trailing effect inspired by HTML version
-        if (brightness < 0.1) {
-            // Check a few positions back for trailing
-            for (let i = 1; i <= 3; i++) {
-                const trailBrightness = sampleTextBitmap(x + i * 2, y);
+        // Enhanced trailing effect with motion blur
+        if (brightness < 0.3) {
+            const trailDirection = Math.atan2(translateY, translateX);
+            const trailLength = 5;
+            
+            for (let i = 1; i <= trailLength; i++) {
+                const trailX = x - Math.cos(trailDirection) * i * 2;
+                const trailY = y - Math.sin(trailDirection) * i * 2;
+                const trailBrightness = sampleTextBitmap(trailX, trailY);
                 if (trailBrightness > 0.1) {
-                    brightness = Math.max(brightness, 0.1 * (4 - i) / 3);
-                    break;
+                    brightness = Math.max(brightness, trailBrightness * (1 - i / (trailLength * 2)));
                 }
             }
         }
         
-        // Scanline modulation like HTML version
-        const scanlineIntensity = 0.9 + Math.sin(time * 0.1) * 0.1;
+        // Continuous scanline effect
+        const scanlineIntensity = 0.85 + Math.sin(time * 2.5 + y * 0.1) * 0.15;
         brightness *= scanlineIntensity;
+        
+        // Add subtle flicker for organic feel
+        const flicker = 0.95 + Math.sin(time * 15 + x * 0.01) * 0.05;
+        brightness *= flicker;
         
         return Math.max(0, Math.min(1, brightness));
     }, [options.complexity, perlinNoise, textToBitmap]);

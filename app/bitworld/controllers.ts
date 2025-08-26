@@ -58,8 +58,17 @@ export function useControllerSystem(): ControllerSystem {
                 const altMatches = !binding.alt || e.altKey;
 
                 if (keyMatches && ctrlMatches && shiftMatches && altMatches) {
-                    binding.action();
+                    // Prevent default immediately to stop browser shortcuts
                     e.preventDefault();
+                    e.stopPropagation();
+                    
+                    // Execute the action after preventing default
+                    try {
+                        binding.action();
+                    } catch (error) {
+                        console.error(`Error executing keybinding action for ${binding.key}:`, error);
+                    }
+                    
                     return true; // Handled
                 }
             }
