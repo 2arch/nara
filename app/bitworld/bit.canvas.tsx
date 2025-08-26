@@ -650,9 +650,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         if ((!char || char.trim() === '') && !engine.commandData[textKey] && !(engine.settings.isDeepspawnVisible && engine.deepspawnData[`deepspawn_${textKey}`])) {
                             // Set color and render character
                             ctx.fillStyle = cell.color;
-                            ctx.globalAlpha = Math.min(0.7, cell.intensity); // Semi-transparent so it doesn't overpower text
+                            // No transparency for monogram patterns - render at full opacity
                             ctx.fillText(cell.char, screenPos.x, screenPos.y + verticalTextOffset);
-                            ctx.globalAlpha = 1; // Reset alpha
                         }
                     }
                 }

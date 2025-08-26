@@ -59,7 +59,7 @@ const useMonogramSystem = () => {
             plasma: [' ', '░', '▒', '▓', '█'],
             spiral: [' ', '░', '▒', '▓', '█'],
             perlin: [' ', '.', '·', '•', '-', '─', '═', '╫'],
-            nara: ['█', '▓', '▒', '░'],
+            nara: ['░', '▒', '▓', '█'], // Back to varied blocks
             'half-full': ['█', '▓', '▒', '░'],
         };
         
@@ -70,7 +70,12 @@ const useMonogramSystem = () => {
 
     // Get color from palette based on value
     const getColorFromPalette = useCallback((value: number, mode: MonogramMode): string => {
-        // Monochromatic scheme for all modes
+        if (mode === 'nara') {
+            // Darker colors for NARA mode for better visibility
+            const lightness = 10 + (value % 1) * 30; // Range from 10% to 40% lightness
+            return `hsl(0, 0%, ${lightness}%)`;
+        }
+        // Monochromatic scheme for other modes
         const lightness = 50 + (value % 1) * 50;
         return `hsl(0, 0%, ${lightness}%)`;
     }, []);
@@ -219,8 +224,8 @@ const useMonogramSystem = () => {
         
         const complexity = options.complexity;
         
-        // Cache text bitmap
-        const textBitmap = textToBitmap("NARA", 48);
+        // Cache text bitmap with much larger font size
+        const textBitmap = textToBitmap("NARA", 120);
         if (!textBitmap) return 0;
         
         // Calculate viewport dimensions and center
@@ -229,8 +234,8 @@ const useMonogramSystem = () => {
         const centerX = (viewportBounds.startX + viewportBounds.endX) / 2;
         const centerY = (viewportBounds.startY + viewportBounds.endY) / 2;
         
-        // Scale text to fit viewport nicely (about 1/3 of viewport width)
-        const scale = (viewportWidth * 0.4) / textBitmap.width;
+        // Scale text to fit viewport nicely (adjusted for larger font)
+        const scale = (viewportWidth * 0.8) / textBitmap.width;
         
         // Continuous transformation parameters
         const translationSpeed = 0.3; // Speed of text movement
@@ -294,66 +299,25 @@ const useMonogramSystem = () => {
             const bitmapX = Math.floor(finalX / scale + textBitmap.width / 2);
             const bitmapY = Math.floor(finalY / scale + textBitmap.height / 2);
             
-            // Smooth boundary handling with fade
+            // Hard boundary check - no edge fading
             if (bitmapX < 0 || bitmapX >= textBitmap.width || 
                 bitmapY < 0 || bitmapY >= textBitmap.height) {
-                // Soft fade at edges instead of hard cutoff
-                const edgeDist = Math.min(
-                    Math.max(-bitmapX, bitmapX - textBitmap.width + 1, 0),
-                    Math.max(-bitmapY, bitmapY - textBitmap.height + 1, 0)
-                );
-                if (edgeDist > 0 && edgeDist < 5) {
-                    return 0.1 * (1 - edgeDist / 5);
-                }
-                return 0;
+                return 0; // Clean cutoff, no artifacts
             }
             
-            // Sample bitmap with bilinear interpolation for smoother rendering
+            // Sample bitmap directly
             const pixelIndex = (bitmapY * textBitmap.width + bitmapX) * 4;
             const brightness = textBitmap.data[pixelIndex] / 255;
             
-            // Add subtle glow effect
-            if (brightness > 0.5) {
-                const glowRadius = 2;
-                let glowSum = brightness;
-                let glowCount = 1;
-                
-                for (let dy = -glowRadius; dy <= glowRadius; dy++) {
-                    for (let dx = -glowRadius; dx <= glowRadius; dx++) {
-                        if (dx === 0 && dy === 0) continue;
-                        const gx = bitmapX + dx;
-                        const gy = bitmapY + dy;
-                        if (gx >= 0 && gx < textBitmap.width && gy >= 0 && gy < textBitmap.height) {
-                            const gIdx = (gy * textBitmap.width + gx) * 4;
-                            const dist = Math.sqrt(dx * dx + dy * dy);
-                            glowSum += (textBitmap.data[gIdx] / 255) * (1 - dist / glowRadius) * 0.3;
-                            glowCount++;
-                        }
-                    }
-                }
-                return Math.min(1, glowSum / glowCount * 1.2);
-            }
-            
+            // Return brightness directly without glow effect to avoid artifacts
             return brightness;
         };
         
         // Sample at current position
         let brightness = sampleTextBitmap(x, y);
         
-        // Enhanced trailing effect with motion blur
-        if (brightness < 0.3) {
-            const trailDirection = Math.atan2(translateY, translateX);
-            const trailLength = 5;
-            
-            for (let i = 1; i <= trailLength; i++) {
-                const trailX = x - Math.cos(trailDirection) * i * 2;
-                const trailY = y - Math.sin(trailDirection) * i * 2;
-                const trailBrightness = sampleTextBitmap(trailX, trailY);
-                if (trailBrightness > 0.1) {
-                    brightness = Math.max(brightness, trailBrightness * (1 - i / (trailLength * 2)));
-                }
-            }
-        }
+        // Skip trailing effect to avoid artifacts
+        // Only show clear text without blur
         
         // Continuous scanline effect
         const scanlineIntensity = 0.85 + Math.sin(time * 2.5 + y * 0.1) * 0.15;
@@ -499,22 +463,39 @@ const useMonogramSystem = () => {
                 
                 // Skip very low intensity cells for performance
                 if (options.mode === 'half-full' && intensity < 0.05) continue;
-                if (options.mode === 'nara' && intensity < 0.05) continue;
+                if (options.mode === 'nara' && intensity < 0.15) continue; // Higher threshold to avoid artifacts
                 if (options.mode !== 'nara' && options.mode !== 'half-full' && intensity < 0.1) continue;
                 
                 const char = getCharForIntensity(intensity, options.mode);
-                const colorValue = rawValue * Math.PI + time * 0.5;
-                const color = getColorFromPalette(colorValue, options.mode);
                 
-                // Fill in pattern around the calculated point if step > 1
-                for (let dy = 0; dy < step && worldY + dy <= Math.ceil(endWorldY); dy++) {
-                    for (let dx = 0; dx < step && worldX + dx <= Math.ceil(endWorldX); dx++) {
-                        const key = `${worldX + dx},${worldY + dy}`;
-                        pattern[key] = {
-                            char,
-                            color,
-                            intensity: (options.mode === 'nara' || options.mode === 'half-full') ? intensity : Math.min(1, intensity + Math.random() * 0.1)
-                        };
+                let color: string;
+                if (options.mode === 'nara') {
+                    // Pure black for NARA mode for maximum visibility
+                    color = 'black';
+                } else {
+                    const colorValue = rawValue * Math.PI + time * 0.5;
+                    color = getColorFromPalette(colorValue, options.mode);
+                }
+                
+                // For NARA mode, only set the exact position to avoid grid artifacts
+                if (options.mode === 'nara') {
+                    const key = `${worldX},${worldY}`;
+                    pattern[key] = {
+                        char,
+                        color,
+                        intensity
+                    };
+                } else {
+                    // Fill in pattern around the calculated point if step > 1
+                    for (let dy = 0; dy < step && worldY + dy <= Math.ceil(endWorldY); dy++) {
+                        for (let dx = 0; dx < step && worldX + dx <= Math.ceil(endWorldX); dx++) {
+                            const key = `${worldX + dx},${worldY + dy}`;
+                            pattern[key] = {
+                                char,
+                                color,
+                                intensity: (options.mode === 'half-full') ? intensity : Math.min(1, intensity + Math.random() * 0.1)
+                            };
+                        }
                     }
                 }
             }
