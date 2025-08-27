@@ -370,6 +370,7 @@ export async function generateVideo(prompt: string): Promise<string | null> {
 
 /**
  * Generate deepspawn questions/suggestions based on recent text
+ * Note: This function should only be called when deepspawn is enabled
  */
 export async function generateDeepspawnQuestions(recentText: string): Promise<string[]> {
     try {

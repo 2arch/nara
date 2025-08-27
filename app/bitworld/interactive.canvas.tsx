@@ -17,7 +17,7 @@ const InteractiveBitCanvas: React.FC<InteractiveBitCanvasProps> = ({ initialBack
   const [cursorAlternate, setCursorAlternate] = useState(false);
   const [overlapRects, setOverlapRects] = useState<{rect: DOMRect, gifName: string}[]>([]);
   
-  const engine = useWorldEngine({ worldId: 'main', initialBackgroundColor });
+  const engine = useWorldEngine({ worldId: 'defaultWorld', initialBackgroundColor });
 
   const updateOverlapRects = useCallback(() => {
     // Look for both old 'animate' ID and new 'animation-{gifName}' pattern

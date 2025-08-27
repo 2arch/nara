@@ -7,13 +7,12 @@ import { getAuth } from "firebase/auth";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyBNVepLdEbdKckcSUadJgzCHsoDK1KVysU",
-  authDomain: "synthe-314f6.firebaseapp.com",
-  databaseURL: "https://synthe-314f6-default-rtdb.firebaseio.com",
-  projectId: "synthe-314f6",
-  storageBucket: "synthe-314f6.firebasestorage.app",
-  messagingSenderId: "42128889382",
-  appId: "1:42128889382:web:cd0d4450fc33f73615b8e7"
+  apiKey: "AIzaSyD5P6G7CMHiuUrKeCE-1R01P6vQSavdTiI",
+  authDomain: "nara-a65bc.firebaseapp.com",
+  projectId: "nara-a65bc",
+  storageBucket: "nara-a65bc.firebasestorage.app",
+  messagingSenderId: "927080876309",
+  appId: "1:927080876309:web:f490f48dca87faa26b811c"
 };
 
 // Initialize Firebase
@@ -39,19 +38,23 @@ if (process.env.NODE_ENV === 'development' && process.env.FIREBASE_EMULATOR === 
   console.log('Connected to Firebase emulator');
 }
 
-// Helper function to check connection status
-const monitorConnection = () => {
-  const connectedRef = ref(database, '.info/connected');
-  onValue(connectedRef, (snap) => {
-    if (snap.val() === true) {
-      console.log('Connected to Firebase');
-    } else {
-      console.log('Not connected to Firebase, will use cached data if available');
-    }
-  });
-};
-
-// Start monitoring connection
-monitorConnection();
+// Force cleanup all connections when page unloads to prevent leaks
+if (typeof window !== 'undefined') {
+  const { goOffline } = require('firebase/database');
+  
+  const cleanup = () => {
+    console.log('Page unloading - forcing Firebase offline to prevent connection leaks');
+    goOffline(database);
+  };
+  
+  // Cleanup on page unload/refresh
+  window.addEventListener('beforeunload', cleanup);
+  window.addEventListener('pagehide', cleanup);
+  
+  // Cleanup in development when hot reloading
+  if (process.env.NODE_ENV === 'development') {
+    window.addEventListener('unload', cleanup);
+  }
+}
 
 export { database, app, auth };

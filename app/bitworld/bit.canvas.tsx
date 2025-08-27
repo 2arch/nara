@@ -11,9 +11,9 @@ import { PixelatedFrame } from './gif.utils';
 // --- Constants --- (Copied and relevant ones kept)
 const FONT_FAMILY = 'IBM Plex Mono';
 const GRID_COLOR = '#F2F2F233';
-const CURSOR_COLOR_PRIMARY = '#FF6B35';
-const CURSOR_COLOR_SECONDARY = '#FFA500';
-const CURSOR_COLOR_SAVE = '#FFFF00'; // Green color for saving state
+const CURSOR_COLOR_PRIMARY = '#003DFF55';
+const CURSOR_COLOR_SECONDARY = '#0022DD55';
+const CURSOR_COLOR_SAVE = '#F2F2F2'; // Green color for saving state
 const CURSOR_COLOR_ERROR = '#FF0000'; // Red color for error state
 const CURSOR_TEXT_COLOR = '#FFFFFF';
 const BACKGROUND_COLOR = '#FFFFFF55';
@@ -646,7 +646,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         
                         // Only render if there's no regular text at this position
                         const textKey = `${worldX},${worldY}`;
-                        const char = engine.worldData[textKey];
+                        const charData = engine.worldData[textKey];
+                        const char = charData ? engine.getCharacter(charData) : '';
                         if ((!char || char.trim() === '') && !engine.commandData[textKey] && !(engine.settings.isDeepspawnVisible && engine.deepspawnData[`deepspawn_${textKey}`])) {
                             // Set color and render character
                             ctx.fillStyle = cell.color;
@@ -658,13 +659,14 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
-        // === Render Light Mode Data (Ephemeral Text) ===
-        ctx.fillStyle = '#808080'; // Gray color for light mode text
+        // === Render Air Mode Data (Ephemeral Text) ===
+        ctx.fillStyle = '#808080'; // Gray color for air mode text
         for (const key in engine.lightModeData) {
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                const char = engine.lightModeData[key];
+                const charData = engine.lightModeData[key];
+                const char = typeof charData === 'string' ? charData : charData.char;
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
                     if (char && char.trim() !== '') {
@@ -682,10 +684,19 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                const char = engine.worldData[key];
+                const charData = engine.worldData[key];
+                const char = charData ? engine.getCharacter(charData) : '';
+                const charStyle = charData ? engine.getCharacterStyle(charData) : undefined;
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
                     if (char && char.trim() !== '') {
+                        // Apply text background if specified
+                        if (charStyle && charStyle.background) {
+                            ctx.fillStyle = charStyle.background;
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        }
+                        // Apply text color
+                        ctx.fillStyle = (charStyle && charStyle.color) || engine.textColor;
                         ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
                     }
                 }
@@ -697,7 +708,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                const char = engine.chatData[key];
+                const charData = engine.chatData[key];
+                const char = typeof charData === 'string' ? charData : charData.char;
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
                     if (char && char.trim() !== '') {
@@ -718,7 +730,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                const char = engine.searchData[key];
+                const charData = engine.searchData[key];
+                const char = typeof charData === 'string' ? charData : charData.char;
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
                     if (char && char.trim() !== '') {
@@ -752,7 +765,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                const char = engine.commandData[key];
+                const charData = engine.commandData[key];
+                const char = typeof charData === 'string' ? charData : charData.char;
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
                     // Use different colors: orange for command line, gray for suggestions, white for selected
@@ -857,7 +871,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     for (let i = 0; i < engine.searchPattern.length; i++) {
                         const checkKey = `${worldX + i},${worldY}`;
                         if (engine.searchData[checkKey]) {
-                            matchText += engine.searchData[checkKey];
+                            const charData = engine.searchData[checkKey];
+                            const char = typeof charData === 'string' ? charData : charData.char;
+                            matchText += char;
                         }
                     }
                     searchMatches.set(matchKey, { x: worldX, y: worldY, text: matchText });
@@ -1259,9 +1275,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     }
                     
                     ctx.fillRect(cursorScreenPos.x, cursorScreenPos.y, effectiveCharWidth, effectiveCharHeight);
-                    if (engine.worldData[key]) {
+                    const charData = engine.worldData[key];
+                    if (charData) {
+                        const char = engine.getCharacter(charData);
                         ctx.fillStyle = CURSOR_TEXT_COLOR;
-                        ctx.fillText(engine.worldData[key], cursorScreenPos.x, cursorScreenPos.y + verticalTextOffset);
+                        ctx.fillText(char, cursorScreenPos.x, cursorScreenPos.y + verticalTextOffset);
                     }
                 }
             }

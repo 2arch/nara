@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { database } from '@/app/firebase'; // Adjust path if needed
-import { ref, set, onValue, off, DataSnapshot } from 'firebase/database';
+import { ref, set, onValue, off, DataSnapshot, get } from 'firebase/database';
 // Import functions and constants directly from @sanity/diff-match-patch
 import { makeDiff, DIFF_EQUAL } from '@sanity/diff-match-patch';
 import type { WorldData } from './world.engine'; // Adjust path if needed
@@ -76,7 +76,12 @@ export function useWorldSave(
         };
 
         const worldRef = ref(database, `worlds/${worldId}`);
-        onValue(worldRef, (snapshot) => {
+        
+        // Store reference for proper cleanup
+        let unsubscribe: (() => void) | null = null;
+        
+        // Set up persistent listener with proper cleanup tracking
+        unsubscribe = onValue(worldRef, (snapshot) => {
             const world = snapshot.val();
             handleData(snapshot.child('data'));
             handleSettings(snapshot.child('settings'));
@@ -84,7 +89,11 @@ export function useWorldSave(
         }, handleError);
 
         return () => {
-            off(worldRef);
+            // Proper cleanup: call the unsubscribe function returned by onValue
+            if (unsubscribe) {
+                unsubscribe();
+                unsubscribe = null;
+            }
             if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
             if (settingsSaveTimeoutRef.current) clearTimeout(settingsSaveTimeoutRef.current);
         };

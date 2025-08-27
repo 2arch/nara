@@ -10,6 +10,7 @@ export interface CommandState {
     matchedCommands: string[];
     selectedIndex: number;
     commandStartPos: Point;
+    hasNavigated: boolean; // Track if user has used arrow keys to navigate
 }
 
 export interface PendingCommand {
@@ -25,12 +26,12 @@ export interface CommandExecution {
 }
 
 // --- Mode System Types ---
-export type CanvasMode = 'air' | 'light' | 'chat';
+export type CanvasMode = 'default' | 'air' | 'chat';
 export type BackgroundMode = 'transparent' | 'color' | 'image' | 'video' | 'space' | 'stream';
 
 export interface ModeState {
     currentMode: CanvasMode;
-    lightModeData: WorldData; // Ephemeral text data for light mode
+    lightModeData: WorldData; // Ephemeral text data for air mode
     backgroundMode: BackgroundMode;
     backgroundColor: string;
     backgroundImage?: string; // URL or data URL for generated images
@@ -38,6 +39,10 @@ export interface ModeState {
     backgroundStream?: MediaStream; // MediaStream for screen share
     textColor: string;
     textBackground?: string; // Background color for text
+    currentTextStyle: {
+        color: string;
+        background?: string;
+    }; // Current persistent text style
     searchPattern: string; // Current search pattern
     isSearchActive: boolean; // Whether search highlighting is active
 }
@@ -50,8 +55,8 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'deepspawn', 'chat', 'bg', 'nav', 'search', 'state'];
-const MODE_COMMANDS = ['air', 'light', 'chat'];
+const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'deepspawn', 'chat', 'bg', 'nav', 'search', 'state', 'text'];
+const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'white', 'black', 'web'];
 const NAV_COMMANDS: string[] = [];
 
@@ -64,7 +69,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         input: '',
         matchedCommands: [],
         selectedIndex: 0,
-        commandStartPos: { x: 0, y: 0 }
+        commandStartPos: { x: 0, y: 0 },
+        hasNavigated: false
     });
     
     const [commandData, setCommandData] = useState<WorldData>({});
@@ -72,7 +78,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
     
     // Mode system state
     const [modeState, setModeState] = useState<ModeState>({
-        currentMode: 'air',
+        currentMode: 'default',
         lightModeData: {},
         backgroundMode: 'color', // Default to color background
         backgroundColor: '#FFFFFF', // White background
@@ -81,6 +87,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         backgroundStream: undefined,
         textColor: '#000000', // Black text on white background
         textBackground: undefined, // No text background by default
+        currentTextStyle: {
+            color: '#000000', // Default black text
+            background: undefined
+        },
         searchPattern: '', // No search pattern initially
         isSearchActive: false, // Search not active initially
     });
@@ -89,6 +99,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
     const matchCommands = useCallback((input: string): string[] => {
         if (!input) return AVAILABLE_COMMANDS;
         const lowerInput = input.toLowerCase().split(' ')[0];
+        console.log('matchCommands called with:', { input, lowerInput, availableStates });
         
         // Special handling for mode command with subcommands
         if (lowerInput === 'mode') {
@@ -151,6 +162,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
 
         if (lowerInput === 'state') {
             const parts = input.toLowerCase().split(' ');
+            console.log('State command matching:', { parts, availableStates });
+            
             if (parts.length > 1) {
                 const secondArg = parts[1];
                 
@@ -167,10 +180,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                         if (stateInput.length > 0 && !suggestions.some(s => s === currentCommand)) {
                              return [currentCommand, ...suggestions];
                         }
-                        return suggestions;
+                        return suggestions.length > 0 ? suggestions : [`state --rm ${stateInput}`];
                     }
                     // Just typed --rm, show all states for deletion
-                    return availableStates.length > 0 ? availableStates.map(state => `state --rm ${state}`) : ['state --rm <name>'];
+                    return availableStates.length > 0 ? availableStates.map(state => `state --rm ${state}`) : ['state --rm'];
                 } else {
                     // Regular state command suggestions
                     const stateInput = secondArg;
@@ -182,11 +195,15 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     if (stateInput.length > 0 && !suggestions.some(s => s === currentCommand)) {
                          return [currentCommand, ...suggestions];
                     }
-                    return suggestions;
+                    return suggestions.length > 0 ? suggestions : [`state ${stateInput}`];
                 }
             }
-            // Show only available states as suggestions (no --rm in basic suggestions)
-            return availableStates.length > 0 ? availableStates.map(state => `state ${state}`) : ['state <name>'];
+            // Always show available states, or allow new state creation
+            if (availableStates.length > 0) {
+                return availableStates.map(state => `state ${state}`);
+            } else {
+                return ['state']; // Just show the command itself if no states exist
+            }
         }
         
         return AVAILABLE_COMMANDS.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
@@ -195,8 +212,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
     // Mode switching functionality
     const switchMode = useCallback((newMode: CanvasMode) => {
         setModeState(prev => {
-            // Clear light mode data when switching away from light mode
-            const lightModeData = newMode === 'light' ? prev.lightModeData : {};
+            // Clear air mode data when switching away from air mode
+            const lightModeData = newMode === 'air' ? prev.lightModeData : {};
             
             return {
                 ...prev,
@@ -313,11 +330,17 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         }
     }, [initialBackgroundColor]); // Removed switchBackgroundMode to avoid dependency issues
 
-    // Add ephemeral text in light mode (disappears after 2 seconds)
+    // Add ephemeral text in air mode (disappears with flip-out animation)
     const addEphemeralText = useCallback((pos: Point, char: string) => {
-        if (modeState.currentMode !== 'light') return;
+        if (modeState.currentMode !== 'air') return;
         
         const key = `${pos.x},${pos.y}`;
+        
+        // Symbol sequence for despawn animation - progressive decay
+        const despawnSymbols = ['@', '#', '*', '=', ';', ':', '•', '·', '.'];
+        let symbolIndex = 0;
+        
+        // Set initial character
         setModeState(prev => ({
             ...prev,
             lightModeData: {
@@ -326,17 +349,36 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             }
         }));
         
-        // Remove the text after 2 seconds
+        // Start flip-out animation after 1.5 seconds
+        const animationDelay = 1500;
+        const frameDelay = 80; // Time between symbol changes
+        
         setTimeout(() => {
-            setModeState(prev => {
-                const newLightModeData = { ...prev.lightModeData };
-                delete newLightModeData[key];
-                return {
-                    ...prev,
-                    lightModeData: newLightModeData
-                };
-            });
-        }, 2000);
+            const animationInterval = setInterval(() => {
+                if (symbolIndex >= despawnSymbols.length) {
+                    // Animation complete - remove the character
+                    setModeState(prev => {
+                        const newLightModeData = { ...prev.lightModeData };
+                        delete newLightModeData[key];
+                        return {
+                            ...prev,
+                            lightModeData: newLightModeData
+                        };
+                    });
+                    clearInterval(animationInterval);
+                } else {
+                    // Update to next symbol in sequence
+                    setModeState(prev => ({
+                        ...prev,
+                        lightModeData: {
+                            ...prev.lightModeData,
+                            [key]: despawnSymbols[symbolIndex]
+                        }
+                    }));
+                    symbolIndex++;
+                }
+            }, frameDelay);
+        }, animationDelay);
     }, [modeState.currentMode]);
 
     // Start command mode when '/' is pressed
@@ -364,7 +406,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             input: '',
             matchedCommands: AVAILABLE_COMMANDS,
             selectedIndex: 0,
-            commandStartPos: { x: cursorPos.x, y: cursorPos.y }
+            commandStartPos: { x: cursorPos.x, y: cursorPos.y },
+            hasNavigated: false
         });
     }, []);
 
@@ -399,7 +442,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 ...prev,
                 input: newInput,
                 matchedCommands: newMatchedCommands,
-                selectedIndex: Math.min(prev.selectedIndex, newMatchedCommands.length - 1)
+                selectedIndex: Math.min(prev.selectedIndex, newMatchedCommands.length - 1),
+                hasNavigated: false // Reset navigation when typing
             };
         });
     }, [matchCommands]);
@@ -413,7 +457,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 input: '',
                 matchedCommands: [],
                 selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 }
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
             });
             setCommandData({});
             return { shouldExitCommand: true, shouldMoveCursor: true };
@@ -449,7 +494,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 ...prev,
                 input: newInput,
                 matchedCommands: newMatchedCommands,
-                selectedIndex: Math.min(prev.selectedIndex, newMatchedCommands.length - 1)
+                selectedIndex: Math.min(prev.selectedIndex, newMatchedCommands.length - 1),
+                hasNavigated: false // Reset navigation when backspacing
             };
         });
         
@@ -460,14 +506,16 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
     const navigateUp = useCallback(() => {
         setCommandState(prev => ({
             ...prev,
-            selectedIndex: Math.max(0, prev.selectedIndex - 1)
+            selectedIndex: Math.max(0, prev.selectedIndex - 1),
+            hasNavigated: true
         }));
     }, []);
 
     const navigateDown = useCallback(() => {
         setCommandState(prev => ({
             ...prev,
-            selectedIndex: Math.min(prev.matchedCommands.length - 1, prev.selectedIndex + 1)
+            selectedIndex: Math.min(prev.matchedCommands.length - 1, prev.selectedIndex + 1),
+            hasNavigated: true
         }));
     }, []);
 
@@ -478,21 +526,30 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         const selectedCommand = commandState.matchedCommands[commandState.selectedIndex];
         if (!selectedCommand) return null; // Safety check for undefined command
         
+        console.log('Executing command:', selectedCommand, 'from matched:', commandState.matchedCommands);
+        
         const fullInput = commandState.input.trim();
         const inputParts = fullInput.split(/\s+/);
         const commandName = inputParts[0];
         
         // Handle mode switching commands directly
-        if (selectedCommand.startsWith('mode ')) {
-            const modeArg = selectedCommand.split(' ')[1] as CanvasMode;
-            if (MODE_COMMANDS.includes(modeArg)) {
-                if (modeArg === 'chat') {
-                    // For chat mode, redirect to /chat
-                    router.push('/chat');
-                } else {
-                    // For other modes, switch mode in current context
-                    switchMode(modeArg);
-                    console.log(`Switched to ${modeArg} mode`);
+        if (commandName === 'mode') {
+            if (inputParts.length === 1) {
+                // User typed just 'mode' - clear to default mode (like /state clears canvas)
+                switchMode('default');
+                console.log('Switched to default mode');
+            } else if (inputParts.length === 2) {
+                // User typed 'mode <something>' - use their specified mode
+                const modeArg = inputParts[1] as CanvasMode;
+                if (MODE_COMMANDS.includes(modeArg)) {
+                    if (modeArg === 'chat') {
+                        // For chat mode, redirect to /chat
+                        router.push('/chat');
+                    } else {
+                        // For other modes, switch mode in current context
+                        switchMode(modeArg);
+                        console.log(`Switched to ${modeArg} mode`);
+                    }
                 }
             }
             
@@ -502,7 +559,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 input: '',
                 matchedCommands: [],
                 selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 }
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
             });
             setCommandData({});
             
@@ -556,11 +614,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     // 'bg clear' with a prompt - generate AI image
                     setDialogueText("Generating background image...");
                     generateImage(prompt).then((imageUrl) => {
-                        if (imageUrl) {
+                        if (imageUrl && (imageUrl.startsWith('data:') || imageUrl.startsWith('http'))) {
+                            // Validate that we have a proper image URL/data URL
                             switchBackgroundMode('image', imageUrl, textColorParam, textBgParam);
                             setDialogueText(`"${prompt}"`);
                         } else {
-                            // Fallback to space background if image generation fails
+                            // Fallback to space background if image generation fails or returns invalid data
                             switchBackgroundMode('space', undefined, textColorParam, textBgParam);
                             setDialogueText("Image generation not available, using space background.");
                         }
@@ -610,11 +669,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     // 'bg live' with a prompt - generate AI video
                     setDialogueText("Generating background video...");
                     generateVideo(prompt).then((videoUrl) => {
-                        if (videoUrl) {
+                        if (videoUrl && (videoUrl.startsWith('data:') || videoUrl.startsWith('http'))) {
+                            // Validate that we have a proper video URL/data URL
                             switchBackgroundMode('video', videoUrl, textColorParam, textBgParam);
                             setDialogueText(`"${prompt}"`);
                         } else {
-                            // Fallback to space background if video generation fails
+                            // Fallback to space background if video generation fails or returns invalid data
                             switchBackgroundMode('space', undefined, textColorParam, textBgParam);
                             setDialogueText("Video generation not available, using space background.");
                         }
@@ -699,7 +759,115 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 input: '',
                 matchedCommands: [],
                 selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 }
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+            
+            return null;
+        }
+
+        if (selectedCommand.startsWith('text')) {
+            const inputParts = commandState.input.trim().split(/\s+/);
+            const colorArg = inputParts.length > 1 ? inputParts[1] : undefined;
+            const backgroundArg = inputParts.length > 2 ? inputParts[2] : undefined;
+            
+            if (colorArg) {
+                // Validate color format (hex code or named colors)
+                const colorMap: { [name: string]: string } = {
+                    'black': '#000000',
+                    'white': '#FFFFFF',
+                    'red': '#FF0000',
+                    'green': '#00FF00',
+                    'blue': '#0000FF',
+                    'yellow': '#FFFF00',
+                    'purple': '#800080',
+                    'orange': '#FFA500',
+                    'pink': '#FFC0CB',
+                    'cyan': '#00FFFF',
+                    'magenta': '#FF00FF'
+                };
+                
+                let finalTextColor: string;
+                if (colorArg.toLowerCase() === 'default') {
+                    // Reset to default text color
+                    finalTextColor = modeState.textColor; // Use current global text color
+                } else {
+                    const hexColor = (colorMap[colorArg.toLowerCase()] || colorArg).toUpperCase();
+                    if (!/^#[0-9A-F]{6}$/i.test(hexColor)) {
+                        setDialogueText(`Invalid color: ${colorArg}. Use hex code (e.g., #FF0000) or name (e.g., red, blue).`);
+                        // Clear command mode
+                        setCommandState({
+                            isActive: false,
+                            input: '',
+                            matchedCommands: [],
+                            selectedIndex: 0,
+                            commandStartPos: { x: 0, y: 0 },
+                            hasNavigated: false
+                        });
+                        setCommandData({});
+                        return null;
+                    }
+                    finalTextColor = hexColor;
+                }
+                
+                let finalTextBackground: string | undefined;
+                if (backgroundArg) {
+                    if (backgroundArg.toLowerCase() === 'none') {
+                        finalTextBackground = undefined;
+                    } else {
+                        const hexBackground = (colorMap[backgroundArg.toLowerCase()] || backgroundArg).toUpperCase();
+                        if (!/^#[0-9A-F]{6}$/i.test(hexBackground)) {
+                            setDialogueText(`Invalid background color: ${backgroundArg}. Use hex code or name.`);
+                            // Clear command mode
+                            setCommandState({
+                                isActive: false,
+                                input: '',
+                                matchedCommands: [],
+                                selectedIndex: 0,
+                                commandStartPos: { x: 0, y: 0 },
+                                hasNavigated: false
+                            });
+                            setCommandData({});
+                            return null;
+                        }
+                        finalTextBackground = hexBackground;
+                    }
+                }
+                
+                // Update the persistent text style
+                setModeState(prev => ({
+                    ...prev,
+                    currentTextStyle: {
+                        color: finalTextColor,
+                        background: finalTextBackground
+                    }
+                }));
+                
+                const styleMsg = finalTextBackground ? 
+                    `Text style: ${finalTextColor} on ${finalTextBackground}` : 
+                    `Text color: ${finalTextColor}`;
+                setDialogueText(styleMsg);
+            } else {
+                // Reset to default text style
+                setModeState(prev => ({
+                    ...prev,
+                    currentTextStyle: {
+                        color: prev.textColor, // Reset to global text color
+                        background: undefined
+                    }
+                }));
+                setDialogueText("Text style reset to default");
+            }
+            
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
             });
             setCommandData({});
             
@@ -713,7 +881,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 input: '',
                 matchedCommands: [],
                 selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 }
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
             });
             setCommandData({});
             
@@ -769,7 +938,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 input: '',
                 matchedCommands: [],
                 selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 }
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
             });
             setCommandData({});
             
@@ -783,16 +953,23 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 input: '',
                 matchedCommands: [],
                 selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 }
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
             });
             setCommandData({});
             
-            // Use the selected command instead of the typed input
-            // Extract arguments from selected command (format: "state [--rm] statename")
+            // Parse the selected command
             const commandParts = selectedCommand.split(' ');
             const args = commandParts.slice(1); // Everything after 'state'
             
+            // Don't execute if user selected a placeholder (shouldn't happen now)
+            if (args.length === 1 && args[0] === '<name>') {
+                setDialogueText("Please specify a state name");
+                return null;
+            }
+            
             // Return command execution for world engine to handle
+            console.log('Returning state command execution with args:', args);
             return {
                 command: 'state',
                 args: args,
@@ -808,7 +985,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 input: '',
                 matchedCommands: [],
                 selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 }
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
             });
             setCommandData({});
             
@@ -891,7 +1069,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 input: '',
                 matchedCommands: [],
                 selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 }
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
             });
             setCommandData({});
             return true;
@@ -986,6 +1165,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         backgroundStream: backgroundStreamRef.current || modeState.backgroundStream,
         textColor: modeState.textColor,
         textBackground: modeState.textBackground,
+        currentTextStyle: modeState.currentTextStyle,
         searchPattern: modeState.searchPattern,
         isSearchActive: modeState.isSearchActive,
         clearSearch: () => setModeState(prev => ({ ...prev, searchPattern: '', isSearchActive: false })),

@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useWorldSave } from './world.save'; // Import the new hook
 import { useCommandSystem, CommandState, CommandExecution, BackgroundMode } from './commands'; // Import command system
+import { getSmartIndentation, calculateWordDeletion } from './text-blocks'; // Import block detection utilities
 import { useDeepspawnSystem } from './deepspawn'; // Import deepspawn system
 import { useWorldSettings, WorldSettings } from './settings';
 import { set, ref } from 'firebase/database';
@@ -21,7 +22,15 @@ const BLOCK_PREFIX = 'block_';// Circle packing constants
 const MIN_BLOCK_DISTANCE = 6;  // Minimum cells between blocks
 
 // --- Interfaces ---
-export interface WorldData { [key: string]: string; }
+export interface StyledCharacter {
+    char: string;
+    style?: {
+        color?: string;
+        background?: string;
+    };
+}
+
+export interface WorldData { [key: string]: string | StyledCharacter; }
 export interface Point { x: number; y: number; }
 
 export interface PanStartInfo {
@@ -47,9 +56,15 @@ export interface WorldEngine {
     backgroundImage?: string;
     backgroundVideo?: string;
     textColor: string;
+    currentTextStyle: {
+        color: string;
+        background?: string;
+    };
     searchPattern: string;
     isSearchActive: boolean;
     clearSearch: () => void;
+    settings: WorldSettings;
+    updateSettings: (newSettings: Partial<WorldSettings>) => void;
     getEffectiveCharDims: (zoom: number) => { width: number; height: number; fontSize: number; };
     screenToWorld: (screenX: number, screenY: number, currentZoom: number, currentOffset: Point) => Point;
     worldToScreen: (worldX: number, worldY: number, currentZoom: number, currentOffset: Point) => Point;
@@ -107,6 +122,8 @@ export interface WorldEngine {
     getUniqueColors: () => string[];
     toggleColorFilter: (color: string) => void;
     cycleSortMode: () => void;
+    getCharacter: (data: string | StyledCharacter) => string;
+    getCharacterStyle: (data: string | StyledCharacter) => { color?: string; background?: string } | undefined;
 }
 
 // --- Hook Input ---
@@ -203,6 +220,7 @@ export function useWorldEngine({
         backgroundVideo,
         backgroundStream,
         textColor,
+        currentTextStyle,
         searchPattern,
         isSearchActive,
         clearSearch,
@@ -228,7 +246,8 @@ export function useWorldEngine({
             const [xStr, yStr] = key.split(',');
             const x = parseInt(xStr, 10);
             const y = parseInt(yStr, 10);
-            const char = worldData[key];
+            const charData = worldData[key];
+            const char = getCharacter(charData);
 
             if (char && !isNaN(x) && !isNaN(y)) {
                 // Check if this position starts a match
@@ -239,8 +258,9 @@ export function useWorldEngine({
                 let textAtPosition = '';
                 for (let i = 0; i < pattern.length; i++) {
                     const checkKey = `${x + i},${y}`;
-                    const checkChar = worldData[checkKey];
-                    if (checkChar) {
+                    const checkCharData = worldData[checkKey];
+                    if (checkCharData) {
+                        const checkChar = getCharacter(checkCharData);
                         textAtPosition += checkChar.toLowerCase();
                     } else {
                         break;
@@ -327,19 +347,40 @@ export function useWorldEngine({
     }, [worldId, setSettings]);
 
     const loadAvailableStates = useCallback(async (): Promise<string[]> => {
-        if (!worldId) return [];
+        console.log('loadAvailableStates called with worldId:', worldId);
+        if (!worldId) {
+            console.log('No worldId provided, returning empty array');
+            return [];
+        }
         
         try {
-            const statesRef = ref(database, `worlds/${worldId}/states`);
-            const snapshot = await get(statesRef);
-            const statesData = snapshot.val();
+            const statesPath = `worlds/${worldId}/states`;
+            console.log('Loading states from path:', statesPath);
+            const statesRef = ref(database, statesPath);
             
-            if (statesData) {
-                return Object.keys(statesData).sort();
+            // Add timeout to avoid hanging
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Firebase timeout')), 5000);
+            });
+            
+            const snapshot = await Promise.race([
+                get(statesRef),
+                timeoutPromise
+            ]);
+            
+            const statesData = (snapshot as any).val();
+            console.log('Firebase snapshot data:', statesData);
+            
+            if (statesData && typeof statesData === 'object') {
+                const stateNames = Object.keys(statesData).sort();
+                console.log('Found states:', stateNames);
+                return stateNames;
             }
+            console.log('No states found in Firebase');
             return [];
         } catch (error) {
             console.error('Error loading available states:', error);
+            console.error('This might be due to Firebase connection limits. Try refreshing the page.');
             return [];
         }
     }, [worldId]);
@@ -365,7 +406,10 @@ export function useWorldEngine({
 
     // Load available states on component mount
     useEffect(() => {
-        loadAvailableStates().then(setAvailableStates);
+        loadAvailableStates().then(states => {
+            console.log('Loaded available states:', states);
+            setAvailableStates(states);
+        });
     }, [loadAvailableStates]);
 
     // Helper function to detect if there's unsaved work
@@ -414,9 +458,14 @@ export function useWorldEngine({
             let rowText = '';
             for (let x = centerX - radius; x <= centerX + radius; x++) {
                 const key = `${x},${y}`;
-                const char = worldData[key];
-                if (char && char.trim() !== '' && !key.startsWith('block_') && !key.startsWith('deepspawn_') && !key.startsWith('label_')) {
-                    rowText += char;
+                const charData = worldData[key];
+                if (charData && !key.startsWith('block_') && !key.startsWith('deepspawn_') && !key.startsWith('label_')) {
+                    const char = getCharacter(charData);
+                    if (char.trim() !== '') {
+                        rowText += char;
+                    } else {
+                        rowText += ' ';
+                    }
                 } else {
                     rowText += ' ';
                 }
@@ -472,6 +521,21 @@ export function useWorldEngine({
         return null;
     }, [worldData]);
 
+    // === Character Utility Functions ===
+    const getCharacter = useCallback((data: string | StyledCharacter): string => {
+        if (typeof data === 'string') {
+            return data;
+        }
+        return data.char;
+    }, []);
+
+    const getCharacterStyle = useCallback((data: string | StyledCharacter): { color?: string; background?: string } | undefined => {
+        if (typeof data === 'string') {
+            return undefined;
+        }
+        return data.style;
+    }, []);
+
     // === Helper Functions (Largely unchanged, but use state variables) ===
     const getEffectiveCharDims = useCallback((zoom: number): { width: number; height: number; fontSize: number } => {
         if (charSizeCacheRef.current[zoom]) {
@@ -522,7 +586,8 @@ export function useWorldEngine({
             let rowText = '';
             for (let x = selection.startX; x <= selection.endX; x++) {
                 const key = `${x},${y}`;
-                const char = worldData[key] || ' ';
+                const charData = worldData[key];
+                const char = charData ? getCharacter(charData) : ' ';
                 rowText += char;
             }
             if (y > selection.startY) selectedText += '\n';
@@ -606,7 +671,9 @@ export function useWorldEngine({
             let line = '';
             for (let x = selection.startX; x <= selection.endX; x++) {
                 const key = `${x},${y}`;
-                line += worldData[key] || ' '; // Use space for empty cells
+                const charData = worldData[key];
+                const char = charData ? getCharacter(charData) : ' ';
+                line += char; // Use space for empty cells
             }
             lines.push(line);
         }
@@ -1092,8 +1159,10 @@ export function useWorldEngine({
                 }
             } else if (exec.command === 'state') {
                 if (exec.args.length === 0) {
-                    // No arguments - show usage
-                    setDialogueText(`Usage: /state [name] or /state --rm [name]. Available states: ${availableStates.join(', ')}`);
+                    // No arguments - clear canvas and exit current state
+                    setWorldData({});
+                    setCurrentStateName(null);
+                    setDialogueText("Canvas cleared");
                 } else if (exec.args[0] === '--rm') {
                     // Delete state command
                     if (exec.args.length < 2) {
@@ -1110,47 +1179,35 @@ export function useWorldEngine({
                     }
                 } else {
                     const stateName = exec.args[0];
-                    if (availableStates.includes(stateName)) {
-                        // State exists - check if we have unsaved work
-                        if (hasUnsavedWork()) {
-                            if (currentStateName) {
-                                // We're in a configured state - auto-save to current state before loading
-                                setDialogueText(`Saving "${currentStateName}" and loading "${stateName}"...`);
-                                saveState(currentStateName).then((success) => {
-                                    if (success) {
-                                        // Now load the requested state
-                                        loadState(stateName).then((loadSuccess) => {
-                                            if (loadSuccess) {
-                                                setDialogueText(`"${currentStateName}" saved, "${stateName}" loaded successfully`);
-                                            } else {
-                                                setDialogueText(`"${currentStateName}" saved, but failed to load "${stateName}"`);
-                                            }
-                                        });
-                                    } else {
-                                        setDialogueText(`Failed to save "${currentStateName}"`);
-                                    }
-                                });
-                            } else {
-                                // No configured state - ask if they want to save current work before loading
-                                setStatePrompt({ type: 'save_before_load_confirm', loadStateName: stateName });
-                                setDialogueText(`Save current work before loading "${stateName}"? (y/n)`);
-                            }
+                    console.log('State command:', stateName, 'Available states:', availableStates);
+                    
+                    if (worldId && stateName) {
+                        if (availableStates.includes(stateName)) {
+                            // State exists - load it directly (simplified from old working code)
+                            setDialogueText(`Loading state "${stateName}"...`);
+                            loadState(stateName).then((success) => {
+                                if (success) {
+                                    setDialogueText(`State "${stateName}" loaded successfully`);
+                                } else {
+                                    setDialogueText(`Failed to load state "${stateName}"`);
+                                }
+                            });
                         } else {
-                            // No unsaved work - directly prompt to load
-                            setStatePrompt({ type: 'load_confirm', stateName });
-                            setDialogueText(`Load state "${stateName}"? (y/n)`);
+                            // State doesn't exist - create new state
+                            setDialogueText(`Creating new state "${stateName}"...`);
+                            saveState(stateName).then((success) => {
+                                if (success) {
+                                    loadAvailableStates().then(setAvailableStates);
+                                    setDialogueText(`State "${stateName}" created and saved successfully`);
+                                } else {
+                                    setDialogueText(`Failed to create state "${stateName}"`);
+                                }
+                            });
                         }
+                    } else if (!worldId) {
+                        setDialogueText("No world ID available for state management");
                     } else {
-                        // State doesn't exist - automatically save current work as new state
-                        setDialogueText("Saving state...");
-                        saveState(stateName).then((success) => {
-                            if (success) {
-                                loadAvailableStates().then(setAvailableStates);
-                                setDialogueWithRevert(`State "${stateName}" created and saved successfully`, setDialogueText);
-                            } else {
-                                setDialogueWithRevert("Failed to create state", setDialogueText);
-                            }
-                        });
+                        setDialogueText("Please provide a state name");
                     }
                 }
             }
@@ -1246,27 +1303,16 @@ export function useWorldEngine({
         }
         // --- Movement ---
         else if (key === 'Enter') {
-            // Find the starting x position of the current line
-            const currentY = cursorPos.y;
-            let lineStartX = 0;
-            let foundLineStart = false;
+            // Smart Indentation System using block detection  
+            const dataToCheck = currentMode === 'air' ? 
+                { ...worldData, ...lightModeData } : 
+                worldData;
             
-            // First, find the leftmost character in the current line
-            for (const k in worldData) {
-                const [xStr, yStr] = k.split(',');
-                const y = parseInt(yStr, 10);
-                if (y === currentY) {
-                    const x = parseInt(xStr, 10);
-                    if (!foundLineStart || x < lineStartX) {
-                        lineStartX = x;
-                        foundLineStart = true;
-                    }
-                }
-            }
+            // Use utility function for smart indentation with 2+ space gap
+            const targetIndent = getSmartIndentation(dataToCheck, cursorPos);
             
             nextCursorPos.y = cursorPos.y + 1;
-            // Use the same indentation as the current line
-            nextCursorPos.x = lineStartX;
+            nextCursorPos.x = targetIndent;
             moved = true;
         } else if (key === 'ArrowUp') {
             if (isMod) {
@@ -1332,7 +1378,8 @@ export function useWorldEngine({
                 // First, skip any spaces to the left
                 while (x >= leftmostX) {
                     const key = `${x},${cursorPos.y}`;
-                    const char = worldData[key];
+                    const charData = worldData[key];
+                    const char = charData ? getCharacter(charData) : '';
                     if (!char || char === ' ' || char === '\t') {
                         x--;
                     } else {
@@ -1346,7 +1393,8 @@ export function useWorldEngine({
                     // Continue until we find a space or beginning of content
                     while (x >= leftmostX) {
                         const key = `${x-1},${cursorPos.y}`;
-                        const char = worldData[key];
+                        const charData = worldData[key];
+                        const char = charData ? getCharacter(charData) : '';
                         if (!char || char === ' ' || char === '\t') {
                             break;
                         }
@@ -1380,13 +1428,15 @@ export function useWorldEngine({
                 
                 // First, see if we're in the middle of a word
                 const startKey = `${x},${currentLine}`;
-                const startChar = worldData[startKey];
+                const startCharData = worldData[startKey];
+                const startChar = startCharData ? getCharacter(startCharData) : '';
                 let inWord = !!startChar && startChar !== ' ' && startChar !== '\t';
                 
                 // Find the end of current word or beginning of next word
                 while (x <= rightmostX) {
                     const key = `${x},${currentLine}`;
-                    const char = worldData[key];
+                    const charData = worldData[key];
+                    const char = charData ? getCharacter(charData) : '';
                     
                     if (!char) {
                         // No character at this position, keep looking
@@ -1443,7 +1493,8 @@ export function useWorldEngine({
                 // Continue deleting until we've checked all possible positions to the left
                 while (x >= leftmostX) {
                     const key = `${x},${cursorPos.y}`;
-                    const char = worldData[key];
+                    const charData = worldData[key];
+                    const char = charData ? getCharacter(charData) : '';
                     
                     // Stop at whitespace or when no character exists
                     if (!char || char === ' ' || char === '\t') {
@@ -1562,10 +1613,10 @@ export function useWorldEngine({
             nextCursorPos = { x: cursorAfterDelete.x + 1, y: cursorAfterDelete.y }; // Move cursor right
             moved = true;
             
-            if (currentMode === 'light') {
-                // Light mode: Add ephemeral text that disappears after 2 seconds
+            if (currentMode === 'air') {
+                // Air mode: Add ephemeral text that disappears after 2 seconds
                 addEphemeralText(cursorAfterDelete, key);
-                // Don't modify worldData in light mode
+                // Don't modify worldData in air mode
             } else if (currentMode === 'chat') {
                 // Chat mode: Use existing chat functionality
                 if (chatMode.isActive) {
@@ -1596,7 +1647,25 @@ export function useWorldEngine({
                 // Air mode (default): Normal text input to worldData
                 nextWorldData = { ...dataToDeleteFrom }; // Start with data after potential deletion
                 const currentKey = `${cursorAfterDelete.x},${cursorAfterDelete.y}`;
-                nextWorldData[currentKey] = key;
+                
+                // Check if current text style is different from global defaults
+                const hasCustomStyle = currentTextStyle.color !== textColor || currentTextStyle.background !== undefined;
+                
+                if (hasCustomStyle) {
+                    // Store styled character
+                    const styledChar: StyledCharacter = {
+                        char: key,
+                        style: {
+                            color: currentTextStyle.color,
+                            background: currentTextStyle.background
+                        }
+                    };
+                    nextWorldData[currentKey] = styledChar;
+                } else {
+                    // Store plain character (backward compatibility)
+                    nextWorldData[currentKey] = key;
+                }
+                
                 worldDataChanged = true; // Mark that synchronous data change occurred
             }
         }
@@ -2011,9 +2080,12 @@ export function useWorldEngine({
         backgroundVideo,
         backgroundStream,
         textColor,
+        currentTextStyle,
         searchPattern,
         isSearchActive,
         clearSearch,
+        settings,
+        updateSettings,
         getEffectiveCharDims,
         screenToWorld,
         worldToScreen,
@@ -2060,5 +2132,7 @@ export function useWorldEngine({
         setDialogueText,
         chatMode,
         setChatMode,
+        getCharacter,
+        getCharacterStyle,
     };
 }
