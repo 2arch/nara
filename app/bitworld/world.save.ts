@@ -15,7 +15,8 @@ export function useWorldSave(
     setLocalWorldData: (data: WorldData) => void,
     localSettings: WorldSettings,
     setLocalSettings: (settings: WorldSettings) => void,
-    autoLoadData: boolean = true
+    autoLoadData: boolean = true,
+    currentStateName?: string | null
 ) {
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -27,8 +28,12 @@ export function useWorldSave(
     const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const settingsSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-    const worldDataRefPath = worldId ? `worlds/${worldId}/data` : null;
-    const settingsRefPath = worldId ? `worlds/${worldId}/settings` : null;
+    const worldDataRefPath = worldId ? 
+        (currentStateName ? `worlds/${worldId}/states/${currentStateName}/data` : `worlds/${worldId}/data`) : 
+        null;
+    const settingsRefPath = worldId ? 
+        (currentStateName ? `worlds/${worldId}/states/${currentStateName}/settings` : `worlds/${worldId}/settings`) : 
+        null;
 
     // --- Load Initial Data & Settings ---
     useEffect(() => {
@@ -41,8 +46,10 @@ export function useWorldSave(
         setIsLoading(true);
         setError(null);
         
-        const dataRef = ref(database, `worlds/${worldId}/data`);
-        const settingsRef = ref(database, `worlds/${worldId}/settings`);
+        const dataPath = currentStateName ? `worlds/${worldId}/states/${currentStateName}/data` : `worlds/${worldId}/data`;
+        const settingsPath = currentStateName ? `worlds/${worldId}/states/${currentStateName}/settings` : `worlds/${worldId}/settings`;
+        const dataRef = ref(database, dataPath);
+        const settingsRef = ref(database, settingsPath);
 
         const handleData = (snapshot: DataSnapshot) => {
             if (!autoLoadData) {
@@ -75,18 +82,27 @@ export function useWorldSave(
             setIsLoading(false);
         };
 
-        const worldRef = ref(database, `worlds/${worldId}`);
-        
         // Store reference for proper cleanup
         let unsubscribe: (() => void) | null = null;
         
         // Set up persistent listener with proper cleanup tracking
-        unsubscribe = onValue(worldRef, (snapshot) => {
-            const world = snapshot.val();
-            handleData(snapshot.child('data'));
-            handleSettings(snapshot.child('settings'));
-            setIsLoading(false);
-        }, handleError);
+        if (currentStateName) {
+            const stateRef = ref(database, `worlds/${worldId}/states/${currentStateName}`);
+            unsubscribe = onValue(stateRef, (snapshot) => {
+                const state = snapshot.val();
+                handleData(snapshot.child('data'));
+                handleSettings(snapshot.child('settings'));
+                setIsLoading(false);
+            }, handleError);
+        } else {
+            const worldRef = ref(database, `worlds/${worldId}`);
+            unsubscribe = onValue(worldRef, (snapshot) => {
+                const world = snapshot.val();
+                handleData(snapshot.child('data'));
+                handleSettings(snapshot.child('settings'));
+                setIsLoading(false);
+            }, handleError);
+        }
 
         return () => {
             // Proper cleanup: call the unsubscribe function returned by onValue
@@ -97,7 +113,7 @@ export function useWorldSave(
             if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
             if (settingsSaveTimeoutRef.current) clearTimeout(settingsSaveTimeoutRef.current);
         };
-    }, [worldId, setLocalWorldData, setLocalSettings]);
+    }, [worldId, setLocalWorldData, setLocalSettings, currentStateName]);
 
     // --- Save Data on Change (Debounced) ---
     useEffect(() => {

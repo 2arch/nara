@@ -111,6 +111,8 @@ export interface WorldEngine {
         inputPositions: Point[];
         isProcessing: boolean;
     }>>;
+    // Text compilation access
+    getCompiledText: () => { [lineY: number]: string };
     // Navigation system properties
     isNavVisible: boolean;
     setIsNavVisible: (visible: boolean) => void;
@@ -291,20 +293,167 @@ export function useWorldEngine({
     // === Settings System ===
     const { settings, setSettings, updateSettings } = useWorldSettings();
     
+    // === Ambient Text Compilation System ===
+    const [compiledTextCache, setCompiledTextCache] = useState<{ [lineY: number]: string }>({});
+    const lastCompiledRef = useRef<{ [lineY: number]: string }>({});
+    const compilationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    
+    const compileTextStrings = useCallback((worldData: WorldData): { [lineY: number]: string } => {
+        const compiledLines: { [lineY: number]: string } = {};
+        const lineData: { [lineY: number]: Array<{ x: number, char: string }> } = {};
+        
+        // Group characters by line
+        for (const key in worldData) {
+            // Skip special keys (blocks, labels, etc.)
+            if (key.startsWith('block_') || key.startsWith('deepspawn_') || key.startsWith('label_')) {
+                continue;
+            }
+            
+            const [xStr, yStr] = key.split(',');
+            const x = parseInt(xStr, 10);
+            const y = parseInt(yStr, 10);
+            
+            if (!isNaN(x) && !isNaN(y)) {
+                const char = getCharacter(worldData[key]);
+                
+                if (!lineData[y]) {
+                    lineData[y] = [];
+                }
+                lineData[y].push({ x, char });
+            }
+        }
+        
+        // Compile each line into a string
+        for (const lineY in lineData) {
+            const y = parseInt(lineY, 10);
+            const chars = lineData[y].sort((a, b) => a.x - b.x);
+            
+            if (chars.length === 0) continue;
+            
+            // Build string with proper spacing
+            let line = '';
+            let lastX = chars[0].x - 1;
+            
+            for (const { x, char } of chars) {
+                // Add spaces for gaps
+                while (lastX + 1 < x) {
+                    line += ' ';
+                    lastX++;
+                }
+                line += char;
+                lastX = x;
+            }
+            
+            // Only store non-empty lines
+            if (line.trim()) {
+                compiledLines[y] = line;
+            }
+        }
+        
+        return compiledLines;
+    }, []);
+
+    // Ambient text compilation and Firebase sync
+    useEffect(() => {
+        if (!worldId) return;
+
+        // Clear any pending compilation
+        if (compilationTimeoutRef.current) {
+            clearTimeout(compilationTimeoutRef.current);
+        }
+
+        // Debounced compilation (300ms after last change)
+        compilationTimeoutRef.current = setTimeout(() => {
+            const compiled = compileTextStrings(worldData);
+            const changes: { [lineY: number]: { old: string | undefined, new: string } } = {};
+            
+            // Detect changes
+            for (const lineY in compiled) {
+                const y = parseInt(lineY);
+                if (lastCompiledRef.current[y] !== compiled[y]) {
+                    changes[y] = {
+                        old: lastCompiledRef.current[y],
+                        new: compiled[y]
+                    };
+                }
+            }
+            
+            // Detect deletions
+            for (const lineY in lastCompiledRef.current) {
+                const y = parseInt(lineY);
+                if (!compiled[y]) {
+                    changes[y] = {
+                        old: lastCompiledRef.current[y],
+                        new: ''
+                    };
+                }
+            }
+            
+            // Send only changes to Firebase
+            if (Object.keys(changes).length > 0) {
+                const contentPath = currentStateName ? `worlds/${worldId}/states/${currentStateName}/content` : `worlds/${worldId}/content`;
+                const compiledTextRef = ref(database, contentPath);
+                
+                // Create append operations for changed lines
+                const updates: { [path: string]: any } = {};
+                for (const lineY in changes) {
+                    const change = changes[lineY];
+                    if (change.new) {
+                        updates[`${lineY}`] = change.new;
+                    } else {
+                        updates[`${lineY}`] = null; // Delete empty lines
+                    }
+                }
+                
+                // Send batch update to Firebase
+                set(compiledTextRef, { ...lastCompiledRef.current, ...updates })
+                    .then(() => {
+                        console.log('Compiled text synced:', { 
+                            changedLines: Object.keys(changes).length,
+                            changes 
+                        });
+                        lastCompiledRef.current = compiled;
+                        setCompiledTextCache(compiled);
+                    })
+                    .catch(error => {
+                        console.error('Failed to sync compiled text:', error);
+                    });
+            }
+        }, 300); // 300ms debounce
+
+        return () => {
+            if (compilationTimeoutRef.current) {
+                clearTimeout(compilationTimeoutRef.current);
+            }
+        };
+    }, [worldData, worldId, compileTextStrings, currentStateName]);
+
     // === State Management Functions ===
     const saveState = useCallback(async (stateName: string): Promise<boolean> => {
         if (!worldId) return false;
         
         try {
             const stateRef = ref(database, `worlds/${worldId}/states/${stateName}`);
+            
+            // Compile text strings from individual characters
+            const compiledText = compileTextStrings(worldData);
+            
             const stateData = {
-                worldData,
+                worldData, // Individual character positions (for canvas)
+                compiledText, // Compiled text strings (for text operations)
                 settings,
                 timestamp: Date.now(),
                 cursorPos,
                 viewOffset,
                 zoomLevel
             };
+            
+            console.log('Saving state with compiled text:', { 
+                characterCount: Object.keys(worldData).length,
+                lineCount: Object.keys(compiledText).length,
+                compiledText 
+            });
+            
             await set(stateRef, stateData);
             setCurrentStateName(stateName); // Track that we're now in this state
             return true;
@@ -336,6 +485,15 @@ export function useWorldEngine({
                 if (stateData.zoomLevel) {
                     setZoomLevel(stateData.zoomLevel);
                 }
+                
+                // Log compiled text if available (for debugging/analysis)
+                if (stateData.compiledText) {
+                    console.log('Loaded state with compiled text:', {
+                        lineCount: Object.keys(stateData.compiledText).length,
+                        compiledText: stateData.compiledText
+                    });
+                }
+                
                 setCurrentStateName(stateName); // Track that we're now in this state
                 return true;
             }
@@ -411,6 +569,24 @@ export function useWorldEngine({
             setAvailableStates(states);
         });
     }, [loadAvailableStates]);
+    
+    // Load compiled text on mount
+    useEffect(() => {
+        if (!worldId) return;
+        
+        const contentPath = currentStateName ? `worlds/${worldId}/states/${currentStateName}/content` : `worlds/${worldId}/content`;
+        const compiledTextRef = ref(database, contentPath);
+        get(compiledTextRef).then((snapshot) => {
+            const compiledText = snapshot.val();
+            if (compiledText) {
+                console.log('Loaded existing compiled text:', compiledText);
+                lastCompiledRef.current = compiledText;
+                setCompiledTextCache(compiledText);
+            }
+        }).catch(error => {
+            console.error('Failed to load compiled text:', error);
+        });
+    }, [worldId, currentStateName]);
 
     // Helper function to detect if there's unsaved work
     const hasUnsavedWork = useCallback((): boolean => {
@@ -492,7 +668,7 @@ export function useWorldEngine({
         isLoading: isLoadingWorld,
         isSaving: isSavingWorld,
         error: worldPersistenceError
-    } = useWorldSave(worldId, worldData, setWorldData, settings, setSettings, false); // Disable auto-loading
+    } = useWorldSave(worldId, worldData, setWorldData, settings, setSettings, false, currentStateName); // Disable auto-loading
 
     // === Refs === (Keep refs for things not directly tied to re-renders or persistence)
     const charSizeCacheRef = useRef<{ [key: number]: { width: number; height: number; fontSize: number } }>({});
@@ -2134,5 +2310,6 @@ export function useWorldEngine({
         setChatMode,
         getCharacter,
         getCharacterStyle,
+        getCompiledText: () => compiledTextCache,
     };
 }
