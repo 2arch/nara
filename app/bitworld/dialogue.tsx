@@ -600,7 +600,8 @@ export function useDebugDialogue(engine: WorldEngine) {
                 const [xStr, yStr] = key.split(',');
                 const x = parseInt(xStr, 10);
                 const y = parseInt(yStr, 10);
-                const char = engine.worldData[key];
+                const charData = engine.worldData[key];
+                const char = engine.getCharacter(charData);
                 
                 if (!isNaN(x) && !isNaN(y) && char) {
                     setLastChar({ char, x, y });

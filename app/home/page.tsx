@@ -84,19 +84,14 @@ export default function CorbuType() {
             )}
             
             {/* Stream background (screen share) */}
-            {engine.backgroundMode === 'stream' && engine.backgroundStream && (
+            {false && (
                 <video
                     key="screen-share-video"
                     autoPlay
                     muted
                     playsInline
                     ref={(videoElement) => {
-                        if (videoElement && engine.backgroundStream) {
-                            // Only set srcObject if it's different to avoid re-renders
-                            if (videoElement.srcObject !== engine.backgroundStream) {
-                                videoElement.srcObject = engine.backgroundStream;
-                            }
-                        }
+                        // backgroundStream temporarily disabled
                     }}
                     style={{
                         position: 'fixed',

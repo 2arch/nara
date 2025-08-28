@@ -96,7 +96,6 @@ export interface WorldEngine {
     isBlock: (x: number, y: number) => boolean;
     directionPoints: { current: Point & { timestamp: number } | null, previous: Point & { timestamp: number } | null };
     getAngleDebugData: () => { firstPoint: Point & { timestamp: number }, lastPoint: Point & { timestamp: number }, angle: number, degrees: number, pointCount: number } | null;
-    settings: WorldSettings;
     dialogueText: string;
     setDialogueText: (text: string) => void;
     chatMode: {
@@ -194,7 +193,9 @@ export function useWorldEngine({
                 const y = parseInt(yStr, 10);
                 if (!isNaN(x) && !isNaN(y)) {
                     try {
-                        const labelData = JSON.parse(worldData[key]);
+                        const charData = worldData[key];
+                        const charString = getCharacter(charData);
+                        const labelData = JSON.parse(charString);
                         const text = labelData.text || '';
                         const color = labelData.color || '#000000';
                         if (text.trim()) {
@@ -224,7 +225,6 @@ export function useWorldEngine({
         backgroundColor,
         backgroundImage,
         backgroundVideo,
-        backgroundStream,
         textColor,
         currentTextStyle,
         searchPattern,
@@ -418,10 +418,6 @@ export function useWorldEngine({
                 // Send batch update to Firebase
                 set(compiledTextRef, { ...lastCompiledRef.current, ...updates })
                     .then(() => {
-                        console.log('Compiled text synced:', { 
-                            changedLines: Object.keys(changes).length,
-                            changes 
-                        });
                         lastCompiledRef.current = compiled;
                         setCompiledTextCache(compiled);
                     })
@@ -458,11 +454,6 @@ export function useWorldEngine({
                 zoomLevel
             };
             
-            console.log('Saving state with compiled text:', { 
-                characterCount: Object.keys(worldData).length,
-                lineCount: Object.keys(compiledText).length,
-                compiledText 
-            });
             
             await set(stateRef, stateData);
             setCurrentStateName(stateName); // Track that we're now in this state
@@ -498,10 +489,6 @@ export function useWorldEngine({
                 
                 // Log compiled text if available (for debugging/analysis)
                 if (stateData.compiledText) {
-                    console.log('Loaded state with compiled text:', {
-                        lineCount: Object.keys(stateData.compiledText).length,
-                        compiledText: stateData.compiledText
-                    });
                 }
                 
                 setCurrentStateName(stateName); // Track that we're now in this state
@@ -515,15 +502,12 @@ export function useWorldEngine({
     }, [worldId, setSettings, getUserPath]);
 
     const loadAvailableStates = useCallback(async (): Promise<string[]> => {
-        console.log('loadAvailableStates called with userUid:', userUid);
         if (!userUid) {
-            console.log('No userUid provided, returning empty array');
             return [];
         }
         
         try {
             const statesPath = `worlds/${userUid}`;
-            console.log('Loading states from path:', statesPath);
             const statesRef = ref(database, statesPath);
             
             // Add timeout to avoid hanging
@@ -537,16 +521,13 @@ export function useWorldEngine({
             ]);
             
             const statesData = (snapshot as any).val();
-            console.log('Firebase snapshot data:', statesData);
             
             if (statesData && typeof statesData === 'object') {
                 // Filter out 'home' and only return actual saved states
                 const allKeys = Object.keys(statesData);
                 const stateNames = allKeys.filter(key => key !== 'home').sort();
-                console.log('Found states:', stateNames, '(filtered from:', allKeys, ')');
                 return stateNames;
             }
-            console.log('No states found in Firebase');
             return [];
         } catch (error) {
             console.error('Error loading available states:', error);
@@ -577,7 +558,6 @@ export function useWorldEngine({
     // Load available states on component mount
     useEffect(() => {
         loadAvailableStates().then(states => {
-            console.log('Loaded available states:', states);
             setAvailableStates(states);
         });
     }, [loadAvailableStates]);
@@ -591,7 +571,6 @@ export function useWorldEngine({
         get(compiledTextRef).then((snapshot) => {
             const compiledText = snapshot.val();
             if (compiledText) {
-                console.log('Loaded existing compiled text:', compiledText);
                 lastCompiledRef.current = compiledText;
                 setCompiledTextCache(compiledText);
             }
@@ -622,7 +601,6 @@ export function useWorldEngine({
             const settingsRef = ref(database, getUserPath(`${worldId}/settings`));
             const updatedSettings = { ...settings, ...newSettings };
             await set(settingsRef, updatedSettings);
-            console.log('Settings saved immediately to Firebase:', updatedSettings);
         } catch (error) {
             console.error('Failed to save settings to Firebase:', error);
         }
@@ -694,7 +672,9 @@ export function useWorldEngine({
                 const ly = parseInt(lyStr, 10);
 
                 try {
-                    const data = JSON.parse(worldData[key]);
+                    const charData = worldData[key];
+                    const charString = getCharacter(charData);
+                    const data = JSON.parse(charString);
                     const text = data.text || '';
                     const width = text.length;
 
@@ -813,7 +793,9 @@ export function useWorldEngine({
                 const ly = parseInt(lyStr, 10);
 
                 try {
-                    const data = JSON.parse(newWorldData[key]);
+                    const charData = newWorldData[key];
+                    const charString = getCharacter(charData);
+                    const data = JSON.parse(charString);
                     const text = data.text || '';
                     const width = text.length;
                     const endX = lx + width - 1;
@@ -1367,7 +1349,6 @@ export function useWorldEngine({
                     }
                 } else {
                     const stateName = exec.args[0];
-                    console.log('State command:', stateName, 'Available states:', availableStates);
                     
                     if (worldId && stateName) {
                         if (availableStates.includes(stateName)) {
@@ -2130,7 +2111,9 @@ export function useWorldEngine({
         for (const key in worldData) {
             if (key.startsWith('label_')) {
                 try {
-                    const labelData = JSON.parse(worldData[key]);
+                    const charData = worldData[key];
+                    const charString = getCharacter(charData);
+                    const labelData = JSON.parse(charString);
                     const color = labelData.color || '#000000';
                     colors.add(color);
                 } catch (e) {
@@ -2187,7 +2170,7 @@ export function useWorldEngine({
                 const y = parseInt(yStr, 10);
                 if (!isNaN(x) && !isNaN(y)) {
                     try {
-                        const labelData = JSON.parse(worldData[key]);
+                        const labelData = JSON.parse(getCharacter(worldData[key]));
                         const text = labelData.text || '';
                         const color = labelData.color || '#000000';
                         if (text.trim()) {
@@ -2270,7 +2253,6 @@ export function useWorldEngine({
         backgroundColor,
         backgroundImage,
         backgroundVideo,
-        backgroundStream,
         textColor,
         currentTextStyle,
         searchPattern,
@@ -2316,7 +2298,6 @@ export function useWorldEngine({
         isBlock,
         directionPoints,
         getAngleDebugData,
-        settings,
         isNavVisible,
         setIsNavVisible,
         navOriginPosition,

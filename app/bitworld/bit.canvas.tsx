@@ -695,7 +695,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             const heatColor = getHeatMapColor(distanceFromCursor);
                             
                             // Render the deepspawn character
-                            const char = engine.deepspawnData[key];
+                            const charData = engine.deepspawnData[key];
+                            const char = engine.getCharacter(charData);
                             ctx.fillStyle = 'rgba(136, 136, 136, 0.7)'; // Translucent gray, similar to command suggestions
                             ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
                         }
@@ -804,7 +805,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     const worldY = parseInt(yStr, 10);
 
                     try {
-                        const labelData = JSON.parse(engine.worldData[key]);
+                        const charData = engine.worldData[key];
+                        const charString = engine.getCharacter(charData);
+                        const labelData = JSON.parse(charString);
                         const text = labelData.text || '';
                         const color = labelData.color || '#000000';
                         const labelWidthInChars = text.length;

@@ -19,7 +19,9 @@ interface BitHomeCanvasProps {
     taglineText?: { title: string; subtitle: string };
     navButtons?: { 
         onLoginClick?: () => void; 
-        onSignupClick?: () => void; 
+        onSignupClick?: () => void;
+        onVisitClick?: () => void;
+        isAuthenticated?: boolean; 
     };
     onBackClick?: () => void;
     onAuthSuccess?: (username: string) => void;
@@ -363,6 +365,7 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         // === Render Email Field (Login or Signup Step 1) ===
         if ((!isSignup) || (isSignup && signupStep === 1)) {
             const emailField = layout.fields.email;
+            if (!emailField) return; // Safety check
             const emailValue = formState.email.value || 'enter your email';
             const emailFocused = focusedInput === 'email';
         
@@ -392,6 +395,7 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         // === Render Password Field (Login or Signup Step 1 only) ===
         if ((!isSignup) || (isSignup && signupStep === 1)) {
             const passwordField = layout.fields.password;
+            if (!passwordField) return; // Safety check
             const passwordValue = formState.password.value || 'enter your password';
             const passwordDisplay = (formState.password.value && !passwordVisible) ? '•'.repeat(formState.password.value.length) : passwordValue;
             const passwordFocused = focusedInput === 'password';
@@ -580,53 +584,74 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         const rightMargin = 40; // Right margin in pixels
         const buttonSpacing = 1; // Single character row spacing between buttons
         
-        // Button dimensions
-        const loginText = 'login';
-        const signupText = 'signup';
-        const buttonWidth = Math.max(loginText.length, signupText.length) * charWidth + 16; // Add padding
-        
         // Center vertically, right-aligned with margin - use character grid
         const centerY = Math.floor(canvasHeight / 2);
-        
-        // Position buttons on character grid - tight spacing like tagline
-        const loginButtonX = canvasWidth - rightMargin - buttonWidth;
-        const loginButtonY = centerY - charHeight - (buttonSpacing * charHeight / 2);
-        
-        const signupButtonX = canvasWidth - rightMargin - buttonWidth;
-        const signupButtonY = centerY + (buttonSpacing * charHeight / 2);
         
         ctx.save();
         ctx.font = `16px "${FONT_FAMILY}"`;
         ctx.textBaseline = 'top';
         
         // Track clickable regions
-        const clickableRegions: Array<{type: 'login' | 'signup', rect: {x: number, y: number, width: number, height: number}}> = [];
+        const clickableRegions: Array<{type: 'login' | 'signup' | 'visit', rect: {x: number, y: number, width: number, height: number}}> = [];
         
-        // === Render Login Button ===
-        ctx.fillStyle = pressedNavButton === 'login' ? '#333333' : '#000000';
-        ctx.fillRect(loginButtonX, loginButtonY, buttonWidth, charHeight);
-        
-        ctx.fillStyle = '#FFFFFF';
-        const loginTextX = loginButtonX + (buttonWidth - (loginText.length * charWidth)) / 2;
-        ctx.fillText(loginText, loginTextX, loginButtonY + verticalTextOffset);
-        
-        clickableRegions.push({
-            type: 'login',
-            rect: { x: loginButtonX, y: loginButtonY, width: buttonWidth, height: charHeight }
-        });
-        
-        // === Render Signup Button ===
-        ctx.fillStyle = pressedNavButton === 'signup' ? '#333333' : '#000000';
-        ctx.fillRect(signupButtonX, signupButtonY, buttonWidth, charHeight);
-        
-        ctx.fillStyle = '#FFFFFF';
-        const signupTextX = signupButtonX + (buttonWidth - (signupText.length * charWidth)) / 2;
-        ctx.fillText(signupText, signupTextX, signupButtonY + verticalTextOffset);
-        
-        clickableRegions.push({
-            type: 'signup',
-            rect: { x: signupButtonX, y: signupButtonY, width: buttonWidth, height: charHeight }
-        });
+        if (navButtons.isAuthenticated && navButtons.onVisitClick) {
+            // === Render single Visit Button for authenticated users ===
+            const visitText = 'visit';
+            const buttonWidth = visitText.length * charWidth + 16; // Add padding
+            
+            const visitButtonX = canvasWidth - rightMargin - buttonWidth;
+            const visitButtonY = centerY - charHeight / 2; // Centered vertically
+            
+            ctx.fillStyle = pressedNavButton === 'visit' ? '#333333' : '#000000';
+            ctx.fillRect(visitButtonX, visitButtonY, buttonWidth, charHeight);
+            
+            ctx.fillStyle = '#FFFFFF';
+            const visitTextX = visitButtonX + (buttonWidth - (visitText.length * charWidth)) / 2;
+            ctx.fillText(visitText, visitTextX, visitButtonY + verticalTextOffset);
+            
+            clickableRegions.push({
+                type: 'visit',
+                rect: { x: visitButtonX, y: visitButtonY, width: buttonWidth, height: charHeight }
+            });
+        } else {
+            // === Render Login and Signup Buttons for non-authenticated users ===
+            const loginText = 'login';
+            const signupText = 'signup';
+            const buttonWidth = Math.max(loginText.length, signupText.length) * charWidth + 16; // Add padding
+            
+            // Position buttons on character grid - tight spacing like tagline
+            const loginButtonX = canvasWidth - rightMargin - buttonWidth;
+            const loginButtonY = centerY - charHeight - (buttonSpacing * charHeight / 2);
+            
+            const signupButtonX = canvasWidth - rightMargin - buttonWidth;
+            const signupButtonY = centerY + (buttonSpacing * charHeight / 2);
+            
+            // === Render Login Button ===
+            ctx.fillStyle = pressedNavButton === 'login' ? '#333333' : '#000000';
+            ctx.fillRect(loginButtonX, loginButtonY, buttonWidth, charHeight);
+            
+            ctx.fillStyle = '#FFFFFF';
+            const loginTextX = loginButtonX + (buttonWidth - (loginText.length * charWidth)) / 2;
+            ctx.fillText(loginText, loginTextX, loginButtonY + verticalTextOffset);
+            
+            clickableRegions.push({
+                type: 'login',
+                rect: { x: loginButtonX, y: loginButtonY, width: buttonWidth, height: charHeight }
+            });
+            
+            // === Render Signup Button ===
+            ctx.fillStyle = pressedNavButton === 'signup' ? '#333333' : '#000000';
+            ctx.fillRect(signupButtonX, signupButtonY, buttonWidth, charHeight);
+            
+            ctx.fillStyle = '#FFFFFF';
+            const signupTextX = signupButtonX + (buttonWidth - (signupText.length * charWidth)) / 2;
+            ctx.fillText(signupText, signupTextX, signupButtonY + verticalTextOffset);
+            
+            clickableRegions.push({
+                type: 'signup',
+                rect: { x: signupButtonX, y: signupButtonY, width: buttonWidth, height: charHeight }
+            });
+        }
         
         // Store regions for click handling
         (ctx.canvas as any).navClickableRegions = clickableRegions;
@@ -885,6 +910,11 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
                     setPressedNavButton('signup');
                     setTimeout(() => setPressedNavButton(null), 150);
                     navButtons.onSignupClick();
+                    return true;
+                } else if (region.type === 'visit' && navButtons.onVisitClick) {
+                    setPressedNavButton('visit');
+                    setTimeout(() => setPressedNavButton(null), 150);
+                    navButtons.onVisitClick();
                     return true;
                 }
             }

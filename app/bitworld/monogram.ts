@@ -465,7 +465,8 @@ const useMonogramSystem = (
         
         const cacheKey = `${text}-${fontSize}`;
         if (textBitmapCache.current[cacheKey]) {
-            return textBitmapCache.current[cacheKey];
+            const cached = textBitmapCache.current[cacheKey];
+            return 'imageData' in cached ? cached.imageData : cached;
         }
         
         const canvas = document.createElement('canvas');
@@ -511,7 +512,8 @@ const useMonogramSystem = (
         const cacheKey = `${text}-${fontSize}-multifont-${timeKey}`;
         
         if (textBitmapCache.current[cacheKey]) {
-            return textBitmapCache.current[cacheKey];
+            const cached = textBitmapCache.current[cacheKey];
+            return 'imageData' in cached ? cached : null;
         }
         
         const canvas = document.createElement('canvas');

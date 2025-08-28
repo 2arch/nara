@@ -24,18 +24,10 @@ export default function Home() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       setAuthLoading(false);
-      
-      // If user is already logged in and not on a form page, redirect to their homepage
-      if (user && !showForm) {
-        const username = await getUsernameByUid(user.uid);
-        if (username) {
-          router.push(`/@${username}`);
-        }
-      }
     });
     
     return () => unsubscribe();
-  }, [showForm, router]);
+  }, []);
   
   const engine = useWorldEngine({ 
     worldId: 'homeWorld', 
@@ -64,6 +56,15 @@ export default function Home() {
     router.push(`/@${username}`);
   }, [router]);
 
+  const handleVisitClick = useCallback(async () => {
+    if (user) {
+      const username = await getUsernameByUid(user.uid);
+      if (username) {
+        router.push(`/@${username}`);
+      }
+    }
+  }, [router, user]);
+
   // Simple cursor blink effect (like BitCanvas)
   useEffect(() => {
     const interval = setInterval(() => {
@@ -88,7 +89,7 @@ export default function Home() {
 
   if (authLoading || engine.isLoadingWorld) {
     return (
-      <div className="w-screen h-screen flex items-center justify-center" style={{backgroundColor: '#39FF14'}}>
+      <div className="w-screen h-screen flex items-center justify-center" style={{backgroundColor: 'orange'}}>
         <div className="text-black">Loading...</div>
       </div>
     );
@@ -107,10 +108,14 @@ export default function Home() {
           title: "nara web services",
           subtitle: "intelligence, simplified."
         } : undefined}
-        navButtons={!showForm ? {
+        navButtons={!showForm ? (user ? {
+          onVisitClick: handleVisitClick,
+          isAuthenticated: true
+        } : {
           onLoginClick: handleLoginClick,
-          onSignupClick: handleSignupClick
-        } : undefined}
+          onSignupClick: handleSignupClick,
+          isAuthenticated: false
+        }) : undefined}
         onBackClick={showForm ? handleBackToHome : undefined}
         onAuthSuccess={handleAuthSuccess}
       />

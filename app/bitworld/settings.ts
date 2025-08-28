@@ -16,7 +16,8 @@ export const initialSettings: WorldSettings = {
         speed: 0.5, // Slower default speed
         complexity: 1.0,
         colorShift: 0,
-        enabled: false
+        enabled: false,
+        geometryType: 'octahedron'
     },
 };
 

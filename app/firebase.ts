@@ -30,12 +30,10 @@ const database = getDatabase(app);
 
 // For Firebase Realtime Database, persistence is enabled by default
 // No need to explicitly enable it, but we can log for confirmation
-console.log("Firebase Realtime Database initialized with default persistence");
 
 // Connect to emulator if in development mode
 if (process.env.NODE_ENV === 'development' && process.env.FIREBASE_EMULATOR === 'true') {
   connectDatabaseEmulator(database, 'localhost', 9000);
-  console.log('Connected to Firebase emulator');
 }
 
 // Force cleanup all connections when page unloads to prevent leaks
@@ -43,7 +41,6 @@ if (typeof window !== 'undefined') {
   const { goOffline } = require('firebase/database');
   
   const cleanup = () => {
-    console.log('Page unloading - forcing Firebase offline to prevent connection leaks');
     goOffline(database);
   };
   

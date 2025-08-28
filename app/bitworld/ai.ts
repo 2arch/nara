@@ -348,8 +348,8 @@ export async function generateVideo(prompt: string): Promise<string | null> {
         }
 
         // Check for RAI (Responsible AI) filtering
-        if (generatedVideo?.raiReason) {
-            console.warn('Video generation blocked by RAI:', generatedVideo.raiReason);
+        if (generatedVideo && 'raiReason' in generatedVideo) {
+            console.warn('Video generation blocked by RAI:', (generatedVideo as any).raiReason);
         }
 
         console.warn('No video data received from generation. Full response structure:', JSON.stringify(operation, null, 2));

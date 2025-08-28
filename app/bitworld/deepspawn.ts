@@ -109,7 +109,6 @@ export function useDeepspawnSystem(isDeepspawnVisible: boolean = false) {
         }
         
         try {
-            console.log('Generating new deepspawn questions based on:', recentText);
             const newQuestions = await generateDeepspawnQuestions(recentText);
             setDeepspawnQuestions(newQuestions);
             return newQuestions;
@@ -203,8 +202,6 @@ export function useDeepspawnSystem(isDeepspawnVisible: boolean = false) {
                 placeDeepspawnObject(newDeepspawnData, validPos.x, validPos.y, questionsToUse[i]);
             }
             placedDeepspawns.push(validPos); // Add to collision tracking
-            
-            console.log(`Spawning forward cursor ${i} at (${validPos.x}, ${validPos.y}) - Direction: ${(direction * 180/Math.PI).toFixed(1)}°${i === 0 ? ' (lead cursor)' : ''} ${validPos.x !== baseX || validPos.y !== baseY ? '(adjusted for collision)' : ''}`);
         }
         
         // Spawn 2 orthogonal cursors (left and right perpendicular to movement direction)
@@ -224,9 +221,7 @@ export function useDeepspawnSystem(isDeepspawnVisible: boolean = false) {
             if (questionsToUse[questionIndex]) {
                 placeDeepspawnObject(newDeepspawnData, validPos.x, validPos.y, questionsToUse[questionIndex]);
             }
-            placedDeepspawns.push(validPos); // Add to collision tracking
-            
-            console.log(`Spawning orthogonal cursor ${index} at (${validPos.x}, ${validPos.y}) - Angle: ${(angle * 180/Math.PI).toFixed(1)}° ${validPos.x !== baseX || validPos.y !== baseY ? '(adjusted for collision)' : ''}`);
+            placedDeepspawns.push(validPos); // Add to collision tracking            
         });
         
         setDeepspawnData(newDeepspawnData);

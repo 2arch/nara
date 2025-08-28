@@ -100,7 +100,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
     const matchCommands = useCallback((input: string): string[] => {
         if (!input) return AVAILABLE_COMMANDS;
         const lowerInput = input.toLowerCase().split(' ')[0];
-        console.log('matchCommands called with:', { input, lowerInput, availableStates });
         
         // Special handling for mode command with subcommands
         if (lowerInput === 'mode') {
@@ -163,7 +162,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
 
         if (lowerInput === 'state') {
             const parts = input.toLowerCase().split(' ');
-            console.log('State command matching:', { parts, availableStates });
             
             if (parts.length > 1) {
                 const secondArg = parts[1];
@@ -532,7 +530,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         
         if (!commandToExecute) return null; // Safety check for undefined command
         
-        console.log('Executing command:', commandToExecute, 'from matched:', commandState.matchedCommands, 'hasNavigated:', commandState.hasNavigated);
         const inputParts = commandToExecute.split(/\s+/);
         const commandName = inputParts[0];
         
@@ -541,7 +538,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             if (inputParts.length === 1) {
                 // User typed just 'mode' - clear to default mode (like /state clears canvas)
                 switchMode('default');
-                console.log('Switched to default mode');
             } else if (inputParts.length === 2) {
                 // User typed 'mode <something>' - use their specified mode
                 const modeArg = inputParts[1] as CanvasMode;
@@ -552,7 +548,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     } else {
                         // For other modes, switch mode in current context
                         switchMode(modeArg);
-                        console.log(`Switched to ${modeArg} mode`);
                     }
                 }
             }
@@ -980,7 +975,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     return null;
                 } else if (args[0] === '--rm') {
                     // Delete command - let world engine handle it
-                    console.log('Returning state delete command execution with args:', args);
                     return {
                         command: 'state',
                         args: args,
@@ -995,7 +989,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             }
             
             // Fallback: Return command execution for world engine to handle (old behavior)
-            console.log('Returning state command execution with args:', args);
             return {
                 command: 'state',
                 args: args,
@@ -1033,13 +1026,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             input: '',
             matchedCommands: [],
             selectedIndex: 0,
-            commandStartPos: { x: 0, y: 0 }
+            commandStartPos: { x: 0, y: 0 },
+            hasNavigated: false
         });
         setCommandData({});
         
         if (commandToExecute.toLowerCase().startsWith(commandName.toLowerCase())) {
             const args = inputParts.slice(1);
-            console.log('Executing command:', commandToExecute, 'with args:', args);
             return { command: commandToExecute, args, commandStartPos: commandState.commandStartPos };
         }
         
