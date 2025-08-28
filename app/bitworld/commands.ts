@@ -523,13 +523,16 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
     const executeCommand = useCallback((): CommandExecution | null => {
         if (commandState.matchedCommands.length === 0) return null;
 
-        const selectedCommand = commandState.matchedCommands[commandState.selectedIndex];
-        if (!selectedCommand) return null; // Safety check for undefined command
-        
-        console.log('Executing command:', selectedCommand, 'from matched:', commandState.matchedCommands);
-        
+        // If user hasn't navigated with arrow keys, use their raw input instead of selected suggestion
         const fullInput = commandState.input.trim();
-        const inputParts = fullInput.split(/\s+/);
+        const commandToExecute = commandState.hasNavigated 
+            ? commandState.matchedCommands[commandState.selectedIndex] 
+            : fullInput;
+        
+        if (!commandToExecute) return null; // Safety check for undefined command
+        
+        console.log('Executing command:', commandToExecute, 'from matched:', commandState.matchedCommands, 'hasNavigated:', commandState.hasNavigated);
+        const inputParts = commandToExecute.split(/\s+/);
         const commandName = inputParts[0];
         
         // Handle mode switching commands directly
@@ -567,7 +570,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return null; // Mode switches don't need further processing
         }
 
-        if (selectedCommand.startsWith('bg')) {
+        if (commandToExecute.startsWith('bg')) {
             const inputParts = commandState.input.trim().split(/\s+/);
             const bgArg = inputParts.length > 1 ? inputParts[1] : undefined;
             
@@ -767,7 +770,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return null;
         }
 
-        if (selectedCommand.startsWith('text')) {
+        if (commandToExecute.startsWith('text')) {
             const inputParts = commandState.input.trim().split(/\s+/);
             const colorArg = inputParts.length > 1 ? inputParts[1] : undefined;
             const backgroundArg = inputParts.length > 2 ? inputParts[2] : undefined;
@@ -874,7 +877,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return null;
         }
 
-        if (selectedCommand.startsWith('nav')) {
+        if (commandToExecute.startsWith('nav')) {
             // Clear command mode
             setCommandState({
                 isActive: false,
@@ -886,9 +889,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             });
             setCommandData({});
             
-            // Use the selected command instead of the typed input
-            // Extract label name from selected command (format: "nav labelname")
-            const commandParts = selectedCommand.split(' ');
+            // Use the command to execute instead of the typed input
+            // Extract label name from command (format: "nav labelname")
+            const commandParts = commandToExecute.split(' ');
             const labelQuery = commandParts.slice(1).join(' ');
             
             if (labelQuery && getAllLabels) {
@@ -910,7 +913,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return { command: 'nav', args: [], commandStartPos: commandState.commandStartPos };
         }
 
-        if (selectedCommand.startsWith('search')) {
+        if (commandToExecute.startsWith('search')) {
             const inputParts = commandState.input.trim().split(/\s+/);
             const searchTerm = inputParts.slice(1).join(' ');
             
@@ -946,7 +949,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return null;
         }
 
-        if (selectedCommand.startsWith('state')) {
+        if (commandToExecute.startsWith('state')) {
             // Clear command mode
             setCommandState({
                 isActive: false,
@@ -958,8 +961,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             });
             setCommandData({});
             
-            // Parse the selected command
-            const commandParts = selectedCommand.split(' ');
+            // Parse the command to execute
+            const commandParts = commandToExecute.split(' ');
             const args = commandParts.slice(1); // Everything after 'state'
             
             // Don't execute if user selected a placeholder (shouldn't happen now)
@@ -978,7 +981,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         }
         
         // Handle commands that need text selection
-        if (['transform', 'explain', 'summarize'].includes(selectedCommand.toLowerCase().split(' ')[0])) {
+        if (['transform', 'explain', 'summarize'].includes(commandToExecute.toLowerCase().split(' ')[0])) {
             // Clear command mode
             setCommandState({
                 isActive: false,
@@ -993,12 +996,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             // Set as pending command waiting for selection
             const args = inputParts.slice(1);
             setPendingCommand({
-                command: selectedCommand,
+                command: commandToExecute,
                 args: args,
                 isWaitingForSelection: true
             });
             
-            return { command: 'pending_selection', args: [selectedCommand], commandStartPos: commandState.commandStartPos };
+            return { command: 'pending_selection', args: [commandToExecute], commandStartPos: commandState.commandStartPos };
         }
         
         // Clear command mode for other commands
@@ -1011,10 +1014,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         });
         setCommandData({});
         
-        if (selectedCommand.toLowerCase().startsWith(commandName.toLowerCase())) {
+        if (commandToExecute.toLowerCase().startsWith(commandName.toLowerCase())) {
             const args = inputParts.slice(1);
-            console.log('Executing command:', selectedCommand, 'with args:', args);
-            return { command: selectedCommand, args, commandStartPos: commandState.commandStartPos };
+            console.log('Executing command:', commandToExecute, 'with args:', args);
+            return { command: commandToExecute, args, commandStartPos: commandState.commandStartPos };
         }
         
         return null;

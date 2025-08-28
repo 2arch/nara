@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useWorldSave } from './world.save'; // Import the new hook
 import { useCommandSystem, CommandState, CommandExecution, BackgroundMode } from './commands'; // Import command system
-import { getSmartIndentation, calculateWordDeletion } from './text-blocks'; // Import block detection utilities
+import { getSmartIndentation, calculateWordDeletion } from './bit.blocks'; // Import block detection utilities
 import { useDeepspawnSystem } from './deepspawn'; // Import deepspawn system
 import { useWorldSettings, WorldSettings } from './settings';
 import { set, ref } from 'firebase/database';
@@ -323,9 +323,11 @@ export function useWorldEngine({
             }
         }
         
-        // Compile each line into a string
-        for (const lineY in lineData) {
-            const y = parseInt(lineY, 10);
+        // Sort lines by y-coordinate and compile each line into a string with order-based indexing
+        const sortedYValues = Object.keys(lineData).map(y => parseInt(y, 10)).sort((a, b) => a - b);
+        let lineIndex = 0;
+        
+        for (const y of sortedYValues) {
             const chars = lineData[y].sort((a, b) => a.x - b.x);
             
             if (chars.length === 0) continue;
@@ -344,9 +346,10 @@ export function useWorldEngine({
                 lastX = x;
             }
             
-            // Only store non-empty lines
+            // Only store non-empty lines with order-based index
             if (line.trim()) {
-                compiledLines[y] = line;
+                compiledLines[lineIndex] = line;
+                lineIndex++;
             }
         }
         

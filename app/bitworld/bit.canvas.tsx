@@ -4,9 +4,7 @@ import { useRouter } from 'next/navigation';
 import type { WorldData, Point, WorldEngine, PanStartInfo } from './world.engine'; // Adjust path as needed
 import { useDialogue, useDebugDialogue } from './dialogue';
 import { useMonogramSystem } from './monogram';
-import { useGifViewportSystem } from './gif-viewport';
 import { useControllerSystem, createMonogramController, createCameraController } from './controllers';
-import { PixelatedFrame } from './gif.utils';
 
 // --- Constants --- (Copied and relevant ones kept)
 const FONT_FAMILY = 'IBM Plex Mono';
@@ -65,15 +63,11 @@ interface BitCanvasProps {
     cursorColorAlternate: boolean;
     className?: string;
     showCursor?: boolean;
-    overlapRects?: {rect: DOMRect, gifName: string}[];
-    gifFrames?: PixelatedFrame[];
     monogramEnabled?: boolean;
     dialogueEnabled?: boolean;
-    overlayGifFrames?: PixelatedFrame[]; // GIF frames for overlay rendering (backward compatibility)
-    gifLibrary?: {[key: string]: PixelatedFrame[]}; // New multi-GIF system
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, overlapRects = [], gifFrames = [], monogramEnabled = false, dialogueEnabled = true, overlayGifFrames = [], gifLibrary = {} }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -90,8 +84,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Monogram system for psychedelic patterns
     const monogramSystem = useMonogramSystem();
 
-    // GIF viewport system for animated GIF rendering
-    const gifViewportSystem = useGifViewportSystem();
 
     // Controller system for handling keyboard inputs
     const { registerGroup, handleKeyDown: handleKeyDownFromController, getHelpText } = useControllerSystem();
@@ -115,6 +107,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const handleSortModeClick = useCallback(() => {
         engine.cycleSortMode();
     }, [engine]);
+
+    
 
     useEffect(() => {
         registerGroup(createMonogramController(monogramSystem));
@@ -464,110 +458,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             ctx.clearRect(0, 0, cssWidth, cssHeight);
         }
 
-        // === Render Overlay GIF Data for Overlapping Areas ===
-        if (overlapRects.length > 0) {
-            for (const {rect, gifName} of overlapRects) {
-                // Get the appropriate GIF frames for this element
-                let gifFramesToUse: PixelatedFrame[] = [];
-                
-                // Try new multi-GIF system first
-                if (gifLibrary[gifName]) {
-                    gifFramesToUse = gifLibrary[gifName];
-                } 
-                // Fallback to backward compatibility with overlayGifFrames for 'main'
-                else if (gifName === 'main' && overlayGifFrames.length > 0) {
-                    gifFramesToUse = overlayGifFrames;
-                }
-                
-                if (gifFramesToUse.length > 0) {
-                    const frameIndex = Math.floor(Date.now() / 100) % gifFramesToUse.length;
-                    const frame = gifFramesToUse[frameIndex];
-                    
-                    if (frame) {
-                        // Convert pixel coordinates to grid coordinates
-                        const startGridX = Math.floor(rect.x / effectiveCharWidth);
-                        const startGridY = Math.floor(rect.y / effectiveCharHeight);
-                        const endGridX = Math.ceil((rect.x + rect.width) / effectiveCharWidth);
-                        const endGridY = Math.ceil((rect.y + rect.height) / effectiveCharHeight);
-                        
-                        const overlapWidth = endGridX - startGridX;
-                        const overlapHeight = endGridY - startGridY;
-                        
-                        // Calculate aspect ratios for proper scaling
-                        const overlapAspectRatio = overlapWidth / overlapHeight;
-                        const gifAspectRatio = frame.width / frame.height;
-                        
-                        // Calculate scaling to fill the overlap area (like object-fit: cover)
-                        let scaleX, scaleY, offsetX, offsetY;
-                        if (overlapAspectRatio > gifAspectRatio) {
-                            // Overlap is wider than GIF - scale by width
-                            scaleX = overlapWidth / frame.width;
-                            scaleY = scaleX;
-                            offsetX = 0;
-                            offsetY = (overlapHeight - (frame.height * scaleY)) / 2;
-                        } else {
-                            // Overlap is taller than GIF - scale by height
-                            scaleY = overlapHeight / frame.height;
-                            scaleX = scaleY;
-                            offsetX = (overlapWidth - (frame.width * scaleX)) / 2;
-                            offsetY = 0;
-                        }
-                        
-                        // Render GIF scaled to fill the entire overlap area
-                        for (let gridY = startGridY; gridY < endGridY; gridY++) {
-                            for (let gridX = startGridX; gridX < endGridX; gridX++) {
-                                const cellX = gridX * effectiveCharWidth;
-                                const cellY = gridY * effectiveCharHeight;
-                                
-                                // Map grid position to scaled gif coordinates
-                                const localGridX = gridX - startGridX;
-                                const localGridY = gridY - startGridY;
-                                
-                                // Apply scaling and offset to map to GIF coordinates
-                                const scaledX = (localGridX - offsetX) / scaleX;
-                                const scaledY = (localGridY - offsetY) / scaleY;
-                                
-                                const gifX = Math.floor(scaledX);
-                                const gifY = Math.floor(scaledY);
-                                
-                                if (gifX >= 0 && gifX < frame.width && gifY >= 0 && gifY < frame.height) {
-                                    const pixelIndex = gifY * frame.width + gifX;
-                                    const pixel = frame.data[pixelIndex];
-                                    
-                                    if (pixel && pixel.char.trim() !== '' && pixel.color !== 'transparent') {
-                                        ctx.fillStyle = pixel.color;
-                                        
-                                        // Always fill the entire cell to match 1:2 aspect ratio
-                                        ctx.fillRect(cellX, cellY, effectiveCharWidth, effectiveCharHeight);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // Fallback to colored rectangles if no gif frames found
-                    const fallbackColors: {[key: string]: string} = {
-                        'main': 'blue',
-                        'bike': 'green',
-                        'default': 'red'
-                    };
-                    ctx.fillStyle = fallbackColors[gifName] || fallbackColors['default'];
-                    
-                    const startGridX = Math.floor(rect.x / effectiveCharWidth);
-                    const startGridY = Math.floor(rect.y / effectiveCharHeight);
-                    const endGridX = Math.ceil((rect.x + rect.width) / effectiveCharWidth);
-                    const endGridY = Math.ceil((rect.y + rect.height) / effectiveCharHeight);
-                    
-                    for (let gridY = startGridY; gridY < endGridY; gridY++) {
-                        for (let gridX = startGridX; gridX < endGridX; gridX++) {
-                            const cellX = gridX * effectiveCharWidth;
-                            const cellY = gridY * effectiveCharHeight;
-                            ctx.fillRect(cellX, cellY, effectiveCharWidth, effectiveCharHeight);
-                        }
-                    }
-                }
-            }
-        }
         
         ctx.imageSmoothingEnabled = false;
         ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
@@ -578,38 +468,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         const endWorldX = startWorldX + (cssWidth / effectiveCharWidth);
         const endWorldY = startWorldY + (cssHeight / effectiveCharHeight);
 
-        // === Render GIF Viewport Data ===
-        if (gifFrames.length > 0) {
-            const gifViewportData = gifViewportSystem.generateGifViewportData(
-                gifFrames, startWorldX, startWorldY, endWorldX, endWorldY
-            );
-            
-            for (const key in gifViewportData) {
-                const [xStr, yStr] = key.split(',');
-                const worldX = parseInt(xStr, 10);
-                const worldY = parseInt(yStr, 10);
-                
-                if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && 
-                    worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                    if (screenPos.x > -effectiveCharWidth && screenPos.x < cssWidth + effectiveCharWidth && 
-                        screenPos.y > -effectiveCharHeight && screenPos.y < cssHeight + effectiveCharHeight) {
-                        
-                        const cell = gifViewportData[key];
-                        
-                        if (cell.type === 'border') {
-                            // Render border as filled rectangles
-                            ctx.fillStyle = cell.color;
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                        } else {
-                            // Render content characters
-                            ctx.fillStyle = cell.color;
-                            ctx.fillText(cell.char, screenPos.x, screenPos.y + verticalTextOffset);
-                        }
-                    }
-                }
-            }
-        }
 
         if (DRAW_GRID && effectiveCharWidth > 2 && effectiveCharHeight > 2) {
             ctx.strokeStyle = GRID_COLOR;
@@ -782,6 +640,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
         ctx.fillStyle = engine.textColor; // Reset to normal text color
+
 
         // === Debug Scaffolds === (Green dot removed)
 
@@ -1333,7 +1192,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.deepspawnData, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, gifViewportSystem, showCursor, monogramEnabled, dialogueEnabled, gifFrames, overlayGifFrames, overlapRects]);
+    }, [engine, engine.backgroundMode, engine.deepspawnData, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled]);
 
 
     // --- Drawing Loop Effect ---
@@ -1402,8 +1261,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         // Set flag to prevent trail creation from click movement
         isClickMovementRef.current = true;
         
-        // Pass false for clearSelection - let the engine decide
+        // Pass to engine's regular click handler
         engine.handleCanvasClick(clickX, clickY, false, e.shiftKey);
+        
         canvasRef.current?.focus(); // Ensure focus for keyboard
     }, [engine, canvasSize, router, handleNavClick, handleCoordinateClick]);
     
