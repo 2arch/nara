@@ -2,6 +2,7 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import type { WorldEngine } from './world.engine';
 import { useMonogramSystem } from './monogram';
+import { signUpUser, signInUser, checkUsernameAvailability, getUsernameByUid } from '../firebase';
 
 // --- Constants ---
 const FONT_FAMILY = 'IBM Plex Mono';
@@ -14,27 +15,127 @@ interface BitHomeCanvasProps {
     className?: string;
     monogramEnabled?: boolean;
     showForm?: boolean;
+    isSignup?: boolean;
     taglineText?: { title: string; subtitle: string };
     navButtons?: { 
         onLoginClick?: () => void; 
         onSignupClick?: () => void; 
     };
+    onBackClick?: () => void;
+    onAuthSuccess?: (username: string) => void;
 }
 
-export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogramEnabled = false, showForm = false, taglineText, navButtons }: BitHomeCanvasProps) {
+export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogramEnabled = false, showForm = false, isSignup = false, taglineText, navButtons, onBackClick, onAuthSuccess }: BitHomeCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
     
     // === Form State (Dialogue-style) ===
-    const [focusedInput, setFocusedInput] = useState<'email' | 'password' | null>(null);
+    const [focusedInput, setFocusedInput] = useState<'firstName' | 'lastName' | 'email' | 'password' | 'username' | null>(null);
     const [pressedButton, setPressedButton] = useState<string | null>(null);
     const [pressedNavButton, setPressedNavButton] = useState<string | null>(null);
     const [passwordVisible, setPasswordVisible] = useState(false);
+    const [signupStep, setSignupStep] = useState<1 | 2>(1); // Two-step signup process
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [submitError, setSubmitError] = useState<string | null>(null);
+    const [submitSuccess, setSubmitSuccess] = useState(false);
     const [formState, setFormState] = useState({
+        firstName: { value: '', cursorPos: 0 },
+        lastName: { value: '', cursorPos: 0 },
         email: { value: '', cursorPos: 0 },
-        password: { value: '', cursorPos: 0 }
+        password: { value: '', cursorPos: 0 },
+        username: { value: '', cursorPos: 0 }
     });
+    
+    // === Form Submission Handlers ===
+    const handleSignupSubmit = useCallback(async () => {
+        const { firstName, lastName, email, password, username } = formState;
+        
+        // Basic validation
+        if (!firstName.value.trim() || !lastName.value.trim() || !email.value.trim() || !password.value.trim() || !username.value.trim()) {
+            setSubmitError('Please fill in all fields');
+            return;
+        }
+        
+        if (password.value.length < 6) {
+            setSubmitError('Password must be at least 6 characters');
+            return;
+        }
+        
+        setIsSubmitting(true);
+        setSubmitError(null);
+        
+        try {
+            // Check username availability first
+            const isUsernameAvailable = await checkUsernameAvailability(username.value);
+            if (!isUsernameAvailable) {
+                setSubmitError('Username is already taken');
+                setIsSubmitting(false);
+                return;
+            }
+            
+            // Create the user account
+            const result = await signUpUser(
+                email.value.trim(),
+                password.value,
+                firstName.value.trim(),
+                lastName.value.trim(),
+                username.value.trim()
+            );
+            
+            if (result.success) {
+                setSubmitSuccess(true);
+                console.log('User created successfully:', result.user);
+                // Navigate to user's homepage
+                if (onAuthSuccess) {
+                    onAuthSuccess(username.value.trim());
+                }
+            } else {
+                setSubmitError(result.error || 'Failed to create account');
+            }
+        } catch (error) {
+            console.error('Signup error:', error);
+            setSubmitError('An unexpected error occurred');
+        } finally {
+            setIsSubmitting(false);
+        }
+    }, [formState]);
+    
+    const handleLoginSubmit = useCallback(async () => {
+        const { email, password } = formState;
+        
+        if (!email.value.trim() || !password.value.trim()) {
+            setSubmitError('Please fill in both email and password');
+            return;
+        }
+        
+        setIsSubmitting(true);
+        setSubmitError(null);
+        
+        try {
+            const result = await signInUser(email.value.trim(), password.value);
+            
+            if (result.success && result.user) {
+                setSubmitSuccess(true);
+                console.log('User signed in successfully:', result.user);
+                // Get username and navigate to user's homepage
+                const username = await getUsernameByUid(result.user.uid);
+                if (username && onAuthSuccess) {
+                    onAuthSuccess(username);
+                } else if (onAuthSuccess) {
+                    // Fallback to UID if username not found
+                    onAuthSuccess(result.user.uid);
+                }
+            } else {
+                setSubmitError(result.error || 'Failed to sign in');
+            }
+        } catch (error) {
+            console.error('Login error:', error);
+            setSubmitError('An unexpected error occurred');
+        } finally {
+            setIsSubmitting(false);
+        }
+    }, [formState]);
     
     // === Monogram System (Hard-coded 'nara' pattern) ===
     const monogramSystem = useMonogramSystem({
@@ -63,38 +164,116 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         const emailInputWidth = passwordInputWidth + gapWidth + toggleButtonWidth;
         const rowWidth = emailInputWidth; // Both rows will be this width
         
+        // Name inputs (for signup) - half width each with gap
+        const nameInputWidth = Math.floor((emailInputWidth - gapWidth) / 2);
+        
         // Center everything in viewport (dialogue pattern)
-        const formHeight = 5; // email + password + button + spacing
+        const backButtonWidth = 4; // 'back' button width
+        const formHeight = isSignup ? (signupStep === 1 ? 8 : 4) : 6; // Different heights for each step
         const centerX = Math.floor(canvasWidth / 2);
         const centerY = Math.floor(canvasHeight / 2);
         
-        return {
-            charWidth,
-            charHeight,
-            fields: {
-                email: { 
-                    x: centerX - (emailInputWidth * charWidth) / 2, 
-                    y: centerY - (formHeight * charHeight) / 2, 
-                    width: emailInputWidth 
-                },
-                password: { 
-                    x: centerX - (emailInputWidth * charWidth) / 2, 
-                    y: centerY - (formHeight * charHeight) / 2 + spacing * charHeight, 
-                    width: passwordInputWidth 
-                },
-                toggle: {
-                    x: centerX - (emailInputWidth * charWidth) / 2 + (passwordInputWidth + gapWidth) * charWidth,
-                    y: centerY - (formHeight * charHeight) / 2 + spacing * charHeight,
-                    width: toggleButtonWidth
-                },
-                button: { 
-                    x: centerX - (buttonWidth * charWidth) / 2, 
-                    y: centerY - (formHeight * charHeight) / 2 + (spacing * 2) * charHeight, 
-                    width: buttonWidth 
+        if (isSignup && signupStep === 1) {
+            // Signup Step 1: back, firstName+lastName, email, password+toggle, "Next" button
+            return {
+                charWidth,
+                charHeight,
+                fields: {
+                    back: {
+                        x: centerX - (emailInputWidth * charWidth) / 2,
+                        y: centerY - (formHeight * charHeight) / 2,
+                        width: backButtonWidth
+                    },
+                    firstName: {
+                        x: centerX - (emailInputWidth * charWidth) / 2,
+                        y: centerY - (formHeight * charHeight) / 2 + spacing * charHeight,
+                        width: nameInputWidth
+                    },
+                    lastName: {
+                        x: centerX - (emailInputWidth * charWidth) / 2 + (nameInputWidth + gapWidth) * charWidth,
+                        y: centerY - (formHeight * charHeight) / 2 + spacing * charHeight,
+                        width: nameInputWidth
+                    },
+                    email: { 
+                        x: centerX - (emailInputWidth * charWidth) / 2, 
+                        y: centerY - (formHeight * charHeight) / 2 + (spacing * 2) * charHeight, 
+                        width: emailInputWidth 
+                    },
+                    password: { 
+                        x: centerX - (emailInputWidth * charWidth) / 2, 
+                        y: centerY - (formHeight * charHeight) / 2 + (spacing * 3) * charHeight, 
+                        width: passwordInputWidth 
+                    },
+                    toggle: {
+                        x: centerX - (emailInputWidth * charWidth) / 2 + (passwordInputWidth + gapWidth) * charWidth,
+                        y: centerY - (formHeight * charHeight) / 2 + (spacing * 3) * charHeight,
+                        width: toggleButtonWidth
+                    },
+                    button: { 
+                        x: centerX - (buttonWidth * charWidth) / 2, 
+                        y: centerY - (formHeight * charHeight) / 2 + (spacing * 4) * charHeight, 
+                        width: buttonWidth 
+                    }
                 }
-            }
-        };
-    }, []);
+            };
+        } else if (isSignup && signupStep === 2) {
+            // Signup Step 2: back, username, "Sign Up" button
+            return {
+                charWidth,
+                charHeight,
+                fields: {
+                    back: {
+                        x: centerX - (emailInputWidth * charWidth) / 2,
+                        y: centerY - (formHeight * charHeight) / 2,
+                        width: backButtonWidth
+                    },
+                    username: {
+                        x: centerX - (emailInputWidth * charWidth) / 2,
+                        y: centerY - (formHeight * charHeight) / 2 + spacing * charHeight,
+                        width: emailInputWidth
+                    },
+                    button: { 
+                        x: centerX - (buttonWidth * charWidth) / 2, 
+                        y: centerY - (formHeight * charHeight) / 2 + (spacing * 2) * charHeight, 
+                        width: buttonWidth 
+                    }
+                }
+            };
+        } else {
+            // Login form layout: back, email, password+toggle, button
+            return {
+                charWidth,
+                charHeight,
+                fields: {
+                    back: {
+                        x: centerX - (emailInputWidth * charWidth) / 2,
+                        y: centerY - (formHeight * charHeight) / 2,
+                        width: backButtonWidth
+                    },
+                    email: { 
+                        x: centerX - (emailInputWidth * charWidth) / 2, 
+                        y: centerY - (formHeight * charHeight) / 2 + spacing * charHeight, 
+                        width: emailInputWidth 
+                    },
+                    password: { 
+                        x: centerX - (emailInputWidth * charWidth) / 2, 
+                        y: centerY - (formHeight * charHeight) / 2 + (spacing * 2) * charHeight, 
+                        width: passwordInputWidth 
+                    },
+                    toggle: {
+                        x: centerX - (emailInputWidth * charWidth) / 2 + (passwordInputWidth + gapWidth) * charWidth,
+                        y: centerY - (formHeight * charHeight) / 2 + (spacing * 2) * charHeight,
+                        width: toggleButtonWidth
+                    },
+                    button: { 
+                        x: centerX - (buttonWidth * charWidth) / 2, 
+                        y: centerY - (formHeight * charHeight) / 2 + (spacing * 3) * charHeight, 
+                        width: buttonWidth 
+                    }
+                }
+            };
+        }
+    }, [isSignup, signupStep]);
     
     // === Form Rendering Function (Dialogue.tsx pattern) ===
     const renderForm = useCallback((ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number) => {
@@ -106,12 +285,86 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         ctx.textBaseline = 'top';
         
         // Track clickable regions (dialogue pattern)
-        const clickableRegions: Array<{type: 'email' | 'password' | 'toggle' | 'button', rect: {x: number, y: number, width: number, height: number}}> = [];
+        const clickableRegions: Array<{type: 'back' | 'firstName' | 'lastName' | 'email' | 'password' | 'toggle' | 'username' | 'button', rect: {x: number, y: number, width: number, height: number}}> = [];
         
-        // === Render Email Field ===
-        const emailField = layout.fields.email;
-        const emailValue = formState.email.value || 'Enter your email';
-        const emailFocused = focusedInput === 'email';
+        // === Render Back Button ===
+        const backField = layout.fields.back;
+        const backText = 'back';
+        
+        ctx.fillStyle = pressedButton === 'back' ? '#333333' : '#000000';
+        ctx.fillRect(backField.x, backField.y, backField.width * layout.charWidth, layout.charHeight);
+        
+        ctx.fillStyle = '#FFFFFF';
+        const backTextX = backField.x + ((backField.width * layout.charWidth) - (backText.length * layout.charWidth)) / 2;
+        ctx.fillText(backText, backTextX, backField.y + verticalTextOffset);
+        
+        clickableRegions.push({
+            type: 'back',
+            rect: { x: backField.x, y: backField.y, width: backField.width * layout.charWidth, height: layout.charHeight }
+        });
+        
+        // === Render Name Fields (Signup Step 1 only) ===
+        if (isSignup && signupStep === 1 && layout.fields.firstName && layout.fields.lastName) {
+            // First Name Field
+            const firstNameField = layout.fields.firstName;
+            const firstNameValue = formState.firstName.value || 'first name';
+            const firstNameFocused = focusedInput === 'firstName';
+            
+            ctx.fillStyle = firstNameFocused ? '#E3F2FD' : '#F5F5F5';
+            ctx.fillRect(firstNameField.x, firstNameField.y, firstNameField.width * layout.charWidth, layout.charHeight);
+            
+            ctx.strokeStyle = firstNameFocused ? '#2196F3' : '#000000';
+            ctx.strokeRect(firstNameField.x - 1, firstNameField.y - 1, firstNameField.width * layout.charWidth + 2, layout.charHeight + 2);
+            
+            ctx.fillStyle = formState.firstName.value ? '#000000' : '#888888';
+            const firstNameDisplayText = firstNameValue.substring(0, firstNameField.width - 2);
+            ctx.fillText(firstNameDisplayText, firstNameField.x + 4, firstNameField.y + verticalTextOffset);
+            
+            // First Name cursor
+            if (firstNameFocused && cursorColorAlternate) {
+                const cursorX = firstNameField.x + 4 + Math.min(formState.firstName.cursorPos, firstNameDisplayText.length) * layout.charWidth;
+                ctx.fillStyle = '#0066FF';
+                ctx.fillRect(cursorX, firstNameField.y + 2, 2, layout.charHeight - 4);
+            }
+            
+            clickableRegions.push({
+                type: 'firstName',
+                rect: { x: firstNameField.x, y: firstNameField.y, width: firstNameField.width * layout.charWidth, height: layout.charHeight }
+            });
+            
+            // Last Name Field
+            const lastNameField = layout.fields.lastName;
+            const lastNameValue = formState.lastName.value || 'last name';
+            const lastNameFocused = focusedInput === 'lastName';
+            
+            ctx.fillStyle = lastNameFocused ? '#E3F2FD' : '#F5F5F5';
+            ctx.fillRect(lastNameField.x, lastNameField.y, lastNameField.width * layout.charWidth, layout.charHeight);
+            
+            ctx.strokeStyle = lastNameFocused ? '#2196F3' : '#000000';
+            ctx.strokeRect(lastNameField.x - 1, lastNameField.y - 1, lastNameField.width * layout.charWidth + 2, layout.charHeight + 2);
+            
+            ctx.fillStyle = formState.lastName.value ? '#000000' : '#888888';
+            const lastNameDisplayText = lastNameValue.substring(0, lastNameField.width - 2);
+            ctx.fillText(lastNameDisplayText, lastNameField.x + 4, lastNameField.y + verticalTextOffset);
+            
+            // Last Name cursor
+            if (lastNameFocused && cursorColorAlternate) {
+                const cursorX = lastNameField.x + 4 + Math.min(formState.lastName.cursorPos, lastNameDisplayText.length) * layout.charWidth;
+                ctx.fillStyle = '#0066FF';
+                ctx.fillRect(cursorX, lastNameField.y + 2, 2, layout.charHeight - 4);
+            }
+            
+            clickableRegions.push({
+                type: 'lastName',
+                rect: { x: lastNameField.x, y: lastNameField.y, width: lastNameField.width * layout.charWidth, height: layout.charHeight }
+            });
+        }
+        
+        // === Render Email Field (Login or Signup Step 1) ===
+        if ((!isSignup) || (isSignup && signupStep === 1)) {
+            const emailField = layout.fields.email;
+            const emailValue = formState.email.value || 'enter your email';
+            const emailFocused = focusedInput === 'email';
         
         ctx.fillStyle = emailFocused ? '#E3F2FD' : '#F5F5F5';
         ctx.fillRect(emailField.x, emailField.y, emailField.width * layout.charWidth, layout.charHeight);
@@ -134,63 +387,109 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
             type: 'email',
             rect: { x: emailField.x, y: emailField.y, width: emailField.width * layout.charWidth, height: layout.charHeight }
         });
-        
-        // === Render Password Field ===
-        const passwordField = layout.fields.password;
-        const passwordValue = formState.password.value || 'Enter your password';
-        const passwordDisplay = (formState.password.value && !passwordVisible) ? '•'.repeat(formState.password.value.length) : passwordValue;
-        const passwordFocused = focusedInput === 'password';
-        
-        ctx.fillStyle = passwordFocused ? '#E3F2FD' : '#F5F5F5';
-        ctx.fillRect(passwordField.x, passwordField.y, passwordField.width * layout.charWidth, layout.charHeight);
-        
-        ctx.strokeStyle = passwordFocused ? '#2196F3' : '#000000';
-        ctx.strokeRect(passwordField.x - 1, passwordField.y - 1, passwordField.width * layout.charWidth + 2, layout.charHeight + 2);
-        
-        ctx.fillStyle = formState.password.value ? '#000000' : '#888888';
-        const passwordDisplayText = passwordDisplay.substring(0, passwordField.width - 2);
-        ctx.fillText(passwordDisplayText, passwordField.x + 4, passwordField.y + verticalTextOffset);
-        
-        // Password cursor
-        if (passwordFocused && cursorColorAlternate) {
-            const cursorX = passwordField.x + 4 + Math.min(formState.password.cursorPos, passwordDisplayText.length) * layout.charWidth;
-            ctx.fillStyle = '#0066FF';
-            ctx.fillRect(cursorX, passwordField.y + 2, 2, layout.charHeight - 4);
         }
         
-        clickableRegions.push({
-            type: 'password',
-            rect: { x: passwordField.x, y: passwordField.y, width: passwordField.width * layout.charWidth, height: layout.charHeight }
-        });
+        // === Render Password Field (Login or Signup Step 1 only) ===
+        if ((!isSignup) || (isSignup && signupStep === 1)) {
+            const passwordField = layout.fields.password;
+            const passwordValue = formState.password.value || 'enter your password';
+            const passwordDisplay = (formState.password.value && !passwordVisible) ? '•'.repeat(formState.password.value.length) : passwordValue;
+            const passwordFocused = focusedInput === 'password';
+            
+            ctx.fillStyle = passwordFocused ? '#E3F2FD' : '#F5F5F5';
+            ctx.fillRect(passwordField.x, passwordField.y, passwordField.width * layout.charWidth, layout.charHeight);
+            
+            ctx.strokeStyle = passwordFocused ? '#2196F3' : '#000000';
+            ctx.strokeRect(passwordField.x - 1, passwordField.y - 1, passwordField.width * layout.charWidth + 2, layout.charHeight + 2);
+            
+            ctx.fillStyle = formState.password.value ? '#000000' : '#888888';
+            const passwordDisplayText = passwordDisplay.substring(0, passwordField.width - 2);
+            ctx.fillText(passwordDisplayText, passwordField.x + 4, passwordField.y + verticalTextOffset);
+            
+            // Password cursor
+            if (passwordFocused && cursorColorAlternate) {
+                const cursorX = passwordField.x + 4 + Math.min(formState.password.cursorPos, passwordDisplayText.length) * layout.charWidth;
+                ctx.fillStyle = '#0066FF';
+                ctx.fillRect(cursorX, passwordField.y + 2, 2, layout.charHeight - 4);
+            }
+            
+            clickableRegions.push({
+                type: 'password',
+                rect: { x: passwordField.x, y: passwordField.y, width: passwordField.width * layout.charWidth, height: layout.charHeight }
+            });
+            
+            // === Render Toggle Button ===
+            const toggleField = layout.fields.toggle;
+            const toggleText = passwordVisible ? 'hide' : 'show';
+            
+            ctx.fillStyle = pressedButton === 'toggle' ? '#333333' : '#000000';
+            ctx.fillRect(toggleField.x, toggleField.y, toggleField.width * layout.charWidth, layout.charHeight);
+            
+            ctx.fillStyle = '#FFFFFF';
+            const toggleTextX = toggleField.x + ((toggleField.width * layout.charWidth) - (toggleText.length * layout.charWidth)) / 2;
+            ctx.fillText(toggleText, toggleTextX, toggleField.y + verticalTextOffset);
+            
+            clickableRegions.push({
+                type: 'toggle',
+                rect: { x: toggleField.x, y: toggleField.y, width: toggleField.width * layout.charWidth, height: layout.charHeight }
+            });
+        }
         
-        // === Render Toggle Button ===
-        const toggleField = layout.fields.toggle;
-        const toggleText = passwordVisible ? 'hide' : 'show';
+        // === Render Username Field (Signup Step 2 only) ===
+        if (isSignup && signupStep === 2 && layout.fields.username) {
+            const usernameField = layout.fields.username;
+            const usernameValue = formState.username.value;
+            const usernameDisplay = usernameValue ? `@${usernameValue}` : '@username';
+            const usernameFocused = focusedInput === 'username';
+            
+            ctx.fillStyle = usernameFocused ? '#E3F2FD' : '#F5F5F5';
+            ctx.fillRect(usernameField.x, usernameField.y, usernameField.width * layout.charWidth, layout.charHeight);
+            
+            ctx.strokeStyle = usernameFocused ? '#2196F3' : '#000000';
+            ctx.strokeRect(usernameField.x - 1, usernameField.y - 1, usernameField.width * layout.charWidth + 2, layout.charHeight + 2);
+            
+            // Render @ symbol in gray, then username
+            const atSymbol = '@';
+            ctx.fillStyle = '#888888'; // Gray @ symbol
+            ctx.fillText(atSymbol, usernameField.x + 4, usernameField.y + verticalTextOffset);
+            
+            // Render username part
+            if (usernameValue) {
+                ctx.fillStyle = '#000000';
+                ctx.fillText(usernameValue, usernameField.x + 4 + layout.charWidth, usernameField.y + verticalTextOffset);
+            } else {
+                ctx.fillStyle = '#888888';
+                ctx.fillText('username', usernameField.x + 4 + layout.charWidth, usernameField.y + verticalTextOffset);
+            }
+            
+            // Username cursor (positioned after the @ symbol)
+            if (usernameFocused && cursorColorAlternate) {
+                const cursorX = usernameField.x + 4 + layout.charWidth + Math.min(formState.username.cursorPos, usernameValue.length) * layout.charWidth;
+                ctx.fillStyle = '#0066FF';
+                ctx.fillRect(cursorX, usernameField.y + 2, 2, layout.charHeight - 4);
+            }
+            
+            clickableRegions.push({
+                type: 'username',
+                rect: { x: usernameField.x, y: usernameField.y, width: usernameField.width * layout.charWidth, height: layout.charHeight }
+            });
+        }
         
-        ctx.fillStyle = pressedButton === 'toggle' ? '#1976D2' : '#2196F3';
-        ctx.fillRect(toggleField.x, toggleField.y, toggleField.width * layout.charWidth, layout.charHeight);
-        
-        ctx.strokeStyle = '#000000';
-        ctx.strokeRect(toggleField.x - 1, toggleField.y - 1, toggleField.width * layout.charWidth + 2, layout.charHeight + 2);
-        
-        ctx.fillStyle = '#FFFFFF';
-        const toggleTextX = toggleField.x + ((toggleField.width * layout.charWidth) - (toggleText.length * layout.charWidth)) / 2;
-        ctx.fillText(toggleText, toggleTextX, toggleField.y + verticalTextOffset);
-        
-        clickableRegions.push({
-            type: 'toggle',
-            rect: { x: toggleField.x, y: toggleField.y, width: toggleField.width * layout.charWidth, height: layout.charHeight }
-        });
-        
-        // === Render Signup Button ===
+        // === Render Submit Button ===
         const buttonField = layout.fields.button;
-        const buttonText = 'Sign Up';
+        let buttonText = '';
+        if (isSubmitting) {
+            buttonText = 'loading...';
+        } else if (submitSuccess) {
+            buttonText = 'success!';
+        } else if (isSignup) {
+            buttonText = signupStep === 1 ? 'next' : 'sign up';
+        } else {
+            buttonText = 'log in';
+        }
         
-        ctx.fillStyle = pressedButton === 'signup' ? '#1976D2' : '#2196F3';
+        ctx.fillStyle = pressedButton === 'signup' ? '#333333' : '#000000';
         ctx.fillRect(buttonField.x, buttonField.y, buttonField.width * layout.charWidth, layout.charHeight);
-        
-        ctx.strokeStyle = '#000000';
-        ctx.strokeRect(buttonField.x - 1, buttonField.y - 1, buttonField.width * layout.charWidth + 2, layout.charHeight + 2);
         
         ctx.fillStyle = '#FFFFFF';
         const buttonTextX = buttonField.x + ((buttonField.width * layout.charWidth) - (buttonText.length * layout.charWidth)) / 2;
@@ -201,11 +500,31 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
             rect: { x: buttonField.x, y: buttonField.y, width: buttonField.width * layout.charWidth, height: layout.charHeight }
         });
         
+        // === Render Error Message ===
+        if (submitError) {
+            const errorY = buttonField.y + layout.charHeight + 10; // Below the button
+            ctx.fillStyle = '#FF0000'; // Red error text
+            ctx.font = `14px "${FONT_FAMILY}"`; // Slightly smaller font
+            const errorText = submitError;
+            const errorX = buttonField.x + ((buttonField.width * layout.charWidth) - (errorText.length * (layout.charWidth * 0.9))) / 2; // Center error text
+            ctx.fillText(errorText, errorX, errorY);
+        }
+        
+        // === Render Success Message ===
+        if (submitSuccess) {
+            const successY = buttonField.y + layout.charHeight + 10; // Below the button
+            ctx.fillStyle = '#00AA00'; // Green success text
+            ctx.font = `14px "${FONT_FAMILY}"`; // Slightly smaller font
+            const successText = isSignup ? 'Account created successfully!' : 'Signed in successfully!';
+            const successX = buttonField.x + ((buttonField.width * layout.charWidth) - (successText.length * (layout.charWidth * 0.9))) / 2; // Center success text
+            ctx.fillText(successText, successX, successY);
+        }
+        
         // Store regions for click handling (dialogue pattern)
         (ctx.canvas as any).formClickableRegions = clickableRegions;
         
         ctx.restore();
-    }, [formState, passwordVisible, cursorColorAlternate, pressedButton, focusedInput, calculateFormLayout]);
+    }, [formState, passwordVisible, cursorColorAlternate, pressedButton, focusedInput, calculateFormLayout, isSignup, signupStep, isSubmitting, submitError, submitSuccess]);
 
     // === Tagline Rendering Function (Dialogue.tsx pattern) ===
     const renderTagline = useCallback((ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number) => {
@@ -259,22 +578,22 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         const charWidth = 16 * 0.6; // Fixed character width ratio
         const verticalTextOffset = (charHeight - 16) / 2 + (16 * 0.1);
         const rightMargin = 40; // Right margin in pixels
-        const buttonSpacing = 8; // Space between buttons in pixels
+        const buttonSpacing = 1; // Single character row spacing between buttons
         
         // Button dimensions
-        const loginText = 'Login';
-        const signupText = 'Sign Up';
+        const loginText = 'login';
+        const signupText = 'signup';
         const buttonWidth = Math.max(loginText.length, signupText.length) * charWidth + 16; // Add padding
         
-        // Center vertically, right-aligned with margin
+        // Center vertically, right-aligned with margin - use character grid
         const centerY = Math.floor(canvasHeight / 2);
         
-        // Position buttons vertically
+        // Position buttons on character grid - tight spacing like tagline
         const loginButtonX = canvasWidth - rightMargin - buttonWidth;
-        const loginButtonY = centerY - charHeight - buttonSpacing/2;
+        const loginButtonY = centerY - charHeight - (buttonSpacing * charHeight / 2);
         
         const signupButtonX = canvasWidth - rightMargin - buttonWidth;
-        const signupButtonY = centerY + buttonSpacing/2;
+        const signupButtonY = centerY + (buttonSpacing * charHeight / 2);
         
         ctx.save();
         ctx.font = `16px "${FONT_FAMILY}"`;
@@ -284,11 +603,8 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         const clickableRegions: Array<{type: 'login' | 'signup', rect: {x: number, y: number, width: number, height: number}}> = [];
         
         // === Render Login Button ===
-        ctx.fillStyle = pressedNavButton === 'login' ? '#1976D2' : '#2196F3';
+        ctx.fillStyle = pressedNavButton === 'login' ? '#333333' : '#000000';
         ctx.fillRect(loginButtonX, loginButtonY, buttonWidth, charHeight);
-        
-        ctx.strokeStyle = '#000000';
-        ctx.strokeRect(loginButtonX - 1, loginButtonY - 1, buttonWidth + 2, charHeight + 2);
         
         ctx.fillStyle = '#FFFFFF';
         const loginTextX = loginButtonX + (buttonWidth - (loginText.length * charWidth)) / 2;
@@ -300,11 +616,8 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         });
         
         // === Render Signup Button ===
-        ctx.fillStyle = pressedNavButton === 'signup' ? '#1976D2' : '#2196F3';
+        ctx.fillStyle = pressedNavButton === 'signup' ? '#333333' : '#000000';
         ctx.fillRect(signupButtonX, signupButtonY, buttonWidth, charHeight);
-        
-        ctx.strokeStyle = '#000000';
-        ctx.strokeRect(signupButtonX - 1, signupButtonY - 1, buttonWidth + 2, charHeight + 2);
         
         ctx.fillStyle = '#FFFFFF';
         const signupTextX = signupButtonX + (buttonWidth - (signupText.length * charWidth)) / 2;
@@ -333,7 +646,43 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
             if (clickX >= region.rect.x && clickX <= region.rect.x + region.rect.width &&
                 clickY >= region.rect.y && clickY <= region.rect.y + region.rect.height) {
                 
-                if (region.type === 'email') {
+                if (region.type === 'back') {
+                    setPressedButton('back');
+                    setTimeout(() => setPressedButton(null), 150);
+                    // Navigate back to home
+                    if (typeof window !== 'undefined') {
+                        window.history.pushState(null, '', '/');
+                        // Trigger a popstate event to update the route
+                        window.dispatchEvent(new PopStateEvent('popstate'));
+                    }
+                    return true;
+                } else if (region.type === 'firstName') {
+                    const layout = calculateFormLayout(canvasSize.width, canvasSize.height);
+                    const relativeX = clickX - region.rect.x - 4;
+                    const charIndex = Math.max(0, Math.min(
+                        formState.firstName.value.length,
+                        Math.floor(relativeX / layout.charWidth)
+                    ));
+                    setFocusedInput('firstName');
+                    setFormState(prev => ({
+                        ...prev,
+                        firstName: { ...prev.firstName, cursorPos: charIndex }
+                    }));
+                    return true;
+                } else if (region.type === 'lastName') {
+                    const layout = calculateFormLayout(canvasSize.width, canvasSize.height);
+                    const relativeX = clickX - region.rect.x - 4;
+                    const charIndex = Math.max(0, Math.min(
+                        formState.lastName.value.length,
+                        Math.floor(relativeX / layout.charWidth)
+                    ));
+                    setFocusedInput('lastName');
+                    setFormState(prev => ({
+                        ...prev,
+                        lastName: { ...prev.lastName, cursorPos: charIndex }
+                    }));
+                    return true;
+                } else if (region.type === 'email') {
                     const layout = calculateFormLayout(canvasSize.width, canvasSize.height);
                     const relativeX = clickX - region.rect.x - 4;
                     const charIndex = Math.max(0, Math.min(
@@ -359,21 +708,49 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
                         password: { ...prev.password, cursorPos: charIndex }
                     }));
                     return true;
+                } else if (region.type === 'username') {
+                    const layout = calculateFormLayout(canvasSize.width, canvasSize.height);
+                    const relativeX = clickX - region.rect.x - 4 - layout.charWidth; // Account for @ symbol
+                    const charIndex = Math.max(0, Math.min(
+                        formState.username.value.length,
+                        Math.floor(relativeX / layout.charWidth)
+                    ));
+                    setFocusedInput('username');
+                    setFormState(prev => ({
+                        ...prev,
+                        username: { ...prev.username, cursorPos: charIndex }
+                    }));
+                    return true;
                 } else if (region.type === 'toggle') {
                     setPressedButton('toggle');
                     setTimeout(() => setPressedButton(null), 150);
                     setPasswordVisible(prev => !prev);
                     return true;
                 } else if (region.type === 'button') {
+                    if (isSubmitting) return true; // Prevent multiple submissions
+                    
                     setPressedButton('signup');
                     setTimeout(() => setPressedButton(null), 150);
-                    console.log('Form submitted:', formState);
+                    
+                    if (isSignup && signupStep === 1) {
+                        // Transition to step 2
+                        setSignupStep(2);
+                        setFocusedInput('username');
+                        // Clear any existing errors when moving to next step
+                        if (submitError) setSubmitError(null);
+                    } else if (isSignup && signupStep === 2) {
+                        // Submit signup form
+                        handleSignupSubmit();
+                    } else {
+                        // Submit login form
+                        handleLoginSubmit();
+                    }
                     return true;
                 }
             }
         }
         return false;
-    }, [formState, canvasSize, calculateFormLayout]);
+    }, [formState, canvasSize, calculateFormLayout, isSubmitting, handleSignupSubmit, handleLoginSubmit, signupStep, isSignup]);
     
     const handleFormKeyDown = useCallback((key: string): boolean => {
         if (!focusedInput) return false;
@@ -383,6 +760,10 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         const currentCursorPos = formState[field].cursorPos;
         
         if (key === 'Backspace') {
+            // Special handling for username field - don't allow deleting past @ symbol
+            if (field === 'username' && currentCursorPos === 0) {
+                return true; // Block backspace at beginning of username
+            }
             if (currentCursorPos > 0) {
                 const newValue = currentValue.slice(0, currentCursorPos - 1) + currentValue.slice(currentCursorPos);
                 setFormState(prev => ({
@@ -425,16 +806,51 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
             }));
             return true;
         } else if (key === 'Tab') {
-            setFocusedInput(focusedInput === 'email' ? 'password' : 'email');
+            // Tab navigation through fields based on current step
+            if (isSignup && signupStep === 1) {
+                const step1Order: typeof focusedInput[] = ['firstName', 'lastName', 'email', 'password'];
+                const currentIndex = step1Order.indexOf(focusedInput);
+                const nextIndex = (currentIndex + 1) % step1Order.length;
+                setFocusedInput(step1Order[nextIndex]);
+            } else if (isSignup && signupStep === 2) {
+                // Only username field in step 2, keep focus on it
+                setFocusedInput('username');
+            } else {
+                // Login: toggle between email and password
+                setFocusedInput(focusedInput === 'email' ? 'password' : 'email');
+            }
             return true;
         } else if (key === 'Enter') {
-            if (focusedInput === 'email') {
-                setFocusedInput('password');
+            if (isSubmitting) return true; // Prevent submission during loading
+            
+            if (isSignup && signupStep === 1) {
+                const step1Order: typeof focusedInput[] = ['firstName', 'lastName', 'email', 'password'];
+                const currentIndex = step1Order.indexOf(focusedInput);
+                if (currentIndex < step1Order.length - 1) {
+                    setFocusedInput(step1Order[currentIndex + 1]);
+                } else {
+                    // Move to step 2
+                    setSignupStep(2);
+                    setFocusedInput('username');
+                    // Clear any existing errors when moving to next step
+                    if (submitError) setSubmitError(null);
+                }
+            } else if (isSignup && signupStep === 2) {
+                // Submit signup form
+                handleSignupSubmit();
             } else {
-                console.log('Form submitted:', formState);
+                // Login form
+                if (focusedInput === 'email') {
+                    setFocusedInput('password');
+                } else {
+                    handleLoginSubmit();
+                }
             }
             return true;
         } else if (key.length === 1 && !key.match(/[\x00-\x1F\x7F]/)) {
+            // Clear error when user starts typing
+            if (submitError) setSubmitError(null);
+            
             const newValue = currentValue.slice(0, currentCursorPos) + key + currentValue.slice(currentCursorPos);
             setFormState(prev => ({
                 ...prev,
@@ -444,7 +860,7 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         }
         
         return false;
-    }, [focusedInput, formState]);
+    }, [focusedInput, formState, isSignup, isSubmitting, handleSignupSubmit, handleLoginSubmit, signupStep, submitError]);
 
     // === Navigation Button Event Handler ===
     const handleNavButtonClick = useCallback((clickX: number, clickY: number): boolean => {

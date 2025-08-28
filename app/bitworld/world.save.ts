@@ -16,7 +16,8 @@ export function useWorldSave(
     localSettings: WorldSettings,
     setLocalSettings: (settings: WorldSettings) => void,
     autoLoadData: boolean = true,
-    currentStateName?: string | null
+    currentStateName?: string | null,
+    userUid?: string | null // Add user UID parameter
 ) {
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -28,11 +29,14 @@ export function useWorldSave(
     const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const settingsSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+    // Build world paths directly under /worlds/{userUid}/ when userUid is provided
+    const getWorldPath = (worldPath: string) => userUid ? `worlds/${userUid}/${worldPath}` : `worlds/${worldPath}`;
+    
     const worldDataRefPath = worldId ? 
-        (currentStateName ? `worlds/${worldId}/states/${currentStateName}/data` : `worlds/${worldId}/data`) : 
+        (currentStateName ? getWorldPath(`${worldId}/states/${currentStateName}/data`) : getWorldPath(`${worldId}/data`)) : 
         null;
     const settingsRefPath = worldId ? 
-        (currentStateName ? `worlds/${worldId}/states/${currentStateName}/settings` : `worlds/${worldId}/settings`) : 
+        (currentStateName ? getWorldPath(`${worldId}/states/${currentStateName}/settings`) : getWorldPath(`${worldId}/settings`)) : 
         null;
 
     // --- Load Initial Data & Settings ---
@@ -46,8 +50,8 @@ export function useWorldSave(
         setIsLoading(true);
         setError(null);
         
-        const dataPath = currentStateName ? `worlds/${worldId}/states/${currentStateName}/data` : `worlds/${worldId}/data`;
-        const settingsPath = currentStateName ? `worlds/${worldId}/states/${currentStateName}/settings` : `worlds/${worldId}/settings`;
+        const dataPath = currentStateName ? getWorldPath(`${worldId}/states/${currentStateName}/data`) : getWorldPath(`${worldId}/data`);
+        const settingsPath = currentStateName ? getWorldPath(`${worldId}/states/${currentStateName}/settings`) : getWorldPath(`${worldId}/settings`);
         const dataRef = ref(database, dataPath);
         const settingsRef = ref(database, settingsPath);
 
@@ -82,21 +86,28 @@ export function useWorldSave(
             setIsLoading(false);
         };
 
+        // Add a timeout to prevent infinite loading
+        const timeoutId = setTimeout(() => {
+            setIsLoading(false);
+        }, 5000); // 5 second timeout
+
         // Store reference for proper cleanup
         let unsubscribe: (() => void) | null = null;
         
         // Set up persistent listener with proper cleanup tracking
         if (currentStateName) {
-            const stateRef = ref(database, `worlds/${worldId}/states/${currentStateName}`);
+            const stateRef = ref(database, getWorldPath(`${worldId}/states/${currentStateName}`));
             unsubscribe = onValue(stateRef, (snapshot) => {
+                clearTimeout(timeoutId);
                 const state = snapshot.val();
                 handleData(snapshot.child('data'));
                 handleSettings(snapshot.child('settings'));
                 setIsLoading(false);
             }, handleError);
         } else {
-            const worldRef = ref(database, `worlds/${worldId}`);
+            const worldRef = ref(database, getWorldPath(`${worldId}`));
             unsubscribe = onValue(worldRef, (snapshot) => {
+                clearTimeout(timeoutId);
                 const world = snapshot.val();
                 handleData(snapshot.child('data'));
                 handleSettings(snapshot.child('settings'));
@@ -106,6 +117,7 @@ export function useWorldSave(
 
         return () => {
             // Proper cleanup: call the unsubscribe function returned by onValue
+            clearTimeout(timeoutId);
             if (unsubscribe) {
                 unsubscribe();
                 unsubscribe = null;
@@ -113,7 +125,7 @@ export function useWorldSave(
             if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
             if (settingsSaveTimeoutRef.current) clearTimeout(settingsSaveTimeoutRef.current);
         };
-    }, [worldId, setLocalWorldData, setLocalSettings, currentStateName]);
+    }, [worldId, setLocalWorldData, setLocalSettings, currentStateName, userUid]);
 
     // --- Save Data on Change (Debounced) ---
     useEffect(() => {

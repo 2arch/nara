@@ -136,6 +136,8 @@ interface UseWorldEngineProps {
     initialZoomLevel?: number;
     worldId: string | null; // Add worldId for persistence
     initialBackgroundColor?: string;
+    userUid?: string | null; // Add user UID for user-specific persistence
+    username?: string; // Add username for routing
 }
 
 // --- The Hook ---
@@ -146,6 +148,8 @@ export function useWorldEngine({
     initialZoomLevel = 1, // Default zoom level index
     worldId = null,      // Default to no persistence
     initialBackgroundColor,
+    userUid = null,      // Default to no user-specific persistence
+    username,            // Username for routing
 }: UseWorldEngineProps): WorldEngine {
     // === State ===
     const [worldData, setWorldData] = useState<WorldData>(initialWorldData);
@@ -226,7 +230,7 @@ export function useWorldEngine({
         searchPattern,
         isSearchActive,
         clearSearch,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates });
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates, username });
 
     // Generate search data when search pattern changes
     useEffect(() => {
@@ -356,6 +360,9 @@ export function useWorldEngine({
         return compiledLines;
     }, []);
 
+    // Helper function to get world paths directly under /worlds/{userUid}/
+    const getUserPath = useCallback((worldPath: string) => userUid ? `worlds/${userUid}/${worldPath.replace('worlds/', '')}` : `worlds/${worldPath.replace('worlds/', '')}`, [userUid]);
+
     // Ambient text compilation and Firebase sync
     useEffect(() => {
         if (!worldId) return;
@@ -394,7 +401,7 @@ export function useWorldEngine({
             
             // Send only changes to Firebase
             if (Object.keys(changes).length > 0) {
-                const contentPath = currentStateName ? `worlds/${worldId}/states/${currentStateName}/content` : `worlds/${worldId}/content`;
+                const contentPath = currentStateName ? getUserPath(`${worldId}/states/${currentStateName}/content`) : getUserPath(`${worldId}/content`);
                 const compiledTextRef = ref(database, contentPath);
                 
                 // Create append operations for changed lines
@@ -429,14 +436,14 @@ export function useWorldEngine({
                 clearTimeout(compilationTimeoutRef.current);
             }
         };
-    }, [worldData, worldId, compileTextStrings, currentStateName]);
+    }, [worldData, worldId, compileTextStrings, currentStateName, getUserPath]);
 
     // === State Management Functions ===
     const saveState = useCallback(async (stateName: string): Promise<boolean> => {
         if (!worldId) return false;
         
         try {
-            const stateRef = ref(database, `worlds/${worldId}/states/${stateName}`);
+            const stateRef = ref(database, getUserPath(`${worldId}/states/${stateName}`));
             
             // Compile text strings from individual characters
             const compiledText = compileTextStrings(worldData);
@@ -464,13 +471,13 @@ export function useWorldEngine({
             console.error('Error saving state:', error);
             return false;
         }
-    }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel]);
+    }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel, getUserPath]);
 
     const loadState = useCallback(async (stateName: string): Promise<boolean> => {
         if (!worldId) return false;
         
         try {
-            const stateRef = ref(database, `worlds/${worldId}/states/${stateName}`);
+            const stateRef = ref(database, getUserPath(`${worldId}/states/${stateName}`));
             const snapshot = await get(stateRef);
             const stateData = snapshot.val();
             
@@ -505,17 +512,17 @@ export function useWorldEngine({
             console.error('Error loading state:', error);
             return false;
         }
-    }, [worldId, setSettings]);
+    }, [worldId, setSettings, getUserPath]);
 
     const loadAvailableStates = useCallback(async (): Promise<string[]> => {
-        console.log('loadAvailableStates called with worldId:', worldId);
-        if (!worldId) {
-            console.log('No worldId provided, returning empty array');
+        console.log('loadAvailableStates called with userUid:', userUid);
+        if (!userUid) {
+            console.log('No userUid provided, returning empty array');
             return [];
         }
         
         try {
-            const statesPath = `worlds/${worldId}/states`;
+            const statesPath = `worlds/${userUid}`;
             console.log('Loading states from path:', statesPath);
             const statesRef = ref(database, statesPath);
             
@@ -533,8 +540,10 @@ export function useWorldEngine({
             console.log('Firebase snapshot data:', statesData);
             
             if (statesData && typeof statesData === 'object') {
-                const stateNames = Object.keys(statesData).sort();
-                console.log('Found states:', stateNames);
+                // Filter out 'home' and only return actual saved states
+                const allKeys = Object.keys(statesData);
+                const stateNames = allKeys.filter(key => key !== 'home').sort();
+                console.log('Found states:', stateNames, '(filtered from:', allKeys, ')');
                 return stateNames;
             }
             console.log('No states found in Firebase');
@@ -544,13 +553,13 @@ export function useWorldEngine({
             console.error('This might be due to Firebase connection limits. Try refreshing the page.');
             return [];
         }
-    }, [worldId]);
+    }, [userUid]);
 
     const deleteState = useCallback(async (stateName: string): Promise<boolean> => {
         if (!worldId) return false;
         
         try {
-            const stateRef = ref(database, `worlds/${worldId}/states/${stateName}`);
+            const stateRef = ref(database, getUserPath(`${worldId}/states/${stateName}`));
             await set(stateRef, null); // Firebase way to delete
             
             // If we're deleting the current state, clear the current state name
@@ -563,7 +572,7 @@ export function useWorldEngine({
             console.error('Error deleting state:', error);
             return false;
         }
-    }, [worldId, currentStateName]);
+    }, [worldId, currentStateName, getUserPath]);
 
     // Load available states on component mount
     useEffect(() => {
@@ -577,7 +586,7 @@ export function useWorldEngine({
     useEffect(() => {
         if (!worldId) return;
         
-        const contentPath = currentStateName ? `worlds/${worldId}/states/${currentStateName}/content` : `worlds/${worldId}/content`;
+        const contentPath = currentStateName ? getUserPath(`${worldId}/states/${currentStateName}/content`) : getUserPath(`${worldId}/content`);
         const compiledTextRef = ref(database, contentPath);
         get(compiledTextRef).then((snapshot) => {
             const compiledText = snapshot.val();
@@ -589,7 +598,7 @@ export function useWorldEngine({
         }).catch(error => {
             console.error('Failed to load compiled text:', error);
         });
-    }, [worldId, currentStateName]);
+    }, [worldId, currentStateName, getUserPath]);
 
     // Helper function to detect if there's unsaved work
     const hasUnsavedWork = useCallback((): boolean => {
@@ -610,14 +619,14 @@ export function useWorldEngine({
         if (!worldId) return;
         
         try {
-            const settingsRef = ref(database, `worlds/${worldId}/settings`);
+            const settingsRef = ref(database, getUserPath(`${worldId}/settings`));
             const updatedSettings = { ...settings, ...newSettings };
             await set(settingsRef, updatedSettings);
             console.log('Settings saved immediately to Firebase:', updatedSettings);
         } catch (error) {
             console.error('Failed to save settings to Firebase:', error);
         }
-    }, [worldId, settings]);
+    }, [worldId, settings, getUserPath]);
     
     // === Deepspawn System ===
     const { 
@@ -671,7 +680,7 @@ export function useWorldEngine({
         isLoading: isLoadingWorld,
         isSaving: isSavingWorld,
         error: worldPersistenceError
-    } = useWorldSave(worldId, worldData, setWorldData, settings, setSettings, false, currentStateName); // Disable auto-loading
+    } = useWorldSave(worldId, worldData, setWorldData, settings, setSettings, false, currentStateName, userUid); // Pass userUid and disable auto-loading
 
     // === Refs === (Keep refs for things not directly tied to re-renders or persistence)
     const charSizeCacheRef = useRef<{ [key: number]: { width: number; height: number; fontSize: number } }>({});

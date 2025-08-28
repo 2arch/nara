@@ -1,7 +1,7 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
 import { getDatabase, connectDatabaseEmulator, ref, onValue, set, get } from "firebase/database";
-import { getAuth } from "firebase/auth";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, User } from "firebase/auth";
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
 
@@ -56,5 +56,85 @@ if (typeof window !== 'undefined') {
     window.addEventListener('unload', cleanup);
   }
 }
+
+// Authentication functions
+export interface UserProfileData {
+  firstName: string;
+  lastName: string;
+  username: string;
+  email: string;
+  uid: string;
+  createdAt: string;
+}
+
+export const signUpUser = async (email: string, password: string, firstName: string, lastName: string, username: string): Promise<{success: boolean, user?: User, error?: string}> => {
+  try {
+    // Create user with email and password
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+    
+    // Update the user's display name
+    await updateProfile(user, {
+      displayName: `${firstName} ${lastName}`
+    });
+    
+    // Store additional user data in the database
+    const userProfileData: UserProfileData = {
+      firstName,
+      lastName,
+      username,
+      email,
+      uid: user.uid,
+      createdAt: new Date().toISOString()
+    };
+    
+    // Store user profile in database
+    await set(ref(database, `users/${user.uid}`), userProfileData);
+    
+    // Store username mapping (to ensure usernames are unique)
+    await set(ref(database, `usernames/${username}`), user.uid);
+    
+    return { success: true, user };
+  } catch (error: any) {
+    console.error('Signup error:', error);
+    return { 
+      success: false, 
+      error: error.message || 'Failed to create account' 
+    };
+  }
+};
+
+export const signInUser = async (email: string, password: string): Promise<{success: boolean, user?: User, error?: string}> => {
+  try {
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    return { success: true, user: userCredential.user };
+  } catch (error: any) {
+    console.error('Signin error:', error);
+    return { 
+      success: false, 
+      error: error.message || 'Failed to sign in' 
+    };
+  }
+};
+
+export const checkUsernameAvailability = async (username: string): Promise<boolean> => {
+  try {
+    const snapshot = await get(ref(database, `usernames/${username}`));
+    return !snapshot.exists(); // Available if doesn't exist
+  } catch (error) {
+    console.error('Error checking username availability:', error);
+    return false; // Assume not available on error
+  }
+};
+
+export const getUsernameByUid = async (uid: string): Promise<string | null> => {
+  try {
+    const snapshot = await get(ref(database, `users/${uid}/username`));
+    return snapshot.exists() ? snapshot.val() : null;
+  } catch (error) {
+    console.error('Error fetching username:', error);
+    return null;
+  }
+};
 
 export { database, app, auth };

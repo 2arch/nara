@@ -52,6 +52,7 @@ interface UseCommandSystemProps {
     initialBackgroundColor?: string;
     getAllLabels?: () => Array<{text: string, x: number, y: number, color: string}>;
     availableStates?: string[];
+    username?: string;
 }
 
 // --- Command System Constants ---
@@ -61,7 +62,7 @@ const BG_COMMANDS = ['clear', 'live', 'white', 'black', 'web'];
 const NAV_COMMANDS: string[] = [];
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates = [] }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates = [], username }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const [commandState, setCommandState] = useState<CommandState>({
@@ -971,7 +972,29 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 return null;
             }
             
-            // Return command execution for world engine to handle
+            // Handle navigation for state commands
+            if (username) {
+                if (args.length === 0) {
+                    // Navigate to user's homepage (no state)
+                    router.push(`/@${username}`);
+                    return null;
+                } else if (args[0] === '--rm') {
+                    // Delete command - let world engine handle it
+                    console.log('Returning state delete command execution with args:', args);
+                    return {
+                        command: 'state',
+                        args: args,
+                        commandStartPos: commandState.commandStartPos
+                    };
+                } else {
+                    const stateName = args[0];
+                    // Navigate to state page
+                    router.push(`/@${username}/${stateName}`);
+                    return null;
+                }
+            }
+            
+            // Fallback: Return command execution for world engine to handle (old behavior)
             console.log('Returning state command execution with args:', args);
             return {
                 command: 'state',
