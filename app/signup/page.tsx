@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect, useCallback } from 'react';
 import { useWorldEngine } from '../bitworld/world.engine';
-import { BitSignupCanvas } from '../bitworld/bit.signup';
+import { BitHomeCanvas } from '../bitworld/bit.home';
 
 const SignupPage: React.FC = () => {
   const [cursorAlternate, setCursorAlternate] = useState(false);
@@ -180,7 +180,6 @@ const SignupPage: React.FC = () => {
   if (engine.isLoadingWorld) {
     return (
       <div className="w-screen h-screen flex items-center justify-center bg-white">
-        <div className="text-black">Loading signup form...</div>
       </div>
     );
   }
@@ -188,7 +187,7 @@ const SignupPage: React.FC = () => {
   return (
     <div className="w-screen h-screen bg-white relative">
       {/* Main signup canvas with form elements and integrated monogram */}
-      <BitSignupCanvas
+      <BitHomeCanvas
         engine={engine}
         cursorColorAlternate={cursorAlternate}
         className="w-full h-full"
