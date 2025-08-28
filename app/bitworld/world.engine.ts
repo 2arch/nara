@@ -680,7 +680,7 @@ export function useWorldEngine({
         isLoading: isLoadingWorld,
         isSaving: isSavingWorld,
         error: worldPersistenceError
-    } = useWorldSave(worldId, worldData, setWorldData, settings, setSettings, false, currentStateName, userUid); // Pass userUid and disable auto-loading
+    } = useWorldSave(worldId, worldData, setWorldData, settings, setSettings, true, currentStateName, userUid); // Pass userUid and enable auto-loading
 
     // === Refs === (Keep refs for things not directly tied to re-renders or persistence)
     const charSizeCacheRef = useRef<{ [key: number]: { width: number; height: number; fontSize: number } }>({});
@@ -1840,13 +1840,17 @@ export function useWorldEngine({
                 const hasCustomStyle = currentTextStyle.color !== textColor || currentTextStyle.background !== undefined;
                 
                 if (hasCustomStyle) {
-                    // Store styled character
+                    // Store styled character (filter out undefined values for Firebase)
+                    const style: { color?: string; background?: string } = {
+                        color: currentTextStyle.color
+                    };
+                    if (currentTextStyle.background !== undefined) {
+                        style.background = currentTextStyle.background;
+                    }
+                    
                     const styledChar: StyledCharacter = {
                         char: key,
-                        style: {
-                            color: currentTextStyle.color,
-                            background: currentTextStyle.background
-                        }
+                        style: style
                     };
                     nextWorldData[currentKey] = styledChar;
                 } else {

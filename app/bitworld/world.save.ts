@@ -47,6 +47,12 @@ export function useWorldSave(
             return;
         }
 
+        if (!userUid) {
+            // Don't load data yet, but don't show error - just wait for userUid
+            setIsLoading(false);
+            return;
+        }
+
         setIsLoading(true);
         setError(null);
         
@@ -95,25 +101,24 @@ export function useWorldSave(
         let unsubscribe: (() => void) | null = null;
         
         // Set up persistent listener with proper cleanup tracking
-        if (currentStateName) {
-            const stateRef = ref(database, getWorldPath(`${worldId}/states/${currentStateName}`));
-            unsubscribe = onValue(stateRef, (snapshot) => {
-                clearTimeout(timeoutId);
-                const state = snapshot.val();
-                handleData(snapshot.child('data'));
-                handleSettings(snapshot.child('settings'));
-                setIsLoading(false);
-            }, handleError);
-        } else {
-            const worldRef = ref(database, getWorldPath(`${worldId}`));
-            unsubscribe = onValue(worldRef, (snapshot) => {
-                clearTimeout(timeoutId);
-                const world = snapshot.val();
-                handleData(snapshot.child('data'));
-                handleSettings(snapshot.child('settings'));
-                setIsLoading(false);
-            }, handleError);
-        }
+        // Always listen to the specific data and settings paths, not the parent object
+        let dataUnsubscribe: (() => void) | null = null;
+        let settingsUnsubscribe: (() => void) | null = null;
+        
+        dataUnsubscribe = onValue(dataRef, (snapshot) => {
+            clearTimeout(timeoutId);
+            handleData(snapshot);
+            setIsLoading(false);
+        }, handleError);
+        
+        settingsUnsubscribe = onValue(settingsRef, (snapshot) => {
+            handleSettings(snapshot);
+        }, handleError);
+        
+        unsubscribe = () => {
+            if (dataUnsubscribe) dataUnsubscribe();
+            if (settingsUnsubscribe) settingsUnsubscribe();
+        };
 
         return () => {
             // Proper cleanup: call the unsubscribe function returned by onValue
@@ -125,11 +130,20 @@ export function useWorldSave(
             if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
             if (settingsSaveTimeoutRef.current) clearTimeout(settingsSaveTimeoutRef.current);
         };
-    }, [worldId, setLocalWorldData, setLocalSettings, currentStateName, userUid]);
+    }, [worldId, setLocalWorldData, setLocalSettings, currentStateName, userUid, autoLoadData]);
 
     // --- Save Data on Change (Debounced) ---
     useEffect(() => {
         if (isLoading || !worldId || !worldDataRefPath || !lastSyncedDataRef.current) {
+            return;
+        }
+
+        // Prevent saving empty data on initial mount - only save if data has meaningful content
+        const hasContent = Object.keys(localWorldData || {}).length > 0;
+        const lastSyncedHasContent = Object.keys(lastSyncedDataRef.current || {}).length > 0;
+        
+        if (!hasContent && !lastSyncedHasContent) {
+            // Both current and last synced are empty - don't save empty state
             return;
         }
 

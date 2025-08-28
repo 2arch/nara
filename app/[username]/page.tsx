@@ -39,7 +39,7 @@ export default function UserHome() {
     return () => clearInterval(interval);
   }, []);
 
-  if (authLoading || engine.isLoadingWorld) {
+  if (authLoading || !user || engine.isLoadingWorld) {
     return (
       <div className="w-screen h-screen flex items-center justify-center" style={{backgroundColor: '#39FF14'}}>
         <div className="text-black">Loading...</div>
