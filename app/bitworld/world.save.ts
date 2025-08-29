@@ -47,11 +47,11 @@ export function useWorldSave(
             return;
         }
 
-        if (!userUid) {
-            // Don't load data yet, but don't show error - just wait for userUid
-            setIsLoading(false);
-            return;
-        }
+        // Allow null userUid for global worlds (saves to worlds/{worldId}/data directly)
+        // if (!userUid) {
+        //     setIsLoading(false);
+        //     return;
+        // }
 
         setIsLoading(true);
         setError(null);

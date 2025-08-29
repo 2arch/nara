@@ -137,6 +137,7 @@ interface UseWorldEngineProps {
     initialBackgroundColor?: string;
     userUid?: string | null; // Add user UID for user-specific persistence
     username?: string; // Add username for routing
+    enableCommands?: boolean; // Enable/disable command system (default: true)
 }
 
 // --- The Hook ---
@@ -148,6 +149,7 @@ export function useWorldEngine({
     worldId = null,      // Default to no persistence
     initialBackgroundColor,
     userUid = null,      // Default to no user-specific persistence
+    enableCommands = true, // Default to enabled
     username,            // Username for routing
 }: UseWorldEngineProps): WorldEngine {
     // === State ===
@@ -1158,8 +1160,9 @@ export function useWorldEngine({
         }
 
         // === Command Handling ===
-        const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos);
-        if (commandResult && typeof commandResult === 'object') {
+        if (enableCommands) {
+            const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos);
+            if (commandResult && typeof commandResult === 'object') {
             // It's a command execution object
             const exec = commandResult as CommandExecution;
             if (exec.command === 'debug') {
@@ -1385,9 +1388,10 @@ export function useWorldEngine({
             setCursorPos(exec.commandStartPos);
             
             return true; // Command was handled
-        } else if (commandResult === true) {
-            // Command mode handled the key, but didn't execute a command
-            return true;
+            } else if (commandResult === true) {
+                // Command mode handled the key, but didn't execute a command
+                return true;
+            }
         }
 
 

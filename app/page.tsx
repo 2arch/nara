@@ -89,14 +89,14 @@ export default function Home() {
 
   if (authLoading || engine.isLoadingWorld) {
     return (
-      <div className="w-screen h-screen flex items-center justify-center" style={{backgroundColor: 'orange'}}>
+      <div className="w-screen h-screen flex items-center justify-center" style={{backgroundColor: '#39FF14'}}>
         <div className="text-black">Loading...</div>
       </div>
     );
   }
 
   return (
-    <div className="w-screen h-screen relative" style={{backgroundColor: 'orange'}}>
+    <div className="w-screen h-screen relative" style={{backgroundColor: '#39FF14'}}>
       <BitHomeCanvas
         engine={engine}
         cursorColorAlternate={cursorAlternate}
