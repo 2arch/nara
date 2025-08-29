@@ -829,8 +829,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 ctx.fillStyle = color;
                                 ctx.fillRect(charScreenPos.x, charScreenPos.y, effectiveCharWidth, effectiveCharHeight);
 
-                                // Render the character
-                                ctx.fillStyle = CURSOR_TEXT_COLOR;
+                                // Render the character with contrasting color
+                                const textColor = color === '#000000' || color === 'black' ? '#FFFFFF' : '#000000';
+                                ctx.fillStyle = textColor;
                                 ctx.fillText(text[charIndex], charScreenPos.x, charScreenPos.y + verticalTextOffset);
                             }
                         } else {

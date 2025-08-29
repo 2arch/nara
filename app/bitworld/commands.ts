@@ -1033,7 +1033,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         
         if (commandToExecute.toLowerCase().startsWith(commandName.toLowerCase())) {
             const args = inputParts.slice(1);
-            return { command: commandToExecute, args, commandStartPos: commandState.commandStartPos };
+            return { command: commandName, args, commandStartPos: commandState.commandStartPos };
         }
         
         return null;

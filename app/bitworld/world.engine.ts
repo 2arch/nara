@@ -200,9 +200,7 @@ export function useWorldEngine({
                 const y = parseInt(yStr, 10);
                 if (!isNaN(x) && !isNaN(y)) {
                     try {
-                        const charData = worldData[key];
-                        const charString = getCharacter(charData);
-                        const labelData = JSON.parse(charString);
+                        const labelData = JSON.parse(worldData[key] as string);
                         const text = labelData.text || '';
                         const color = labelData.color || '#000000';
                         if (text.trim()) {
