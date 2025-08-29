@@ -735,8 +735,18 @@ export function BitPageCanvas({
             return;
         }
         
-        // Handle backspace with boundary checking and line wrapping support
+        // Handle backspace with modifier key support
         if (e.key === 'Backspace') {
+            // Let engine handle advanced backspace (cmd+backspace, option+backspace, etc.)
+            const handled = engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey, e.shiftKey);
+            
+            if (handled) {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+            
+            // Fallback to basic backspace logic if engine doesn't handle it
             const { minX, maxX } = getHorizontalBounds();
             
             if (currentPos.x > minX) {

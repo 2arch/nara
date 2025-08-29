@@ -62,11 +62,12 @@ export default function BlogPage() {
     // Back to Home button - always first
     {
       id: 'back-to-home',
-      text: 'Back to Home',
+      text: 'back to home',
       onClick: () => {
         router.push('/');
       },
       position: 'sidebar-left',
+      color: '#39FF14',
       style: 'primary'
     },
     // Dynamic buttons for existing blog posts
@@ -82,7 +83,7 @@ export default function BlogPage() {
     // New Post button - always last
     {
       id: 'new-post',
-      text: 'New Post',
+      text: 'new post',
       onClick: () => {
         const postName = prompt('Enter new post name:');
         if (postName && postName.trim()) {
@@ -99,6 +100,7 @@ export default function BlogPage() {
         }
       },
       position: 'sidebar-left',
+      color: '#003DFF',
       style: 'primary'
     }
   ];

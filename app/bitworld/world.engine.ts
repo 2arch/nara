@@ -546,13 +546,16 @@ export function useWorldEngine({
     }, [worldId, setSettings, getUserPath, userUid]);
 
     const loadAvailableStates = useCallback(async (): Promise<string[]> => {
-        if (!userUid) {
-            return [];
-        }
-        
         try {
-            // For blog posts, load from posts/ instead of nested states structure
-            const isBlogs = userUid === 'blog' && worldId === 'posts';
+            // For blog posts, detect by worldId pattern
+            const isBlogPost = worldId?.startsWith('blog/posts/');
+            const isBlogMain = userUid === 'blog' && worldId === 'posts';
+            const isBlogs = isBlogPost || isBlogMain;
+            
+            if (!isBlogs && !userUid) {
+                return [];
+            }
+            
             const statesPath = isBlogs ? 
                 `worlds/blog/posts` :
                 `worlds/${userUid}`;

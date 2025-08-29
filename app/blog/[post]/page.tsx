@@ -62,11 +62,12 @@ export default function BlogPostPage({ params }: { params: Promise<{ post: strin
     // Back to Home button - always first
     {
       id: 'back-to-home',
-      text: 'Back to Home',
+      text: 'back to home',
       onClick: () => {
         router.push('/');
       },
       position: 'sidebar-left',
+      color: '#39FF14',
       style: 'primary'
     },
     // Dynamic buttons for all blog posts, highlighting current one
@@ -82,7 +83,7 @@ export default function BlogPostPage({ params }: { params: Promise<{ post: strin
     // New Post button - always last
     {
       id: 'new-post',
-      text: 'New Post',
+      text: 'new post',
       onClick: () => {
         const postName = prompt('Enter new post name:');
         if (postName && postName.trim()) {
@@ -94,6 +95,7 @@ export default function BlogPostPage({ params }: { params: Promise<{ post: strin
         }
       },
       position: 'sidebar-left',
+      color: '#003DFF',
       style: 'primary'
     }
   ];

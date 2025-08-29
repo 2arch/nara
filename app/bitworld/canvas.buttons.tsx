@@ -10,6 +10,8 @@ export interface CanvasButton {
     position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center' | 'sidebar-left';
     style?: 'primary' | 'secondary' | 'outlined';
     width?: number; // Optional fixed width in characters
+    color?: string; // Custom background color (hex)
+    textColor?: string; // Custom text color (hex)
 }
 
 export interface ButtonRegion {
@@ -28,6 +30,8 @@ interface ButtonLayout {
         height: number;
         text: string;
         style: 'primary' | 'secondary' | 'outlined';
+        color?: string;
+        textColor?: string;
     }>;
 }
 
@@ -102,7 +106,9 @@ export function useCanvasButtons(buttons: CanvasButton[], charWidth?: number, ch
                     width: buttonWidth,
                     height: effectiveCharHeight,
                     text: button.text,
-                    style: button.style || 'primary'
+                    style: button.style || 'primary',
+                    color: button.color,
+                    textColor: button.textColor
                 });
             });
         });
@@ -125,24 +131,31 @@ export function useCanvasButtons(buttons: CanvasButton[], charWidth?: number, ch
         layout.buttons.forEach(button => {
             const isPressed = pressedButton === button.id;
             
-            // Button colors based on style and pressed state
+            // Button colors based on custom colors or style and pressed state
             let backgroundColor: string;
             let textColor: string;
             
-            switch (button.style) {
-                case 'outlined':
-                    backgroundColor = isPressed ? '#E0E0E0' : 'transparent';
-                    textColor = isPressed ? '#000000' : '#000000';
-                    break;
-                case 'secondary':
-                    backgroundColor = isPressed ? '#666666' : '#888888';
-                    textColor = '#FFFFFF';
-                    break;
-                case 'primary':
-                default:
-                    backgroundColor = isPressed ? '#333333' : '#000000';
-                    textColor = '#FFFFFF';
-                    break;
+            if (button.color) {
+                // Use custom colors if provided
+                backgroundColor = isPressed ? '#666666' : button.color;
+                textColor = button.textColor || '#FFFFFF';
+            } else {
+                // Fall back to style-based colors
+                switch (button.style) {
+                    case 'outlined':
+                        backgroundColor = isPressed ? '#E0E0E0' : 'transparent';
+                        textColor = isPressed ? '#000000' : '#000000';
+                        break;
+                    case 'secondary':
+                        backgroundColor = isPressed ? '#666666' : '#888888';
+                        textColor = '#FFFFFF';
+                        break;
+                    case 'primary':
+                    default:
+                        backgroundColor = isPressed ? '#333333' : '#000000';
+                        textColor = '#FFFFFF';
+                        break;
+                }
             }
 
             // Draw button background
