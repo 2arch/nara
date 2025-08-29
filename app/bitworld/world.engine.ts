@@ -6,7 +6,9 @@ import { getSmartIndentation, calculateWordDeletion } from './bit.blocks'; // Im
 import { useDeepspawnSystem } from './deepspawn'; // Import deepspawn system
 import { useWorldSettings, WorldSettings } from './settings';
 import { set, ref } from 'firebase/database';
-import { database } from '@/app/firebase';
+import { database, auth } from '@/app/firebase';
+import { signOut } from 'firebase/auth';
+import { useRouter } from 'next/navigation';
 import { transformText, explainText, summarizeText, createSubtitleCycler, chatWithAI, clearChatHistory, setDialogueWithRevert } from './ai';
 import { get } from 'firebase/database';
 
@@ -157,6 +159,9 @@ export function useWorldEngine({
     enableCommands = true, // Default to enabled
     username,            // Username for routing
 }: UseWorldEngineProps): WorldEngine {
+    // === Router ===
+    const router = useRouter();
+    
     // === State ===
     const [worldData, setWorldData] = useState<WorldData>(initialWorldData);
     const [cursorPos, setCursorPos] = useState<Point>(initialCursorPos);
@@ -1395,6 +1400,14 @@ export function useWorldEngine({
                 } else {
                     setDialogueWithRevert("Usage: /label [text] [color] (e.g., /label important note red, /label heading blue)", setDialogueText);
                 }
+            } else if (exec.command === 'signout') {
+                setDialogueText("Signing out...");
+                signOut(auth).then(() => {
+                    setDialogueText("Signed out successfully");
+                    router.push('/');
+                }).catch((error) => {
+                    setDialogueText(`Error signing out: ${error.message}`);
+                });
             } else if (exec.command === 'state') {
                 if (exec.args.length === 0) {
                     // No arguments - clear canvas and exit current state
