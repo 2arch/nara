@@ -32,11 +32,17 @@ export function useWorldSave(
     // Build world paths directly under /worlds/{userUid}/ when userUid is provided
     const getWorldPath = (worldPath: string) => userUid ? `worlds/${userUid}/${worldPath}` : `worlds/${worldPath}`;
     
+    // For blog posts, use direct path structure: worlds/blog/posts/{post}/data
+    const isBlogs = userUid === 'blog' && worldId === 'posts';
     const worldDataRefPath = worldId ? 
-        (currentStateName ? getWorldPath(`${worldId}/states/${currentStateName}/data`) : getWorldPath(`${worldId}/data`)) : 
+        (currentStateName ? 
+            (isBlogs ? `worlds/blog/posts/${currentStateName}/data` : getWorldPath(`${worldId}/states/${currentStateName}/data`)) :
+            (isBlogs ? null : getWorldPath(`${worldId}/data`))) : 
         null;
     const settingsRefPath = worldId ? 
-        (currentStateName ? getWorldPath(`${worldId}/states/${currentStateName}/settings`) : getWorldPath(`${worldId}/settings`)) : 
+        (currentStateName ? 
+            (isBlogs ? `worlds/blog/posts/${currentStateName}/settings` : getWorldPath(`${worldId}/states/${currentStateName}/settings`)) :
+            (isBlogs ? null : getWorldPath(`${worldId}/settings`))) : 
         null;
 
     // --- Load Initial Data & Settings ---
@@ -56,12 +62,23 @@ export function useWorldSave(
         setIsLoading(true);
         setError(null);
         
-        const dataPath = currentStateName ? getWorldPath(`${worldId}/states/${currentStateName}/data`) : getWorldPath(`${worldId}/data`);
-        const settingsPath = currentStateName ? getWorldPath(`${worldId}/states/${currentStateName}/settings`) : getWorldPath(`${worldId}/settings`);
+        const dataPath = currentStateName ? 
+            (isBlogs ? `worlds/blog/posts/${currentStateName}/data` : getWorldPath(`${worldId}/states/${currentStateName}/data`)) :
+            getWorldPath(`${worldId}/data`);
+        const settingsPath = currentStateName ? 
+            (isBlogs ? `worlds/blog/posts/${currentStateName}/settings` : getWorldPath(`${worldId}/states/${currentStateName}/settings`)) :
+            getWorldPath(`${worldId}/settings`);
+            
+        console.log('Blog save hook - paths:', { dataPath, settingsPath, currentStateName, isBlogs });
         const dataRef = ref(database, dataPath);
         const settingsRef = ref(database, settingsPath);
 
         const handleData = (snapshot: DataSnapshot) => {
+            // For blog posts, completely skip data handling to avoid conflicts
+            if (isBlogs) {
+                return;
+            }
+            
             if (!autoLoadData) {
                 // Don't auto-load data, but still track it for saving purposes
                 const data = snapshot.val() as WorldData | null;
@@ -137,6 +154,12 @@ export function useWorldSave(
         if (isLoading || !worldId || !worldDataRefPath || !lastSyncedDataRef.current) {
             return;
         }
+        
+        // For blog posts, disable auto-save hook since state system handles saving
+        if (isBlogs) {
+            console.log('Skipping auto-save for blog posts - using state system');
+            return;
+        }
 
         // Prevent saving empty data on initial mount - only save if data has meaningful content
         const hasContent = Object.keys(localWorldData || {}).length > 0;
@@ -154,12 +177,22 @@ export function useWorldSave(
         const lastSyncedStr = JSON.stringify(lastSyncedDataRef.current || {});
         const currentStr = JSON.stringify(localWorldData || {});
 
+        console.log('Save hook diff check:', { 
+            lastSyncedKeys: Object.keys(lastSyncedDataRef.current || {}),
+            currentKeys: Object.keys(localWorldData || {}),
+            isBlogs,
+            currentStateName
+        });
+
         const diff = makeDiff(lastSyncedStr, currentStr);
         const hasChanges = diff.length > 1 || (diff.length === 1 && diff[0][0] !== DIFF_EQUAL);
 
         if (!hasChanges) {
+            console.log('No changes detected, skipping save');
             return;
         }
+        
+        console.log('Changes detected, preparing to save');
 
         saveTimeoutRef.current = setTimeout(async () => {
             if (!worldId || !worldDataRefPath) return;

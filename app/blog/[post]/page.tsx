@@ -1,18 +1,18 @@
 "use client";
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useWorldEngine } from '../bitworld/world.engine';
-import { BitPageCanvas } from '../bitworld/bit.page';
-import { auth } from '../firebase';
+import { useWorldEngine } from '../../bitworld/world.engine';
+import { BitPageCanvas } from '../../bitworld/bit.page';
+import { auth } from '../../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import type { CanvasButton } from '../bitworld/canvas.buttons';
+import type { CanvasButton } from '../../bitworld/canvas.buttons';
 
-export default function BlogPage() {
+export default function BlogPostPage({ params }: { params: Promise<{ post: string }> }) {
   const [cursorAlternate, setCursorAlternate] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [statesVersion, setStatesVersion] = useState(0); // Force re-render when states change
   const router = useRouter();
+  const { post } = React.use(params);
   
   // Listen for authentication state changes
   useEffect(() => {
@@ -24,9 +24,17 @@ export default function BlogPage() {
     return () => unsubscribe();
   }, []);
 
+  // Simple cursor blink effect
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCursorAlternate(prev => !prev);
+    }, 500);
+    return () => clearInterval(interval);
+  }, []);
+
   const engine = useWorldEngine({ 
-    worldId: 'posts',
-    userUid: 'blog', // Use 'blog' as userUid to save under worlds/blog/{post}/data
+    worldId: `blog/posts/${post}`, // Use nested path so it saves to worlds/blog/posts/{post}/data
+    userUid: null, // No userUid to save directly to worlds/blog/posts/{post}/data
     username: 'blog', // Use 'blog' as username for blog content
     // Start at the top of the blog
     initialViewOffset: { x: 0, y: 0 },
@@ -41,18 +49,10 @@ export default function BlogPage() {
     }
   }, [engine, authLoading]);
 
-  // Simple cursor blink effect
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setCursorAlternate(prev => !prev);
-    }, 500);
-    return () => clearInterval(interval);
-  }, []);
-
   if (authLoading || engine.isLoadingWorld) {
     return (
       <div className="w-screen h-screen flex items-center justify-center" style={{backgroundColor: '#f8f9fa'}}>
-        <div className="text-black">Loading blog...</div>
+        <div className="text-black">Loading {post}...</div>
       </div>
     );
   }
@@ -69,7 +69,7 @@ export default function BlogPage() {
       position: 'sidebar-left',
       style: 'primary'
     },
-    // Dynamic buttons for existing blog posts
+    // Dynamic buttons for all blog posts, highlighting current one
     ...engine.availableStates.map((stateName) => ({
       id: `post-${stateName}`,
       text: stateName,
@@ -77,7 +77,7 @@ export default function BlogPage() {
         router.push(`/blog/${stateName}`);
       },
       position: 'sidebar-left' as const,
-      style: 'primary' as const
+      style: stateName === post ? 'secondary' as const : 'primary' as const  // Different style for current post
     })),
     // New Post button - always last
     {
@@ -88,12 +88,7 @@ export default function BlogPage() {
         if (postName && postName.trim()) {
           engine.saveState(postName.trim()).then((success) => {
             if (success) {
-              // Refresh available states to update button display
-              engine.loadAvailableStates().then(() => {
-                // Force component re-render when states change
-                setStatesVersion(prev => prev + 1);
-              });
-              console.log(`Created new post: ${postName}`);
+              router.push(`/blog/${postName.trim()}`);
             }
           });
         }

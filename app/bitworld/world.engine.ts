@@ -403,7 +403,16 @@ export function useWorldEngine({
             
             // Send only changes to Firebase
             if (Object.keys(changes).length > 0) {
-                const contentPath = currentStateName ? getUserPath(`${worldId}/states/${currentStateName}/content`) : getUserPath(`${worldId}/content`);
+                // For blog posts, skip content compilation to avoid conflicts
+                const isBlogs = userUid === 'blog' && worldId === 'posts';
+                if (isBlogs) {
+                    console.log('Skipping content compilation for blog posts');
+                    return; // Skip content sync for blog posts
+                }
+                
+                const contentPath = currentStateName ? 
+                    getUserPath(`${worldId}/states/${currentStateName}/content`) :
+                    getUserPath(`${worldId}/content`);
                 const compiledTextRef = ref(database, contentPath);
                 
                 // Create append operations for changed lines
@@ -441,67 +450,100 @@ export function useWorldEngine({
         if (!worldId) return false;
         
         try {
-            const stateRef = ref(database, getUserPath(`${worldId}/states/${stateName}`));
+            // For blog posts, save directly under posts/{post} instead of posts/states/{post}
+            const isBlogs = userUid === 'blog' && worldId === 'posts';
             
-            // Compile text strings from individual characters
-            const compiledText = compileTextStrings(worldData);
-            
-            const stateData = {
-                worldData, // Individual character positions (for canvas)
-                compiledText, // Compiled text strings (for text operations)
-                settings,
-                timestamp: Date.now(),
-                cursorPos,
-                viewOffset,
-                zoomLevel
-            };
-            
-            
-            await set(stateRef, stateData);
+            if (isBlogs) {
+                // For blog posts, save worldData directly to /data path (compatible with useWorldSave)
+                const dataRef = ref(database, `worlds/blog/posts/${stateName}/data`);
+                const settingsRef = ref(database, `worlds/blog/posts/${stateName}/settings`);
+                
+                console.log(`Blog: Saving to worlds/blog/posts/${stateName}/data`);
+                await set(dataRef, worldData);
+                await set(settingsRef, settings);
+            } else {
+                // Regular state saving with nested structure
+                const stateRef = ref(database, getUserPath(`${worldId}/states/${stateName}`));
+                
+                // Compile text strings from individual characters
+                const compiledText = compileTextStrings(worldData);
+                
+                const stateData = {
+                    worldData, // Individual character positions (for canvas)
+                    compiledText, // Compiled text strings (for text operations)
+                    settings,
+                    timestamp: Date.now(),
+                    cursorPos,
+                    viewOffset,
+                    zoomLevel
+                };
+                
+                await set(stateRef, stateData);
+            }
             setCurrentStateName(stateName); // Track that we're now in this state
             return true;
         } catch (error) {
             console.error('Error saving state:', error);
             return false;
         }
-    }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel, getUserPath]);
+    }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel, getUserPath, userUid]);
 
     const loadState = useCallback(async (stateName: string): Promise<boolean> => {
         if (!worldId) return false;
         
         try {
-            const stateRef = ref(database, getUserPath(`${worldId}/states/${stateName}`));
-            const snapshot = await get(stateRef);
-            const stateData = snapshot.val();
+            // For blog posts, load directly from posts/{post} instead of posts/states/{post}
+            const isBlogs = userUid === 'blog' && worldId === 'posts';
             
-            if (stateData) {
-                setWorldData(stateData.worldData || {});
-                if (stateData.settings) {
-                    setSettings(stateData.settings);
-                }
-                if (stateData.cursorPos) {
-                    setCursorPos(stateData.cursorPos);
-                }
-                if (stateData.viewOffset) {
-                    setViewOffset(stateData.viewOffset);
-                }
-                if (stateData.zoomLevel) {
-                    setZoomLevel(stateData.zoomLevel);
-                }
+            if (isBlogs) {
+                // For blog posts, load data and settings separately (compatible with useWorldSave)
+                const dataRef = ref(database, `worlds/blog/posts/${stateName}/data`);
+                const settingsRef = ref(database, `worlds/blog/posts/${stateName}/settings`);
                 
-                // Log compiled text if available (for debugging/analysis)
-                if (stateData.compiledText) {
-                }
+                const dataSnapshot = await get(dataRef);
+                const settingsSnapshot = await get(settingsRef);
                 
-                setCurrentStateName(stateName); // Track that we're now in this state
-                return true;
+                const worldDataToLoad = dataSnapshot.val() || {};
+                const settingsToLoad = settingsSnapshot.val() || {};
+                
+                setWorldData(worldDataToLoad);
+                setSettings(settingsToLoad);
+            } else {
+                // Regular state loading with nested structure
+                const stateRef = ref(database, getUserPath(`${worldId}/states/${stateName}`));
+                const snapshot = await get(stateRef);
+                const stateData = snapshot.val();
+                
+                if (stateData) {
+                    setWorldData(stateData.worldData || {});
+                    if (stateData.settings) {
+                        setSettings(stateData.settings);
+                    }
+                    if (stateData.cursorPos) {
+                        setCursorPos(stateData.cursorPos);
+                    }
+                    if (stateData.viewOffset) {
+                        setViewOffset(stateData.viewOffset);
+                    }
+                    if (stateData.zoomLevel) {
+                        setZoomLevel(stateData.zoomLevel);
+                    }
+                    
+                    // Log compiled text if available (for debugging/analysis)
+                    if (stateData.compiledText) {
+                    }
+                } else {
+                    return false;
+                }
             }
-            return false;
+            
+            setCurrentStateName(stateName); // Track that we're now in this state
+            return true;
         } catch (error) {
             console.error('Error loading state:', error);
             return false;
         }
-    }, [worldId, setSettings, getUserPath]);
+    }, [worldId, setSettings, getUserPath, userUid]);
 
     const loadAvailableStates = useCallback(async (): Promise<string[]> => {
         if (!userUid) {
@@ -509,7 +551,11 @@ export function useWorldEngine({
         }
         
         try {
-            const statesPath = `worlds/${userUid}`;
+            // For blog posts, load from posts/ instead of nested states structure
+            const isBlogs = userUid === 'blog' && worldId === 'posts';
+            const statesPath = isBlogs ? 
+                `worlds/blog/posts` :
+                `worlds/${userUid}`;
             const statesRef = ref(database, statesPath);
             
             // Add timeout to avoid hanging
@@ -525,10 +571,15 @@ export function useWorldEngine({
             const statesData = (snapshot as any).val();
             
             if (statesData && typeof statesData === 'object') {
-                // Filter out 'home' and only return actual saved states
-                const allKeys = Object.keys(statesData);
-                const stateNames = allKeys.filter(key => key !== 'home').sort();
-                return stateNames;
+                if (isBlogs) {
+                    // For blog posts, state names are direct keys under posts/
+                    return Object.keys(statesData).sort();
+                } else {
+                    // Filter out 'home' and only return actual saved states
+                    const allKeys = Object.keys(statesData);
+                    const stateNames = allKeys.filter(key => key !== 'home').sort();
+                    return stateNames;
+                }
             }
             return [];
         } catch (error) {
@@ -536,13 +587,17 @@ export function useWorldEngine({
             console.error('This might be due to Firebase connection limits. Try refreshing the page.');
             return [];
         }
-    }, [userUid]);
+    }, [userUid, worldId]);
 
     const deleteState = useCallback(async (stateName: string): Promise<boolean> => {
         if (!worldId) return false;
         
         try {
-            const stateRef = ref(database, getUserPath(`${worldId}/states/${stateName}`));
+            // For blog posts, delete directly from posts/{post} instead of posts/states/{post}
+            const isBlogs = userUid === 'blog' && worldId === 'posts';
+            const stateRef = isBlogs ? 
+                ref(database, `worlds/blog/posts/${stateName}`) :
+                ref(database, getUserPath(`${worldId}/states/${stateName}`));
             await set(stateRef, null); // Firebase way to delete
             
             // If we're deleting the current state, clear the current state name
@@ -555,7 +610,7 @@ export function useWorldEngine({
             console.error('Error deleting state:', error);
             return false;
         }
-    }, [worldId, currentStateName, getUserPath]);
+    }, [worldId, currentStateName, getUserPath, userUid]);
 
     // Load available states on component mount
     useEffect(() => {
@@ -568,7 +623,11 @@ export function useWorldEngine({
     useEffect(() => {
         if (!worldId) return;
         
-        const contentPath = currentStateName ? getUserPath(`${worldId}/states/${currentStateName}/content`) : getUserPath(`${worldId}/content`);
+        // For blog posts, use direct path structure for content
+        const isBlogs = userUid === 'blog' && worldId === 'posts';
+        const contentPath = currentStateName ? 
+            (isBlogs ? `worlds/blog/posts/${currentStateName}/content` : getUserPath(`${worldId}/states/${currentStateName}/content`)) :
+            getUserPath(`${worldId}/content`);
         const compiledTextRef = ref(database, contentPath);
         get(compiledTextRef).then((snapshot) => {
             const compiledText = snapshot.val();
@@ -2312,5 +2371,11 @@ export function useWorldEngine({
         getCharacter,
         getCharacterStyle,
         getCompiledText: () => compiledTextCache,
+        // State management functions for blog posts
+        saveState,
+        loadState,
+        availableStates,
+        currentStateName,
+        loadAvailableStates,
     };
 }
