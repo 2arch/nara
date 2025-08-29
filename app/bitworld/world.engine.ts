@@ -125,6 +125,11 @@ export interface WorldEngine {
     cycleSortMode: () => void;
     getCharacter: (data: string | StyledCharacter) => string;
     getCharacterStyle: (data: string | StyledCharacter) => { color?: string; background?: string } | undefined;
+    saveState: (stateName: string) => Promise<boolean>;
+    loadState: (stateName: string) => Promise<boolean>;
+    availableStates: string[];
+    currentStateName: string | null;
+    loadAvailableStates: () => Promise<string[]>;
 }
 
 // --- Hook Input ---
