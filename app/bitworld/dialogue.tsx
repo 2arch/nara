@@ -196,7 +196,7 @@ export function useDialogue() {
         ctx.restore();
     }, [calculateDebugLayout]);
 
-    const formatTableOfContents = useCallback((labels: Array<{text: string, x: number, y: number, color: string}>, maxWidth: number, originPosition: {x: number, y: number}, uniqueColors: string[], activeFilters: Set<string>, sortMode: string, availableStates: string[] = [], username?: string, navMode: 'labels' | 'states' = 'labels'): string => {
+    const formatTableOfContents = useCallback((labels: Array<{text: string, x: number, y: number, color: string}>, maxWidth: number, originPosition: {x: number, y: number}, uniqueColors: string[], activeFilters: Set<string>, sortMode: string, availableStates: string[] = [], username?: string, navMode: 'labels' | 'states' = 'labels', getStatePublishStatus?: (state: string) => boolean): string => {
         const availableWidth = maxWidth - NAV_MARGIN_CHARS * 2;
         
         // Line 0: "index" with current position coordinates and mode indicator
@@ -301,22 +301,20 @@ export function useDialogue() {
                 return lines.join('\n');
             }
             
-            // Add each state with fake coordinates
+            // Add each state with buttons
             availableStates.forEach((state, index) => {
-                // Give each state arbitrary coordinates (negative to avoid conflicts)
-                const fakeX = -1000 - index;
-                const fakeY = -1000 - index;
-                const coordinates = `(${fakeX},${fakeY})`;
-                const maxCoordLength = 12; // Consistent width for fake coordinates
-                const paddedCoordinates = coordinates.padStart(maxCoordLength, ' ');
+                const isPublished = getStatePublishStatus ? getStatePublishStatus(state) : false;
+                const publishButton = isPublished ? '[unpublish]' : '[publish]';
+                const navigateButton = '[navigate]';
+                const buttonsWidth = publishButton.length + 1 + navigateButton.length; // +1 for space
                 
-                const dotsWidth = availableWidth - state.length - maxCoordLength;
+                const dotsWidth = availableWidth - state.length - buttonsWidth;
                 
                 if (dotsWidth > 0) {
                     const dots = '+'.repeat(dotsWidth);
-                    lines.push(`${state}${dots}${paddedCoordinates}`);
+                    lines.push(`${state}${dots}${publishButton} ${navigateButton}`);
                 } else {
-                    lines.push(state);
+                    lines.push(`${state} ${publishButton} ${navigateButton}`);
                 }
                 lines.push(''); // Add blank line between entries
             });
@@ -362,9 +360,12 @@ export function useDialogue() {
         username?: string,
         onStateClick?: (state: string) => void,
         navMode?: 'labels' | 'states',
-        onIndexClick?: () => void
+        onIndexClick?: () => void,
+        onPublishClick?: (state: string) => void,
+        onNavigateClick?: (state: string) => void,
+        getStatePublishStatus?: (state: string) => boolean
     }) => {
-        const { canvasWidth, canvasHeight, ctx, labels, originPosition, uniqueColors, activeFilters, sortMode, onCoordinateClick, onColorFilterClick, onSortModeClick, availableStates = [], username, onStateClick, navMode = 'labels', onIndexClick } = props;
+        const { canvasWidth, canvasHeight, ctx, labels, originPosition, uniqueColors, activeFilters, sortMode, onCoordinateClick, onColorFilterClick, onSortModeClick, availableStates = [], username, onStateClick, navMode = 'labels', onIndexClick, onPublishClick, onNavigateClick, getStatePublishStatus } = props;
         
         // Use fixed dimensions for nav text
         const charHeight = DIALOGUE_FONT_SIZE;
@@ -373,7 +374,7 @@ export function useDialogue() {
 
         // Calculate max width for table of contents formatting
         const maxWidthChars = Math.floor(canvasWidth / charWidth) - (NAV_MARGIN_CHARS * 2);
-        const navText = formatTableOfContents(labels, maxWidthChars, originPosition, uniqueColors, activeFilters, sortMode, availableStates, username, navMode);
+        const navText = formatTableOfContents(labels, maxWidthChars, originPosition, uniqueColors, activeFilters, sortMode, availableStates, username, navMode, getStatePublishStatus);
         const navLayout = calculateNavLayout(canvasWidth, canvasHeight, charWidth, charHeight, navText);
         
         ctx.save();
@@ -387,7 +388,7 @@ export function useDialogue() {
         // Draw text and track coordinate positions
         ctx.fillStyle = NAV_TEXT_COLOR;
         const coordinateRegions: Array<{x: number, y: number, rect: {x: number, y: number, width: number, height: number}, labelX: number, labelY: number}> = [];
-        const buttonRegions: Array<{type: 'color' | 'sort' | 'index', color?: string, rect: {x: number, y: number, width: number, height: number}}> = [];
+        const buttonRegions: Array<{type: 'color' | 'sort' | 'index' | 'publish' | 'unpublish' | 'navigate', color?: string, state?: string, rect: {x: number, y: number, width: number, height: number}}> = [];
         const stateRegions: Array<{state: string, rect: {x: number, y: number, width: number, height: number}}> = [];
         
         let labelIndex = 0;
@@ -507,22 +508,7 @@ export function useDialogue() {
                         const y = parseInt(coordMatch[2], 10);
                         const coordWidth = coordMatch[0].length * charWidth;
                         
-                        // Check if this is a fake state coordinate (negative values < -999)
-                        if (x < -999 && y < -999 && navMode === 'states') {
-                            // This is a state with fake coordinates - treat it like a coordinate click
-                            coordinateRegions.push({
-                                x: x,
-                                y: y,
-                                rect: {
-                                    x: coordScreenX,
-                                    y: screenY,
-                                    width: coordWidth,
-                                    height: charHeight
-                                },
-                                labelX: x,
-                                labelY: y
-                            });
-                        } else if (navMode === 'labels' && labelIndex < labels.length) {
+                        if (navMode === 'labels' && labelIndex < labels.length) {
                             // This is a regular label coordinate
                             const label = labels[labelIndex];
                             coordinateRegions.push({
@@ -542,6 +528,56 @@ export function useDialogue() {
                     }
                 }
             }
+            
+            // Track state buttons (publish/unpublish/navigate) for states mode
+            if (navMode === 'states' && (line.includes('[publish]') || line.includes('[unpublish]')) && line.includes('[navigate]')) {
+                const stateIndex = Math.floor((lineIndex - 4) / 2); // Account for header lines and spacing
+                if (stateIndex >= 0 && stateIndex < availableStates.length) {
+                    const stateName = availableStates[stateIndex];
+                    
+                    // Find publish/unpublish button position
+                    const publishStart = line.indexOf('[publish]');
+                    const unpublishStart = line.indexOf('[unpublish]');
+                    if (publishStart !== -1) {
+                        buttonRegions.push({
+                            type: 'publish',
+                            state: stateName,
+                            rect: {
+                                x: screenX + (publishStart * charWidth),
+                                y: screenY,
+                                width: '[publish]'.length * charWidth,
+                                height: charHeight
+                            }
+                        });
+                    } else if (unpublishStart !== -1) {
+                        buttonRegions.push({
+                            type: 'unpublish',
+                            state: stateName,
+                            rect: {
+                                x: screenX + (unpublishStart * charWidth),
+                                y: screenY,
+                                width: '[unpublish]'.length * charWidth,
+                                height: charHeight
+                            }
+                        });
+                    }
+                    
+                    // Find navigate button position
+                    const navigateStart = line.indexOf('[navigate]');
+                    if (navigateStart !== -1) {
+                        buttonRegions.push({
+                            type: 'navigate',
+                            state: stateName,
+                            rect: {
+                                x: screenX + (navigateStart * charWidth),
+                                y: screenY,
+                                width: '[navigate]'.length * charWidth,
+                                height: charHeight
+                            }
+                        });
+                    }
+                }
+            }
         }
         
         // Store regions globally for click handling
@@ -554,10 +590,10 @@ export function useDialogue() {
         ctx.restore();
     }, [calculateNavLayout, formatTableOfContents]);
 
-    const handleNavClick = useCallback((canvas: HTMLCanvasElement, clickX: number, clickY: number, onCoordinateClick?: (x: number, y: number) => void, onColorFilterClick?: (color: string) => void, onSortModeClick?: () => void, onStateClick?: (state: string) => void, onIndexClick?: () => void): boolean => {
+    const handleNavClick = useCallback((canvas: HTMLCanvasElement, clickX: number, clickY: number, onCoordinateClick?: (x: number, y: number) => void, onColorFilterClick?: (color: string) => void, onSortModeClick?: () => void, onStateClick?: (state: string) => void, onIndexClick?: () => void, onPublishClick?: (state: string) => void, onNavigateClick?: (state: string) => void): boolean => {
         // Check button clicks first
         const buttonRegions = (canvas as any).navButtonRegions;
-        if (buttonRegions && (onColorFilterClick || onSortModeClick || onIndexClick)) {
+        if (buttonRegions && (onColorFilterClick || onSortModeClick || onIndexClick || onPublishClick || onNavigateClick)) {
             for (const button of buttonRegions) {
                 if (clickX >= button.rect.x && clickX <= button.rect.x + button.rect.width &&
                     clickY >= button.rect.y && clickY <= button.rect.y + button.rect.height) {
@@ -569,6 +605,15 @@ export function useDialogue() {
                         return true;
                     } else if (button.type === 'index' && onIndexClick) {
                         onIndexClick();
+                        return true;
+                    } else if (button.type === 'publish' && button.state && onPublishClick) {
+                        onPublishClick(button.state);
+                        return true;
+                    } else if (button.type === 'unpublish' && button.state && onPublishClick) {
+                        onPublishClick(button.state); // Use same handler, it will detect unpublish
+                        return true;
+                    } else if (button.type === 'navigate' && button.state && onNavigateClick) {
+                        onNavigateClick(button.state);
                         return true;
                     }
                 }

@@ -72,6 +72,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
     const [cursorTrail, setCursorTrail] = useState<CursorTrailPosition[]>([]);
+    const [statePublishStatuses, setStatePublishStatuses] = useState<Record<string, boolean>>({});
     const lastCursorPosRef = useRef<Point | null>(null);
     const router = useRouter();
     
@@ -93,21 +94,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         // Close nav dialogue first
         engine.setIsNavVisible(false);
         
-        // Check if this is a fake state coordinate (negative values < -999)
-        if (x < -999 && y < -999) {
-            const stateIndex = Math.abs(x + 1000);
-            if (stateIndex < engine.availableStates.length) {
-                const stateName = engine.availableStates[stateIndex];
-                console.log(`State clicked: ${stateName}`);
-                if (engine.username) {
-                    router.push(`/@${engine.username}/${stateName}`);
-                }
-            }
-        } else {
-            // Navigate camera to real coordinates
-            engine.setViewOffset({ x: x - (canvasSize.width / engine.getEffectiveCharDims(engine.zoomLevel).width) / 2, 
-                                   y: y - (canvasSize.height / engine.getEffectiveCharDims(engine.zoomLevel).height) / 2 });
-        }
+        // Navigate camera to coordinates
+        engine.setViewOffset({ x: x - (canvasSize.width / engine.getEffectiveCharDims(engine.zoomLevel).width) / 2, 
+                               y: y - (canvasSize.height / engine.getEffectiveCharDims(engine.zoomLevel).height) / 2 });
     }, [engine, canvasSize, router]);
 
     // Handle color filter clicks
@@ -131,6 +120,78 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const handleIndexClick = useCallback(() => {
         engine.toggleNavMode();
     }, [engine]);
+    
+    // Load publish statuses for all states
+    const loadStatePublishStatuses = useCallback(async () => {
+        if (!engine.userUid || engine.availableStates.length === 0) return;
+        
+        try {
+            const { database } = await import('@/app/firebase');
+            const { ref, get } = await import('firebase/database');
+            const statuses: Record<string, boolean> = {};
+            
+            for (const state of engine.availableStates) {
+                const publicRef = ref(database, `worlds/${engine.userUid}/${state}/public`);
+                const snapshot = await get(publicRef);
+                statuses[state] = snapshot.exists() && snapshot.val() === true;
+            }
+            
+            setStatePublishStatuses(statuses);
+        } catch (error) {
+            console.error('Error loading publish statuses:', error);
+        }
+    }, [engine.userUid, engine.availableStates]);
+    
+    // Check if a state is published (from cached statuses)
+    const getStatePublishStatus = useCallback((state: string): boolean => {
+        return statePublishStatuses[state] || false;
+    }, [statePublishStatuses]);
+    
+    // Handle publish/unpublish clicks
+    const handlePublishClick = useCallback(async (state: string) => {
+        const isCurrentlyPublished = getStatePublishStatus(state);
+        const action = isCurrentlyPublished ? 'Unpublishing' : 'Publishing';
+        console.log(`${action} state: ${state}`);
+        engine.setDialogueText(`${action} state...`);
+        
+        try {
+            // Use the same Firebase logic as the /publish command
+            const { database } = await import('@/app/firebase');
+            const { ref, set } = await import('firebase/database');
+            const userUid = engine.userUid || 'anonymous';
+            const stateRef = ref(database, `worlds/${userUid}/${state}/public`);
+            await set(stateRef, !isCurrentlyPublished); // Toggle publish status
+            
+            const statusText = isCurrentlyPublished ? 'private' : 'public';
+            engine.setDialogueText(`State "${state}" is now ${statusText}`);
+            
+            // Update cached status
+            setStatePublishStatuses(prev => ({
+                ...prev,
+                [state]: !isCurrentlyPublished
+            }));
+        } catch (error: any) {
+            engine.setDialogueText(`Error ${action.toLowerCase()} state: ${error.message}`);
+        }
+        
+        engine.setIsNavVisible(false);
+    }, [engine, getStatePublishStatus]);
+    
+    // Handle navigate clicks
+    const handleNavigateClick = useCallback((state: string) => {
+        console.log(`Navigate clicked for state: ${state}`);
+        if (engine.username) {
+            router.push(`/@${engine.username}/${state}`);
+        }
+        engine.setIsNavVisible(false);
+    }, [engine, router]);
+    
+    // Load publish statuses when nav opens or states change
+    useEffect(() => {
+        if (engine.isNavVisible && engine.navMode === 'states') {
+            loadStatePublishStatuses();
+        }
+    }, [engine.isNavVisible, engine.navMode, engine.availableStates, loadStatePublishStatuses]);
 
     
 
@@ -1190,7 +1251,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 username: engine.username,
                 onStateClick: handleStateClick,
                 navMode: engine.navMode,
-                onIndexClick: handleIndexClick
+                onIndexClick: handleIndexClick,
+                onPublishClick: handlePublishClick,
+                onNavigateClick: handleNavigateClick,
+                getStatePublishStatus: getStatePublishStatus
             });
         }
 
@@ -1286,7 +1350,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         
         // Check for nav coordinate clicks first
         if (engine.isNavVisible && canvasRef.current) {
-            if (handleNavClick(canvasRef.current, clickX, clickY, handleCoordinateClick, handleColorFilterClick, handleSortModeClick, handleStateClick, handleIndexClick)) {
+            if (handleNavClick(canvasRef.current, clickX, clickY, handleCoordinateClick, handleColorFilterClick, handleSortModeClick, handleStateClick, handleIndexClick, handlePublishClick, handleNavigateClick)) {
                 return; // Click was handled by nav, don't process further
             }
         }
