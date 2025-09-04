@@ -316,8 +316,8 @@ export function useWorldEngine({
     const lastCompiledRef = useRef<{ [lineY: number]: string }>({});
     const compilationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     
-    const compileTextStrings = useCallback((worldData: WorldData): { [lineY: number]: string } => {
-        const compiledLines: { [lineY: number]: string } = {};
+    const compileTextStrings = useCallback((worldData: WorldData): { [lineY: number]: { content: string, range: { minX: number, maxX: number, minY: number, maxY: number } } } => {
+        const compiledLines: { [lineY: number]: { content: string, range: { minX: number, maxX: number, minY: number, maxY: number } } } = {};
         const lineData: { [lineY: number]: Array<{ x: number, char: string }> } = {};
         
         // Group characters by line
@@ -350,6 +350,12 @@ export function useWorldEngine({
             
             if (chars.length === 0) continue;
             
+            // Calculate range for this line
+            const minX = Math.min(...chars.map(c => c.x));
+            const maxX = Math.max(...chars.map(c => c.x));
+            const minY = y;
+            const maxY = y;
+            
             // Build string with proper spacing
             let line = '';
             let lastX = chars[0].x - 1;
@@ -366,7 +372,10 @@ export function useWorldEngine({
             
             // Only store non-empty lines with order-based index
             if (line.trim()) {
-                compiledLines[lineIndex] = line;
+                compiledLines[lineIndex] = {
+                    content: line,
+                    range: { minX, maxX, minY, maxY }
+                };
                 lineIndex++;
             }
         }
@@ -1430,6 +1439,19 @@ export function useWorldEngine({
                         setDialogueText(`Error publishing state: ${error.message}`);
                     });
                 }
+            } else if (exec.command === 'unpublish') {
+                if (!currentStateName) {
+                    setDialogueText("No current state to unpublish. Save your work first with /state [name]");
+                } else {
+                    setDialogueText("Unpublishing state...");
+                    // Remove public property from current state
+                    const stateRef = ref(database, `worlds/${userUid}/${currentStateName}/public`);
+                    set(stateRef, false).then(() => {
+                        setDialogueText(`State "${currentStateName}" is now private`);
+                    }).catch((error) => {
+                        setDialogueText(`Error unpublishing state: ${error.message}`);
+                    });
+                }
             } else if (exec.command === 'state') {
                 if (exec.args.length === 0) {
                     // No arguments - clear canvas and exit current state
@@ -2421,5 +2443,6 @@ export function useWorldEngine({
         currentStateName,
         loadAvailableStates,
         username, // Expose username for routing
+        userUid, // Expose userUid for Firebase operations
     };
 }
