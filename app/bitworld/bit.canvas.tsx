@@ -90,6 +90,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
     // Handle navigation coordinate clicks
     const handleCoordinateClick = useCallback((x: number, y: number) => {
+        // Close nav dialogue first
+        engine.setIsNavVisible(false);
+        
         // Check if this is a fake state coordinate (negative values < -999)
         if (x < -999 && y < -999) {
             const stateIndex = Math.abs(x + 1000);
@@ -98,7 +101,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 console.log(`State clicked: ${stateName}`);
                 if (engine.username) {
                     router.push(`/@${engine.username}/${stateName}`);
-                    console.log(`Router push: /@${engine.username}/${stateName}`);
                 }
             }
         } else {
@@ -106,9 +108,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             engine.setViewOffset({ x: x - (canvasSize.width / engine.getEffectiveCharDims(engine.zoomLevel).width) / 2, 
                                    y: y - (canvasSize.height / engine.getEffectiveCharDims(engine.zoomLevel).height) / 2 });
         }
-        
-        // Close nav dialogue
-        engine.setIsNavVisible(false);
     }, [engine, canvasSize, router]);
 
     // Handle color filter clicks

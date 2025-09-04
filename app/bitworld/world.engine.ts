@@ -2420,5 +2420,6 @@ export function useWorldEngine({
         availableStates,
         currentStateName,
         loadAvailableStates,
+        username, // Expose username for routing
     };
 }
