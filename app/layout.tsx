@@ -4,6 +4,9 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "nara web services",
   description: "typed canvas",
+  icons: {
+    icon: '/apple-icon.svg',
+  },
 };
 
 export default function RootLayout({

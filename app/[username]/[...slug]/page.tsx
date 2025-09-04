@@ -44,14 +44,14 @@ export default function UserState() {
 
   if (authLoading || !user || engine.isLoadingWorld) {
     return (
-      <div className="w-screen h-screen flex items-center justify-center" style={{backgroundColor: 'orange'}}>
+      <div className="w-screen h-screen flex items-center justify-center" style={{}}>
         <div className="text-black">Loading...</div>
       </div>
     );
   }
 
   return (
-    <div className="w-screen h-screen relative" style={{backgroundColor: 'orange'}}>
+    <div className="w-screen h-screen relative" style={{}}>
       <BitCanvas
         engine={engine}
         cursorColorAlternate={cursorAlternate}

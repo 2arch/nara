@@ -90,13 +90,26 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
     // Handle navigation coordinate clicks
     const handleCoordinateClick = useCallback((x: number, y: number) => {
-        // Navigate camera to coordinates
-        engine.setViewOffset({ x: x - (canvasSize.width / engine.getEffectiveCharDims(engine.zoomLevel).width) / 2, 
-                               y: y - (canvasSize.height / engine.getEffectiveCharDims(engine.zoomLevel).height) / 2 });
+        // Check if this is a fake state coordinate (negative values < -999)
+        if (x < -999 && y < -999) {
+            const stateIndex = Math.abs(x + 1000);
+            if (stateIndex < engine.availableStates.length) {
+                const stateName = engine.availableStates[stateIndex];
+                console.log(`State clicked: ${stateName}`);
+                if (engine.username) {
+                    router.push(`/@${engine.username}/${stateName}`);
+                    console.log(`Router push: /@${engine.username}/${stateName}`);
+                }
+            }
+        } else {
+            // Navigate camera to real coordinates
+            engine.setViewOffset({ x: x - (canvasSize.width / engine.getEffectiveCharDims(engine.zoomLevel).width) / 2, 
+                                   y: y - (canvasSize.height / engine.getEffectiveCharDims(engine.zoomLevel).height) / 2 });
+        }
         
         // Close nav dialogue
         engine.setIsNavVisible(false);
-    }, [engine, canvasSize]);
+    }, [engine, canvasSize, router]);
 
     // Handle color filter clicks
     const handleColorFilterClick = useCallback((color: string) => {
@@ -106,6 +119,18 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Handle sort mode clicks  
     const handleSortModeClick = useCallback(() => {
         engine.cycleSortMode();
+    }, [engine]);
+    
+    // Handle state clicks
+    const handleStateClick = useCallback((state: string) => {
+        if (engine.username) {
+            router.push(`/@${engine.username}/${state}`);
+        }
+    }, [engine.username, router]);
+    
+    // Handle index clicks
+    const handleIndexClick = useCallback(() => {
+        engine.toggleNavMode();
     }, [engine]);
 
     
@@ -1161,7 +1186,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 sortMode: engine.navSortMode,
                 onCoordinateClick: handleCoordinateClick,
                 onColorFilterClick: handleColorFilterClick,
-                onSortModeClick: handleSortModeClick
+                onSortModeClick: handleSortModeClick,
+                availableStates: engine.availableStates,
+                username: engine.username,
+                onStateClick: handleStateClick,
+                navMode: engine.navMode,
+                onIndexClick: handleIndexClick
             });
         }
 
@@ -1257,7 +1287,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         
         // Check for nav coordinate clicks first
         if (engine.isNavVisible && canvasRef.current) {
-            if (handleNavClick(canvasRef.current, clickX, clickY, handleCoordinateClick, handleColorFilterClick, handleSortModeClick)) {
+            if (handleNavClick(canvasRef.current, clickX, clickY, handleCoordinateClick, handleColorFilterClick, handleSortModeClick, handleStateClick, handleIndexClick)) {
                 return; // Click was handled by nav, don't process further
             }
         }
@@ -1269,7 +1299,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         engine.handleCanvasClick(clickX, clickY, false, e.shiftKey);
         
         canvasRef.current?.focus(); // Ensure focus for keyboard
-    }, [engine, canvasSize, router, handleNavClick, handleCoordinateClick]);
+    }, [engine, canvasSize, router, handleNavClick, handleCoordinateClick, handleColorFilterClick, handleSortModeClick, handleStateClick, handleIndexClick]);
     
     const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();

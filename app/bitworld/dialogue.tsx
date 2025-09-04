@@ -196,18 +196,19 @@ export function useDialogue() {
         ctx.restore();
     }, [calculateDebugLayout]);
 
-    const formatTableOfContents = useCallback((labels: Array<{text: string, x: number, y: number, color: string}>, maxWidth: number, originPosition: {x: number, y: number}, uniqueColors: string[], activeFilters: Set<string>, sortMode: string): string => {
+    const formatTableOfContents = useCallback((labels: Array<{text: string, x: number, y: number, color: string}>, maxWidth: number, originPosition: {x: number, y: number}, uniqueColors: string[], activeFilters: Set<string>, sortMode: string, availableStates: string[] = [], username?: string, navMode: 'labels' | 'states' = 'labels'): string => {
         const availableWidth = maxWidth - NAV_MARGIN_CHARS * 2;
         
-        // Line 0: "index" with current position coordinates on the same line (space-between, no dots)
+        // Line 0: "index" with current position coordinates and mode indicator
         const currentPosCoordinates = `(${Math.round(originPosition.x)},${Math.round(originPosition.y)})`;
+        const modeIndicator = navMode === 'labels' ? 'labels' : 'states';
         const indexSpaceWidth = availableWidth - 'index'.length - currentPosCoordinates.length;
-        let indexLine = 'index';
+        let indexLine = `index ${modeIndicator}`;
         if (indexSpaceWidth > 0) {
-            const indexSpaces = ' '.repeat(indexSpaceWidth);
-            indexLine = `index${indexSpaces}${currentPosCoordinates}`;
+            const indexSpaces = ' '.repeat(indexSpaceWidth - modeIndicator.length - 1);
+            indexLine = `index ${modeIndicator}${indexSpaces}${currentPosCoordinates}`;
         } else {
-            indexLine = `index${currentPosCoordinates}`;
+            indexLine = `index ${modeIndicator}${currentPosCoordinates}`;
         }
         
         const lines: string[] = [indexLine];
@@ -249,48 +250,76 @@ export function useDialogue() {
         // Line 3: Empty space
         lines.push('');
         
-        // Filter labels based on active color filters
-        const filteredLabels = activeFilters.size === 0 ? labels : labels.filter(label => activeFilters.has(label.color));
-        
-        if (filteredLabels.length === 0) {
-            if (activeFilters.size === 0) {
-                lines.push('No labels found.');
-            } else {
-                lines.push('No labels match selected filters.');
-            }
-            return lines.join('\n');
-        }
-        
-        // Find the longest coordinate string to ensure consistent alignment
-        let maxCoordLength = 0;
-        for (const label of filteredLabels) {
-            const coordinates = `(${label.x},${label.y})`;
-            maxCoordLength = Math.max(maxCoordLength, coordinates.length);
-        }
-        
-        for (const label of filteredLabels) {
-            const coordinates = `(${label.x},${label.y})`;
-            // Pad coordinates to consistent width (right-align them)
-            const paddedCoordinates = coordinates.padStart(maxCoordLength, ' ');
+        if (navMode === 'labels') {
+            // Show labels only
+            const filteredLabels = activeFilters.size === 0 ? labels : labels.filter(label => activeFilters.has(label.color));
             
-            const dotsWidth = availableWidth - label.text.length - maxCoordLength;
-            
-            if (dotsWidth > 0) {
-                const dots = '+'.repeat(dotsWidth);
-                lines.push(`${label.text}${dots}${paddedCoordinates}`);
-            } else {
-                // If text is too long, truncate it
-                const maxTextWidth = availableWidth - maxCoordLength - 3; // 3 for minimum dots
-                if (maxTextWidth > 0) {
-                    const truncatedText = label.text.substring(0, maxTextWidth);
-                    const dots = '...';
-                    lines.push(`${truncatedText}${dots}${paddedCoordinates}`);
+            if (filteredLabels.length === 0) {
+                if (activeFilters.size === 0) {
+                    lines.push('No labels found.');
                 } else {
-                    // Fallback if everything is too long
-                    lines.push(`${label.text.substring(0, availableWidth)}`);
+                    lines.push('No labels match selected filters.');
                 }
+                return lines.join('\n');
             }
-            lines.push(''); // Add blank line between entries
+            
+            // Find the longest coordinate string to ensure consistent alignment
+            let maxCoordLength = 0;
+            for (const label of filteredLabels) {
+                const coordinates = `(${label.x},${label.y})`;
+                maxCoordLength = Math.max(maxCoordLength, coordinates.length);
+            }
+            
+            for (const label of filteredLabels) {
+                const coordinates = `(${label.x},${label.y})`;
+                // Pad coordinates to consistent width (right-align them)
+                const paddedCoordinates = coordinates.padStart(maxCoordLength, ' ');
+                
+                const dotsWidth = availableWidth - label.text.length - maxCoordLength;
+                
+                if (dotsWidth > 0) {
+                    const dots = '+'.repeat(dotsWidth);
+                    lines.push(`${label.text}${dots}${paddedCoordinates}`);
+                } else {
+                    // If text is too long, truncate it
+                    const maxTextWidth = availableWidth - maxCoordLength - 3; // 3 for minimum dots
+                    if (maxTextWidth > 0) {
+                        const truncatedText = label.text.substring(0, maxTextWidth);
+                        const dots = '...';
+                        lines.push(`${truncatedText}${dots}${paddedCoordinates}`);
+                    } else {
+                        // Fallback if everything is too long
+                        lines.push(`${label.text.substring(0, availableWidth)}`);
+                    }
+                }
+                lines.push(''); // Add blank line between entries
+            }
+        } else {
+            // Show states only
+            if (availableStates.length === 0) {
+                lines.push('No states found.');
+                return lines.join('\n');
+            }
+            
+            // Add each state with fake coordinates
+            availableStates.forEach((state, index) => {
+                // Give each state arbitrary coordinates (negative to avoid conflicts)
+                const fakeX = -1000 - index;
+                const fakeY = -1000 - index;
+                const coordinates = `(${fakeX},${fakeY})`;
+                const maxCoordLength = 12; // Consistent width for fake coordinates
+                const paddedCoordinates = coordinates.padStart(maxCoordLength, ' ');
+                
+                const dotsWidth = availableWidth - state.length - maxCoordLength;
+                
+                if (dotsWidth > 0) {
+                    const dots = '+'.repeat(dotsWidth);
+                    lines.push(`${state}${dots}${paddedCoordinates}`);
+                } else {
+                    lines.push(state);
+                }
+                lines.push(''); // Add blank line between entries
+            });
         }
         
         return lines.join('\n');
@@ -328,9 +357,14 @@ export function useDialogue() {
         sortMode: string,
         onCoordinateClick?: (x: number, y: number) => void,
         onColorFilterClick?: (color: string) => void,
-        onSortModeClick?: () => void
+        onSortModeClick?: () => void,
+        availableStates?: string[],
+        username?: string,
+        onStateClick?: (state: string) => void,
+        navMode?: 'labels' | 'states',
+        onIndexClick?: () => void
     }) => {
-        const { canvasWidth, canvasHeight, ctx, labels, originPosition, uniqueColors, activeFilters, sortMode, onCoordinateClick, onColorFilterClick, onSortModeClick } = props;
+        const { canvasWidth, canvasHeight, ctx, labels, originPosition, uniqueColors, activeFilters, sortMode, onCoordinateClick, onColorFilterClick, onSortModeClick, availableStates = [], username, onStateClick, navMode = 'labels', onIndexClick } = props;
         
         // Use fixed dimensions for nav text
         const charHeight = DIALOGUE_FONT_SIZE;
@@ -339,7 +373,7 @@ export function useDialogue() {
 
         // Calculate max width for table of contents formatting
         const maxWidthChars = Math.floor(canvasWidth / charWidth) - (NAV_MARGIN_CHARS * 2);
-        const navText = formatTableOfContents(labels, maxWidthChars, originPosition, uniqueColors, activeFilters, sortMode);
+        const navText = formatTableOfContents(labels, maxWidthChars, originPosition, uniqueColors, activeFilters, sortMode, availableStates, username, navMode);
         const navLayout = calculateNavLayout(canvasWidth, canvasHeight, charWidth, charHeight, navText);
         
         ctx.save();
@@ -353,7 +387,8 @@ export function useDialogue() {
         // Draw text and track coordinate positions
         ctx.fillStyle = NAV_TEXT_COLOR;
         const coordinateRegions: Array<{x: number, y: number, rect: {x: number, y: number, width: number, height: number}, labelX: number, labelY: number}> = [];
-        const buttonRegions: Array<{type: 'color' | 'sort', color?: string, rect: {x: number, y: number, width: number, height: number}}> = [];
+        const buttonRegions: Array<{type: 'color' | 'sort' | 'index', color?: string, rect: {x: number, y: number, width: number, height: number}}> = [];
+        const stateRegions: Array<{state: string, rect: {x: number, y: number, width: number, height: number}}> = [];
         
         let labelIndex = 0;
         for (let lineIndex = 0; lineIndex < navLayout.lines.length; lineIndex++) {
@@ -361,6 +396,22 @@ export function useDialogue() {
             const line = navLayout.lines[lineIndex];
             const screenX = navLayout.startCol * charWidth;
             const screenY = rowIndex * charHeight;
+            
+            // Track index click region (line index 0)
+            if (lineIndex === 0 && onIndexClick) {
+                // Track the "index [mode]" part as clickable (not the coordinates)
+                const modeText = navMode === 'labels' ? 'labels' : 'states';
+                const indexText = `index ${modeText}`;
+                buttonRegions.push({
+                    type: 'index',
+                    rect: {
+                        x: screenX,
+                        y: screenY,
+                        width: indexText.length * charWidth,
+                        height: charHeight
+                    }
+                });
+            }
             
             // Special rendering for button line (line index 2)
             if (lineIndex === 2) {
@@ -443,46 +494,70 @@ export function useDialogue() {
                 }
             }
             
-            // Check if this line contains coordinates (skip title line with current position, empty lines, and button line)
-            if (line.includes('(') && line.includes(')') && labelIndex < labels.length && lineIndex !== 0) {
-                const label = labels[labelIndex];
-                const coordinates = `(${label.x},${label.y})`;
+            // Check if this line contains coordinates 
+            if (line.includes('(') && line.includes(')') && lineIndex !== 0) {
                 const coordStartIndex = line.lastIndexOf('(');
                 
                 if (coordStartIndex !== -1) {
                     const coordScreenX = screenX + (coordStartIndex * charWidth);
-                    const coordWidth = coordinates.length * charWidth;
+                    const coordMatch = line.match(/\((-?\d+),(-?\d+)\)/);
                     
-                    coordinateRegions.push({
-                        x: label.x,
-                        y: label.y,
-                        rect: {
-                            x: coordScreenX,
-                            y: screenY,
-                            width: coordWidth,
-                            height: charHeight
-                        },
-                        labelX: label.x,
-                        labelY: label.y
-                    });
+                    if (coordMatch) {
+                        const x = parseInt(coordMatch[1], 10);
+                        const y = parseInt(coordMatch[2], 10);
+                        const coordWidth = coordMatch[0].length * charWidth;
+                        
+                        // Check if this is a fake state coordinate (negative values < -999)
+                        if (x < -999 && y < -999 && navMode === 'states') {
+                            // This is a state with fake coordinates - treat it like a coordinate click
+                            coordinateRegions.push({
+                                x: x,
+                                y: y,
+                                rect: {
+                                    x: coordScreenX,
+                                    y: screenY,
+                                    width: coordWidth,
+                                    height: charHeight
+                                },
+                                labelX: x,
+                                labelY: y
+                            });
+                        } else if (navMode === 'labels' && labelIndex < labels.length) {
+                            // This is a regular label coordinate
+                            const label = labels[labelIndex];
+                            coordinateRegions.push({
+                                x: label.x,
+                                y: label.y,
+                                rect: {
+                                    x: coordScreenX,
+                                    y: screenY,
+                                    width: coordWidth,
+                                    height: charHeight
+                                },
+                                labelX: label.x,
+                                labelY: label.y
+                            });
+                            labelIndex++;
+                        }
+                    }
                 }
-                labelIndex++;
             }
         }
         
         // Store regions globally for click handling
-        if (onCoordinateClick || onColorFilterClick || onSortModeClick) {
+        if (onCoordinateClick || onColorFilterClick || onSortModeClick || onStateClick) {
             (ctx.canvas as any).navCoordinateRegions = coordinateRegions;
             (ctx.canvas as any).navButtonRegions = buttonRegions;
+            (ctx.canvas as any).navStateRegions = stateRegions;
         }
         
         ctx.restore();
     }, [calculateNavLayout, formatTableOfContents]);
 
-    const handleNavClick = useCallback((canvas: HTMLCanvasElement, clickX: number, clickY: number, onCoordinateClick?: (x: number, y: number) => void, onColorFilterClick?: (color: string) => void, onSortModeClick?: () => void): boolean => {
+    const handleNavClick = useCallback((canvas: HTMLCanvasElement, clickX: number, clickY: number, onCoordinateClick?: (x: number, y: number) => void, onColorFilterClick?: (color: string) => void, onSortModeClick?: () => void, onStateClick?: (state: string) => void, onIndexClick?: () => void): boolean => {
         // Check button clicks first
         const buttonRegions = (canvas as any).navButtonRegions;
-        if (buttonRegions && (onColorFilterClick || onSortModeClick)) {
+        if (buttonRegions && (onColorFilterClick || onSortModeClick || onIndexClick)) {
             for (const button of buttonRegions) {
                 if (clickX >= button.rect.x && clickX <= button.rect.x + button.rect.width &&
                     clickY >= button.rect.y && clickY <= button.rect.y + button.rect.height) {
@@ -492,24 +567,42 @@ export function useDialogue() {
                     } else if (button.type === 'sort' && onSortModeClick) {
                         onSortModeClick();
                         return true;
+                    } else if (button.type === 'index' && onIndexClick) {
+                        onIndexClick();
+                        return true;
                     }
                 }
             }
         }
         
         // Check coordinate clicks
-        if (!onCoordinateClick) return false;
-        
-        const regions = (canvas as any).navCoordinateRegions;
-        if (!regions) return false;
-        
-        for (const region of regions) {
-            if (clickX >= region.rect.x && clickX <= region.rect.x + region.rect.width &&
-                clickY >= region.rect.y && clickY <= region.rect.y + region.rect.height) {
-                onCoordinateClick(region.labelX, region.labelY);
-                return true;
+        if (onCoordinateClick) {
+            const regions = (canvas as any).navCoordinateRegions;
+            if (regions) {
+                for (const region of regions) {
+                    if (clickX >= region.rect.x && clickX <= region.rect.x + region.rect.width &&
+                        clickY >= region.rect.y && clickY <= region.rect.y + region.rect.height) {
+                        onCoordinateClick(region.labelX, region.labelY);
+                        return true;
+                    }
+                }
             }
         }
+        
+        // Check state clicks
+        if (onStateClick) {
+            const stateRegions = (canvas as any).navStateRegions;
+            if (stateRegions) {
+                for (const region of stateRegions) {
+                    if (clickX >= region.rect.x && clickX <= region.rect.x + region.rect.width &&
+                        clickY >= region.rect.y && clickY <= region.rect.y + region.rect.height) {
+                        onStateClick(region.state);
+                        return true;
+                    }
+                }
+            }
+        }
+        
         return false;
     }, []);
 
