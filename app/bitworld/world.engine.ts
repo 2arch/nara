@@ -120,6 +120,8 @@ export interface WorldEngine {
     navOriginPosition: Point;
     navColorFilters: Set<string>;
     navSortMode: 'chronological' | 'closest' | 'farthest';
+    navMode: 'labels' | 'states';
+    toggleNavMode: () => void;
     getAllLabels: () => Array<{text: string, x: number, y: number, color: string}>;
     getSortedLabels: (sortMode: 'chronological' | 'closest' | 'farthest', originPos: Point) => Array<{text: string, x: number, y: number, color: string}>;
     getUniqueColors: () => string[];
@@ -145,6 +147,7 @@ interface UseWorldEngineProps {
     userUid?: string | null; // Add user UID for user-specific persistence
     username?: string; // Add username for routing
     enableCommands?: boolean; // Enable/disable command system (default: true)
+    initialStateName?: string | null; // Initial state name from URL
 }
 
 // --- The Hook ---
@@ -158,6 +161,7 @@ export function useWorldEngine({
     userUid = null,      // Default to no user-specific persistence
     enableCommands = true, // Default to enabled
     username,            // Username for routing
+    initialStateName = null, // Initial state name from URL
 }: UseWorldEngineProps): WorldEngine {
     // === Router ===
     const router = useRouter();
@@ -193,7 +197,7 @@ export function useWorldEngine({
         inputBuffer?: string;
     }>({ type: null });
     const [availableStates, setAvailableStates] = useState<string[]>([]);
-    const [currentStateName, setCurrentStateName] = useState<string | null>(null); // Track which state we're currently in
+    const [currentStateName, setCurrentStateName] = useState<string | null>(initialStateName); // Track which state we're currently in
 
     const getAllLabels = useCallback(() => {
         const labels: Array<{text: string, x: number, y: number, color: string}> = [];
@@ -664,6 +668,11 @@ export function useWorldEngine({
     // Sort modes: chronological -> closest -> farthest
     type NavSortMode = 'chronological' | 'closest' | 'farthest';
     const [navSortMode, setNavSortMode] = useState<NavSortMode>('chronological');
+    const [navMode, setNavMode] = useState<'labels' | 'states'>('labels');
+
+    const toggleNavMode = useCallback(() => {
+        setNavMode(prev => prev === 'labels' ? 'states' : 'labels');
+    }, []);
 
     // === Immediate Settings Save Function ===
     const saveSettingsToFirebase = useCallback(async (newSettings: Partial<WorldSettings>) => {
@@ -1408,6 +1417,19 @@ export function useWorldEngine({
                 }).catch((error) => {
                     setDialogueText(`Error signing out: ${error.message}`);
                 });
+            } else if (exec.command === 'publish') {
+                if (!currentStateName) {
+                    setDialogueText("No current state to publish. Save your work first with /state [name]");
+                } else {
+                    setDialogueText("Publishing state...");
+                    // Add public property to current state
+                    const stateRef = ref(database, `worlds/${userUid}/${currentStateName}/public`);
+                    set(stateRef, true).then(() => {
+                        setDialogueText(`State "${currentStateName}" is now public`);
+                    }).catch((error) => {
+                        setDialogueText(`Error publishing state: ${error.message}`);
+                    });
+                }
             } else if (exec.command === 'state') {
                 if (exec.args.length === 0) {
                     // No arguments - clear canvas and exit current state
@@ -2377,6 +2399,8 @@ export function useWorldEngine({
         navColorFilters,
         cycleSortMode,
         navSortMode,
+        navMode,
+        toggleNavMode,
         isBlock,
         directionPoints,
         getAngleDebugData,

@@ -30,7 +30,8 @@ export default function UserState() {
     worldId: stateName, 
     // initialBackgroundColor: '#000',
     userUid: user?.uid || null,
-    username: username
+    username: username,
+    initialStateName: stateName
   });
 
   // Simple cursor blink effect
