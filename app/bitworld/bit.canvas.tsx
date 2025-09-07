@@ -5,6 +5,7 @@ import type { WorldData, Point, WorldEngine, PanStartInfo } from './world.engine
 import { useDialogue, useDebugDialogue } from './dialogue';
 import { useMonogramSystem } from './monogram';
 import { useControllerSystem, createMonogramController, createCameraController } from './controllers';
+import { detectTextBlocks, extractLineCharacters } from './bit.blocks';
 
 // --- Constants --- (Copied and relevant ones kept)
 const FONT_FAMILY = 'IBM Plex Mono';
@@ -603,20 +604,57 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         // === Render Air Mode Data (Ephemeral Text) ===
+        // First, group ephemeral text by lines to render as continuous text
+        const ephemeralLines = new Map<string, {y: number, chars: Array<{x: number, char: string, color: string}>}>();
+        
         for (const key in engine.lightModeData) {
             const [xStr, yStr] = key.split(',');
-            const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
+            const worldX = parseInt(xStr, 10); 
+            const worldY = parseInt(yStr, 10);
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.lightModeData[key];
                 const char = typeof charData === 'string' ? charData : charData.char;
-                const color = typeof charData === 'object' && charData.color ? charData.color : '#808080'; // Default gray
-                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-                    if (char && char.trim() !== '') {
-                        ctx.fillStyle = color; // Use character's color or default
-                        ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                const color = typeof charData === 'object' && charData.color ? charData.color : '#808080';
+                
+                if (char && char.trim() !== '') {
+                    const lineKey = yStr;
+                    if (!ephemeralLines.has(lineKey)) {
+                        ephemeralLines.set(lineKey, {y: worldY, chars: []});
+                    }
+                    ephemeralLines.get(lineKey)!.chars.push({x: worldX, char, color});
+                }
+            }
+        }
+        
+        // Render each line as continuous text
+        for (const line of ephemeralLines.values()) {
+            // Sort characters by x position
+            line.chars.sort((a, b) => a.x - b.x);
+            
+            // Build continuous text string and find start position
+            let text = '';
+            let currentColor = line.chars[0]?.color || '#808080';
+            const startX = line.chars[0]?.x || 0;
+            
+            // Check for gaps and build text accordingly
+            for (let i = 0; i < line.chars.length; i++) {
+                const char = line.chars[i];
+                if (i > 0) {
+                    const prevChar = line.chars[i - 1];
+                    const gap = char.x - (prevChar.x + 1);
+                    if (gap > 0) {
+                        text += ' '.repeat(gap); // Fill gaps with spaces
                     }
                 }
+                text += char.char;
+            }
+            
+            // Render the continuous text
+            const screenPos = engine.worldToScreen(startX, line.y, currentZoom, currentOffset);
+            if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && 
+                screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                ctx.fillStyle = currentColor;
+                ctx.fillText(text, screenPos.x, screenPos.y + verticalTextOffset);
             }
         }
 
@@ -851,6 +889,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         drawArrow(ctx, adjustedX, adjustedY, intersection.angle, '#800080');
 
                         // Draw the search match text next to the arrow
+                        // Calculate distance from viewport center to search match
+                        const viewportCenter = engine.getViewportCenter();
+                        const deltaX = match.x - viewportCenter.x;
+                        const deltaY = match.y - viewportCenter.y;
+                        const distance = Math.round(Math.sqrt(deltaX * deltaX + deltaY * deltaY));
+                        
                         ctx.fillStyle = '#800080';
                         ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
                         const textOffset = ARROW_SIZE * 1.5;
@@ -873,7 +917,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             ctx.textBaseline = 'middle';
                         }
 
-                        ctx.fillText(match.text, textX, textY);
+                        // Add distance indicator
+                        const distanceText = ` [${distance}]`;
+                        ctx.fillText(match.text + distanceText, textX, textY);
 
                         // Reset to defaults
                         ctx.textAlign = 'left';
@@ -929,46 +975,54 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             );
 
                             if (intersection) {
-                                const edgeBuffer = ARROW_MARGIN;
-                                let adjustedX = intersection.x;
-                                let adjustedY = intersection.y;
+                            const edgeBuffer = ARROW_MARGIN;
+                            let adjustedX = intersection.x;
+                            let adjustedY = intersection.y;
+                            
+                            adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
+                            adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
+                            
+                            drawArrow(ctx, adjustedX, adjustedY, intersection.angle, color);
+
+                            // Draw the label text next to the arrow
+                            if (text) {
+                                // Calculate distance from viewport center to label
+                                const viewportCenter = engine.getViewportCenter();
+                                const deltaX = worldX - viewportCenter.x;
+                                const deltaY = worldY - viewportCenter.y;
+                                const distance = Math.round(Math.sqrt(deltaX * deltaX + deltaY * deltaY));
                                 
-                                adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
-                                adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
+                                ctx.fillStyle = color;
+                                ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
+                                const textOffset = ARROW_SIZE * 1.5;
                                 
-                                drawArrow(ctx, adjustedX, adjustedY, intersection.angle, color);
+                                let textX = adjustedX - Math.cos(intersection.angle) * textOffset;
+                                let textY = adjustedY - Math.sin(intersection.angle) * textOffset;
 
-                                // Draw the label text next to the arrow
-                                if (text) {
-                                    ctx.fillStyle = color;
-                                    ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
-                                    const textOffset = ARROW_SIZE * 1.5;
-                                    
-                                    let textX = adjustedX - Math.cos(intersection.angle) * textOffset;
-                                    let textY = adjustedY - Math.sin(intersection.angle) * textOffset;
-
-                                    // Adjust alignment to keep text inside the screen bounds
-                                    if (Math.abs(intersection.angle) < Math.PI / 2) {
-                                        ctx.textAlign = 'right';
-                                    } else {
-                                        ctx.textAlign = 'left';
-                                    }
-
-                                    if (intersection.angle > Math.PI / 4 && intersection.angle < 3 * Math.PI / 4) {
-                                        ctx.textBaseline = 'bottom';
-                                    } else if (intersection.angle < -Math.PI / 4 && intersection.angle > -3 * Math.PI / 4) {
-                                        ctx.textBaseline = 'top';
-                                    } else {
-                                        ctx.textBaseline = 'middle';
-                                    }
-
-                                    ctx.fillText(text, textX, textY);
-
-                                    // Reset to defaults
+                                // Adjust alignment to keep text inside the screen bounds
+                                if (Math.abs(intersection.angle) < Math.PI / 2) {
+                                    ctx.textAlign = 'right';
+                                } else {
                                     ctx.textAlign = 'left';
-                                    ctx.textBaseline = 'top';
                                 }
+
+                                if (intersection.angle > Math.PI / 4 && intersection.angle < 3 * Math.PI / 4) {
+                                    ctx.textBaseline = 'bottom';
+                                } else if (intersection.angle < -Math.PI / 4 && intersection.angle > -3 * Math.PI / 4) {
+                                    ctx.textBaseline = 'top';
+                                } else {
+                                    ctx.textBaseline = 'middle';
+                                }
+
+                                // Add distance indicator
+                                const distanceText = ` [${distance}]`;
+                                ctx.fillText(text + distanceText, textX, textY);
+
+                                // Reset to defaults
+                                ctx.textAlign = 'left';
+                                ctx.textBaseline = 'top';
                             }
+                        }
                         }
                     } catch (e) {
                         console.error(`Error parsing label data for key ${key}:`, e);
@@ -1106,6 +1160,41 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         
                         // Draw the waypoint arrow
                         drawArrow(ctx, adjustedX, adjustedY, intersection.angle, heatColor);
+                        
+                        // Add distance indicator for blocks
+                        const viewportCenter = engine.getViewportCenter();
+                        const deltaCenterX = worldX - viewportCenter.x;
+                        const deltaCenterY = worldY - viewportCenter.y;
+                        const distanceFromCenter = Math.round(Math.sqrt(deltaCenterX * deltaCenterX + deltaCenterY * deltaCenterY));
+                        
+                        ctx.fillStyle = heatColor;
+                        ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
+                        const textOffset = ARROW_SIZE * 1.5;
+                        
+                        let textX = adjustedX - Math.cos(intersection.angle) * textOffset;
+                        let textY = adjustedY - Math.sin(intersection.angle) * textOffset;
+                        
+                        // Adjust alignment to keep text inside the screen bounds
+                        if (Math.abs(intersection.angle) < Math.PI / 2) {
+                            ctx.textAlign = 'right';
+                        } else {
+                            ctx.textAlign = 'left';
+                        }
+                        
+                        if (intersection.angle > Math.PI / 4 && intersection.angle < 3 * Math.PI / 4) {
+                            ctx.textBaseline = 'bottom';
+                        } else if (intersection.angle < -Math.PI / 4 && intersection.angle > -3 * Math.PI / 4) {
+                            ctx.textBaseline = 'top';
+                        } else {
+                            ctx.textBaseline = 'middle';
+                        }
+                        
+                        // Draw distance only (no text for blocks)
+                        ctx.fillText(`[${distanceFromCenter}]`, textX, textY);
+                        
+                        // Reset to defaults
+                        ctx.textAlign = 'left';
+                        ctx.textBaseline = 'top';
                     }
                 }
             }
@@ -1160,6 +1249,43 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
             }
         }
+
+        // === Render Text Block Borders === (DISABLED FOR PERFORMANCE)
+        // Commented out - was causing performance issues
+        // if (currentZoom >= 0.5) {
+        //     const combinedWorldData: WorldData = { ...engine.worldData, ...engine.lightModeData };
+        //     
+        //     // Limit viewport scanning to reasonable range
+        //     const maxLines = Math.min(50, endWorldY - startWorldY + 5);
+        //     let linesProcessed = 0;
+        //     
+        //     for (let y = startWorldY; y <= endWorldY && linesProcessed < maxLines; y++, linesProcessed++) {
+        //         const lineChars = extractLineCharacters(combinedWorldData, y, false);
+        //         if (lineChars.length === 0) continue;
+        //         
+        //         const textBlocks = detectTextBlocks(lineChars);
+        //         
+        //         for (const block of textBlocks) {
+        //             // Quick bounds check before expensive screen conversion
+        //             if (block.start > endWorldX + 5 || block.end < startWorldX - 5) continue;
+        //             
+        //             const startScreenPos = engine.worldToScreen(block.start, y, currentZoom, currentOffset);
+        //             const endScreenPos = engine.worldToScreen(block.end + 1, y + 1, currentZoom, currentOffset);
+        //             
+        //             // Simple visibility check
+        //             if (startScreenPos.x < cssWidth + 50 && endScreenPos.x > -50) {
+        //                 ctx.strokeStyle = '#00000020'; // Semi-transparent to reduce visual noise
+        //                 ctx.lineWidth = 1;
+        //                 ctx.strokeRect(
+        //                     startScreenPos.x - 1, 
+        //                     startScreenPos.y - 1, 
+        //                     (endScreenPos.x - startScreenPos.x) + 1, 
+        //                     effectiveCharHeight + 1
+        //                 );
+        //             }
+        //         }
+        //     }
+        // }
 
         if (showCursor) {
             // Draw cursor trail (older positions first, for proper layering)

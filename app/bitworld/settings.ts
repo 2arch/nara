@@ -6,6 +6,7 @@ export interface WorldSettings {
     isDebugVisible: boolean;
     isDeepspawnVisible: boolean;
     monogramOptions: MonogramOptions;
+    labelProximityThreshold: number;
 }
 
 export const initialSettings: WorldSettings = {
@@ -19,6 +20,7 @@ export const initialSettings: WorldSettings = {
         enabled: false,
         geometryType: 'octahedron'
     },
+    labelProximityThreshold: 50,
 };
 
 export function useWorldSettings() {
