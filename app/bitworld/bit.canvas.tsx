@@ -603,16 +603,17 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         // === Render Air Mode Data (Ephemeral Text) ===
-        ctx.fillStyle = '#808080'; // Gray color for air mode text
         for (const key in engine.lightModeData) {
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.lightModeData[key];
                 const char = typeof charData === 'string' ? charData : charData.char;
+                const color = typeof charData === 'object' && charData.color ? charData.color : '#808080'; // Default gray
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
                     if (char && char.trim() !== '') {
+                        ctx.fillStyle = color; // Use character's color or default
                         ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
                     }
                 }

@@ -329,56 +329,118 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         }
     }, [initialBackgroundColor]); // Removed switchBackgroundMode to avoid dependency issues
 
-    // Add ephemeral text in air mode (disappears with flip-out animation)
-    const addEphemeralText = useCallback((pos: Point, char: string) => {
-        if (modeState.currentMode !== 'air') return;
+    // Add ephemeral text (disappears after delay)
+    const addEphemeralText = useCallback((pos: Point, char: string, options?: {
+        animationDelay?: number;
+        frameDelay?: number;
+        color?: string;
+    }) => {
         
         const key = `${pos.x},${pos.y}`;
+        const animationDelay = options?.animationDelay || 1500;
+        const frameDelay = options?.frameDelay || 80;
         
         // Symbol sequence for despawn animation - progressive decay
         const despawnSymbols = ['@', '#', '*', '=', ';', ':', '•', '·', '.'];
         let symbolIndex = 0;
         
-        // Set initial character
+        // Set initial character with optional color
+        const charData = options?.color ? { char, color: options.color } : char;
         setModeState(prev => ({
             ...prev,
             lightModeData: {
                 ...prev.lightModeData,
-                [key]: char
+                [key]: charData
             }
         }));
         
-        // Start flip-out animation after 1.5 seconds
-        const animationDelay = 1500;
-        const frameDelay = 80; // Time between symbol changes
-        
+        // Simple fade-out after specified delay
         setTimeout(() => {
-            const animationInterval = setInterval(() => {
-                if (symbolIndex >= despawnSymbols.length) {
-                    // Animation complete - remove the character
-                    setModeState(prev => {
-                        const newLightModeData = { ...prev.lightModeData };
-                        delete newLightModeData[key];
-                        return {
-                            ...prev,
-                            lightModeData: newLightModeData
-                        };
-                    });
-                    clearInterval(animationInterval);
-                } else {
-                    // Update to next symbol in sequence
-                    setModeState(prev => ({
-                        ...prev,
-                        lightModeData: {
-                            ...prev.lightModeData,
-                            [key]: despawnSymbols[symbolIndex]
-                        }
-                    }));
-                    symbolIndex++;
-                }
-            }, frameDelay);
+            // Remove the character directly without animation
+            setModeState(prev => {
+                const newLightModeData = { ...prev.lightModeData };
+                delete newLightModeData[key];
+                return {
+                    ...prev,
+                    lightModeData: newLightModeData
+                };
+            });
         }, animationDelay);
     }, [modeState.currentMode]);
+
+    // Add AI response as ephemeral text with typewriter effect
+    const addAIResponse = useCallback((startPos: Point, text: string, options?: {
+        wrapWidth?: number;
+        typewriterSpeed?: number;
+        lineDelay?: number;
+        color?: string;
+        persistTime?: number;
+    }) => {
+        
+        const wrapWidth = options?.wrapWidth || 40;
+        const typewriterSpeed = options?.typewriterSpeed || 50;
+        const lineDelay = options?.lineDelay || 150;
+        const color = options?.color || '#808080'; // Gray for AI responses (same as regular ephemeral text)
+        const persistTime = options?.persistTime || 3000; // Longer persistence for AI
+        
+        // Simple text wrapping
+        const wrapText = (text: string, maxWidth: number): string[] => {
+            const words = text.split(' ');
+            const lines: string[] = [];
+            let currentLine = '';
+            
+            for (const word of words) {
+                const testLine = currentLine ? `${currentLine} ${word}` : word;
+                if (testLine.length <= maxWidth) {
+                    currentLine = testLine;
+                } else {
+                    if (currentLine) {
+                        lines.push(currentLine);
+                        currentLine = word;
+                    } else {
+                        // Word is longer than line, split it
+                        lines.push(word.substring(0, maxWidth));
+                        currentLine = word.substring(maxWidth);
+                    }
+                }
+            }
+            if (currentLine) lines.push(currentLine);
+            return lines;
+        };
+        
+        const wrappedLines = wrapText(text, wrapWidth);
+        let lineIndex = 0;
+        let charIndex = 0;
+        
+        const typeNextChar = () => {
+            if (lineIndex >= wrappedLines.length) return;
+            
+            const currentLine = wrappedLines[lineIndex];
+            if (charIndex < currentLine.length) {
+                const char = currentLine[charIndex];
+                const x = startPos.x + charIndex;
+                const y = startPos.y + lineIndex;
+                
+                // Add character with AI color and longer persistence
+                addEphemeralText({ x, y }, char, {
+                    color: color,
+                    animationDelay: persistTime
+                });
+                
+                charIndex++;
+                setTimeout(typeNextChar, typewriterSpeed);
+            } else {
+                // Move to next line
+                lineIndex++;
+                charIndex = 0;
+                if (lineIndex < wrappedLines.length) {
+                    setTimeout(typeNextChar, lineDelay);
+                }
+            }
+        };
+        
+        typeNextChar();
+    }, [addEphemeralText, modeState.currentMode]);
 
     // Start command mode when '/' is pressed
     const startCommand = useCallback((cursorPos: Point) => {
@@ -1195,6 +1257,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         modeState,
         switchMode,
         addEphemeralText,
+        addAIResponse,
         currentMode: modeState.currentMode,
         lightModeData: modeState.lightModeData,
         backgroundMode: modeState.backgroundMode,

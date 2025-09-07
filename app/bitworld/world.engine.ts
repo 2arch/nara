@@ -234,6 +234,7 @@ export function useWorldEngine({
         setPendingCommand,
         currentMode,
         addEphemeralText,
+        addAIResponse,
         lightModeData,
         backgroundMode,
         backgroundColor,
@@ -1165,7 +1166,17 @@ export function useWorldEngine({
                     setDialogueText("Processing...");
                     
                     chatWithAI(chatMode.currentInput.trim()).then((response) => {
+                        // Show response in dialogue system (subtitle-style)
                         createSubtitleCycler(response, setDialogueText);
+                        
+                        // Also show response as ephemeral text at cursor location
+                        // Find a good position for the AI response (slightly below current input)
+                        const responseStartPos = {
+                            x: chatMode.inputPositions[0]?.x || cursorPos.x,
+                            y: (chatMode.inputPositions[0]?.y || cursorPos.y) + 2 // Start 2 lines below input
+                        };
+                        addAIResponse(responseStartPos, response);
+                        
                         // Clear current input from chat data after response
                         setChatData({});
                         setChatMode(prev => ({
@@ -1595,6 +1606,94 @@ export function useWorldEngine({
                 setDialogueWithRevert("Please select some text first, then press Enter to execute the command", setDialogueText);
             }
             return false;
+        }
+        // === Quick Chat (Cmd+Enter) ===
+        else if (key === 'Enter' && metaKey && !chatMode.isActive) {
+            // Extract text to send to AI - either selection or current line
+            let textToSend = '';
+            let chatStartPos = cursorPos;
+            
+            if (currentSelectionActive) {
+                // Use selected text
+                const minX = Math.min(selectionStart!.x, selectionEnd!.x);
+                const maxX = Math.max(selectionStart!.x, selectionEnd!.x);
+                const minY = Math.min(selectionStart!.y, selectionEnd!.y);
+                const maxY = Math.max(selectionStart!.y, selectionEnd!.y);
+                
+                // Extract selected text
+                for (let y = minY; y <= maxY; y++) {
+                    let lineText = '';
+                    for (let x = minX; x <= maxX; x++) {
+                        const key = `${x},${y}`;
+                        const charData = worldData[key];
+                        if (charData) {
+                            const char = getCharacter(charData);
+                            lineText += char;
+                        } else {
+                            lineText += ' ';
+                        }
+                    }
+                    textToSend += lineText.trimEnd();
+                    if (y < maxY) textToSend += '\n';
+                }
+                chatStartPos = { x: minX, y: minY };
+            } else {
+                // Use current line
+                const currentY = cursorPos.y;
+                let lineText = '';
+                let minX = cursorPos.x;
+                let maxX = cursorPos.x;
+                
+                // Find the extent of text on current line
+                for (const key in worldData) {
+                    const [xStr, yStr] = key.split(',');
+                    const x = parseInt(xStr, 10);
+                    const y = parseInt(yStr, 10);
+                    
+                    if (y === currentY) {
+                        minX = Math.min(minX, x);
+                        maxX = Math.max(maxX, x);
+                    }
+                }
+                
+                // Extract the line text
+                for (let x = minX; x <= maxX; x++) {
+                    const key = `${x},${currentY}`;
+                    const charData = worldData[key];
+                    if (charData) {
+                        const char = getCharacter(charData);
+                        lineText += char;
+                    } else {
+                        lineText += ' ';
+                    }
+                }
+                textToSend = lineText.trim();
+                chatStartPos = { x: minX, y: currentY };
+            }
+            
+            // Send to AI if we have text
+            if (textToSend.trim()) {
+                setDialogueText("Processing...");
+                chatWithAI(textToSend.trim()).then((response) => {
+                    // Show response in dialogue system
+                    createSubtitleCycler(response, setDialogueText);
+                    
+                    // Show response as ephemeral text below the input
+                    const responseStartPos = {
+                        x: chatStartPos.x,
+                        y: chatStartPos.y + (textToSend.split('\n').length) + 1 // Below the input text
+                    };
+                    addAIResponse(responseStartPos, response);
+                }).catch(() => {
+                    setDialogueText("Could not process message");
+                });
+                
+                // Clear selection after sending
+                clearSelectionState();
+            } else {
+                setDialogueText("No text to send - select text or place cursor on a line with content");
+            }
+            return true;
         }
         // --- Movement ---
         else if (key === 'Enter') {
