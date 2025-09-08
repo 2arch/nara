@@ -604,9 +604,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         // === Render Air Mode Data (Ephemeral Text) ===
-        // First, group ephemeral text by lines to render as continuous text
-        const ephemeralLines = new Map<string, {y: number, chars: Array<{x: number, char: string, color: string}>}>();
-        
+        // Render each ephemeral character individually at its exact grid position
         for (const key in engine.lightModeData) {
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); 
@@ -615,46 +613,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const charData = engine.lightModeData[key];
                 const char = typeof charData === 'string' ? charData : charData.char;
                 const color = typeof charData === 'object' && charData.color ? charData.color : '#808080';
-                
-                if (char && char.trim() !== '') {
-                    const lineKey = yStr;
-                    if (!ephemeralLines.has(lineKey)) {
-                        ephemeralLines.set(lineKey, {y: worldY, chars: []});
-                    }
-                    ephemeralLines.get(lineKey)!.chars.push({x: worldX, char, color});
-                }
-            }
-        }
-        
-        // Render each line as continuous text
-        for (const line of ephemeralLines.values()) {
-            // Sort characters by x position
-            line.chars.sort((a, b) => a.x - b.x);
-            
-            // Build continuous text string and find start position
-            let text = '';
-            let currentColor = line.chars[0]?.color || '#808080';
-            const startX = line.chars[0]?.x || 0;
-            
-            // Check for gaps and build text accordingly
-            for (let i = 0; i < line.chars.length; i++) {
-                const char = line.chars[i];
-                if (i > 0) {
-                    const prevChar = line.chars[i - 1];
-                    const gap = char.x - (prevChar.x + 1);
-                    if (gap > 0) {
-                        text += ' '.repeat(gap); // Fill gaps with spaces
+                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                    if (char && char.trim() !== '') {
+                        ctx.fillStyle = color; // Use character's color or default
+                        ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
                     }
                 }
-                text += char.char;
-            }
-            
-            // Render the continuous text
-            const screenPos = engine.worldToScreen(startX, line.y, currentZoom, currentOffset);
-            if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && 
-                screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-                ctx.fillStyle = currentColor;
-                ctx.fillText(text, screenPos.x, screenPos.y + verticalTextOffset);
             }
         }
 
@@ -967,30 +932,33 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 ctx.fillText(text[charIndex], charScreenPos.x, charScreenPos.y + verticalTextOffset);
                             }
                         } else {
-                            const labelScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                            const intersection = getViewportEdgeIntersection(
-                                viewportCenterScreen.x, viewportCenterScreen.y,
-                                labelScreenPos.x, labelScreenPos.y,
-                                cssWidth, cssHeight
-                            );
-
-                            if (intersection) {
-                            const edgeBuffer = ARROW_MARGIN;
-                            let adjustedX = intersection.x;
-                            let adjustedY = intersection.y;
+                            // Calculate distance from viewport center to label
+                            const viewportCenter = engine.getViewportCenter();
+                            const deltaX = worldX - viewportCenter.x;
+                            const deltaY = worldY - viewportCenter.y;
+                            const distance = Math.round(Math.sqrt(deltaX * deltaX + deltaY * deltaY));
                             
-                            adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
-                            adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
-                            
-                            drawArrow(ctx, adjustedX, adjustedY, intersection.angle, color);
+                            // Only show waypoint arrow if within proximity threshold
+                            if (distance <= engine.settings.labelProximityThreshold) {
+                                const labelScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                                const intersection = getViewportEdgeIntersection(
+                                    viewportCenterScreen.x, viewportCenterScreen.y,
+                                    labelScreenPos.x, labelScreenPos.y,
+                                    cssWidth, cssHeight
+                                );
 
-                            // Draw the label text next to the arrow
-                            if (text) {
-                                // Calculate distance from viewport center to label
-                                const viewportCenter = engine.getViewportCenter();
-                                const deltaX = worldX - viewportCenter.x;
-                                const deltaY = worldY - viewportCenter.y;
-                                const distance = Math.round(Math.sqrt(deltaX * deltaX + deltaY * deltaY));
+                                if (intersection) {
+                                const edgeBuffer = ARROW_MARGIN;
+                                let adjustedX = intersection.x;
+                                let adjustedY = intersection.y;
+                                
+                                adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
+                                adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
+                                
+                                drawArrow(ctx, adjustedX, adjustedY, intersection.angle, color);
+
+                                // Draw the label text next to the arrow
+                                if (text) {
                                 
                                 ctx.fillStyle = color;
                                 ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
@@ -1021,8 +989,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 // Reset to defaults
                                 ctx.textAlign = 'left';
                                 ctx.textBaseline = 'top';
+                                }
                             }
-                        }
+                            }
                         }
                     } catch (e) {
                         console.error(`Error parsing label data for key ${key}:`, e);

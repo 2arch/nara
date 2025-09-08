@@ -1404,7 +1404,18 @@ export function useWorldEngine({
             } else if (exec.command === 'settings') {
                 setDialogueText("Settings menu: /settings [option] [value] (coming soon)");
             } else if (exec.command === 'label') {
-                if (exec.args.length >= 1) {
+                // Check for --distance flag first
+                if (exec.args.length >= 2 && exec.args[0] === '--distance') {
+                    const distance = parseInt(exec.args[1], 10);
+                    if (!isNaN(distance) && distance >= 0) {
+                        const newSettings = { labelProximityThreshold: distance };
+                        updateSettings(newSettings);
+                        saveSettingsToFirebase(newSettings);
+                        setDialogueWithRevert(`Label proximity threshold set to ${distance}`, setDialogueText);
+                    } else {
+                        setDialogueWithRevert("Invalid distance value. Please provide a positive number.", setDialogueText);
+                    }
+                } else if (exec.args.length >= 1) {
                     let color = 'black';
                     let text = '';
                     const lastArg = exec.args[exec.args.length - 1].toLowerCase();
@@ -1427,7 +1438,7 @@ export function useWorldEngine({
                         [key]: value
                     }));
                 } else {
-                    setDialogueWithRevert("Usage: /label [text] [color] (e.g., /label important note red, /label heading blue)", setDialogueText);
+                    setDialogueWithRevert("Usage: /label [text] [color] or /label --distance [value] (e.g., /label important note red, /label --distance 100)", setDialogueText);
                 }
             } else if (exec.command === 'signout') {
                 setDialogueText("Signing out...");
