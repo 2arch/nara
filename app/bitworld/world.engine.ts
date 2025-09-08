@@ -1406,14 +1406,24 @@ export function useWorldEngine({
             } else if (exec.command === 'label') {
                 // Check for --distance flag first
                 if (exec.args.length >= 2 && exec.args[0] === '--distance') {
-                    const distance = parseInt(exec.args[1], 10);
-                    if (!isNaN(distance) && distance >= 0) {
-                        const newSettings = { labelProximityThreshold: distance };
+                    const arg = exec.args[1].toLowerCase();
+                    
+                    // Check for special values to disable threshold
+                    if (arg === '0' || arg === 'auto' || arg === 'off') {
+                        const newSettings = { labelProximityThreshold: Infinity };
                         updateSettings(newSettings);
                         saveSettingsToFirebase(newSettings);
-                        setDialogueWithRevert(`Label proximity threshold set to ${distance}`, setDialogueText);
+                        setDialogueWithRevert(`Label proximity threshold disabled - all labels will show waypoints`, setDialogueText);
                     } else {
-                        setDialogueWithRevert("Invalid distance value. Please provide a positive number.", setDialogueText);
+                        const distance = parseInt(exec.args[1], 10);
+                        if (!isNaN(distance) && distance > 0) {
+                            const newSettings = { labelProximityThreshold: distance };
+                            updateSettings(newSettings);
+                            saveSettingsToFirebase(newSettings);
+                            setDialogueWithRevert(`Label proximity threshold set to ${distance}`, setDialogueText);
+                        } else {
+                            setDialogueWithRevert("Invalid distance value. Use a positive number, or '0', 'auto', 'off' to disable.", setDialogueText);
+                        }
                     }
                 } else if (exec.args.length >= 1) {
                     let color = 'black';
@@ -1438,7 +1448,7 @@ export function useWorldEngine({
                         [key]: value
                     }));
                 } else {
-                    setDialogueWithRevert("Usage: /label [text] [color] or /label --distance [value] (e.g., /label important note red, /label --distance 100)", setDialogueText);
+                    setDialogueWithRevert("Usage: /label [text] [color] or /label --distance [value|0|auto|off] (e.g., /label important note red, /label --distance 100, /label --distance off)", setDialogueText);
                 }
             } else if (exec.command === 'signout') {
                 setDialogueText("Signing out...");
