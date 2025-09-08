@@ -854,11 +854,36 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         drawArrow(ctx, adjustedX, adjustedY, intersection.angle, '#800080');
 
                         // Draw the search match text next to the arrow
-                        // Calculate distance from viewport center to search match
-                        const viewportCenter = engine.getViewportCenter();
-                        const deltaX = match.x - viewportCenter.x;
-                        const deltaY = match.y - viewportCenter.y;
-                        const distance = Math.round(Math.sqrt(deltaX * deltaX + deltaY * deltaY));
+                        // Calculate distance from viewport edge to search match
+                        const viewportMinX = Math.floor(startWorldX);
+                        const viewportMaxX = Math.ceil(endWorldX);
+                        const viewportMinY = Math.floor(startWorldY);
+                        const viewportMaxY = Math.ceil(endWorldY);
+                        
+                        let distance = 0;
+                        // Calculate shortest distance to viewport edge
+                        if (match.x < viewportMinX) {
+                            // Match is to the left of viewport
+                            const dxLeft = viewportMinX - match.x;
+                            const dyEdge = Math.max(0, Math.max(viewportMinY - match.y, match.y - viewportMaxY));
+                            distance = Math.sqrt(dxLeft * dxLeft + dyEdge * dyEdge);
+                        } else if (match.x > viewportMaxX) {
+                            // Match is to the right of viewport
+                            const dxRight = match.x - viewportMaxX;
+                            const dyEdge = Math.max(0, Math.max(viewportMinY - match.y, match.y - viewportMaxY));
+                            distance = Math.sqrt(dxRight * dxRight + dyEdge * dyEdge);
+                        } else if (match.y < viewportMinY) {
+                            // Match is above viewport (x is within viewport bounds)
+                            distance = viewportMinY - match.y;
+                        } else if (match.y > viewportMaxY) {
+                            // Match is below viewport (x is within viewport bounds)  
+                            distance = match.y - viewportMaxY;
+                        } else {
+                            // Match is inside viewport
+                            distance = 0;
+                        }
+                        
+                        distance = Math.round(distance);
                         
                         ctx.fillStyle = '#800080';
                         ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
@@ -932,11 +957,36 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 ctx.fillText(text[charIndex], charScreenPos.x, charScreenPos.y + verticalTextOffset);
                             }
                         } else {
-                            // Calculate distance from viewport center to label
-                            const viewportCenter = engine.getViewportCenter();
-                            const deltaX = worldX - viewportCenter.x;
-                            const deltaY = worldY - viewportCenter.y;
-                            const distance = Math.round(Math.sqrt(deltaX * deltaX + deltaY * deltaY));
+                            // Calculate distance from viewport edge to label
+                            const viewportMinX = Math.floor(startWorldX);
+                            const viewportMaxX = Math.ceil(endWorldX);
+                            const viewportMinY = Math.floor(startWorldY);
+                            const viewportMaxY = Math.ceil(endWorldY);
+                            
+                            let distance = 0;
+                            // Calculate shortest distance to viewport edge
+                            if (worldX < viewportMinX) {
+                                // Label is to the left of viewport
+                                const dxLeft = viewportMinX - worldX;
+                                const dyEdge = Math.max(0, Math.max(viewportMinY - worldY, worldY - viewportMaxY));
+                                distance = Math.sqrt(dxLeft * dxLeft + dyEdge * dyEdge);
+                            } else if (worldX > viewportMaxX) {
+                                // Label is to the right of viewport
+                                const dxRight = worldX - viewportMaxX;
+                                const dyEdge = Math.max(0, Math.max(viewportMinY - worldY, worldY - viewportMaxY));
+                                distance = Math.sqrt(dxRight * dxRight + dyEdge * dyEdge);
+                            } else if (worldY < viewportMinY) {
+                                // Label is above viewport (x is within viewport bounds)
+                                distance = viewportMinY - worldY;
+                            } else if (worldY > viewportMaxY) {
+                                // Label is below viewport (x is within viewport bounds)  
+                                distance = worldY - viewportMaxY;
+                            } else {
+                                // Label is inside viewport
+                                distance = 0;
+                            }
+                            
+                            distance = Math.round(distance);
                             
                             // Only show waypoint arrow if within proximity threshold
                             if (distance <= engine.settings.labelProximityThreshold) {
@@ -1131,10 +1181,35 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         drawArrow(ctx, adjustedX, adjustedY, intersection.angle, heatColor);
                         
                         // Add distance indicator for blocks
-                        const viewportCenter = engine.getViewportCenter();
-                        const deltaCenterX = worldX - viewportCenter.x;
-                        const deltaCenterY = worldY - viewportCenter.y;
-                        const distanceFromCenter = Math.round(Math.sqrt(deltaCenterX * deltaCenterX + deltaCenterY * deltaCenterY));
+                        const viewportMinX = Math.floor(startWorldX);
+                        const viewportMaxX = Math.ceil(endWorldX);
+                        const viewportMinY = Math.floor(startWorldY);
+                        const viewportMaxY = Math.ceil(endWorldY);
+                        
+                        let distanceFromEdge = 0;
+                        // Calculate shortest distance to viewport edge
+                        if (worldX < viewportMinX) {
+                            // Block is to the left of viewport
+                            const dxLeft = viewportMinX - worldX;
+                            const dyEdge = Math.max(0, Math.max(viewportMinY - worldY, worldY - viewportMaxY));
+                            distanceFromEdge = Math.sqrt(dxLeft * dxLeft + dyEdge * dyEdge);
+                        } else if (worldX > viewportMaxX) {
+                            // Block is to the right of viewport
+                            const dxRight = worldX - viewportMaxX;
+                            const dyEdge = Math.max(0, Math.max(viewportMinY - worldY, worldY - viewportMaxY));
+                            distanceFromEdge = Math.sqrt(dxRight * dxRight + dyEdge * dyEdge);
+                        } else if (worldY < viewportMinY) {
+                            // Block is above viewport (x is within viewport bounds)
+                            distanceFromEdge = viewportMinY - worldY;
+                        } else if (worldY > viewportMaxY) {
+                            // Block is below viewport (x is within viewport bounds)  
+                            distanceFromEdge = worldY - viewportMaxY;
+                        } else {
+                            // Block is inside viewport
+                            distanceFromEdge = 0;
+                        }
+                        
+                        const distanceFromCenter = Math.round(distanceFromEdge);
                         
                         ctx.fillStyle = heatColor;
                         ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
