@@ -77,6 +77,10 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const lastCursorPosRef = useRef<Point | null>(null);
     const router = useRouter();
     
+    // Cache for background images to avoid reloading
+    const backgroundImageRef = useRef<HTMLImageElement | null>(null);
+    const backgroundImageUrlRef = useRef<string | null>(null);
+    
     // Dialogue system
     const { renderDialogue, renderDebugDialogue, renderNavDialogue, renderMonogramControls, handleNavClick } = useDialogue();
     
@@ -531,8 +535,21 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         } else if (engine.backgroundMode === 'image' && engine.backgroundImage) {
             // Clear canvas first
             ctx.clearRect(0, 0, cssWidth, cssHeight);
-            // Note: Image rendering will be handled via CSS background in parent component
-            // to avoid async loading issues in draw loop
+            
+            // Check if we need to load a new image
+            if (backgroundImageUrlRef.current !== engine.backgroundImage || !backgroundImageRef.current) {
+                backgroundImageUrlRef.current = engine.backgroundImage;
+                backgroundImageRef.current = new Image();
+                backgroundImageRef.current.onload = () => {
+                    // Image loaded, the next animation frame will draw it
+                };
+                backgroundImageRef.current.src = engine.backgroundImage;
+            }
+            
+            // Draw the cached image if it's loaded
+            if (backgroundImageRef.current && backgroundImageRef.current.complete) {
+                ctx.drawImage(backgroundImageRef.current, 0, 0, cssWidth, cssHeight);
+            }
         } else if (engine.backgroundMode === 'space') {
             // Clear canvas for space background (handled by SpaceBackground component)
             ctx.clearRect(0, 0, cssWidth, cssHeight);
@@ -1389,7 +1406,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.deepspawnData, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled]);
+    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.deepspawnData, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, panTrail, drawStraightSpline, drawCurvedSpline, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled]);
 
 
     // --- Drawing Loop Effect ---
