@@ -4,14 +4,12 @@ import type { MonogramOptions } from './monogram';
 
 export interface WorldSettings {
     isDebugVisible: boolean;
-    isDeepspawnVisible: boolean;
     monogramOptions: MonogramOptions;
     labelProximityThreshold: number;
 }
 
 export const initialSettings: WorldSettings = {
     isDebugVisible: false,
-    isDeepspawnVisible: false,
     monogramOptions: {
         mode: 'plasma',
         speed: 0.5, // Slower default speed

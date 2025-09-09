@@ -7,6 +7,40 @@ const ai = new GoogleGenAI({
 
 const DEFAULT_TEXT = '';
 
+// Global abort controller for interrupting AI operations
+let globalAbortController: AbortController | null = null;
+
+/**
+ * Create a new abort controller for AI operations
+ */
+export function createAIAbortController(): AbortController {
+    // Cancel any existing operation
+    if (globalAbortController && !globalAbortController.signal.aborted) {
+        globalAbortController.abort('New AI operation started');
+    }
+    
+    globalAbortController = new AbortController();
+    return globalAbortController;
+}
+
+/**
+ * Abort the current AI operation
+ */
+export function abortCurrentAI(): boolean {
+    if (globalAbortController && !globalAbortController.signal.aborted) {
+        globalAbortController.abort('User interrupted');
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Check if there's an active AI operation
+ */
+export function isAIActive(): boolean {
+    return globalAbortController !== null && !globalAbortController.signal.aborted;
+}
+
 // Helper function to set dialogue text with automatic revert to default
 export function setDialogueWithRevert(text: string, setDialogueText: (text: string) => void, timeout: number = 2500) {
     setDialogueText(text);

@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useWorldSave } from './world.save'; // Import the new hook
 import { useCommandSystem, CommandState, CommandExecution, BackgroundMode } from './commands'; // Import command system
 import { getSmartIndentation, calculateWordDeletion, extractLineCharacters, detectTextBlocks, findClosestBlock } from './bit.blocks'; // Import block detection utilities
-import { useDeepspawnSystem } from './deepspawn'; // Import deepspawn system
 import { useWorldSettings, WorldSettings } from './settings';
 import { set, ref } from 'firebase/database';
 import { database, auth } from '@/app/firebase';
@@ -44,7 +43,6 @@ export interface PanStartInfo {
 
 export interface WorldEngine {
     worldData: WorldData;
-    deepspawnData: WorldData;
     commandData: WorldData;
     commandState: CommandState;
     chatData: WorldData;
@@ -53,7 +51,6 @@ export interface WorldEngine {
     viewOffset: Point;
     cursorPos: Point;
     zoomLevel: number;
-    panningDirection: number | null;
     backgroundMode: BackgroundMode;
     backgroundColor: string;
     backgroundImage?: string;
@@ -98,8 +95,6 @@ export interface WorldEngine {
     getCursorDistanceFromCenter: () => number;
     getBlocksInRegion: (center: Point, radius: number) => Point[];
     isBlock: (x: number, y: number) => boolean;
-    directionPoints: { current: Point & { timestamp: number } | null, previous: Point & { timestamp: number } | null };
-    getAngleDebugData: () => { firstPoint: Point & { timestamp: number }, lastPoint: Point & { timestamp: number }, angle: number, degrees: number, pointCount: number } | null;
     dialogueText: string;
     setDialogueText: (text: string) => void;
     chatMode: {
@@ -422,7 +417,7 @@ export function useWorldEngine({
         // Search through worldData for matches
         for (const key in worldData) {
             // Skip special keys (blocks, labels, etc.)
-            if (key.startsWith('block_') || key.startsWith('deepspawn_') || key.startsWith('label_')) {
+            if (key.startsWith('block_') || key.startsWith('label_')) {
                 continue;
             }
 
@@ -486,7 +481,7 @@ export function useWorldEngine({
         // Group characters by line
         for (const key in worldData) {
             // Skip special keys (blocks, labels, etc.)
-            if (key.startsWith('block_') || key.startsWith('deepspawn_') || key.startsWith('label_')) {
+            if (key.startsWith('block_') || key.startsWith('label_')) {
                 continue;
             }
             
@@ -554,7 +549,7 @@ export function useWorldEngine({
         if (!worldId || userUid === undefined) return;
 
         // Additional check to ensure userUid is not null/undefined before proceeding
-        if (!userUid && userUid !== 'blog') return;
+        if (!userUid) return;
 
         // Clear any pending compilation
         if (compilationTimeoutRef.current) {
@@ -590,12 +585,6 @@ export function useWorldEngine({
             
             // Send only changes to Firebase
             if (Object.keys(changes).length > 0) {
-                // For blog posts, skip content compilation to avoid conflicts
-                const isBlogs = userUid === 'blog' && worldId === 'posts';
-                if (isBlogs) {
-                    console.log('Skipping content compilation for blog posts');
-                    return; // Skip content sync for blog posts
-                }
                 
                 const contentPath = currentStateName ? 
                     getUserPath(`${currentStateName}/content`) :
@@ -643,39 +632,26 @@ export function useWorldEngine({
         if (!worldId || userUid === undefined) return false;
         
         // Additional check to ensure userUid is not null/undefined before proceeding
-        if (!userUid && userUid !== 'blog') return false;
+        if (!userUid) return false;
         
         try {
-            // For blog posts, save directly under posts/{post} instead of posts/states/{post}
-            const isBlogs = userUid === 'blog' && worldId === 'posts';
+            // Save directly to worlds/{userId}/{stateName}
+            const stateRef = ref(database, getUserPath(`${stateName}`));
             
-            if (isBlogs) {
-                // For blog posts, save worldData directly to /data path (compatible with useWorldSave)
-                const dataRef = ref(database, `worlds/blog/posts/${stateName}/data`);
-                const settingsRef = ref(database, `worlds/blog/posts/${stateName}/settings`);
-                
-                console.log(`Blog: Saving to worlds/blog/posts/${stateName}/data`);
-                await set(dataRef, worldData);
-                await set(settingsRef, settings);
-            } else {
-                // Regular state saving - save directly to worlds/{userId}/{stateName}
-                const stateRef = ref(database, getUserPath(`${stateName}`));
-                
-                // Compile text strings from individual characters
-                const compiledText = compileTextStrings(worldData);
-                
-                const stateData = {
-                    worldData, // Individual character positions (for canvas)
-                    compiledText, // Compiled text strings (for text operations)
-                    settings,
-                    timestamp: Date.now(),
-                    cursorPos,
-                    viewOffset,
-                    zoomLevel
-                };
-                
-                await set(stateRef, stateData);
-            }
+            // Compile text strings from individual characters
+            const compiledText = compileTextStrings(worldData);
+            
+            const stateData = {
+                worldData, // Individual character positions (for canvas)
+                compiledText, // Compiled text strings (for text operations)
+                settings,
+                timestamp: Date.now(),
+                cursorPos,
+                viewOffset,
+                zoomLevel
+            };
+            
+            await set(stateRef, stateData);
             setCurrentStateName(stateName); // Track that we're now in this state
             return true;
         } catch (error) {
@@ -688,52 +664,30 @@ export function useWorldEngine({
         if (!worldId || userUid === undefined) return false;
         
         // Additional check to ensure userUid is not null/undefined before proceeding
-        if (!userUid && userUid !== 'blog') return false;
+        if (!userUid) return false;
         
         try {
-            // For blog posts, load directly from posts/{post} instead of posts/states/{post}
-            const isBlogs = userUid === 'blog' && worldId === 'posts';
+            // Load directly from worlds/{userId}/{stateName}
+            const stateRef = ref(database, getUserPath(`${stateName}`));
+            const snapshot = await get(stateRef);
+            const stateData = snapshot.val();
             
-            if (isBlogs) {
-                // For blog posts, load data and settings separately (compatible with useWorldSave)
-                const dataRef = ref(database, `worlds/blog/posts/${stateName}/data`);
-                const settingsRef = ref(database, `worlds/blog/posts/${stateName}/settings`);
-                
-                const dataSnapshot = await get(dataRef);
-                const settingsSnapshot = await get(settingsRef);
-                
-                const worldDataToLoad = dataSnapshot.val() || {};
-                const settingsToLoad = settingsSnapshot.val() || {};
-                
-                setWorldData(worldDataToLoad);
-                setSettings(settingsToLoad);
-            } else {
-                // Regular state loading - load directly from worlds/{userId}/{stateName}
-                const stateRef = ref(database, getUserPath(`${stateName}`));
-                const snapshot = await get(stateRef);
-                const stateData = snapshot.val();
-                
-                if (stateData) {
-                    setWorldData(stateData.worldData || {});
-                    if (stateData.settings) {
-                        setSettings(stateData.settings);
-                    }
-                    if (stateData.cursorPos) {
-                        setCursorPos(stateData.cursorPos);
-                    }
-                    if (stateData.viewOffset) {
-                        setViewOffset(stateData.viewOffset);
-                    }
-                    if (stateData.zoomLevel) {
-                        setZoomLevel(stateData.zoomLevel);
-                    }
-                    
-                    // Log compiled text if available (for debugging/analysis)
-                    if (stateData.compiledText) {
-                    }
-                } else {
-                    return false;
+            if (stateData) {
+                setWorldData(stateData.worldData || {});
+                if (stateData.settings) {
+                    setSettings(stateData.settings);
                 }
+                if (stateData.cursorPos) {
+                    setCursorPos(stateData.cursorPos);
+                }
+                if (stateData.viewOffset) {
+                    setViewOffset(stateData.viewOffset);
+                }
+                if (stateData.zoomLevel) {
+                    setZoomLevel(stateData.zoomLevel);
+                }
+            } else {
+                return false;
             }
             
             setCurrentStateName(stateName); // Track that we're now in this state
@@ -746,18 +700,11 @@ export function useWorldEngine({
 
     const loadAvailableStates = useCallback(async (): Promise<string[]> => {
         try {
-            // For blog posts, detect by worldId pattern
-            const isBlogPost = worldId?.startsWith('blog/posts/');
-            const isBlogMain = userUid === 'blog' && worldId === 'posts';
-            const isBlogs = isBlogPost || isBlogMain;
-            
-            if (!isBlogs && (userUid === undefined || !userUid)) {
+            if (!userUid) {
                 return [];
             }
             
-            const statesPath = isBlogs ? 
-                `worlds/blog/posts` :
-                `worlds/${userUid}`;
+            const statesPath = `worlds/${userUid}`;
             const statesRef = ref(database, statesPath);
             
             // Add timeout to avoid hanging
@@ -773,15 +720,10 @@ export function useWorldEngine({
             const statesData = (snapshot as any).val();
             
             if (statesData && typeof statesData === 'object') {
-                if (isBlogs) {
-                    // For blog posts, state names are direct keys under posts/
-                    return Object.keys(statesData).sort();
-                } else {
-                    // Filter out 'home' and only return actual saved states
-                    const allKeys = Object.keys(statesData);
-                    const stateNames = allKeys.filter(key => key !== 'home').sort();
-                    return stateNames;
-                }
+                // Filter out 'home' and only return actual saved states
+                const allKeys = Object.keys(statesData);
+                const stateNames = allKeys.filter(key => key !== 'home').sort();
+                return stateNames;
             }
             return [];
         } catch (error) {
@@ -792,17 +734,10 @@ export function useWorldEngine({
     }, [userUid, worldId]);
 
     const deleteState = useCallback(async (stateName: string): Promise<boolean> => {
-        if (!worldId || userUid === undefined) return false;
-        
-        // Additional check to ensure userUid is not null/undefined before proceeding
-        if (!userUid && userUid !== 'blog') return false;
+        if (!worldId || !userUid) return false;
         
         try {
-            // For blog posts, delete directly from posts/{post} instead of posts/states/{post}
-            const isBlogs = userUid === 'blog' && worldId === 'posts';
-            const stateRef = isBlogs ? 
-                ref(database, `worlds/blog/posts/${stateName}`) :
-                ref(database, getUserPath(`${stateName}`));
+            const stateRef = ref(database, getUserPath(`${stateName}`));
             await set(stateRef, null); // Firebase way to delete
             
             // If we're deleting the current state, clear the current state name
@@ -827,15 +762,10 @@ export function useWorldEngine({
     
     // Load compiled text on mount
     useEffect(() => {
-        if (!worldId || userUid === undefined) return;
+        if (!worldId || !userUid) return;
         
-        // Additional check to ensure userUid is not null/undefined before proceeding
-        if (!userUid && userUid !== 'blog') return;
-        
-        // For blog posts, use direct path structure for content
-        const isBlogs = userUid === 'blog' && worldId === 'posts';
         const contentPath = currentStateName ? 
-            (isBlogs ? `worlds/blog/posts/${currentStateName}/content` : getUserPath(`${currentStateName}/content`)) :
+            getUserPath(`${currentStateName}/content`) :
             getUserPath(`${worldId}/content`);
         const compiledTextRef = ref(database, contentPath);
         get(compiledTextRef).then((snapshot) => {
@@ -870,10 +800,7 @@ export function useWorldEngine({
 
     // === Immediate Settings Save Function ===
     const saveSettingsToFirebase = useCallback(async (newSettings: Partial<WorldSettings>) => {
-        if (!worldId || userUid === undefined) return;
-        
-        // Additional check to ensure userUid is not null/undefined before proceeding
-        if (!userUid && userUid !== 'blog') return;
+        if (!worldId || !userUid) return;
         
         try {
             const settingsRef = ref(database, getUserPath(`${worldId}/settings`));
@@ -884,47 +811,8 @@ export function useWorldEngine({
         }
     }, [worldId, settings, getUserPath, userUid]);
     
-    // === Deepspawn System ===
-    const { 
-        deepspawnData, 
-        directionPoints, 
-        updateDirectionPoint, 
-        getPanningDirection, 
-        getAngleDebugData 
-    } = useDeepspawnSystem(settings.isDeepspawnVisible);
 
-    // Helper function to extract recent text from world data around a position
-    const getRecentText = useCallback((centerX: number, centerY: number, radius: number = 20): string => {
-        const textChunks: string[] = [];
-        
-        // Collect text in a radius around the center position
-        for (let y = centerY - radius; y <= centerY + radius; y++) {
-            let rowText = '';
-            for (let x = centerX - radius; x <= centerX + radius; x++) {
-                const key = `${x},${y}`;
-                const charData = worldData[key];
-                if (charData && !key.startsWith('block_') && !key.startsWith('deepspawn_') && !key.startsWith('label_')) {
-                    const char = getCharacter(charData);
-                    if (char.trim() !== '') {
-                        rowText += char;
-                    } else {
-                        rowText += ' ';
-                    }
-                } else {
-                    rowText += ' ';
-                }
-            }
-            if (rowText.trim()) {
-                textChunks.push(rowText.trim());
-            }
-        }
-        
-        // Join and clean up the text
-        return textChunks.join(' ').replace(/\s+/g, ' ').trim();
-    }, [worldData]);
     
-    // Calculate panning direction (memoized to avoid recalculating on every render)
-    const panningDirection = useMemo(() => getPanningDirection(), [getPanningDirection]);
     const isPanningRef = useRef(false);
     const [isSelecting, setIsSelecting] = useState(false);
     const [selectionStart, setSelectionStart] = useState<Point | null>(null);
@@ -1337,44 +1225,148 @@ export function useWorldEngine({
         // === Chat Mode Handling ===
         if (chatMode.isActive && !commandState.isActive) {
             if (key === 'Enter') {
-                // Send chat message - prevent if already processing
-                if (chatMode.currentInput.trim() && !chatMode.isProcessing) {
-                    setChatMode(prev => ({ ...prev, isProcessing: true }));
-                    setDialogueText("Processing...");
+                if (shiftKey) {
+                    // Shift+Enter: Move to next line without sending to AI
+                    const newInput = chatMode.currentInput + '\n';
+                    const startX = chatMode.inputPositions[0]?.x || cursorPos.x;
                     
-                    chatWithAI(chatMode.currentInput.trim()).then((response) => {
-                        // Show response in dialogue system (subtitle-style)
-                        createSubtitleCycler(response, setDialogueText);
+                    setChatMode(prev => ({
+                        ...prev,
+                        currentInput: newInput,
+                        inputPositions: [...prev.inputPositions, { x: startX, y: cursorPos.y + 1 }]
+                    }));
+                    
+                    // Move cursor to next line at start position
+                    setCursorPos({ x: startX, y: cursorPos.y + 1 });
+                    return true;
+                } else if (metaKey || ctrlKey) {
+                    // Cmd+Enter (or Ctrl+Enter): Send chat message and write response directly to canvas
+                    if (chatMode.currentInput.trim() && !chatMode.isProcessing) {
+                        setChatMode(prev => ({ ...prev, isProcessing: true }));
+                        setDialogueText("Processing...");
                         
-                        // Also show response as ephemeral text at cursor location
-                        // Find a good position for the AI response (slightly below current input)
-                        const responseStartPos = {
-                            x: chatMode.inputPositions[0]?.x || cursorPos.x,
-                            y: (chatMode.inputPositions[0]?.y || cursorPos.y) + 2 // Start 2 lines below input
-                        };
-                        addAIResponse(responseStartPos, response, { queryText: chatMode.currentInput.trim() });
+                        chatWithAI(chatMode.currentInput.trim()).then((response) => {
+                            // Show response in dialogue system
+                            createSubtitleCycler(response, setDialogueText);
+                            
+                            // Write response permanently to canvas below the input
+                            const responseStartPos = {
+                                x: chatMode.inputPositions[0]?.x || cursorPos.x,
+                                y: (chatMode.inputPositions[chatMode.inputPositions.length - 1]?.y || cursorPos.y) + 2 // Start 2 lines below last input line
+                            };
+                            
+                            // Calculate dynamic wrap width based on input
+                            const inputLines = chatMode.currentInput.trim().split('\n');
+                            const maxInputLineLength = Math.max(...inputLines.map(line => line.length));
+                            const wrapWidth = Math.max(30, maxInputLineLength);
+                            
+                            // Text wrapping that honors paragraph breaks
+                            const wrapText = (text: string, maxWidth: number): string[] => {
+                                const paragraphs = text.split('\n');
+                                const lines: string[] = [];
+                                
+                                for (let i = 0; i < paragraphs.length; i++) {
+                                    const paragraph = paragraphs[i].trim();
+                                    
+                                    if (paragraph === '') {
+                                        lines.push('');
+                                        continue;
+                                    }
+                                    
+                                    const words = paragraph.split(' ');
+                                    let currentLine = '';
+                                    
+                                    for (const word of words) {
+                                        const testLine = currentLine ? `${currentLine} ${word}` : word;
+                                        if (testLine.length <= maxWidth) {
+                                            currentLine = testLine;
+                                        } else {
+                                            if (currentLine) lines.push(currentLine);
+                                            currentLine = word;
+                                        }
+                                    }
+                                    if (currentLine) lines.push(currentLine);
+                                }
+                                return lines;
+                            };
+                            
+                            const wrappedLines = wrapText(response, wrapWidth);
+                            
+                            // Write each character permanently to worldData
+                            const newWorldData = { ...worldData };
+                            for (let lineIndex = 0; lineIndex < wrappedLines.length; lineIndex++) {
+                                const line = wrappedLines[lineIndex];
+                                for (let charIndex = 0; charIndex < line.length; charIndex++) {
+                                    const char = line[charIndex];
+                                    const x = responseStartPos.x + charIndex;
+                                    const y = responseStartPos.y + lineIndex;
+                                    const key = `${x},${y}`;
+                                    newWorldData[key] = char;
+                                }
+                            }
+                            setWorldData(newWorldData);
+                            
+                            // Clear current input from chat data after response
+                            setChatData({});
+                            setChatMode(prev => ({
+                                ...prev,
+                                currentInput: '',
+                                inputPositions: [],
+                                isProcessing: false
+                            }));
+                        }).catch(() => {
+                            setDialogueWithRevert("Could not process chat message", setDialogueText);
+                            // Clear chat data even on error
+                            setChatData({});
+                            setChatMode(prev => ({ 
+                                ...prev, 
+                                currentInput: '',
+                                inputPositions: [],
+                                isProcessing: false 
+                            }));
+                        });
+                    }
+                    return true;
+                } else {
+                    // Regular Enter: Send chat message and show ephemeral response
+                    if (chatMode.currentInput.trim() && !chatMode.isProcessing) {
+                        setChatMode(prev => ({ ...prev, isProcessing: true }));
+                        setDialogueText("Processing...");
                         
-                        // Clear current input from chat data after response
-                        setChatData({});
-                        setChatMode(prev => ({
-                            ...prev,
-                            currentInput: '',
-                            inputPositions: [],
-                            isProcessing: false
-                        }));
-                    }).catch(() => {
-                        setDialogueWithRevert("Could not process chat message", setDialogueText);
-                        // Clear chat data even on error
-                        setChatData({});
-                        setChatMode(prev => ({ 
-                            ...prev, 
-                            currentInput: '',
-                            inputPositions: [],
-                            isProcessing: false 
-                        }));
-                    });
+                        chatWithAI(chatMode.currentInput.trim()).then((response) => {
+                            // Show response in dialogue system (subtitle-style)
+                            createSubtitleCycler(response, setDialogueText);
+                            
+                            // Also show response as ephemeral text at cursor location
+                            // Find a good position for the AI response (slightly below current input)
+                            const responseStartPos = {
+                                x: chatMode.inputPositions[0]?.x || cursorPos.x,
+                                y: (chatMode.inputPositions[chatMode.inputPositions.length - 1]?.y || cursorPos.y) + 2 // Start 2 lines below last input line
+                            };
+                            addAIResponse(responseStartPos, response, { queryText: chatMode.currentInput.trim() });
+                            
+                            // Clear current input from chat data after response
+                            setChatData({});
+                            setChatMode(prev => ({
+                                ...prev,
+                                currentInput: '',
+                                inputPositions: [],
+                                isProcessing: false
+                            }));
+                        }).catch(() => {
+                            setDialogueWithRevert("Could not process chat message", setDialogueText);
+                            // Clear chat data even on error
+                            setChatData({});
+                            setChatMode(prev => ({ 
+                                ...prev, 
+                                currentInput: '',
+                                inputPositions: [],
+                                isProcessing: false 
+                            }));
+                        });
+                    }
+                    return true;
                 }
-                return true;
             } else if (key === 'Escape') {
                 // Exit chat mode
                 setChatMode({
@@ -1454,17 +1446,6 @@ export function useWorldEngine({
                     setDialogueWithRevert("Usage: /debug [on|off] - Toggle debug information display", setDialogueText);
                 }
             } else if (exec.command === 'deepspawn') {
-                if (exec.args[0] === 'on') {
-                    const newSettings = { isDeepspawnVisible: true };
-                    updateSettings(newSettings);
-                    saveSettingsToFirebase(newSettings);
-                } else if (exec.args[0] === 'off') {
-                    const newSettings = { isDeepspawnVisible: false };
-                    updateSettings(newSettings);
-                    saveSettingsToFirebase(newSettings);
-                } else {
-                    setDialogueWithRevert("Usage: /deepspawn [on|off] - Toggle deepspawn objects visibility", setDialogueText);
-                }
             } else if (exec.command === 'nav') {
                 if (exec.args.length === 2) {
                     // Navigate to specific coordinates (x, y)
@@ -1563,7 +1544,7 @@ export function useWorldEngine({
                         inputPositions: [],
                         isProcessing: false
                     });
-                    setDialogueText("Chat mode activated. Type anywhere and press Enter to chat. Use /exit to leave chat mode.");
+                    setDialogueText("Chat mode activated. Enter: ephemeral response, Cmd+Enter: permanent response, Shift+Enter: new line. Use /exit to leave.");
                 } else {
                     // Exit chat mode
                     setChatMode({
@@ -2364,7 +2345,7 @@ export function useWorldEngine({
                     setChatData({
                         [`${cursorAfterDelete.x},${cursorAfterDelete.y}`]: key
                     });
-                    setDialogueText("Chat mode activated. Type anywhere and press Enter to chat. Use /exit to leave chat mode.");
+                    setDialogueText("Chat mode activated. Enter: ephemeral response, Cmd+Enter: permanent response, Shift+Enter: new line. Use /exit to leave.");
                 }
             } else {
                 // Air mode (default): Normal text input to worldData
@@ -2539,13 +2520,10 @@ export function useWorldEngine({
             const centerX = newOffset.x + (viewportWidth / effectiveCharWidth) / 2;
             const centerY = newOffset.y + (viewportHeight / effectiveCharHeight) / 2;
             
-            // Update direction tracking with viewport center during panning
-            const recentText = getRecentText(centerX, centerY);
-            updateDirectionPoint(centerX, centerY, recentText);
         }
         
         return newOffset;
-    }, [zoomLevel, getEffectiveCharDims, viewOffset, getRecentText]);
+    }, [zoomLevel, getEffectiveCharDims, viewOffset]);
 
     const handlePanEnd = useCallback((newOffset: Point): void => {
         if (isPanningRef.current) {
@@ -2562,13 +2540,10 @@ export function useWorldEngine({
                     const centerX = newOffset.x + (viewportWidth / effectiveCharWidth) / 2;
                     const centerY = newOffset.y + (viewportHeight / effectiveCharHeight) / 2;
                     
-                    // Update direction tracking with final viewport center
-                    const recentText = getRecentText(centerX, centerY);
-                    updateDirectionPoint(centerX, centerY, recentText);
                 }
             }
         }
-    }, [zoomLevel, getEffectiveCharDims, updateDirectionPoint, getRecentText]);
+    }, [zoomLevel, getEffectiveCharDims]);
 
     const handleSelectionStart = useCallback((canvasRelativeX: number, canvasRelativeY: number): void => {
         const worldPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
@@ -2757,20 +2732,17 @@ export function useWorldEngine({
                     Math.abs(center.x - lastKnownPositionRef.current.x) > 0.1 ||
                     Math.abs(center.y - lastKnownPositionRef.current.y) > 0.1) {
                     
-                    const recentText = getRecentText(center.x, center.y);
-                    updateDirectionPoint(center.x, center.y, recentText);
                     lastKnownPositionRef.current = { x: center.x, y: center.y };
                 }
             }
         }, 100); // Update every 100ms
 
         return () => clearInterval(interval);
-    }, [getViewportCenter, updateDirectionPoint, getRecentText]);
+    }, [getViewportCenter]);
 
 
     return {
         worldData,
-        deepspawnData,
         commandData,
         commandState,
         chatData,
@@ -2779,7 +2751,6 @@ export function useWorldEngine({
         viewOffset,
         cursorPos,
         zoomLevel,
-        panningDirection,
         backgroundMode,
         backgroundColor,
         backgroundImage,
@@ -2830,8 +2801,6 @@ export function useWorldEngine({
         navMode,
         toggleNavMode,
         isBlock,
-        directionPoints,
-        getAngleDebugData,
         isNavVisible,
         setIsNavVisible,
         navOriginPosition,
@@ -2842,7 +2811,8 @@ export function useWorldEngine({
         getCharacter,
         getCharacterStyle,
         getCompiledText: () => compiledTextCache,
-        // State management functions for blog posts
+        getCanvasSize: () => ({ width: window.innerWidth, height: window.innerHeight }),
+        // State management functions
         saveState,
         loadState,
         availableStates,
