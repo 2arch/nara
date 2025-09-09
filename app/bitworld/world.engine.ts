@@ -163,6 +163,34 @@ interface UseWorldEngineProps {
     initialStateName?: string | null; // Initial state name from URL
 }
 
+/**
+ * Gets smart indentation only if there are nearby text blocks (within maxDistance)
+ * @param worldData Combined world data
+ * @param cursorPos Current cursor position  
+ * @param maxDistance Maximum horizontal distance to consider for indentation
+ * @returns X position for indentation or null if no nearby blocks
+ */
+function getNearbySmartIndentation(worldData: WorldData, cursorPos: {x: number, y: number}, maxDistance: number): number | null {
+    // Check a few lines above and below for nearby text
+    const searchRange = 3; // Check 3 lines up/down
+    
+    for (let offsetY = -searchRange; offsetY <= searchRange; offsetY++) {
+        const checkY = cursorPos.y + offsetY;
+        const lineChars = extractLineCharacters(worldData, checkY);
+        
+        if (lineChars.length === 0) continue;
+        
+        const blocks = detectTextBlocks(lineChars);
+        const closest = findClosestBlock(blocks, cursorPos.x);
+        
+        if (closest && closest.distance <= maxDistance) {
+            return closest.block.start;
+        }
+    }
+    
+    return null; // No nearby text blocks found
+}
+
 // --- The Hook ---
 export function useWorldEngine({
     initialWorldData = {},
@@ -1992,9 +2020,16 @@ export function useWorldEngine({
                 // Empty line and we have a previous Enter X position - use it
                 targetIndent = lastEnterX;
             } else {
-                // Empty line, no previous Enter position - use smart indentation
-                targetIndent = getSmartIndentation(dataToCheck, cursorPos);
-                setLastEnterX(targetIndent);
+                // Empty line, no previous Enter position - check for nearby text blocks
+                const nearbyIndent = getNearbySmartIndentation(dataToCheck, cursorPos, 50); // Max 50 units away
+                if (nearbyIndent !== null) {
+                    targetIndent = nearbyIndent;
+                    setLastEnterX(targetIndent);
+                } else {
+                    // No nearby text - use current X position and remember it
+                    targetIndent = cursorPos.x;
+                    setLastEnterX(targetIndent);
+                }
             }
             
             nextCursorPos.y = cursorPos.y + 1;

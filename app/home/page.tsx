@@ -113,6 +113,7 @@ export default function CorbuType() {
                     engine={engine}
                     cursorColorAlternate={cursorColorAlternate}
                     monogramEnabled={true}
+                    fontFamily={engine.fontFamily}
                 />
             </div>
         </div>

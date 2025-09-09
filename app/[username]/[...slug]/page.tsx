@@ -58,6 +58,7 @@ export default function UserState() {
         className="w-full h-full"
         monogramEnabled={true}
         dialogueEnabled={true}
+        fontFamily={engine.fontFamily}
       />
     </div>
   );

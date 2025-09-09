@@ -20,7 +20,7 @@ export const initialSettings: WorldSettings = {
         enabled: false,
         geometryType: 'octahedron'
     },
-    labelProximityThreshold: 50,
+    labelProximityThreshold: 999999,
 };
 
 export function useWorldSettings() {

@@ -45,6 +45,59 @@ const NAV_MARGIN_CHARS = 2;
 const NAV_BACKGROUND_COLOR = 'rgba(0, 0, 0, 0.4)';
 const NAV_TEXT_COLOR = '#FFFFFF';
 
+// Auto-clearing dialogue hook
+export function useAutoDialogue(dialogueText: string, setDialogueText: (text: string) => void) {
+    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+    
+    useEffect(() => {
+        // Clear existing timeout
+        if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
+        }
+        
+        // Only auto-clear if there's text and it looks like a temporary status message
+        if (dialogueText.trim() && shouldAutoClear(dialogueText)) {
+            timeoutRef.current = setTimeout(() => {
+                setDialogueText('');
+                timeoutRef.current = null;
+            }, 2500);
+        }
+        
+        // Cleanup on unmount or text change
+        return () => {
+            if (timeoutRef.current) {
+                clearTimeout(timeoutRef.current);
+                timeoutRef.current = null;
+            }
+        };
+    }, [dialogueText, setDialogueText]);
+}
+
+// Function to determine if a message should auto-clear
+function shouldAutoClear(text: string): boolean {
+    const message = text.toLowerCase().trim();
+    
+    // Don't auto-clear if empty or if it's a persistent prompt/input request
+    if (!message) return false;
+    
+    // Don't auto-clear prompts asking for user input
+    if (message.includes('enter ') || message.includes('(y/n)') || message.includes(':')) return false;
+    
+    // Don't auto-clear processing messages (they should be cleared when done)
+    if (message.includes('processing') || message.includes('loading') || message.includes('saving')) return false;
+    
+    // Auto-clear success/error/status messages
+    const autoClearPatterns = [
+        'successfully', 'failed', 'error', 'completed', 'cleared', 'cancelled', 'created', 'deleted',
+        'published', 'unpublished', 'signed out', 'navigated to', 'threshold set', 'threshold disabled',
+        'mode deactivated', 'not found', 'invalid', 'usage:', 'available', 'no current state',
+        'could not', 'canvas cleared', 'operation cancelled'
+    ];
+    
+    return autoClearPatterns.some(pattern => message.includes(pattern));
+}
+
 export function useDialogue() {
     // --- Dialogue Text Wrapping Functions ---
     const wrapText = useCallback((text: string, maxWidth: number): string[] => {

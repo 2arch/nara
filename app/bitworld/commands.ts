@@ -39,6 +39,7 @@ export interface ModeState {
     backgroundStream?: MediaStream; // MediaStream for screen share
     textColor: string;
     textBackground?: string; // Background color for text
+    fontFamily: string; // Font family for text rendering
     currentTextStyle: {
         color: string;
         background?: string;
@@ -56,9 +57,10 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'deepspawn', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'signout', 'publish', 'unpublish'];
+const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'deepspawn', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'white', 'black', 'web'];
+const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro'];
 const NAV_COMMANDS: string[] = [];
 
 // --- Command System Hook ---
@@ -88,6 +90,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         backgroundStream: undefined,
         textColor: '#000000', // Black text on white background
         textBackground: undefined, // No text background by default
+        fontFamily: 'IBM Plex Mono', // Default font
         currentTextStyle: {
             color: '#000000', // Default black text
             background: undefined
@@ -129,6 +132,23 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 return suggestions;
             }
             return BG_COMMANDS.map(bg => `bg ${bg}`);
+        }
+
+        if (lowerInput === 'font') {
+            const parts = input.toLowerCase().split(' ');
+            if (parts.length > 1) {
+                const fontInput = parts[1];
+                const suggestions = FONT_COMMANDS
+                    .filter(font => font.toLowerCase().startsWith(fontInput))
+                    .map(font => `font ${font}`);
+                
+                const currentCommand = `font ${fontInput}`;
+                if (fontInput.length > 0 && !suggestions.some(s => s === currentCommand)) {
+                     return [currentCommand, ...suggestions];
+                }
+                return suggestions;
+            }
+            return FONT_COMMANDS.map(font => `font ${font}`);
         }
 
         if (lowerInput === 'nav') {
@@ -966,6 +986,46 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return null;
         }
 
+        if (commandToExecute.startsWith('font')) {
+            // Parse the full command (e.g., "font IBM Plex Mono" or "font Apercu Pro")
+            const fontCommandParts = commandToExecute.split(' ');
+            const fontName = fontCommandParts.slice(1).join(' '); // Join all parts after "font"
+            
+            if (fontName) {
+                // Check if the font name exactly matches one of our available fonts
+                const selectedFont = FONT_COMMANDS.find(font => 
+                    font.toLowerCase() === fontName.toLowerCase()
+                );
+                
+                if (selectedFont) {
+                    // Update font in mode state
+                    setModeState(prev => ({
+                        ...prev,
+                        fontFamily: selectedFont
+                    }));
+                    setDialogueText(`Font changed to: ${selectedFont}`);
+                } else {
+                    setDialogueText(`Font not found. Available fonts: ${FONT_COMMANDS.join(', ')}`);
+                }
+            } else {
+                // No font specified - show available fonts
+                setDialogueText(`Available fonts: ${FONT_COMMANDS.join(', ')}`);
+            }
+            
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+            
+            return null;
+        }
+
         if (commandToExecute.startsWith('nav')) {
             // Clear command mode
             setCommandState({
@@ -1333,6 +1393,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         backgroundStream: backgroundStreamRef.current || modeState.backgroundStream,
         textColor: modeState.textColor,
         textBackground: modeState.textBackground,
+        fontFamily: modeState.fontFamily,
         currentTextStyle: modeState.currentTextStyle,
         searchPattern: modeState.searchPattern,
         isSearchActive: modeState.isSearchActive,

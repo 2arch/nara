@@ -55,6 +55,7 @@ export default function UserHome() {
         className="w-full h-full"
         monogramEnabled={true}
         dialogueEnabled={true}
+        fontFamily={engine.fontFamily}
       />
     </div>
   );

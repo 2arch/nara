@@ -5,7 +5,6 @@ import { useMonogramSystem } from './monogram';
 import { signUpUser, signInUser, checkUsernameAvailability, getUsernameByUid } from '../firebase';
 
 // --- Constants ---
-const FONT_FAMILY = 'IBM Plex Mono';
 const CURSOR_COLOR_PRIMARY = '#0066FF';
 const CURSOR_COLOR_SECONDARY = '#FF6B35';
 
@@ -25,9 +24,10 @@ interface BitHomeCanvasProps {
     };
     onBackClick?: () => void;
     onAuthSuccess?: (username: string) => void;
+    fontFamily?: string;
 }
 
-export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogramEnabled = false, showForm = false, isSignup = false, taglineText, navButtons, onBackClick, onAuthSuccess }: BitHomeCanvasProps) {
+export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogramEnabled = false, showForm = false, isSignup = false, taglineText, navButtons, onBackClick, onAuthSuccess, fontFamily = 'IBM Plex Mono' }: BitHomeCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -283,7 +283,7 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         const verticalTextOffset = (layout.charHeight - 16) / 2 + (16 * 0.1);
         
         ctx.save();
-        ctx.font = `16px "${FONT_FAMILY}"`;
+        ctx.font = `16px "${fontFamily}"`;
         ctx.textBaseline = 'top';
         
         // Track clickable regions (dialogue pattern)
@@ -508,7 +508,7 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         if (submitError) {
             const errorY = buttonField.y + layout.charHeight + 10; // Below the button
             ctx.fillStyle = '#FF0000'; // Red error text
-            ctx.font = `14px "${FONT_FAMILY}"`; // Slightly smaller font
+            ctx.font = `14px "${fontFamily}"`; // Slightly smaller font
             const errorText = submitError;
             const errorX = buttonField.x + ((buttonField.width * layout.charWidth) - (errorText.length * (layout.charWidth * 0.9))) / 2; // Center error text
             ctx.fillText(errorText, errorX, errorY);
@@ -518,7 +518,7 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         if (submitSuccess) {
             const successY = buttonField.y + layout.charHeight + 10; // Below the button
             ctx.fillStyle = '#00AA00'; // Green success text
-            ctx.font = `14px "${FONT_FAMILY}"`; // Slightly smaller font
+            ctx.font = `14px "${fontFamily}"`; // Slightly smaller font
             const successText = isSignup ? 'Account created successfully!' : 'Signed in successfully!';
             const successX = buttonField.x + ((buttonField.width * layout.charWidth) - (successText.length * (layout.charWidth * 0.9))) / 2; // Center success text
             ctx.fillText(successText, successX, successY);
@@ -549,7 +549,7 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         const subtitleY = centerY + charHeight; // Subtitle below center
         
         ctx.save();
-        ctx.font = `16px "${FONT_FAMILY}"`;
+        ctx.font = `16px "${fontFamily}"`;
         ctx.textBaseline = 'top';
         
         // Draw black background for title
@@ -588,7 +588,7 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         const centerY = Math.floor(canvasHeight / 2);
         
         ctx.save();
-        ctx.font = `16px "${FONT_FAMILY}"`;
+        ctx.font = `16px "${fontFamily}"`;
         ctx.textBaseline = 'top';
         
         // Track clickable regions
@@ -969,7 +969,7 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         ctx.clearRect(0, 0, cssWidth, cssHeight);
         
         ctx.imageSmoothingEnabled = false;
-        ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
+        ctx.font = `${effectiveFontSize}px ${fontFamily}`;
         ctx.textBaseline = 'top';
 
         const startWorldX = currentOffset.x;

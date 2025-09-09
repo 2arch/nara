@@ -30,7 +30,7 @@ export default function Home() {
   }, []);
   
   const engine = useWorldEngine({ 
-    worldId: 'homeWorld', 
+    worldId: null, 
     // initialBackgroundColor: '#000',
     userUid: user?.uid || null
   });
@@ -118,6 +118,7 @@ export default function Home() {
         }) : undefined}
         onBackClick={showForm ? handleBackToHome : undefined}
         onAuthSuccess={handleAuthSuccess}
+        fontFamily={engine.fontFamily}
       />
     </div>
   );
