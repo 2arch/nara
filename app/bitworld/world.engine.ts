@@ -391,7 +391,10 @@ export function useWorldEngine({
 
     // Ambient text compilation and Firebase sync
     useEffect(() => {
-        if (!worldId) return;
+        if (!worldId || userUid === undefined) return;
+
+        // Additional check to ensure userUid is not null/undefined before proceeding
+        if (!userUid && userUid !== 'blog') return;
 
         // Clear any pending compilation
         if (compilationTimeoutRef.current) {
@@ -473,11 +476,14 @@ export function useWorldEngine({
                 clearTimeout(compilationTimeoutRef.current);
             }
         };
-    }, [worldData, worldId, compileTextStrings, currentStateName, getUserPath]);
+    }, [worldData, worldId, compileTextStrings, currentStateName, getUserPath, userUid]);
 
     // === State Management Functions ===
     const saveState = useCallback(async (stateName: string): Promise<boolean> => {
-        if (!worldId) return false;
+        if (!worldId || userUid === undefined) return false;
+        
+        // Additional check to ensure userUid is not null/undefined before proceeding
+        if (!userUid && userUid !== 'blog') return false;
         
         try {
             // For blog posts, save directly under posts/{post} instead of posts/states/{post}
@@ -519,7 +525,10 @@ export function useWorldEngine({
     }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel, getUserPath, userUid]);
 
     const loadState = useCallback(async (stateName: string): Promise<boolean> => {
-        if (!worldId) return false;
+        if (!worldId || userUid === undefined) return false;
+        
+        // Additional check to ensure userUid is not null/undefined before proceeding
+        if (!userUid && userUid !== 'blog') return false;
         
         try {
             // For blog posts, load directly from posts/{post} instead of posts/states/{post}
@@ -582,7 +591,7 @@ export function useWorldEngine({
             const isBlogMain = userUid === 'blog' && worldId === 'posts';
             const isBlogs = isBlogPost || isBlogMain;
             
-            if (!isBlogs && !userUid) {
+            if (!isBlogs && (userUid === undefined || !userUid)) {
                 return [];
             }
             
@@ -623,7 +632,10 @@ export function useWorldEngine({
     }, [userUid, worldId]);
 
     const deleteState = useCallback(async (stateName: string): Promise<boolean> => {
-        if (!worldId) return false;
+        if (!worldId || userUid === undefined) return false;
+        
+        // Additional check to ensure userUid is not null/undefined before proceeding
+        if (!userUid && userUid !== 'blog') return false;
         
         try {
             // For blog posts, delete directly from posts/{post} instead of posts/states/{post}
@@ -647,14 +659,18 @@ export function useWorldEngine({
 
     // Load available states on component mount
     useEffect(() => {
+        if (userUid === undefined) return;
         loadAvailableStates().then(states => {
             setAvailableStates(states);
         });
-    }, [loadAvailableStates]);
+    }, [loadAvailableStates, userUid]);
     
     // Load compiled text on mount
     useEffect(() => {
-        if (!worldId) return;
+        if (!worldId || userUid === undefined) return;
+        
+        // Additional check to ensure userUid is not null/undefined before proceeding
+        if (!userUid && userUid !== 'blog') return;
         
         // For blog posts, use direct path structure for content
         const isBlogs = userUid === 'blog' && worldId === 'posts';
@@ -671,7 +687,7 @@ export function useWorldEngine({
         }).catch(error => {
             console.error('Failed to load compiled text:', error);
         });
-    }, [worldId, currentStateName, getUserPath]);
+    }, [worldId, currentStateName, getUserPath, userUid]);
 
     // Helper function to detect if there's unsaved work
     const hasUnsavedWork = useCallback((): boolean => {
@@ -694,7 +710,10 @@ export function useWorldEngine({
 
     // === Immediate Settings Save Function ===
     const saveSettingsToFirebase = useCallback(async (newSettings: Partial<WorldSettings>) => {
-        if (!worldId) return;
+        if (!worldId || userUid === undefined) return;
+        
+        // Additional check to ensure userUid is not null/undefined before proceeding
+        if (!userUid && userUid !== 'blog') return;
         
         try {
             const settingsRef = ref(database, getUserPath(`${worldId}/settings`));
@@ -703,7 +722,7 @@ export function useWorldEngine({
         } catch (error) {
             console.error('Failed to save settings to Firebase:', error);
         }
-    }, [worldId, settings, getUserPath]);
+    }, [worldId, settings, getUserPath, userUid]);
     
     // === Deepspawn System ===
     const { 
@@ -753,11 +772,22 @@ export function useWorldEngine({
     const clipboardRef = useRef<{ text: string, width: number, height: number } | null>(null);
 
     // === Persistence ===
+    // Only enable world save when userUid is available to prevent permission errors on refresh
+    const shouldEnableWorldSave = worldId && (userUid !== undefined);
     const {
         isLoading: isLoadingWorld,
         isSaving: isSavingWorld,
         error: worldPersistenceError
-    } = useWorldSave(worldId, worldData, setWorldData, settings, setSettings, true, currentStateName, userUid); // Pass userUid and enable auto-loading
+    } = useWorldSave(
+        shouldEnableWorldSave ? worldId : null, 
+        worldData, 
+        setWorldData, 
+        settings, 
+        setSettings, 
+        true, 
+        currentStateName, 
+        userUid
+    ); // Only enable when userUid is available
 
     // === Refs === (Keep refs for things not directly tied to re-renders or persistence)
     const charSizeCacheRef = useRef<{ [key: number]: { width: number; height: number; fontSize: number } }>({});
