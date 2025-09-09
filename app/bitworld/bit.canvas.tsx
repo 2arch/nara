@@ -659,14 +659,16 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const char = typeof charData === 'string' ? charData : charData.char;
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-                    if (char && char.trim() !== '') {
-                        // Draw black background
+                    if (char) {
+                        // Draw black background for all characters including spaces
                         ctx.fillStyle = '#000000';
                         ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
                         
-                        // Draw white text
-                        ctx.fillStyle = '#FFFFFF';
-                        ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                        // Draw white text (only if not a space)
+                        if (char.trim() !== '') {
+                            ctx.fillStyle = '#FFFFFF';
+                            ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                        }
                     }
                 }
             }
@@ -882,8 +884,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             ctx.textBaseline = 'middle';
                         }
 
-                        // Add distance indicator
-                        const distanceText = ` [${distance}]`;
+                        // Add distance indicator only if proximity threshold is not disabled
+                        const distanceText = engine.settings.labelProximityThreshold === Infinity ? '' : ` [${distance}]`;
                         ctx.fillText(match.text + distanceText, textX, textY);
 
                         // Reset to defaults
@@ -982,8 +984,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     ctx.textBaseline = 'middle';
                                 }
 
-                                // Add distance indicator
-                                const distanceText = ` [${distance}]`;
+                                // Add distance indicator only if proximity threshold is not disabled
+                                const distanceText = engine.settings.labelProximityThreshold === Infinity ? '' : ` [${distance}]`;
                                 ctx.fillText(text + distanceText, textX, textY);
 
                                 // Reset to defaults
@@ -1158,8 +1160,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             ctx.textBaseline = 'middle';
                         }
                         
-                        // Draw distance only (no text for blocks)
-                        ctx.fillText(`[${distanceFromCenter}]`, textX, textY);
+                        // Draw distance only if proximity threshold is not disabled (no text for blocks)
+                        if (engine.settings.labelProximityThreshold !== Infinity) {
+                            ctx.fillText(`[${distanceFromCenter}]`, textX, textY);
+                        }
                         
                         // Reset to defaults
                         ctx.textAlign = 'left';

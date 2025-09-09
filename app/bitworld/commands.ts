@@ -56,7 +56,7 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'deepspawn', 'chat', 'bg', 'nav', 'search', 'state', 'text', 'signout', 'publish', 'unpublish'];
+const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'deepspawn', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'signout', 'publish', 'unpublish'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'white', 'black', 'web'];
 const NAV_COMMANDS: string[] = [];
@@ -368,6 +368,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         }, animationDelay);
     }, [modeState.currentMode]);
 
+    // Calculate dynamic wrap width based on query text
+    const calculateResponseWidth = useCallback((queryText: string, minWidth: number = 15): number => {
+        const queryLines = queryText.split('\n');
+        const maxQueryLineLength = Math.max(...queryLines.map(line => line.length));
+        return Math.max(minWidth, maxQueryLineLength);
+    }, []);
+
     // Add AI response as ephemeral text with typewriter effect
     const addAIResponse = useCallback((startPos: Point, text: string, options?: {
         wrapWidth?: number;
@@ -375,9 +382,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         lineDelay?: number;
         color?: string;
         persistTime?: number;
+        queryText?: string; // Add queryText to calculate dynamic width
     }) => {
         
-        const wrapWidth = options?.wrapWidth || 30;
+        const wrapWidth = options?.wrapWidth || (options?.queryText ? calculateResponseWidth(options.queryText) : 30);
         const typewriterSpeed = options?.typewriterSpeed || 50;
         const lineDelay = options?.lineDelay || 150;
         const color = options?.color || '#808080'; // Gray for AI responses (same as regular ephemeral text)
@@ -463,7 +471,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         };
         
         typeNextChar();
-    }, [addEphemeralText, modeState.currentMode]);
+    }, [addEphemeralText, modeState.currentMode, calculateResponseWidth]);
 
     // Start command mode when '/' is pressed
     const startCommand = useCallback((cursorPos: Point) => {
@@ -1077,6 +1085,41 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return {
                 command: 'state',
                 args: args,
+                commandStartPos: commandState.commandStartPos
+            };
+        }
+
+        if (commandToExecute.startsWith('random')) {
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+            
+            // Navigate to a random existing state
+            if (username && availableStates.length > 0) {
+                // Pick a random state from available states
+                const randomIndex = Math.floor(Math.random() * availableStates.length);
+                const randomStateName = availableStates[randomIndex];
+                
+                // Navigate to random existing state page
+                router.push(`/@${username}/${randomStateName}`);
+                setDialogueText(`Random state: ${randomStateName}`);
+                return null;
+            } else if (availableStates.length === 0) {
+                setDialogueText("No existing states found to navigate to");
+                return null;
+            }
+            
+            // Fallback: Return command execution for world engine to handle (old behavior)
+            return {
+                command: 'random',
+                args: [],
                 commandStartPos: commandState.commandStartPos
             };
         }

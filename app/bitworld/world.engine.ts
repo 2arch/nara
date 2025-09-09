@@ -1183,7 +1183,7 @@ export function useWorldEngine({
                             x: chatMode.inputPositions[0]?.x || cursorPos.x,
                             y: (chatMode.inputPositions[0]?.y || cursorPos.y) + 2 // Start 2 lines below input
                         };
-                        addAIResponse(responseStartPos, response);
+                        addAIResponse(responseStartPos, response, { queryText: chatMode.currentInput.trim() });
                         
                         // Clear current input from chat data after response
                         setChatData({});
@@ -1726,12 +1726,62 @@ export function useWorldEngine({
                     // Show response in dialogue system
                     createSubtitleCycler(response, setDialogueText);
                     
-                    // Show response as ephemeral text below the input
+                    // Write response permanently to canvas below the input
                     const responseStartPos = {
                         x: chatStartPos.x,
                         y: chatStartPos.y + (textToSend.split('\n').length) + 1 // Below the input text
                     };
-                    addAIResponse(responseStartPos, response);
+                    
+                    // Calculate dynamic wrap width based on query
+                    const queryLines = textToSend.trim().split('\n');
+                    const maxQueryLineLength = Math.max(...queryLines.map(line => line.length));
+                    const wrapWidth = Math.max(30, maxQueryLineLength);
+                    
+                    // Text wrapping that honors paragraph breaks
+                    const wrapText = (text: string, maxWidth: number): string[] => {
+                        const paragraphs = text.split('\n');
+                        const lines: string[] = [];
+                        
+                        for (let i = 0; i < paragraphs.length; i++) {
+                            const paragraph = paragraphs[i].trim();
+                            
+                            if (paragraph === '') {
+                                lines.push('');
+                                continue;
+                            }
+                            
+                            const words = paragraph.split(' ');
+                            let currentLine = '';
+                            
+                            for (const word of words) {
+                                const testLine = currentLine ? `${currentLine} ${word}` : word;
+                                if (testLine.length <= maxWidth) {
+                                    currentLine = testLine;
+                                } else {
+                                    if (currentLine) lines.push(currentLine);
+                                    currentLine = word;
+                                }
+                            }
+                            if (currentLine) lines.push(currentLine);
+                        }
+                        return lines;
+                    };
+                    
+                    const wrappedLines = wrapText(response, wrapWidth);
+                    
+                    // Write each character permanently to worldData
+                    const newWorldData = { ...worldData };
+                    for (let lineIndex = 0; lineIndex < wrappedLines.length; lineIndex++) {
+                        const line = wrappedLines[lineIndex];
+                        for (let charIndex = 0; charIndex < line.length; charIndex++) {
+                            const char = line[charIndex];
+                            const x = responseStartPos.x + charIndex;
+                            const y = responseStartPos.y + lineIndex;
+                            const key = `${x},${y}`;
+                            newWorldData[key] = char;
+                        }
+                    }
+                    setWorldData(newWorldData);
                 }).catch((error) => {
                     console.error('Error in context-aware chat:', error);
                     setDialogueText("Could not process message");
