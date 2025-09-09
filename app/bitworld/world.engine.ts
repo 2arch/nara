@@ -9,7 +9,7 @@ import { set, ref } from 'firebase/database';
 import { database, auth } from '@/app/firebase';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
-import { transformText, explainText, summarizeText, createSubtitleCycler, chatWithAI, clearChatHistory, setDialogueWithRevert } from './ai';
+import { transformText, explainText, summarizeText, createSubtitleCycler, chatWithAI, clearChatHistory, setDialogueWithRevert, updateWorldContext } from './ai';
 import { get } from 'firebase/database';
 
 // --- Constants --- (Copied and relevant ones kept)
@@ -134,6 +134,8 @@ export interface WorldEngine {
     availableStates: string[];
     currentStateName: string | null;
     loadAvailableStates: () => Promise<string[]>;
+    username?: string;
+    userUid?: string | null;
 }
 
 // --- Hook Input ---
@@ -404,10 +406,10 @@ export function useWorldEngine({
             // Detect changes
             for (const lineY in compiled) {
                 const y = parseInt(lineY);
-                if (lastCompiledRef.current[y] !== compiled[y]) {
+                if (lastCompiledRef.current[y] !== compiled[y].content) {
                     changes[y] = {
                         old: lastCompiledRef.current[y],
-                        new: compiled[y]
+                        new: compiled[y].content
                     };
                 }
             }
@@ -448,11 +450,17 @@ export function useWorldEngine({
                     }
                 }
                 
+                // Convert compiled objects to just content strings
+                const compiledContentOnly: { [lineY: number]: string } = {};
+                for (const lineY in compiled) {
+                    compiledContentOnly[parseInt(lineY)] = compiled[lineY].content;
+                }
+                
                 // Send batch update to Firebase
                 set(compiledTextRef, { ...lastCompiledRef.current, ...updates })
                     .then(() => {
-                        lastCompiledRef.current = compiled;
-                        setCompiledTextCache(compiled);
+                        lastCompiledRef.current = compiledContentOnly;
+                        setCompiledTextCache(compiledContentOnly);
                     })
                     .catch(error => {
                         console.error('Failed to sync compiled text:', error);
@@ -1695,7 +1703,26 @@ export function useWorldEngine({
             // Send to AI if we have text
             if (textToSend.trim()) {
                 setDialogueText("Processing...");
-                chatWithAI(textToSend.trim()).then((response) => {
+                
+                // First update the cached context with current world state
+                const currentLabels = getAllLabels();
+                const currentCompiledText = compiledTextCache;
+                
+                // Convert compiled text cache to string format
+                const compiledTextString = Object.entries(currentCompiledText)
+                    .sort(([aLine], [bLine]) => parseInt(aLine) - parseInt(bLine))
+                    .map(([lineY, text]) => `Line ${lineY}: ${text}`)
+                    .join('\n');
+                
+                // Update world context first, then chat
+                updateWorldContext({
+                    compiledText: compiledTextString,
+                    labels: currentLabels,
+                    metadata: `Canvas viewport center: ${JSON.stringify(getViewportCenter())}, Current cursor: ${JSON.stringify(cursorPos)}`
+                });
+                
+                // Use world context for AI chat
+                chatWithAI(textToSend.trim(), true).then((response) => { // true = use context
                     // Show response in dialogue system
                     createSubtitleCycler(response, setDialogueText);
                     
@@ -1705,7 +1732,8 @@ export function useWorldEngine({
                         y: chatStartPos.y + (textToSend.split('\n').length) + 1 // Below the input text
                     };
                     addAIResponse(responseStartPos, response);
-                }).catch(() => {
+                }).catch((error) => {
+                    console.error('Error in context-aware chat:', error);
                     setDialogueText("Could not process message");
                 });
                 

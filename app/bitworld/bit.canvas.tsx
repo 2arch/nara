@@ -612,7 +612,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.lightModeData[key];
                 const char = typeof charData === 'string' ? charData : charData.char;
-                const color = typeof charData === 'object' && charData.color ? charData.color : '#808080';
+                const color = typeof charData === 'object' && charData.style?.color ? charData.style.color : '#808080';
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
                     if (char && char.trim() !== '') {

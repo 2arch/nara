@@ -67,7 +67,7 @@ export function createSubtitleCycler(text: string, setDialogueText: (text: strin
 export async function transformText(text: string, instructions: string): Promise<string> {
     try {
         const response = await ai.models.generateContent({
-            model: 'gemini-2.0-flash-001',
+            model: 'gemini-2.5-pro',
             contents: `Transform the following text according to these instructions: "${instructions}"
 
 Original text: "${text}"
@@ -97,7 +97,7 @@ export async function explainText(text: string, analysisType: string = 'analysis
             : `Explain this text focusing on "${analysisType}": "${text}"`;
 
         const response = await ai.models.generateContent({
-            model: 'gemini-2.0-flash-001',
+            model: 'gemini-2.5-pro',
             contents: prompt,
             config: {
                 maxOutputTokens: 200,
@@ -123,7 +123,7 @@ export async function summarizeText(text: string, focus?: string): Promise<strin
             : `Summarize this text: "${text}"`;
 
         const response = await ai.models.generateContent({
-            model: 'gemini-2.0-flash-001',
+            model: 'gemini-2.5-pro',
             contents: prompt,
             config: {
                 maxOutputTokens: 150,
@@ -149,10 +149,36 @@ export interface ChatMessage {
 // Chat session state
 let chatHistory: ChatMessage[] = [];
 
+// Context for ambient navigation
+let currentWorldContext: {
+    compiledText: string;
+    labels: Array<{ text: string; x: number; y: number; }>;
+    metadata?: string;
+} | null = null;
+
+/**
+ * Update the world context for ambient navigation
+ */
+export function updateWorldContext(worldContext: {
+    compiledText: string;
+    labels: Array<{ text: string; x: number; y: number; }>;
+    metadata?: string;
+}): void {
+    currentWorldContext = worldContext;
+    console.log('World context updated for ambient navigation');
+}
+
+/**
+ * Get the current world context
+ */
+export function getCurrentWorldContext() {
+    return currentWorldContext;
+}
+
 /**
  * Chat with AI maintaining conversation history
  */
-export async function chatWithAI(message: string): Promise<string> {
+export async function chatWithAI(message: string, useCache: boolean = true): Promise<string> {
     try {
         // Add user message to history
         chatHistory.push({
@@ -167,20 +193,46 @@ export async function chatWithAI(message: string): Promise<string> {
             .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
             .join('\n');
 
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.0-flash-001',
-            contents: `Previous conversation:
+        let response;
+        
+        // Use world context if available and enabled
+        if (useCache && currentWorldContext) {
+            try {
+                const contextContent = `Canvas context: ${currentWorldContext.compiledText}\nLabels: ${currentWorldContext.labels.map(l => l.text).join(', ')}\n\nUser: ${message}\n\nRespond briefly and conversationally. Reference canvas content when relevant.`;
+                
+                response = await ai.models.generateContent({
+                    model: 'gemini-2.5-pro',
+                    contents: contextContent,
+                    config: {
+                        maxOutputTokens: 100,
+                        temperature: 0.7,
+                        systemInstruction: 'You are a concise ambient navigator. Give brief, helpful responses about canvas content connections. Be conversational, not academic.'
+                    }
+                });
+            } catch (error) {
+                console.error('Error using world context, falling back:', error);
+                // Fall back to non-cached request
+                useCache = false;
+            }
+        }
+        
+        // If not using cache or cache failed
+        if (!useCache || !response) {
+            response = await ai.models.generateContent({
+                model: 'gemini-2.5-pro',
+                contents: `Previous conversation:
 ${conversationContext}
 
 User: ${message}
 
 Respond naturally and conversationally. Keep responses concise but complete.`,
-            config: {
-                maxOutputTokens: 300,
-                temperature: 0.7,
-                systemInstruction: 'You are a helpful assistant engaged in a natural conversation. Be conversational, helpful, and concise. Remember the context of the conversation.'
-            }
-        });
+                config: {
+                    maxOutputTokens: 300,
+                    temperature: 0.7,
+                    systemInstruction: 'You are a helpful assistant engaged in a natural conversation. Be conversational, helpful, and concise. Remember the context of the conversation.'
+                }
+            });
+        }
 
         const aiResponse = response.text?.trim() || 'I could not process that message.';
 
@@ -203,6 +255,14 @@ Respond naturally and conversationally. Keep responses concise but complete.`,
  */
 export function clearChatHistory(): void {
     chatHistory = [];
+}
+
+/**
+ * Clear world context
+ */
+export function clearWorldContext(): void {
+    currentWorldContext = null;
+    console.log('World context cleared');
 }
 
 /**
@@ -375,7 +435,7 @@ export async function generateVideo(prompt: string): Promise<string | null> {
 export async function generateDeepspawnQuestions(recentText: string): Promise<string[]> {
     try {
         const response = await ai.models.generateContent({
-            model: 'gemini-2.0-flash-001',
+            model: 'gemini-2.5-pro',
             contents: `Based on this text: "${recentText}"
 
 Generate exactly 5 very short writing prompts that encourage deeper thinking. Each must be:

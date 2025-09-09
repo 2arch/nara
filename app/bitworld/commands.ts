@@ -377,40 +377,60 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         persistTime?: number;
     }) => {
         
-        const wrapWidth = options?.wrapWidth || 40;
+        const wrapWidth = options?.wrapWidth || 30;
         const typewriterSpeed = options?.typewriterSpeed || 50;
         const lineDelay = options?.lineDelay || 150;
         const color = options?.color || '#808080'; // Gray for AI responses (same as regular ephemeral text)
         const persistTime = options?.persistTime || 3000; // Longer persistence for AI
         
-        // Simple text wrapping
+        // Text wrapping that honors paragraph breaks
         const wrapText = (text: string, maxWidth: number): string[] => {
-            const words = text.split(' ');
+            // First split by paragraph breaks
+            const paragraphs = text.split('\n');
             const lines: string[] = [];
-            let currentLine = '';
             
-            for (const word of words) {
-                const testLine = currentLine ? `${currentLine} ${word}` : word;
-                if (testLine.length <= maxWidth) {
-                    currentLine = testLine;
-                } else {
-                    if (currentLine) {
-                        lines.push(currentLine);
-                        currentLine = word;
+            for (let i = 0; i < paragraphs.length; i++) {
+                const paragraph = paragraphs[i].trim();
+                
+                if (paragraph === '') {
+                    // Empty line for paragraph break
+                    lines.push('');
+                    continue;
+                }
+                
+                // Wrap this paragraph
+                const words = paragraph.split(' ');
+                let currentLine = '';
+                
+                for (const word of words) {
+                    const testLine = currentLine ? `${currentLine} ${word}` : word;
+                    if (testLine.length <= maxWidth) {
+                        currentLine = testLine;
                     } else {
-                        // Word is longer than line, split it
-                        lines.push(word.substring(0, maxWidth));
-                        currentLine = word.substring(maxWidth);
+                        if (currentLine) {
+                            lines.push(currentLine);
+                            currentLine = word;
+                        } else {
+                            // Word is longer than line, split it
+                            lines.push(word.substring(0, maxWidth));
+                            currentLine = word.substring(maxWidth);
+                        }
                     }
                 }
+                if (currentLine) lines.push(currentLine);
             }
-            if (currentLine) lines.push(currentLine);
             return lines;
         };
         
         const wrappedLines = wrapText(text, wrapWidth);
         let lineIndex = 0;
         let charIndex = 0;
+        const allCharPositions: Array<{ x: number; y: number; char: string }> = [];
+        
+        // Calculate total typing time to delay fade start
+        const totalChars = wrappedLines.reduce((sum, line) => sum + line.length, 0);
+        const totalLines = wrappedLines.length;
+        const totalTypingTime = (totalChars * typewriterSpeed) + (totalLines * lineDelay);
         
         const typeNextChar = () => {
             if (lineIndex >= wrappedLines.length) return;
@@ -421,10 +441,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 const x = startPos.x + charIndex;
                 const y = startPos.y + lineIndex;
                 
-                // Add character with AI color and longer persistence
+                // Store for later cleanup
+                allCharPositions.push({ x, y, char });
+                
+                // Add character with delayed fade (starts after all typing is done)
                 addEphemeralText({ x, y }, char, {
                     color: color,
-                    animationDelay: persistTime
+                    animationDelay: totalTypingTime + persistTime
                 });
                 
                 charIndex++;
