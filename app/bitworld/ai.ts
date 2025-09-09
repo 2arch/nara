@@ -496,3 +496,50 @@ Format as a numbered list:
         ];
     }
 }
+
+/**
+ * Generate a concise label for a text cluster using AI
+ * @param clusterContent Full text content of the cluster
+ * @returns Promise<string> Concise label or null if generation fails
+ */
+export async function generateClusterLabel(clusterContent: string): Promise<string | null> {
+    try {
+        console.log('=== CLUSTER LABEL GENERATION ===');
+        console.log('Input content:', clusterContent);
+        
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-lite',
+            contents: `Create a very short, descriptive label (2-4 words max) for this text cluster:
+
+"${clusterContent}"
+
+The label should:
+- Capture the main topic/theme
+- Be concise and clear
+- Work as a navigation waypoint
+- Avoid generic words like "text" or "content"
+
+Respond with ONLY the label, no explanation.`,
+            config: {
+                maxOutputTokens: 20,
+                temperature: 0.3,
+                systemInstruction: 'You create concise, descriptive labels for text clusters. Respond only with the label.'
+            }
+        });
+
+        const label = response.text?.trim();
+        console.log('AI response:', label);
+        
+        // Validate the label is reasonably short and meaningful
+        if (label && label.length >= 3 && label.length <= 30 && !label.includes('"')) {
+            console.log('Generated label:', label);
+            return label;
+        }
+        
+        console.log('Label validation failed:', { label, length: label?.length });
+        return null;
+    } catch (error) {
+        console.error('Error generating cluster label:', error);
+        return null;
+    }
+}

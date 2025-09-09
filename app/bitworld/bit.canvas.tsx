@@ -8,7 +8,6 @@ import { useControllerSystem, createMonogramController, createCameraController }
 import { detectTextBlocks, extractLineCharacters } from './bit.blocks';
 
 // --- Constants --- (Copied and relevant ones kept)
-const FONT_FAMILY = 'IBM Plex Mono';
 const GRID_COLOR = '#F2F2F233';
 const CURSOR_COLOR_PRIMARY = '#003DFF55';
 const CURSOR_COLOR_SECONDARY = '#0022DD55';
@@ -66,9 +65,10 @@ interface BitCanvasProps {
     showCursor?: boolean;
     monogramEnabled?: boolean;
     dialogueEnabled?: boolean;
+    fontFamily?: string; // Font family for text rendering
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono' }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -563,7 +563,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         
         ctx.imageSmoothingEnabled = false;
-        ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
+        ctx.font = `${effectiveFontSize}px ${fontFamily}`;
         ctx.textBaseline = 'top';
 
         const startWorldX = currentOffset.x;
@@ -880,7 +880,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const distance = Math.round(Math.sqrt(deltaX * deltaX + deltaY * deltaY));
                         
                         ctx.fillStyle = '#800080';
-                        ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
+                        ctx.font = `${effectiveFontSize}px ${fontFamily}`;
                         const textOffset = ARROW_SIZE * 1.5;
                         
                         let textX = adjustedX - Math.cos(intersection.angle) * textOffset;
@@ -902,7 +902,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         }
 
                         // Add distance indicator only if proximity threshold is not disabled
-                        const distanceText = engine.settings.labelProximityThreshold === Infinity ? '' : ` [${distance}]`;
+                        const distanceText = engine.settings.labelProximityThreshold >= 999999 ? '' : ` [${distance}]`;
                         ctx.fillText(match.text + distanceText, textX, textY);
 
                         // Reset to defaults
@@ -933,7 +933,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                         if (isVisible) {
                             // Ensure consistent font settings for labels (same as regular text)
-                            ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
+                            ctx.font = `${effectiveFontSize}px ${fontFamily}`;
                             ctx.textBaseline = 'top';
                             
                             // Render each character of the label individually across cells
@@ -980,7 +980,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 if (text) {
                                 
                                 ctx.fillStyle = color;
-                                ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
+                                ctx.font = `${effectiveFontSize}px ${fontFamily}`;
                                 const textOffset = ARROW_SIZE * 1.5;
                                 
                                 let textX = adjustedX - Math.cos(intersection.angle) * textOffset;
@@ -1002,7 +1002,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 }
 
                                 // Add distance indicator only if proximity threshold is not disabled
-                                const distanceText = engine.settings.labelProximityThreshold === Infinity ? '' : ` [${distance}]`;
+                                const distanceText = engine.settings.labelProximityThreshold >= 999999 ? '' : ` [${distance}]`;
                                 ctx.fillText(text + distanceText, textX, textY);
 
                                 // Reset to defaults
@@ -1156,7 +1156,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const distanceFromCenter = Math.round(Math.sqrt(deltaCenterX * deltaCenterX + deltaCenterY * deltaCenterY));
                         
                         ctx.fillStyle = heatColor;
-                        ctx.font = `${effectiveFontSize}px ${FONT_FAMILY}`;
+                        ctx.font = `${effectiveFontSize}px ${fontFamily}`;
                         const textOffset = ARROW_SIZE * 1.5;
                         
                         let textX = adjustedX - Math.cos(intersection.angle) * textOffset;
@@ -1178,7 +1178,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         }
                         
                         // Draw distance only if proximity threshold is not disabled (no text for blocks)
-                        if (engine.settings.labelProximityThreshold !== Infinity) {
+                        if (engine.settings.labelProximityThreshold < 999999) {
                             ctx.fillText(`[${distanceFromCenter}]`, textX, textY);
                         }
                         
@@ -1188,6 +1188,94 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     }
                 }
             }
+        }
+
+        // === Render Cluster Waypoint Arrows ===
+        if (engine.clustersVisible && engine.clusterLabels.length > 0) {
+            console.log('Rendering cluster waypoints. Total clusters:', engine.clusterLabels.length);
+            console.log('View bounds:', viewBounds);
+            
+            for (const clusterLabel of engine.clusterLabels) {
+            const { position, text } = clusterLabel;
+            console.log('Checking cluster:', { text, position });
+            
+            // Check if cluster is outside current viewport
+            const isClusterVisible = position.x >= viewBounds.minX && 
+                                   position.x <= viewBounds.maxX &&
+                                   position.y >= viewBounds.minY && 
+                                   position.y <= viewBounds.maxY;
+            
+            console.log('Cluster visible:', isClusterVisible);
+            
+            if (!isClusterVisible) {
+                console.log('Drawing green arrow for off-screen cluster:', text);
+                // Convert cluster position to screen coordinates for direction calculation
+                const clusterScreenPos = engine.worldToScreen(position.x, position.y, currentZoom, currentOffset);
+                
+                // Find intersection point on viewport edge
+                const intersection = getViewportEdgeIntersection(
+                    viewportCenterScreen.x,
+                    viewportCenterScreen.y,
+                    clusterScreenPos.x,
+                    clusterScreenPos.y,
+                    cssWidth,
+                    cssHeight
+                );
+                
+                if (intersection) {
+                    // Adjust intersection point to be within margin from edge
+                    const edgeBuffer = ARROW_MARGIN;
+                    let adjustedX = intersection.x;
+                    let adjustedY = intersection.y;
+                    
+                    // Clamp to viewport bounds with margin
+                    adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
+                    adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
+                    
+                    // Draw the green waypoint arrow for cluster
+                    drawArrow(ctx, adjustedX, adjustedY, intersection.angle, '#00FF00');
+                    
+                    // Draw the cluster label text next to the arrow
+                    const viewportCenter = engine.getViewportCenter();
+                    const deltaCenterX = position.x - viewportCenter.x;
+                    const deltaCenterY = position.y - viewportCenter.y;
+                    const distanceFromCenter = Math.round(Math.sqrt(deltaCenterX * deltaCenterX + deltaCenterY * deltaCenterY));
+                    
+                    ctx.fillStyle = '#00FF00'; // Green color for cluster labels
+                    ctx.font = `${effectiveFontSize}px ${fontFamily}`;
+                    const textOffset = ARROW_SIZE * 1.5;
+                    
+                    let textX = adjustedX - Math.cos(intersection.angle) * textOffset;
+                    let textY = adjustedY - Math.sin(intersection.angle) * textOffset;
+                    
+                    // Adjust alignment to keep text inside the screen bounds
+                    if (Math.abs(intersection.angle) < Math.PI / 2) {
+                        ctx.textAlign = 'right';
+                    } else {
+                        ctx.textAlign = 'left';
+                    }
+                    
+                    if (intersection.angle > Math.PI / 4 && intersection.angle < 3 * Math.PI / 4) {
+                        ctx.textBaseline = 'bottom';
+                    } else if (intersection.angle < -Math.PI / 4 && intersection.angle > -3 * Math.PI / 4) {
+                        ctx.textBaseline = 'top';
+                    } else {
+                        ctx.textBaseline = 'middle';
+                    }
+                    
+                    // Draw cluster label with distance (if enabled)
+                    if (engine.settings.labelProximityThreshold < 999999) {
+                        ctx.fillText(`${text} [${distanceFromCenter}]`, textX, textY);
+                    } else {
+                        ctx.fillText(text, textX, textY);
+                    }
+                    
+                    // Reset to defaults
+                    ctx.textAlign = 'left';
+                    ctx.textBaseline = 'top';
+                }
+            }
+        }
         }
 
         // // === Render Panning Direction ===

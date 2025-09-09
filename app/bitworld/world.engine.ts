@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useWorldSave } from './world.save'; // Import the new hook
 import { useCommandSystem, CommandState, CommandExecution, BackgroundMode } from './commands'; // Import command system
-import { getSmartIndentation, calculateWordDeletion } from './bit.blocks'; // Import block detection utilities
+import { getSmartIndentation, calculateWordDeletion, extractLineCharacters, detectTextBlocks, findClosestBlock } from './bit.blocks'; // Import block detection utilities
 import { useDeepspawnSystem } from './deepspawn'; // Import deepspawn system
 import { useWorldSettings, WorldSettings } from './settings';
 import { set, ref } from 'firebase/database';
@@ -10,6 +10,7 @@ import { database, auth } from '@/app/firebase';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 import { transformText, explainText, summarizeText, createSubtitleCycler, chatWithAI, clearChatHistory, setDialogueWithRevert, updateWorldContext } from './ai';
+import { useAutoDialogue } from './dialogue';
 import { get } from 'firebase/database';
 
 // --- Constants --- (Copied and relevant ones kept)
@@ -58,6 +59,7 @@ export interface WorldEngine {
     backgroundImage?: string;
     backgroundVideo?: string;
     textColor: string;
+    fontFamily: string;
     currentTextStyle: {
         color: string;
         background?: string;
@@ -136,6 +138,15 @@ export interface WorldEngine {
     loadAvailableStates: () => Promise<string[]>;
     username?: string;
     userUid?: string | null;
+    // Text cluster system
+    clusterLabels: Array<{
+        clusterId: string;
+        position: { x: number; y: number };
+        text: string;
+        confidence: number;
+    }>;
+    clustersVisible: boolean;
+    updateClusterLabels: () => Promise<void>;
 }
 
 // --- Hook Input ---
@@ -174,6 +185,10 @@ export function useWorldEngine({
     const [viewOffset, setViewOffset] = useState<Point>(initialViewOffset);
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
     const [dialogueText, setDialogueText] = useState('');
+    const [lastEnterX, setLastEnterX] = useState<number | null>(null); // Track X position from last Enter
+    
+    // Auto-clear temporary dialogue messages
+    useAutoDialogue(dialogueText, setDialogueText);
     
     // === Chat Mode State ===
     const [chatMode, setChatMode] = useState<{
@@ -190,6 +205,15 @@ export function useWorldEngine({
     
     const [chatData, setChatData] = useState<WorldData>({});
     const [searchData, setSearchData] = useState<WorldData>({});
+    
+    // === Text Cluster System ===
+    const [clusterLabels, setClusterLabels] = useState<Array<{
+        clusterId: string;
+        position: { x: number; y: number };
+        text: string;
+        confidence: number;
+    }>>([]);
+    const [clustersVisible, setClustersVisible] = useState<boolean>(false);
     
     // === State Management System ===
     const [statePrompt, setStatePrompt] = useState<{
@@ -226,6 +250,113 @@ export function useWorldEngine({
         return labels;
     }, [worldData]);
 
+    // === Character Dimensions Calculation ===
+    const getEffectiveCharDims = useCallback((zoom: number): { width: number; height: number; fontSize: number } => {
+        if (charSizeCacheRef.current[zoom]) {
+            return charSizeCacheRef.current[zoom];
+        }
+        // Simple scaling - adjust as needed
+        const effectiveWidth = Math.max(1, Math.round(BASE_CHAR_WIDTH * zoom));
+        const effectiveHeight = Math.max(1, Math.round(effectiveWidth * 1.8)); // Maintain aspect ratio roughly
+        const effectiveFontSize = Math.max(1, Math.round(effectiveWidth * 1.5));
+
+        const dims = { width: effectiveWidth, height: effectiveHeight, fontSize: effectiveFontSize };
+        charSizeCacheRef.current[zoom] = dims;
+        return dims;
+    }, []); // No dependencies needed if constants are outside
+
+    // === Screen-World Coordinate Conversion ===
+    const screenToWorld = useCallback((screenX: number, screenY: number, currentZoom: number, currentOffset: Point): Point => {
+        const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(currentZoom);
+        if (effectiveCharWidth === 0 || effectiveCharHeight === 0) return currentOffset;
+        const worldX = screenX / effectiveCharWidth + currentOffset.x;
+        const worldY = screenY / effectiveCharHeight + currentOffset.y;
+        return { x: Math.floor(worldX), y: Math.floor(worldY) };
+    }, [getEffectiveCharDims]);
+
+    // === Viewport Center Calculation ===
+    const getViewportCenter = useCallback((): Point => {
+        // Calculate center of viewport in world coordinates
+        const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
+        if (effectiveCharWidth === 0 || effectiveCharHeight === 0) {
+            return { x: 0, y: 0 };
+        }
+        
+        // Check if we're in browser environment
+        if (typeof window === 'undefined') {
+            return { x: 0, y: 0 };
+        }
+        
+        // Use window dimensions for viewport size
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        
+        // Center of screen in screen coordinates
+        const centerScreenX = viewportWidth / 2;
+        const centerScreenY = viewportHeight / 2;
+        
+        // Convert to world coordinates
+        return screenToWorld(centerScreenX, centerScreenY, zoomLevel, viewOffset);
+    }, [zoomLevel, viewOffset, getEffectiveCharDims, screenToWorld]);
+
+    // === Text Cluster Label Generation ===
+    const updateClusterLabels = useCallback(async () => {
+        try {
+            console.log('=== UPDATING CLUSTER LABELS ===');
+            console.log('Current world data keys:', Object.keys(worldData).length);
+            
+            // Import clustering functions
+            const { 
+                extractAllTextBlocks, 
+                groupTextBlocksIntoClusters, 
+                filterClustersForLabeling, 
+                generateClusterLabels 
+            } = await import('./bit.blocks');
+
+            // Get current viewport bounds for optimization
+            const viewCenter = getViewportCenter();
+            const viewportRadius = Math.max(100, 150 / zoomLevel); // Scale with zoom
+            
+            const viewport = {
+                minX: Math.floor(viewCenter.x - viewportRadius),
+                maxX: Math.ceil(viewCenter.x + viewportRadius),
+                minY: Math.floor(viewCenter.y - viewportRadius),
+                maxY: Math.ceil(viewCenter.y + viewportRadius)
+            };
+
+            // Extract text blocks from world data within viewport
+            const lineBlocks = extractAllTextBlocks(worldData, viewport);
+            console.log('Extracted line blocks:', lineBlocks.size);
+            
+            // Group blocks into clusters
+            const clusters = groupTextBlocksIntoClusters(lineBlocks);
+            console.log('Found clusters:', clusters.length);
+            
+            // Filter clusters that meet labeling conditions
+            const qualifiedClusters = filterClustersForLabeling(clusters);
+            console.log('Qualified clusters:', qualifiedClusters.length);
+            
+            // Generate AI labels for qualified clusters
+            const aiLabels = await generateClusterLabels(qualifiedClusters);
+            console.log('Generated AI labels:', aiLabels.length);
+            
+            // Convert to simplified format for rendering
+            const simplifiedLabels = aiLabels.map(label => ({
+                clusterId: label.clusterId,
+                position: label.position,
+                text: label.text,
+                confidence: label.confidence
+            }));
+            
+            console.log('Final simplified labels:', simplifiedLabels);
+            setClusterLabels(simplifiedLabels);
+            
+        } catch (error) {
+            console.error('Error updating cluster labels:', error);
+            // Don't clear existing labels on error, just log it
+        }
+    }, [worldData, getViewportCenter, zoomLevel]);
+
     // === Command System ===
     const { 
         commandState, 
@@ -243,6 +374,7 @@ export function useWorldEngine({
         backgroundImage,
         backgroundVideo,
         textColor,
+        fontFamily,
         currentTextStyle,
         searchPattern,
         isSearchActive,
@@ -438,7 +570,7 @@ export function useWorldEngine({
                 }
                 
                 const contentPath = currentStateName ? 
-                    getUserPath(`${worldId}/states/${currentStateName}/content`) :
+                    getUserPath(`${currentStateName}/content`) :
                     getUserPath(`${worldId}/content`);
                 const compiledTextRef = ref(database, contentPath);
                 
@@ -498,8 +630,8 @@ export function useWorldEngine({
                 await set(dataRef, worldData);
                 await set(settingsRef, settings);
             } else {
-                // Regular state saving with nested structure
-                const stateRef = ref(database, getUserPath(`${worldId}/states/${stateName}`));
+                // Regular state saving - save directly to worlds/{userId}/{stateName}
+                const stateRef = ref(database, getUserPath(`${stateName}`));
                 
                 // Compile text strings from individual characters
                 const compiledText = compileTextStrings(worldData);
@@ -548,8 +680,8 @@ export function useWorldEngine({
                 setWorldData(worldDataToLoad);
                 setSettings(settingsToLoad);
             } else {
-                // Regular state loading with nested structure
-                const stateRef = ref(database, getUserPath(`${worldId}/states/${stateName}`));
+                // Regular state loading - load directly from worlds/{userId}/{stateName}
+                const stateRef = ref(database, getUserPath(`${stateName}`));
                 const snapshot = await get(stateRef);
                 const stateData = snapshot.val();
                 
@@ -642,7 +774,7 @@ export function useWorldEngine({
             const isBlogs = userUid === 'blog' && worldId === 'posts';
             const stateRef = isBlogs ? 
                 ref(database, `worlds/blog/posts/${stateName}`) :
-                ref(database, getUserPath(`${worldId}/states/${stateName}`));
+                ref(database, getUserPath(`${stateName}`));
             await set(stateRef, null); // Firebase way to delete
             
             // If we're deleting the current state, clear the current state name
@@ -675,7 +807,7 @@ export function useWorldEngine({
         // For blog posts, use direct path structure for content
         const isBlogs = userUid === 'blog' && worldId === 'posts';
         const contentPath = currentStateName ? 
-            (isBlogs ? `worlds/blog/posts/${currentStateName}/content` : getUserPath(`${worldId}/states/${currentStateName}/content`)) :
+            (isBlogs ? `worlds/blog/posts/${currentStateName}/content` : getUserPath(`${currentStateName}/content`)) :
             getUserPath(`${worldId}/content`);
         const compiledTextRef = ref(database, contentPath);
         get(compiledTextRef).then((snapshot) => {
@@ -834,28 +966,6 @@ export function useWorldEngine({
     }, []);
 
     // === Helper Functions (Largely unchanged, but use state variables) ===
-    const getEffectiveCharDims = useCallback((zoom: number): { width: number; height: number; fontSize: number } => {
-        if (charSizeCacheRef.current[zoom]) {
-            return charSizeCacheRef.current[zoom];
-        }
-        // Simple scaling - adjust as needed
-        const effectiveWidth = Math.max(1, Math.round(BASE_CHAR_WIDTH * zoom));
-        const effectiveHeight = Math.max(1, Math.round(effectiveWidth * 1.8)); // Maintain aspect ratio roughly
-        const effectiveFontSize = Math.max(1, Math.round(effectiveWidth * 1.5));
-
-        const dims = { width: effectiveWidth, height: effectiveHeight, fontSize: effectiveFontSize };
-        charSizeCacheRef.current[zoom] = dims;
-        return dims;
-    }, []); // No dependencies needed if constants are outside
-
-    const screenToWorld = useCallback((screenX: number, screenY: number, currentZoom: number, currentOffset: Point): Point => {
-        const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(currentZoom);
-        if (effectiveCharWidth === 0 || effectiveCharHeight === 0) return currentOffset;
-        const worldX = screenX / effectiveCharWidth + currentOffset.x;
-        const worldY = screenY / effectiveCharHeight + currentOffset.y;
-        return { x: Math.floor(worldX), y: Math.floor(worldY) };
-    }, [getEffectiveCharDims]);
-
     const worldToScreen = useCallback((worldX: number, worldY: number, currentZoom: number, currentOffset: Point): Point => {
         const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(currentZoom);
         const screenX = (worldX - currentOffset.x) * effectiveCharWidth;
@@ -1086,12 +1196,13 @@ export function useWorldEngine({
             setDialogueWithRevert("Search cleared", setDialogueText);
             return true;
         }
+        
 
         // === State Prompt Handling ===
         if (statePrompt.type) {
             if (key === 'Escape') {
                 setStatePrompt({ type: null });
-                setDialogueText("Operation cancelled");
+                setDialogueWithRevert("Operation cancelled", setDialogueText);
                 return true;
             }
             
@@ -1121,19 +1232,19 @@ export function useWorldEngine({
                                 setDialogueText("Loading requested state...");
                                 loadState(loadStateName).then((loadSuccess) => {
                                     if (loadSuccess) {
-                                        setDialogueText(`Current work saved as "${saveStateName}", "${loadStateName}" loaded successfully`);
+                                        setDialogueWithRevert(`Current work saved as "${saveStateName}", "${loadStateName}" loaded successfully`, setDialogueText);
                                     } else {
-                                        setDialogueText(`Current work saved as "${saveStateName}", but failed to load "${loadStateName}"`);
+                                        setDialogueWithRevert(`Current work saved as "${saveStateName}", but failed to load "${loadStateName}"`, setDialogueText);
                                     }
                                     setStatePrompt({ type: null });
                                 });
                             } else {
-                                setDialogueText("Failed to save current work");
+                                setDialogueWithRevert("Failed to save current work", setDialogueText);
                                 setStatePrompt({ type: null });
                             }
                         });
                     } else {
-                        setDialogueText("State name cannot be empty");
+                        setDialogueWithRevert("State name cannot be empty", setDialogueText);
                         setStatePrompt({ type: null });
                     }
                     return true;
@@ -1224,7 +1335,7 @@ export function useWorldEngine({
                             isProcessing: false
                         }));
                     }).catch(() => {
-                        setDialogueText("Could not process chat message");
+                        setDialogueWithRevert("Could not process chat message", setDialogueText);
                         // Clear chat data even on error
                         setChatData({});
                         setChatMode(prev => ({ 
@@ -1246,7 +1357,7 @@ export function useWorldEngine({
                 });
                 // Clear any chat input
                 setChatData({});
-                setDialogueText("Chat mode deactivated.");
+                setDialogueWithRevert("Chat mode deactivated.", setDialogueText);
                 return true;
             } else if (key.length === 1) {
                 // Add character to chat input
@@ -1374,7 +1485,7 @@ export function useWorldEngine({
                     transformText(selectedText, instructions).then((result) => {
                         createSubtitleCycler(result, setDialogueText);
                     }).catch(() => {
-                        setDialogueText(`Could not transform text`);
+                        setDialogueWithRevert(`Could not transform text`, setDialogueText);
                     });
                 } else if (!selectedText) {
                     setDialogueWithRevert("Select a region of text first, then use: /transform [instructions]", setDialogueText);
@@ -1393,7 +1504,7 @@ export function useWorldEngine({
                     explainText(selectedText, instructions).then((result) => {
                         createSubtitleCycler(result, setDialogueText);
                     }).catch(() => {
-                        setDialogueText(`Could not explain text`);
+                        setDialogueWithRevert(`Could not explain text`, setDialogueText);
                     });
                 } else {
                     setDialogueWithRevert("Select a region of text first, then use: /explain [optional: how to explain]", setDialogueText);
@@ -1410,7 +1521,7 @@ export function useWorldEngine({
                     summarizeText(selectedText, focus).then((result) => {
                         createSubtitleCycler(result, setDialogueText);
                     }).catch(() => {
-                        setDialogueText(`Could not summarize text`);
+                        setDialogueWithRevert(`Could not summarize text`, setDialogueText);
                     });
                 } else {
                     setDialogueWithRevert("Select a region of text first, then use: /summarize [optional focus]", setDialogueText);
@@ -1438,9 +1549,9 @@ export function useWorldEngine({
                     setDialogueWithRevert("Chat mode deactivated.", setDialogueText);
                 }
             } else if (exec.command === 'modes') {
-                setDialogueText("Available modes: edit, view, select. Usage: /modes [mode] (coming soon)");
+                setDialogueWithRevert("Available modes: edit, view, select. Usage: /modes [mode] (coming soon)", setDialogueText);
             } else if (exec.command === 'settings') {
-                setDialogueText("Settings menu: /settings [option] [value] (coming soon)");
+                setDialogueWithRevert("Settings menu: /settings [option] [value] (coming soon)", setDialogueText);
             } else if (exec.command === 'label') {
                 // Check for --distance flag first
                 if (exec.args.length >= 2 && exec.args[0] === '--distance') {
@@ -1448,7 +1559,7 @@ export function useWorldEngine({
                     
                     // Check for 'off' to disable threshold
                     if (arg === 'off') {
-                        const newSettings = { labelProximityThreshold: Infinity };
+                        const newSettings = { labelProximityThreshold: 999999 };
                         updateSettings(newSettings);
                         saveSettingsToFirebase(newSettings);
                         setDialogueWithRevert(`Label proximity threshold disabled - all labels will show waypoints`, setDialogueText);
@@ -1491,47 +1602,64 @@ export function useWorldEngine({
             } else if (exec.command === 'signout') {
                 setDialogueText("Signing out...");
                 signOut(auth).then(() => {
-                    setDialogueText("Signed out successfully");
+                    setDialogueWithRevert("Signed out successfully", setDialogueText);
                     router.push('/');
                 }).catch((error) => {
-                    setDialogueText(`Error signing out: ${error.message}`);
+                    setDialogueWithRevert(`Error signing out: ${error.message}`, setDialogueText);
                 });
             } else if (exec.command === 'publish') {
                 if (!currentStateName) {
-                    setDialogueText("No current state to publish. Save your work first with /state [name]");
+                    setDialogueWithRevert("No current state to publish. Save your work first with /state [name]", setDialogueText);
                 } else {
                     setDialogueText("Publishing state...");
                     // Add public property to current state
                     const stateRef = ref(database, `worlds/${userUid}/${currentStateName}/public`);
                     set(stateRef, true).then(() => {
-                        setDialogueText(`State "${currentStateName}" is now public`);
+                        setDialogueWithRevert(`State "${currentStateName}" is now public`, setDialogueText);
                     }).catch((error) => {
-                        setDialogueText(`Error publishing state: ${error.message}`);
+                        setDialogueWithRevert(`Error publishing state: ${error.message}`, setDialogueText);
                     });
                 }
             } else if (exec.command === 'unpublish') {
                 if (!currentStateName) {
-                    setDialogueText("No current state to unpublish. Save your work first with /state [name]");
+                    setDialogueWithRevert("No current state to unpublish. Save your work first with /state [name]", setDialogueText);
                 } else {
                     setDialogueText("Unpublishing state...");
                     // Remove public property from current state
                     const stateRef = ref(database, `worlds/${userUid}/${currentStateName}/public`);
                     set(stateRef, false).then(() => {
-                        setDialogueText(`State "${currentStateName}" is now private`);
+                        setDialogueWithRevert(`State "${currentStateName}" is now private`, setDialogueText);
                     }).catch((error) => {
-                        setDialogueText(`Error unpublishing state: ${error.message}`);
+                        setDialogueWithRevert(`Error unpublishing state: ${error.message}`, setDialogueText);
                     });
+                }
+            } else if (exec.command === 'cluster') {
+                if (exec.args.length === 0) {
+                    // No arguments - generate/refresh clusters
+                    updateClusterLabels();
+                    setClustersVisible(true);
+                    setDialogueWithRevert("Generating cluster labels...", setDialogueText, 2000);
+                } else if (exec.args[0] === 'on') {
+                    // Turn on cluster visibility
+                    setClustersVisible(true);
+                    setDialogueWithRevert("Cluster labels visible", setDialogueText);
+                } else if (exec.args[0] === 'off') {
+                    // Turn off cluster visibility
+                    setClustersVisible(false);
+                    setDialogueWithRevert("Cluster labels hidden", setDialogueText);
+                } else {
+                    setDialogueWithRevert("Usage: /cluster [on|off] or /cluster to refresh", setDialogueText);
                 }
             } else if (exec.command === 'state') {
                 if (exec.args.length === 0) {
                     // No arguments - clear canvas and exit current state
                     setWorldData({});
                     setCurrentStateName(null);
-                    setDialogueText("Canvas cleared");
+                    setDialogueWithRevert("Canvas cleared", setDialogueText);
                 } else if (exec.args[0] === '--rm') {
                     // Delete state command
                     if (exec.args.length < 2) {
-                        setDialogueText(`Usage: /state --rm [name]. Available states: ${availableStates.join(', ')}`);
+                        setDialogueWithRevert(`Usage: /state --rm [name]. Available states: ${availableStates.join(', ')}`, setDialogueText);
                     } else {
                         const stateNameToDelete = exec.args[1];
                         if (availableStates.includes(stateNameToDelete)) {
@@ -1539,7 +1667,7 @@ export function useWorldEngine({
                             setStatePrompt({ type: 'delete_confirm', stateName: stateNameToDelete });
                             setDialogueText(`Delete state "${stateNameToDelete}"? This cannot be undone. (y/n)`);
                         } else {
-                            setDialogueText(`State "${stateNameToDelete}" not found. Available states: ${availableStates.join(', ')}`);
+                            setDialogueWithRevert(`State "${stateNameToDelete}" not found. Available states: ${availableStates.join(', ')}`, setDialogueText);
                         }
                     }
                 } else {
@@ -1551,9 +1679,9 @@ export function useWorldEngine({
                             setDialogueText(`Loading state "${stateName}"...`);
                             loadState(stateName).then((success) => {
                                 if (success) {
-                                    setDialogueText(`State "${stateName}" loaded successfully`);
+                                    setDialogueWithRevert(`State "${stateName}" loaded successfully`, setDialogueText);
                                 } else {
-                                    setDialogueText(`Failed to load state "${stateName}"`);
+                                    setDialogueWithRevert(`Failed to load state "${stateName}"`, setDialogueText);
                                 }
                             });
                         } else {
@@ -1562,16 +1690,16 @@ export function useWorldEngine({
                             saveState(stateName).then((success) => {
                                 if (success) {
                                     loadAvailableStates().then(setAvailableStates);
-                                    setDialogueText(`State "${stateName}" created and saved successfully`);
+                                    setDialogueWithRevert(`State "${stateName}" created and saved successfully`, setDialogueText);
                                 } else {
-                                    setDialogueText(`Failed to create state "${stateName}"`);
+                                    setDialogueWithRevert(`Failed to create state "${stateName}"`, setDialogueText);
                                 }
                             });
                         }
                     } else if (!worldId) {
-                        setDialogueText("No world ID available for state management");
+                        setDialogueWithRevert("No world ID available for state management", setDialogueText);
                     } else {
-                        setDialogueText("Please provide a state name");
+                        setDialogueWithRevert("Please provide a state name", setDialogueText);
                     }
                 }
             }
@@ -1633,7 +1761,7 @@ export function useWorldEngine({
                             transformText(selectedText, instructions).then((result) => {
                                 createSubtitleCycler(result, setDialogueText);
                             }).catch(() => {
-                                setDialogueText(`Could not transform text`);
+                                setDialogueWithRevert(`Could not transform text`, setDialogueText);
                             });
                         }
                     } else if (exec.command === 'explain') {
@@ -1644,7 +1772,7 @@ export function useWorldEngine({
                         explainText(selectedText, instructions).then((result) => {
                             createSubtitleCycler(result, setDialogueText);
                         }).catch(() => {
-                            setDialogueText(`Could not explain text`);
+                            setDialogueWithRevert(`Could not explain text`, setDialogueText);
                         });
                     } else if (exec.command === 'summarize') {
                         const selectedText = exec.args[0];
@@ -1654,7 +1782,7 @@ export function useWorldEngine({
                         summarizeText(selectedText, focus).then((result) => {
                             createSubtitleCycler(result, setDialogueText);
                         }).catch(() => {
-                            setDialogueText(`Could not summarize text`);
+                            setDialogueWithRevert(`Could not summarize text`, setDialogueText);
                         });
                     }
                 }
@@ -1668,7 +1796,7 @@ export function useWorldEngine({
         }
         // === Quick Chat (Cmd+Enter) ===
         else if (key === 'Enter' && metaKey && !chatMode.isActive) {
-            // Extract text to send to AI - either selection or current line
+            // Extract text to send to AI - selection, enclosing text block, or current line
             let textToSend = '';
             let chatStartPos = cursorPos;
             
@@ -1697,37 +1825,56 @@ export function useWorldEngine({
                 }
                 chatStartPos = { x: minX, y: minY };
             } else {
-                // Use current line
+                // Find enclosing text block using block detection
                 const currentY = cursorPos.y;
-                let lineText = '';
-                let minX = cursorPos.x;
-                let maxX = cursorPos.x;
+                const lineChars = extractLineCharacters(worldData, currentY);
                 
-                // Find the extent of text on current line
-                for (const key in worldData) {
-                    const [xStr, yStr] = key.split(',');
-                    const x = parseInt(xStr, 10);
-                    const y = parseInt(yStr, 10);
+                if (lineChars.length > 0) {
+                    const blocks = detectTextBlocks(lineChars);
+                    const closestBlockResult = findClosestBlock(blocks, cursorPos.x);
                     
-                    if (y === currentY) {
-                        minX = Math.min(minX, x);
-                        maxX = Math.max(maxX, x);
-                    }
-                }
-                
-                // Extract the line text
-                for (let x = minX; x <= maxX; x++) {
-                    const key = `${x},${currentY}`;
-                    const charData = worldData[key];
-                    if (charData) {
-                        const char = getCharacter(charData);
-                        lineText += char;
+                    if (closestBlockResult && closestBlockResult.distance === 0) {
+                        // Cursor is within a text block - use that block
+                        const block = closestBlockResult.block;
+                        textToSend = block.characters.map(c => c.char).join('');
+                        chatStartPos = { x: block.start, y: currentY };
                     } else {
-                        lineText += ' ';
+                        // No enclosing block or cursor not within block - fall back to entire line
+                        let lineText = '';
+                        let minX = cursorPos.x;
+                        let maxX = cursorPos.x;
+                        
+                        // Find the extent of text on current line
+                        for (const key in worldData) {
+                            const [xStr, yStr] = key.split(',');
+                            const x = parseInt(xStr, 10);
+                            const y = parseInt(yStr, 10);
+                            
+                            if (y === currentY) {
+                                minX = Math.min(minX, x);
+                                maxX = Math.max(maxX, x);
+                            }
+                        }
+                        
+                        // Extract the line text
+                        for (let x = minX; x <= maxX; x++) {
+                            const key = `${x},${currentY}`;
+                            const charData = worldData[key];
+                            if (charData) {
+                                const char = getCharacter(charData);
+                                lineText += char;
+                            } else {
+                                lineText += ' ';
+                            }
+                        }
+                        textToSend = lineText.trim();
+                        chatStartPos = { x: minX, y: currentY };
                     }
+                } else {
+                    // No text on line
+                    setDialogueText("No text found to send to AI");
+                    return false;
                 }
-                textToSend = lineText.trim();
-                chatStartPos = { x: minX, y: currentY };
             }
             
             // Send to AI if we have text
@@ -1826,13 +1973,29 @@ export function useWorldEngine({
         }
         // --- Movement ---
         else if (key === 'Enter') {
-            // Smart Indentation System using block detection  
             const dataToCheck = currentMode === 'air' ? 
                 { ...worldData, ...lightModeData } : 
                 worldData;
             
-            // Use utility function for smart indentation with 2+ space gap
-            const targetIndent = getSmartIndentation(dataToCheck, cursorPos);
+            // Check if current line has any characters
+            const currentLineHasText = Object.keys(dataToCheck).some(key => {
+                const [, y] = key.split(',');
+                return parseInt(y) === cursorPos.y;
+            });
+            
+            let targetIndent;
+            if (currentLineHasText) {
+                // Line has text - use smart indentation and remember this X position
+                targetIndent = getSmartIndentation(dataToCheck, cursorPos);
+                setLastEnterX(targetIndent);
+            } else if (lastEnterX !== null) {
+                // Empty line and we have a previous Enter X position - use it
+                targetIndent = lastEnterX;
+            } else {
+                // Empty line, no previous Enter position - use smart indentation
+                targetIndent = getSmartIndentation(dataToCheck, cursorPos);
+                setLastEnterX(targetIndent);
+            }
             
             nextCursorPos.y = cursorPos.y + 1;
             nextCursorPos.x = targetIndent;
@@ -1929,6 +2092,7 @@ export function useWorldEngine({
             } else {
                 nextCursorPos.x -= 1;
             }
+            setLastEnterX(null); // Reset Enter X tracking on horizontal movement
             moved = true;
         } else if (key === 'ArrowRight') {
             if (isMod) {
@@ -1984,6 +2148,7 @@ export function useWorldEngine({
             } else {
                 nextCursorPos.x += 1;
             }
+            setLastEnterX(null); // Reset Enter X tracking on horizontal movement
             moved = true;
         }
         // --- Deletion ---
@@ -2194,6 +2359,7 @@ export function useWorldEngine({
                 }
                 
                 worldDataChanged = true; // Mark that synchronous data change occurred
+                setLastEnterX(null); // Reset Enter X tracking when typing
             }
         }
         // --- Other ---
@@ -2407,30 +2573,6 @@ export function useWorldEngine({
         setWorldData(newWorldData);
     }, [worldData]);
 
-    const getViewportCenter = useCallback((): Point => {
-        // Calculate center of viewport in world coordinates
-        const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
-        if (effectiveCharWidth === 0 || effectiveCharHeight === 0) {
-            return { x: 0, y: 0 };
-        }
-        
-        // Check if we're in browser environment
-        if (typeof window === 'undefined') {
-            return { x: 0, y: 0 };
-        }
-        
-        // Use window dimensions for viewport size
-        const viewportWidth = window.innerWidth;
-        const viewportHeight = window.innerHeight;
-        
-        // Center of screen in screen coordinates
-        const centerScreenX = viewportWidth / 2;
-        const centerScreenY = viewportHeight / 2;
-        
-        // Convert to world coordinates
-        return screenToWorld(centerScreenX, centerScreenY, zoomLevel, viewOffset);
-    }, [zoomLevel, viewOffset, getEffectiveCharDims, screenToWorld]);
-
     const getCursorDistanceFromCenter = useCallback((): number => {
         const center = getViewportCenter();
         const deltaX = cursorPos.x - center.x;
@@ -2608,6 +2750,7 @@ export function useWorldEngine({
         backgroundImage,
         backgroundVideo,
         textColor,
+        fontFamily,
         currentTextStyle,
         searchPattern,
         isSearchActive,
@@ -2672,5 +2815,9 @@ export function useWorldEngine({
         loadAvailableStates,
         username, // Expose username for routing
         userUid, // Expose userUid for Firebase operations
+        // Text cluster system
+        clusterLabels,
+        clustersVisible,
+        updateClusterLabels,
     };
 }
