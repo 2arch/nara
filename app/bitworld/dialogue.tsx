@@ -787,7 +787,7 @@ export function useDebugDialogue(engine: WorldEngine) {
         
         // Find the most recent addition
         for (const key in engine.worldData) {
-            if (!prevWorldDataRef.current[key] && !key.startsWith('block_') && !key.startsWith('label_') && !key.startsWith('deepspawn_')) {
+            if (!prevWorldDataRef.current[key] && !key.startsWith('block_') && !key.startsWith('label_')) {
                 const [xStr, yStr] = key.split(',');
                 const x = parseInt(xStr, 10);
                 const y = parseInt(yStr, 10);
@@ -812,26 +812,15 @@ export function useDebugDialogue(engine: WorldEngine) {
         }
         
         const distance = engine.getCursorDistanceFromCenter ? engine.getCursorDistanceFromCenter() : 0;
-        const angleData = engine.getAngleDebugData ? engine.getAngleDebugData() : null;
         
         const text = [
             `Cursor: (${engine.cursorPos.x}, ${engine.cursorPos.y})`,
             lastChar ? `Last char: ${lastChar.char}, ${lastChar.x}, ${lastChar.y}` : 'Last char: --, --, --',
             `Distance: ${distance.toFixed(2)}`,
-            `Points: ${angleData ? 2 : 0}`,
-            angleData 
-                ? `Angle: ${angleData.degrees.toFixed(1)}°`
-                : 'Angle: --°',
-            angleData 
-                ? `Current: (${angleData.firstPoint.x.toFixed(1)}, ${angleData.firstPoint.y.toFixed(1)})`
-                : 'Current: (---, ---)',
-            angleData 
-                ? `Previous: (${angleData.lastPoint.x.toFixed(1)}, ${angleData.lastPoint.y.toFixed(1)})`
-                : 'Previous: (---, ---)'
         ].join('\n');
         
         setDebugText(text);
-    }, [isClient, engine.cursorPos, engine.viewOffset, engine.getCursorDistanceFromCenter, engine.getAngleDebugData, engine.settings.isDebugVisible, lastChar]);
+    }, [isClient, engine.cursorPos, engine.viewOffset, engine.getCursorDistanceFromCenter, engine.settings.isDebugVisible, lastChar]);
     
     return { debugText };
 }

@@ -57,7 +57,7 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'deepspawn', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish'];
+const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'white', 'black', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro'];
@@ -223,6 +223,28 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             } else {
                 return ['state']; // Just show the command itself if no states exist
             }
+        }
+
+        if (lowerInput === 'label') {
+            const parts = input.split(' ');
+            
+            if (parts.length > 1) {
+                const secondArg = parts[1];
+                
+                // Handle --distance flag
+                if (secondArg === '--distance') {
+                    if (parts.length > 2) {
+                        // User is typing the distance number
+                        return [input];
+                    }
+                    // Just typed --distance, show example
+                    return ['label --distance <number>'];
+                } else {
+                    // Regular label command - show as typed
+                    return [input];
+                }
+            }
+            return ['label', 'label --distance'];
         }
         
         return AVAILABLE_COMMANDS.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
@@ -1199,6 +1221,26 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             // Return command execution for world engine to handle
             return {
                 command: 'publish',
+                args: [],
+                commandStartPos: commandState.commandStartPos
+            };
+        }
+
+        if (commandToExecute.startsWith('signout')) {
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+            
+            // Return command execution for world engine to handle the actual sign out
+            return {
+                command: 'signout',
                 args: [],
                 commandStartPos: commandState.commandStartPos
             };

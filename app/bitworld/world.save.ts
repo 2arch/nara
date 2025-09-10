@@ -36,12 +36,12 @@ export function useWorldSave(
     const isBlogs = userUid === 'blog' && worldId === 'posts';
     const worldDataRefPath = worldId ? 
         (currentStateName ? 
-            (isBlogs ? `worlds/blog/posts/${currentStateName}/data` : getWorldPath(`${worldId}/states/${currentStateName}/data`)) :
+            (isBlogs ? `worlds/blog/posts/${currentStateName}/data` : getWorldPath(`${currentStateName}/data`)) :
             (isBlogs ? null : getWorldPath(`${worldId}/data`))) : 
         null;
     const settingsRefPath = worldId ? 
         (currentStateName ? 
-            (isBlogs ? `worlds/blog/posts/${currentStateName}/settings` : getWorldPath(`${worldId}/states/${currentStateName}/settings`)) :
+            (isBlogs ? `worlds/blog/posts/${currentStateName}/settings` : getWorldPath(`${currentStateName}/settings`)) :
             (isBlogs ? null : getWorldPath(`${worldId}/settings`))) : 
         null;
 
@@ -63,10 +63,10 @@ export function useWorldSave(
         setError(null);
         
         const dataPath = currentStateName ? 
-            (isBlogs ? `worlds/blog/posts/${currentStateName}/data` : getWorldPath(`${worldId}/states/${currentStateName}/data`)) :
+            (isBlogs ? `worlds/blog/posts/${currentStateName}/data` : getWorldPath(`${currentStateName}/data`)) :
             getWorldPath(`${worldId}/data`);
         const settingsPath = currentStateName ? 
-            (isBlogs ? `worlds/blog/posts/${currentStateName}/settings` : getWorldPath(`${worldId}/states/${currentStateName}/settings`)) :
+            (isBlogs ? `worlds/blog/posts/${currentStateName}/settings` : getWorldPath(`${currentStateName}/settings`)) :
             getWorldPath(`${worldId}/settings`);
             
         console.log('Blog save hook - paths:', { dataPath, settingsPath, currentStateName, isBlogs });

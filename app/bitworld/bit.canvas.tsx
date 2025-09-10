@@ -573,15 +573,28 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const char = typeof charData === 'string' ? charData : charData.char;
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-                    // Use different colors: orange for command line, gray for suggestions, white for selected
+                    // Draw background for command data
                     if (worldY === engine.commandState.commandStartPos.y) {
-                        ctx.fillStyle = '#FF6B35'; // Orange for command line
+                        // Orange background for command line (typed command)
+                        ctx.fillStyle = '#FF6B35';
+                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        ctx.fillStyle = '#000000';
                     } else if (engine.commandState.isActive && worldY === engine.commandState.commandStartPos.y + 1 + engine.commandState.selectedIndex) {
-                        ctx.fillStyle = '#FFFFFF'; // White for selected suggestion
+                        // White background for selected suggestion
+                        ctx.fillStyle = '#FFFFFF';
+                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        ctx.fillStyle = '#000000';
                     } else {
-                        ctx.fillStyle = '#888888'; // Gray for other suggestions
+                        // Gray background for other suggestions
+                        ctx.fillStyle = '#333333';
+                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        ctx.fillStyle = '#CCCCCC';
                     }
-                    ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                    
+                    // Draw text (only if not a space)
+                    if (char && char.trim() !== '') {
+                        ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                    }
                 }
             }
         }
@@ -1075,8 +1088,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             if (cursorScreenPos.x >= -effectiveCharWidth && cursorScreenPos.x <= cssWidth && cursorScreenPos.y >= -effectiveCharHeight && cursorScreenPos.y <= cssHeight) {
                 const key = `${engine.cursorPos.x},${engine.cursorPos.y}`;
                 
-                // Don't render cursor if there's chat data at this position (chat data already has its own styling)
-                if (!engine.chatData[key]) {
+                // Don't render cursor if in chat mode or if there's chat/command data at this position
+                if (!engine.chatMode.isActive && !engine.chatData[key] && !engine.commandData[key]) {
                     // Determine cursor color based on engine state
                     if (engine.worldPersistenceError) {
                         ctx.fillStyle = CURSOR_COLOR_ERROR;

@@ -8,7 +8,7 @@ import { set, ref } from 'firebase/database';
 import { database, auth } from '@/app/firebase';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
-import { transformText, explainText, summarizeText, createSubtitleCycler, chatWithAI, clearChatHistory, setDialogueWithRevert, updateWorldContext } from './ai';
+import { transformText, explainText, summarizeText, createSubtitleCycler, chatWithAI, clearChatHistory, setDialogueWithRevert, updateWorldContext, abortCurrentAI, isAIActive } from './ai';
 import { useAutoDialogue } from './dialogue';
 import { get } from 'firebase/database';
 
@@ -126,6 +126,7 @@ export interface WorldEngine {
     cycleSortMode: () => void;
     getCharacter: (data: string | StyledCharacter) => string;
     getCharacterStyle: (data: string | StyledCharacter) => { color?: string; background?: string } | undefined;
+    getCanvasSize: () => { width: number; height: number };
     saveState: (stateName: string) => Promise<boolean>;
     loadState: (stateName: string) => Promise<boolean>;
     availableStates: string[];
@@ -208,6 +209,9 @@ export function useWorldEngine({
     const [viewOffset, setViewOffset] = useState<Point>(initialViewOffset);
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
     const [dialogueText, setDialogueText] = useState('');
+    
+    // Double ESC detection for AI interruption
+    const lastEscTimeRef = useRef<number | null>(null);
     const [lastEnterX, setLastEnterX] = useState<number | null>(null); // Track X position from last Enter
     
     // Auto-clear temporary dialogue messages
@@ -1100,6 +1104,36 @@ export function useWorldEngine({
         const isMod = ctrlKey || metaKey; // Modifier key check
         const currentSelectionActive = !!(selectionStart && selectionEnd && (selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y));
 
+        // === Double ESC Detection for AI Interruption ===
+        if (key === 'Escape') {
+            const currentTime = Date.now();
+            const lastEscTime = lastEscTimeRef.current;
+            
+            if (lastEscTime && currentTime - lastEscTime < 500) { // 500ms window for double ESC
+                // Double ESC detected - interrupt AI operations
+                if (isAIActive()) {
+                    const wasAborted = abortCurrentAI();
+                    if (wasAborted) {
+                        setDialogueWithRevert("AI operation interrupted", setDialogueText, 1500);
+                        // Clear any chat processing state
+                        setChatMode(prev => ({ 
+                            ...prev, 
+                            isProcessing: false 
+                        }));
+                        lastEscTimeRef.current = null; // Reset ESC timing
+                        return true;
+                    }
+                }
+                lastEscTimeRef.current = null; // Reset on double ESC
+            } else {
+                // First ESC - record the time
+                lastEscTimeRef.current = currentTime;
+            }
+        } else {
+            // Reset ESC timing on any other key
+            lastEscTimeRef.current = null;
+        }
+
         // === Nav Dialogue Handling (Priority) ===
         if (key === 'Escape' && isNavVisible) {
             setIsNavVisible(false);
@@ -1113,6 +1147,105 @@ export function useWorldEngine({
             return true;
         }
         
+        // === Command Handling (Early Priority) ===
+        if (enableCommands) {
+            const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos);
+            if (commandResult && typeof commandResult === 'object') {
+                // It's a command execution object - handle it
+                const exec = commandResult as CommandExecution;
+                if (exec.command === 'debug') {
+                    if (exec.args[0] === 'on') {
+                        const newSettings = { isDebugVisible: true };
+                        updateSettings(newSettings);
+                        saveSettingsToFirebase(newSettings);
+                    } else if (exec.args[0] === 'off') {
+                        const newSettings = { isDebugVisible: false };
+                        updateSettings(newSettings);
+                        saveSettingsToFirebase(newSettings);
+                    } else {
+                        setDialogueWithRevert("Usage: /debug [on|off] - Toggle debug information display", setDialogueText);
+                    }
+                } else if (exec.command === 'nav') {
+                    if (exec.args.length === 2) {
+                        // Navigate to specific coordinates (x, y)
+                        const targetX = parseInt(exec.args[0], 10);
+                        const targetY = parseInt(exec.args[1], 10);
+                        
+                        if (!isNaN(targetX) && !isNaN(targetY)) {
+                            // Move camera to center on the target position
+                            if (typeof window !== 'undefined') {
+                                const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
+                                if (effectiveCharWidth > 0 && effectiveCharHeight > 0) {
+                                    const viewportCharWidth = window.innerWidth / effectiveCharWidth;
+                                    const viewportCharHeight = window.innerHeight / effectiveCharHeight;
+                                    setViewOffset({
+                                        x: targetX - viewportCharWidth / 2,
+                                        y: targetY - viewportCharHeight / 2
+                                    });
+                                }
+                            }
+                        }
+                    } else {
+                        // Open navigation dialogue
+                        setIsNavVisible(true);
+                    }
+                } else if (exec.command === 'chat') {
+                    setChatMode({
+                        isActive: true,
+                        currentInput: '',
+                        inputPositions: [],
+                        isProcessing: false
+                    });
+                } else if (exec.command === 'label') {
+                    // Check if this is a --distance command
+                    if (exec.args.length >= 2 && exec.args[0] === '--distance') {
+                        const distanceStr = exec.args[1];
+                        const distance = parseInt(distanceStr, 10);
+                        
+                        if (!isNaN(distance) && distance > 0) {
+                            // Update the labelProximityThreshold setting
+                            const newSettings = { labelProximityThreshold: distance };
+                            updateSettings(newSettings);
+                            saveSettingsToFirebase(newSettings);
+                            setDialogueWithRevert(`Label distance threshold set to ${distance}`, setDialogueText);
+                        } else {
+                            setDialogueWithRevert("Invalid distance. Please provide a positive number.", setDialogueText);
+                        }
+                    } else if (exec.args.length >= 1) {
+                        const text = exec.args[0];
+                        const color = exec.args[1] || '#0066FF'; // Default blue color
+                        
+                        const labelKey = `label_${cursorPos.x},${cursorPos.y}`;
+                        const newLabel = { text, color };
+                        
+                        setWorldData(prev => ({
+                            ...prev,
+                            [labelKey]: JSON.stringify(newLabel)
+                        }));
+                        
+                        setDialogueWithRevert(`Label "${text}" created`, setDialogueText);
+                    } else {
+                        setDialogueWithRevert("Usage: /label <text> [color] or /label --distance <number>", setDialogueText);
+                    }
+                } else if (exec.command === 'signout') {
+                    // Sign out from Firebase
+                    signOut(auth).then(() => {
+                        // Sign-out successful, navigate to home
+                        router.push('/');
+                    }).catch((error) => {
+                        // An error happened
+                        console.error('Sign out error:', error);
+                        setDialogueWithRevert("Failed to sign out", setDialogueText);
+                    });
+                }
+                
+                setCursorPos(exec.commandStartPos);
+                return true;
+            } else if (commandResult === true) {
+                // Command mode handled the key, but didn't execute a command
+                return true;
+            }
+        }
 
         // === State Prompt Handling ===
         if (statePrompt.type) {
@@ -1426,303 +1559,6 @@ export function useWorldEngine({
                 return true;
             }
         }
-
-        // === Command Handling ===
-        if (enableCommands) {
-            const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos);
-            if (commandResult && typeof commandResult === 'object') {
-            // It's a command execution object
-            const exec = commandResult as CommandExecution;
-            if (exec.command === 'debug') {
-                if (exec.args[0] === 'on') {
-                    const newSettings = { isDebugVisible: true };
-                    updateSettings(newSettings);
-                    saveSettingsToFirebase(newSettings);
-                } else if (exec.args[0] === 'off') {
-                    const newSettings = { isDebugVisible: false };
-                    updateSettings(newSettings);
-                    saveSettingsToFirebase(newSettings);
-                } else {
-                    setDialogueWithRevert("Usage: /debug [on|off] - Toggle debug information display", setDialogueText);
-                }
-            } else if (exec.command === 'deepspawn') {
-            } else if (exec.command === 'nav') {
-                if (exec.args.length === 2) {
-                    // Navigate to specific coordinates (x, y)
-                    const targetX = parseInt(exec.args[0], 10);
-                    const targetY = parseInt(exec.args[1], 10);
-                    
-                    if (!isNaN(targetX) && !isNaN(targetY)) {
-                        // Move camera to center on the target position
-                        if (typeof window !== 'undefined') {
-                            const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
-                            if (effectiveCharWidth > 0 && effectiveCharHeight > 0) {
-                                const viewportWidth = window.innerWidth;
-                                const viewportHeight = window.innerHeight;
-                                
-                                const newViewOffset = {
-                                    x: -targetX + (viewportWidth / (2 * effectiveCharWidth)),
-                                    y: -targetY + (viewportHeight / (2 * effectiveCharHeight))
-                                };
-                                setViewOffset(newViewOffset);
-                            }
-                        }
-                        setIsNavVisible(false);
-                        setDialogueWithRevert(`Navigated to label at (${targetX}, ${targetY})`, setDialogueText);
-                    } else {
-                        setDialogueWithRevert("Invalid coordinates for navigation", setDialogueText);
-                    }
-                } else {
-                    // No arguments or invalid arguments - show nav table of contents
-                    const currentCenter = getViewportCenter();
-                    setNavOriginPosition(currentCenter);
-                    setIsNavVisible(true);
-                }
-            } else if (exec.command === 'pending_selection') {
-                // Show prompt for selection
-                const commandName = exec.args[0];
-                setDialogueWithRevert(`Select a region of text, then press Enter to ${commandName}`, setDialogueText, 5000);
-            } else if (exec.command === 'transform') {
-                // This handles both old system (pre-selected text) and new system (text as first arg)
-                const selectedText = exec.args.length > 0 && exec.args[0].length > 10 ? exec.args[0] : getSelectedText();
-                const instructions = exec.args.length > 1 ? exec.args.slice(1).join(' ') : exec.args.length === 1 && exec.args[0].length <= 10 ? exec.args[0] : '';
-                
-                if (selectedText && instructions) {
-                    setDialogueText("Processing transformation...");
-                    
-                    // Use AI to transform the text
-                    transformText(selectedText, instructions).then((result) => {
-                        createSubtitleCycler(result, setDialogueText);
-                    }).catch(() => {
-                        setDialogueWithRevert(`Could not transform text`, setDialogueText);
-                    });
-                } else if (!selectedText) {
-                    setDialogueWithRevert("Select a region of text first, then use: /transform [instructions]", setDialogueText);
-                } else {
-                    setDialogueWithRevert("Usage: /transform [instructions] (e.g., /transform make uppercase, /transform convert to bullet points)", setDialogueText);
-                }
-            } else if (exec.command === 'explain') {
-                // This handles both old system (pre-selected text) and new system (text as first arg)
-                const selectedText = exec.args.length > 0 && exec.args[0].length > 10 ? exec.args[0] : getSelectedText();
-                const instructions = exec.args.length > 1 ? exec.args.slice(1).join(' ') : exec.args.length === 1 && exec.args[0].length <= 10 ? exec.args[0] : 'analysis';
-                
-                if (selectedText) {
-                    setDialogueText("Processing explanation...");
-                    
-                    // Use AI to explain the text
-                    explainText(selectedText, instructions).then((result) => {
-                        createSubtitleCycler(result, setDialogueText);
-                    }).catch(() => {
-                        setDialogueWithRevert(`Could not explain text`, setDialogueText);
-                    });
-                } else {
-                    setDialogueWithRevert("Select a region of text first, then use: /explain [optional: how to explain]", setDialogueText);
-                }
-            } else if (exec.command === 'summarize') {
-                // This handles both old system (pre-selected text) and new system (text as first arg)
-                const selectedText = exec.args.length > 0 && exec.args[0].length > 10 ? exec.args[0] : getSelectedText();
-                const focus = exec.args.length > 1 ? exec.args.slice(1).join(' ') : exec.args.length === 1 && exec.args[0].length <= 10 ? exec.args[0] : undefined;
-                
-                if (selectedText) {
-                    setDialogueText("Processing summary...");
-                    
-                    // Use AI to summarize the text
-                    summarizeText(selectedText, focus).then((result) => {
-                        createSubtitleCycler(result, setDialogueText);
-                    }).catch(() => {
-                        setDialogueWithRevert(`Could not summarize text`, setDialogueText);
-                    });
-                } else {
-                    setDialogueWithRevert("Select a region of text first, then use: /summarize [optional focus]", setDialogueText);
-                }
-            } else if (exec.command === 'chat') {
-                if (!chatMode.isActive) {
-                    // Enter chat mode
-                    setChatMode({
-                        isActive: true,
-                        currentInput: '',
-                        inputPositions: [],
-                        isProcessing: false
-                    });
-                    setDialogueText("Chat mode activated. Enter: ephemeral response, Cmd+Enter: permanent response, Shift+Enter: new line. Use /exit to leave.");
-                } else {
-                    // Exit chat mode
-                    setChatMode({
-                        isActive: false,
-                        currentInput: '',
-                        inputPositions: [],
-                        isProcessing: false
-                    });
-                    // Clear any chat input
-                    setChatData({});
-                    setDialogueWithRevert("Chat mode deactivated.", setDialogueText);
-                }
-            } else if (exec.command === 'modes') {
-                setDialogueWithRevert("Available modes: edit, view, select. Usage: /modes [mode] (coming soon)", setDialogueText);
-            } else if (exec.command === 'settings') {
-                setDialogueWithRevert("Settings menu: /settings [option] [value] (coming soon)", setDialogueText);
-            } else if (exec.command === 'label') {
-                // Check for --distance flag first
-                if (exec.args.length >= 2 && exec.args[0] === '--distance') {
-                    const arg = exec.args[1].toLowerCase();
-                    
-                    // Check for 'off' to disable threshold
-                    if (arg === 'off') {
-                        const newSettings = { labelProximityThreshold: 999999 };
-                        updateSettings(newSettings);
-                        saveSettingsToFirebase(newSettings);
-                        setDialogueWithRevert(`Label proximity threshold disabled - all labels will show waypoints`, setDialogueText);
-                    } else {
-                        const distance = parseInt(exec.args[1], 10);
-                        if (!isNaN(distance) && distance > 0) {
-                            const newSettings = { labelProximityThreshold: distance };
-                            updateSettings(newSettings);
-                            saveSettingsToFirebase(newSettings);
-                            setDialogueWithRevert(`Label proximity threshold set to ${distance}`, setDialogueText);
-                        } else {
-                            setDialogueWithRevert("Invalid distance value. Use a positive number or 'off' to disable.", setDialogueText);
-                        }
-                    }
-                } else if (exec.args.length >= 1) {
-                    let color = 'black';
-                    let text = '';
-                    const lastArg = exec.args[exec.args.length - 1].toLowerCase();
-                    const commonColors = ['black', 'white', 'red', 'green', 'blue', 'yellow', 'purple', 'orange', 'pink', 'cyan', 'magenta'];
-                    const isLastArgColor = lastArg.startsWith('#') || commonColors.includes(lastArg);
-
-                    if (exec.args.length > 1 && isLastArgColor) {
-                        color = exec.args.pop() as string;
-                        text = exec.args.join(' ');
-                    } else {
-                        text = exec.args.join(' ');
-                    }
-                    
-                    const position = { x: exec.commandStartPos.x + 1, y: exec.commandStartPos.y };
-                    const key = `label_${position.x},${position.y}`;
-                    const value = JSON.stringify({ text, color });
-                    
-                    setWorldData(prev => ({
-                        ...prev,
-                        [key]: value
-                    }));
-                } else {
-                    setDialogueWithRevert("Usage: /label [text] [color] or /label --distance [value|off] (e.g., /label important note red, /label --distance 100, /label --distance off)", setDialogueText);
-                }
-            } else if (exec.command === 'signout') {
-                setDialogueText("Signing out...");
-                signOut(auth).then(() => {
-                    setDialogueWithRevert("Signed out successfully", setDialogueText);
-                    router.push('/');
-                }).catch((error) => {
-                    setDialogueWithRevert(`Error signing out: ${error.message}`, setDialogueText);
-                });
-            } else if (exec.command === 'publish') {
-                if (!currentStateName) {
-                    setDialogueWithRevert("No current state to publish. Save your work first with /state [name]", setDialogueText);
-                } else {
-                    setDialogueText("Publishing state...");
-                    // Add public property to current state
-                    const stateRef = ref(database, `worlds/${userUid}/${currentStateName}/public`);
-                    set(stateRef, true).then(() => {
-                        setDialogueWithRevert(`State "${currentStateName}" is now public`, setDialogueText);
-                    }).catch((error) => {
-                        setDialogueWithRevert(`Error publishing state: ${error.message}`, setDialogueText);
-                    });
-                }
-            } else if (exec.command === 'unpublish') {
-                if (!currentStateName) {
-                    setDialogueWithRevert("No current state to unpublish. Save your work first with /state [name]", setDialogueText);
-                } else {
-                    setDialogueText("Unpublishing state...");
-                    // Remove public property from current state
-                    const stateRef = ref(database, `worlds/${userUid}/${currentStateName}/public`);
-                    set(stateRef, false).then(() => {
-                        setDialogueWithRevert(`State "${currentStateName}" is now private`, setDialogueText);
-                    }).catch((error) => {
-                        setDialogueWithRevert(`Error unpublishing state: ${error.message}`, setDialogueText);
-                    });
-                }
-            } else if (exec.command === 'cluster') {
-                if (exec.args.length === 0) {
-                    // No arguments - generate/refresh clusters
-                    updateClusterLabels();
-                    setClustersVisible(true);
-                    setDialogueWithRevert("Generating cluster labels...", setDialogueText, 2000);
-                } else if (exec.args[0] === 'on') {
-                    // Turn on cluster visibility
-                    setClustersVisible(true);
-                    setDialogueWithRevert("Cluster labels visible", setDialogueText);
-                } else if (exec.args[0] === 'off') {
-                    // Turn off cluster visibility
-                    setClustersVisible(false);
-                    setDialogueWithRevert("Cluster labels hidden", setDialogueText);
-                } else {
-                    setDialogueWithRevert("Usage: /cluster [on|off] or /cluster to refresh", setDialogueText);
-                }
-            } else if (exec.command === 'state') {
-                if (exec.args.length === 0) {
-                    // No arguments - clear canvas and exit current state
-                    setWorldData({});
-                    setCurrentStateName(null);
-                    setDialogueWithRevert("Canvas cleared", setDialogueText);
-                } else if (exec.args[0] === '--rm') {
-                    // Delete state command
-                    if (exec.args.length < 2) {
-                        setDialogueWithRevert(`Usage: /state --rm [name]. Available states: ${availableStates.join(', ')}`, setDialogueText);
-                    } else {
-                        const stateNameToDelete = exec.args[1];
-                        if (availableStates.includes(stateNameToDelete)) {
-                            // State exists - ask for confirmation
-                            setStatePrompt({ type: 'delete_confirm', stateName: stateNameToDelete });
-                            setDialogueText(`Delete state "${stateNameToDelete}"? This cannot be undone. (y/n)`);
-                        } else {
-                            setDialogueWithRevert(`State "${stateNameToDelete}" not found. Available states: ${availableStates.join(', ')}`, setDialogueText);
-                        }
-                    }
-                } else {
-                    const stateName = exec.args[0];
-                    
-                    if (worldId && stateName) {
-                        if (availableStates.includes(stateName)) {
-                            // State exists - load it directly (simplified from old working code)
-                            setDialogueText(`Loading state "${stateName}"...`);
-                            loadState(stateName).then((success) => {
-                                if (success) {
-                                    setDialogueWithRevert(`State "${stateName}" loaded successfully`, setDialogueText);
-                                } else {
-                                    setDialogueWithRevert(`Failed to load state "${stateName}"`, setDialogueText);
-                                }
-                            });
-                        } else {
-                            // State doesn't exist - create new state
-                            setDialogueText(`Creating new state "${stateName}"...`);
-                            saveState(stateName).then((success) => {
-                                if (success) {
-                                    loadAvailableStates().then(setAvailableStates);
-                                    setDialogueWithRevert(`State "${stateName}" created and saved successfully`, setDialogueText);
-                                } else {
-                                    setDialogueWithRevert(`Failed to create state "${stateName}"`, setDialogueText);
-                                }
-                            });
-                        }
-                    } else if (!worldId) {
-                        setDialogueWithRevert("No world ID available for state management", setDialogueText);
-                    } else {
-                        setDialogueWithRevert("Please provide a state name", setDialogueText);
-                    }
-                }
-            }
-            
-            // Return cursor to command start position
-            setCursorPos(exec.commandStartPos);
-            
-            return true; // Command was handled
-            } else if (commandResult === true) {
-                // Command mode handled the key, but didn't execute a command
-                return true;
-            }
-        }
-
 
         // Function to clear selection state
         const clearSelectionState = () => {

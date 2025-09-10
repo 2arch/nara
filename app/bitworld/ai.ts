@@ -99,23 +99,40 @@ export function createSubtitleCycler(text: string, setDialogueText: (text: strin
  * Transform text according to given instructions
  */
 export async function transformText(text: string, instructions: string): Promise<string> {
+    const abortController = createAIAbortController();
+    
     try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-lite',
-            contents: `Transform the following text according to these instructions: "${instructions}"
+        if (abortController.signal.aborted) {
+            throw new Error('AI operation was interrupted');
+        }
+
+        const response = await Promise.race([
+            ai.models.generateContent({
+                model: 'gemini-2.5-flash-lite',
+                contents: `Transform the following text according to these instructions: "${instructions}"
 
 Original text: "${text}"
 
 Respond with ONLY the transformed text. No explanation, no quotes.`,
-            config: {
-                maxOutputTokens: 150,
-                temperature: 0.3,
-                systemInstruction: 'You transform text according to user instructions. Respond only with the transformed result.'
-            }
-        });
+                config: {
+                    maxOutputTokens: 150,
+                    temperature: 0.3,
+                    systemInstruction: 'You transform text according to user instructions. Respond only with the transformed result.'
+                }
+            }),
+            new Promise((_, reject) => {
+                abortController.signal.addEventListener('abort', () => {
+                    reject(new Error('AI operation was interrupted'));
+                });
+            })
+        ]);
 
-        return response.text?.trim() || text;
+        return (response as any).text?.trim() || text;
     } catch (error) {
+        if (error instanceof Error && error.message === 'AI operation was interrupted') {
+            console.log('AI transform operation was interrupted by user');
+            return '[Interrupted]';
+        }
         console.error('Error transforming text:', error);
         return `Could not transform text`;
     }
@@ -125,23 +142,40 @@ Respond with ONLY the transformed text. No explanation, no quotes.`,
  * Explain text according to given analysis type or general analysis
  */
 export async function explainText(text: string, analysisType: string = 'analysis'): Promise<string> {
+    const abortController = createAIAbortController();
+    
     try {
+        if (abortController.signal.aborted) {
+            throw new Error('AI operation was interrupted');
+        }
+
         const prompt = analysisType === 'analysis' 
             ? `Explain this text: "${text}"`
             : `Explain this text focusing on "${analysisType}": "${text}"`;
 
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-lite',
-            contents: prompt,
-            config: {
-                maxOutputTokens: 200,
-                temperature: 0.2,
-                systemInstruction: 'You explain text clearly and concisely. Focus on the key meaning and context.'
-            }
-        });
+        const response = await Promise.race([
+            ai.models.generateContent({
+                model: 'gemini-2.5-flash-lite',
+                contents: prompt,
+                config: {
+                    maxOutputTokens: 200,
+                    temperature: 0.2,
+                    systemInstruction: 'You explain text clearly and concisely. Focus on the key meaning and context.'
+                }
+            }),
+            new Promise((_, reject) => {
+                abortController.signal.addEventListener('abort', () => {
+                    reject(new Error('AI operation was interrupted'));
+                });
+            })
+        ]);
 
-        return response.text?.trim() || `Could not analyze the text`;
+        return (response as any).text?.trim() || `Could not analyze the text`;
     } catch (error) {
+        if (error instanceof Error && error.message === 'AI operation was interrupted') {
+            console.log('AI explain operation was interrupted by user');
+            return '[Interrupted]';
+        }
         console.error('Error explaining text:', error);
         return `Could not explain text`;
     }
@@ -151,23 +185,40 @@ export async function explainText(text: string, analysisType: string = 'analysis
  * Summarize the given text
  */
 export async function summarizeText(text: string, focus?: string): Promise<string> {
+    const abortController = createAIAbortController();
+    
     try {
+        if (abortController.signal.aborted) {
+            throw new Error('AI operation was interrupted');
+        }
+
         const prompt = focus 
             ? `Summarize this text focusing on "${focus}": "${text}"`
             : `Summarize this text: "${text}"`;
 
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-lite',
-            contents: prompt,
-            config: {
-                maxOutputTokens: 150,
-                temperature: 0.1,
-                systemInstruction: 'You summarize text concisely, capturing the main points in a clear and brief way.'
-            }
-        });
+        const response = await Promise.race([
+            ai.models.generateContent({
+                model: 'gemini-2.5-flash-lite',
+                contents: prompt,
+                config: {
+                    maxOutputTokens: 150,
+                    temperature: 0.1,
+                    systemInstruction: 'You summarize text concisely, capturing the main points in a clear and brief way.'
+                }
+            }),
+            new Promise((_, reject) => {
+                abortController.signal.addEventListener('abort', () => {
+                    reject(new Error('AI operation was interrupted'));
+                });
+            })
+        ]);
 
-        return response.text?.trim() || `Could not summarize the text`;
+        return (response as any).text?.trim() || `Could not summarize the text`;
     } catch (error) {
+        if (error instanceof Error && error.message === 'AI operation was interrupted') {
+            console.log('AI summarize operation was interrupted by user');
+            return '[Interrupted]';
+        }
         console.error('Error summarizing text:', error);
         return `Could not summarize text`;
     }
@@ -213,6 +264,8 @@ export function getCurrentWorldContext() {
  * Chat with AI maintaining conversation history
  */
 export async function chatWithAI(message: string, useCache: boolean = true): Promise<string> {
+    const abortController = createAIAbortController();
+    
     try {
         // Add user message to history
         chatHistory.push({
@@ -229,21 +282,37 @@ export async function chatWithAI(message: string, useCache: boolean = true): Pro
 
         let response;
         
+        // Check for abort before making requests
+        if (abortController.signal.aborted) {
+            throw new Error('AI operation was interrupted');
+        }
+        
         // Use world context if available and enabled
         if (useCache && currentWorldContext) {
             try {
                 const contextContent = `Canvas context: ${currentWorldContext.compiledText}\nLabels: ${currentWorldContext.labels.map(l => l.text).join(', ')}\n\nUser: ${message}\n\nRespond briefly and conversationally. Reference canvas content when relevant.`;
                 
-                response = await ai.models.generateContent({
-                    model: 'gemini-2.5-flash-lite',
-                    contents: contextContent,
-                    config: {
-                        maxOutputTokens: 100,
-                        temperature: 0.7,
-                        systemInstruction: 'You are a concise ambient navigator. Give brief, helpful responses about canvas content connections. Be conversational, not academic.'
-                    }
-                });
+                // Create a promise race with abort signal
+                response = await Promise.race([
+                    ai.models.generateContent({
+                        model: 'gemini-2.5-flash-lite',
+                        contents: contextContent,
+                        config: {
+                            maxOutputTokens: 100,
+                            temperature: 0.7,
+                            systemInstruction: 'You are a concise ambient navigator. Give brief, helpful responses about canvas content connections. Be conversational, not academic.'
+                        }
+                    }),
+                    new Promise((_, reject) => {
+                        abortController.signal.addEventListener('abort', () => {
+                            reject(new Error('AI operation was interrupted'));
+                        });
+                    })
+                ]);
             } catch (error) {
+                if (error instanceof Error && error.message === 'AI operation was interrupted') {
+                    throw error;
+                }
                 console.error('Error using world context, falling back:', error);
                 // Fall back to non-cached request
                 useCache = false;
@@ -252,23 +321,35 @@ export async function chatWithAI(message: string, useCache: boolean = true): Pro
         
         // If not using cache or cache failed
         if (!useCache || !response) {
-            response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash-lite',
-                contents: `Previous conversation:
+            // Check for abort again
+            if (abortController.signal.aborted) {
+                throw new Error('AI operation was interrupted');
+            }
+            
+            response = await Promise.race([
+                ai.models.generateContent({
+                    model: 'gemini-2.5-flash-lite',
+                    contents: `Previous conversation:
 ${conversationContext}
 
 User: ${message}
 
 Respond naturally and conversationally. Keep responses concise but complete.`,
-                config: {
-                    maxOutputTokens: 300,
-                    temperature: 0.7,
-                    systemInstruction: 'You are a helpful assistant engaged in a natural conversation. Be conversational, helpful, and concise. Remember the context of the conversation.'
-                }
-            });
+                    config: {
+                        maxOutputTokens: 300,
+                        temperature: 0.7,
+                        systemInstruction: 'You are a helpful assistant engaged in a natural conversation. Be conversational, helpful, and concise. Remember the context of the conversation.'
+                    }
+                }),
+                new Promise((_, reject) => {
+                    abortController.signal.addEventListener('abort', () => {
+                        reject(new Error('AI operation was interrupted'));
+                    });
+                })
+            ]);
         }
 
-        const aiResponse = response.text?.trim() || 'I could not process that message.';
+        const aiResponse = (response as any).text?.trim() || 'I could not process that message.';
 
         // Add AI response to history
         chatHistory.push({
@@ -279,6 +360,10 @@ Respond naturally and conversationally. Keep responses concise but complete.`,
 
         return aiResponse;
     } catch (error) {
+        if (error instanceof Error && error.message === 'AI operation was interrupted') {
+            console.log('AI chat operation was interrupted by user');
+            return '[Interrupted]';
+        }
         console.error('Error in chat:', error);
         return 'Sorry, I encountered an error. Could you try again?';
     }
@@ -462,74 +547,6 @@ export async function generateVideo(prompt: string): Promise<string | null> {
     }
 }
 
-/**
- * Generate deepspawn questions/suggestions based on recent text
- * Note: This function should only be called when deepspawn is enabled
- */
-export async function generateDeepspawnQuestions(recentText: string): Promise<string[]> {
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-lite',
-            contents: `Based on this text: "${recentText}"
-
-Generate exactly 5 very short writing prompts that encourage deeper thinking. Each must be:
-- Under 20 characters total
-- Single phrase or short question
-- Thought-provoking
-- Related to the content
-
-Examples: "Why not?", "What if...", "How else?", "But what about...", "Consider..."
-
-Format as a numbered list:
-1. [prompt]
-2. [prompt] 
-3. [prompt]
-4. [prompt]
-5. [prompt]`,
-            config: {
-                maxOutputTokens: 300,
-                temperature: 0.8,
-                systemInstruction: 'You generate creative, thought-provoking questions and suggestions to inspire deeper thinking and writing exploration.'
-            }
-        });
-
-        const responseText = response.text?.trim() || '';
-        
-        // Parse the numbered list into an array
-        const questions = responseText
-            .split('\n')
-            .filter(line => line.match(/^\d+\./))
-            .map(line => line.replace(/^\d+\.\s*/, '').trim())
-            .filter(q => q.length > 0);
-
-        // Filter questions to ensure they're under 20 characters
-        const validQuestions = questions.filter(q => q.length <= 20);
-        
-        // If we don't get exactly 5 valid questions, fall back to defaults
-        if (validQuestions.length !== 5) {
-            console.warn('Deepspawn AI returned unexpected format, using fallbacks');
-            return [
-                "Why not?",
-                "What if...",
-                "How else?",
-                "But what about...",
-                "Consider..."
-            ];
-        }
-
-        return validQuestions;
-    } catch (error) {
-        console.error('Error generating deepspawn questions:', error);
-        // Return fallback questions on error
-        return [
-            "Why not?",
-            "What if...",
-            "How else?", 
-            "But what about...",
-            "Consider..."
-        ];
-    }
-}
 
 /**
  * Generate a concise label for a text cluster using AI

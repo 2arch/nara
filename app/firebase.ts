@@ -116,17 +116,8 @@ export const signInUser = async (email: string, password: string): Promise<{succ
 
 export const checkUsernameAvailability = async (username: string): Promise<boolean> => {
   try {
-    const snapshot = await get(ref(database, 'users'));
-    if (!snapshot.exists()) return true; // No users yet, username available
-    
-    const users = snapshot.val();
-    // Check if any user already has this username
-    for (const userId in users) {
-      if (users[userId].username === username) {
-        return false; // Username taken
-      }
-    }
-    return true; // Username available
+    const snapshot = await get(ref(database, `usernames/${username}`));
+    return !snapshot.exists(); // Available if username doesn't exist
   } catch (error) {
     console.error('Error checking username availability:', error);
     return false; // Assume not available on error
