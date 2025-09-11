@@ -918,14 +918,44 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Cluster Frames ===
+        if (engine.clustersVisible && engine.clusterLabels.length > 0) {
+            for (const clusterLabel of engine.clusterLabels) {
+                const { boundingBox } = clusterLabel;
+                
+                // Check if cluster bounding box intersects with viewport
+                const clusterVisible = !(
+                    boundingBox.maxX < viewBounds.minX || 
+                    boundingBox.minX > viewBounds.maxX ||
+                    boundingBox.maxY < viewBounds.minY || 
+                    boundingBox.minY > viewBounds.maxY
+                );
+                
+                if (clusterVisible) {
+                    // Calculate frame bounds that align to character cell boundaries
+                    const topLeft = engine.worldToScreen(boundingBox.minX, boundingBox.minY, currentZoom, currentOffset);
+                    const bottomRight = engine.worldToScreen(boundingBox.maxX + 1, boundingBox.maxY + 1, currentZoom, currentOffset);
+                    
+                    // Snap frame to exact cell boundaries (no sub-pixel positioning)
+                    const frameX = Math.floor(topLeft.x);
+                    const frameY = Math.floor(topLeft.y);
+                    const frameWidth = Math.ceil(bottomRight.x) - frameX;
+                    const frameHeight = Math.ceil(bottomRight.y) - frameY;
+                    
+                    // Draw cluster frame aligned to character grid
+                    ctx.strokeStyle = '#00FF00'; // Green frame color
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([5, 5]); // Dashed line
+                    ctx.strokeRect(frameX + 0.5, frameY + 0.5, frameWidth - 1, frameHeight - 1);
+                    ctx.setLineDash([]); // Reset to solid lines
+                }
+            }
+        }
+
         // === Render Cluster Waypoint Arrows ===
         if (engine.clustersVisible && engine.clusterLabels.length > 0) {
-            console.log('Rendering cluster waypoints. Total clusters:', engine.clusterLabels.length);
-            console.log('View bounds:', viewBounds);
-            
             for (const clusterLabel of engine.clusterLabels) {
             const { position, text } = clusterLabel;
-            console.log('Checking cluster:', { text, position });
             
             // Check if cluster is outside current viewport
             const isClusterVisible = position.x >= viewBounds.minX && 
@@ -933,10 +963,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                    position.y >= viewBounds.minY && 
                                    position.y <= viewBounds.maxY;
             
-            console.log('Cluster visible:', isClusterVisible);
-            
             if (!isClusterVisible) {
-                console.log('Drawing green arrow for off-screen cluster:', text);
                 // Convert cluster position to screen coordinates for direction calculation
                 const clusterScreenPos = engine.worldToScreen(position.x, position.y, currentZoom, currentOffset);
                 

@@ -532,6 +532,12 @@ export interface ClusterLabel {
     type: 'summary' | 'title' | 'topic' | 'section';
     confidence: number;
     contentSample: string;
+    boundingBox: {
+        minX: number;
+        maxX: number;
+        minY: number;
+        maxY: number;
+    };
 }
 
 /**
@@ -594,7 +600,8 @@ export async function generateClusterLabels(clusters: TextCluster[]): Promise<Cl
                 type: 'summary', // AI-generated labels are summaries
                 confidence: 0.8, // High confidence for AI labels
                 contentSample: content.split('\n')[0]?.slice(0, 50) + 
-                               (content.split('\n')[0]?.length > 50 ? '...' : '') || ''
+                               (content.split('\n')[0]?.length > 50 ? '...' : '') || '',
+                boundingBox: cluster.boundingBox
             });
         }
     }

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useWorldSave } from './world.save'; // Import the new hook
 import { useCommandSystem, CommandState, CommandExecution, BackgroundMode } from './commands'; // Import command system
-import { getSmartIndentation, calculateWordDeletion, extractLineCharacters, detectTextBlocks, findClosestBlock } from './bit.blocks'; // Import block detection utilities
+import { getSmartIndentation, calculateWordDeletion, extractLineCharacters, detectTextBlocks, findClosestBlock, extractAllTextBlocks, groupTextBlocksIntoClusters, filterClustersForLabeling } from './bit.blocks'; // Import block detection utilities
 import { useWorldSettings, WorldSettings } from './settings';
 import { set, ref } from 'firebase/database';
 import { database, auth } from '@/app/firebase';
@@ -140,6 +140,12 @@ export interface WorldEngine {
         position: { x: number; y: number };
         text: string;
         confidence: number;
+        boundingBox: {
+            minX: number;
+            maxX: number;
+            minY: number;
+            maxY: number;
+        };
     }>;
     clustersVisible: boolean;
     updateClusterLabels: () => Promise<void>;
@@ -217,6 +223,9 @@ export function useWorldEngine({
     // Auto-clear temporary dialogue messages
     useAutoDialogue(dialogueText, setDialogueText);
     
+    // Helper function to get world paths directly under /worlds/{userUid}/
+    const getUserPath = useCallback((worldPath: string) => userUid ? `worlds/${userUid}/${worldPath.replace('worlds/', '')}` : `worlds/${worldPath.replace('worlds/', '')}`, [userUid]);
+
     // === Chat Mode State ===
     const [chatMode, setChatMode] = useState<{
         isActive: boolean;
@@ -239,6 +248,12 @@ export function useWorldEngine({
         position: { x: number; y: number };
         text: string;
         confidence: number;
+        boundingBox: {
+            minX: number;
+            maxX: number;
+            minY: number;
+            maxY: number;
+        };
     }>>([]);
     const [clustersVisible, setClustersVisible] = useState<boolean>(false);
     
@@ -340,19 +355,9 @@ export function useWorldEngine({
                 generateClusterLabels 
             } = await import('./bit.blocks');
 
-            // Get current viewport bounds for optimization
-            const viewCenter = getViewportCenter();
-            const viewportRadius = Math.max(100, 150 / zoomLevel); // Scale with zoom
-            
-            const viewport = {
-                minX: Math.floor(viewCenter.x - viewportRadius),
-                maxX: Math.ceil(viewCenter.x + viewportRadius),
-                minY: Math.floor(viewCenter.y - viewportRadius),
-                maxY: Math.ceil(viewCenter.y + viewportRadius)
-            };
-
-            // Extract text blocks from world data within viewport
-            const lineBlocks = extractAllTextBlocks(worldData, viewport);
+            // Process entire infinite canvas (no viewport restriction)
+            // Extract text blocks from all world data
+            const lineBlocks = extractAllTextBlocks(worldData);
             console.log('Extracted line blocks:', lineBlocks.size);
             
             // Group blocks into clusters
@@ -372,17 +377,34 @@ export function useWorldEngine({
                 clusterId: label.clusterId,
                 position: label.position,
                 text: label.text,
-                confidence: label.confidence
+                confidence: label.confidence,
+                boundingBox: label.boundingBox
             }));
             
             console.log('Final simplified labels:', simplifiedLabels);
             setClusterLabels(simplifiedLabels);
             
+            // Save cluster regions to Firebase if we have a current state
+            if (currentStateName && userUid) {
+                try {
+                    const regionsRef = ref(database, getUserPath(`${currentStateName}/regions`));
+                    const regionsData = {
+                        clusters: simplifiedLabels,
+                        lastGenerated: Date.now(),
+                        clustersVisible: true // Set to true since we just generated
+                    };
+                    await set(regionsRef, regionsData);
+                    console.log('Cluster regions saved to Firebase');
+                } catch (error) {
+                    console.error('Failed to save cluster regions:', error);
+                }
+            }
+            
         } catch (error) {
             console.error('Error updating cluster labels:', error);
             // Don't clear existing labels on error, just log it
         }
-    }, [worldData, getViewportCenter, zoomLevel]);
+    }, [worldData, currentStateName, userUid, getUserPath]);
 
     // === Command System ===
     const { 
@@ -545,9 +567,6 @@ export function useWorldEngine({
         return compiledLines;
     }, []);
 
-    // Helper function to get world paths directly under /worlds/{userUid}/
-    const getUserPath = useCallback((worldPath: string) => userUid ? `worlds/${userUid}/${worldPath.replace('worlds/', '')}` : `worlds/${worldPath.replace('worlds/', '')}`, [userUid]);
-
     // Ambient text compilation and Firebase sync
     useEffect(() => {
         if (!worldId || userUid === undefined) return;
@@ -652,7 +671,12 @@ export function useWorldEngine({
                 timestamp: Date.now(),
                 cursorPos,
                 viewOffset,
-                zoomLevel
+                zoomLevel,
+                regions: {
+                    clusters: clusterLabels,
+                    lastGenerated: clusterLabels.length > 0 ? Date.now() : null,
+                    clustersVisible: clustersVisible
+                }
             };
             
             await set(stateRef, stateData);
@@ -662,7 +686,7 @@ export function useWorldEngine({
             console.error('Error saving state:', error);
             return false;
         }
-    }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel, getUserPath, userUid]);
+    }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel, clusterLabels, clustersVisible, getUserPath, userUid]);
 
     const loadState = useCallback(async (stateName: string): Promise<boolean> => {
         if (!worldId || userUid === undefined) return false;
@@ -689,6 +713,15 @@ export function useWorldEngine({
                 }
                 if (stateData.zoomLevel) {
                     setZoomLevel(stateData.zoomLevel);
+                }
+                if (stateData.regions) {
+                    // Restore cluster regions if they exist
+                    if (stateData.regions.clusters) {
+                        setClusterLabels(stateData.regions.clusters);
+                    }
+                    if (stateData.regions.clustersVisible !== undefined) {
+                        setClustersVisible(stateData.regions.clustersVisible);
+                    }
                 }
             } else {
                 return false;
@@ -755,6 +788,26 @@ export function useWorldEngine({
             return false;
         }
     }, [worldId, currentStateName, getUserPath, userUid]);
+
+    const publishState = useCallback(async (stateName: string, isPublic: boolean): Promise<boolean> => {
+        if (!worldId || !userUid) return false;
+        
+        try {
+            // Update metadata for the state
+            const metadataRef = ref(database, getUserPath(`${stateName}/metadata`));
+            await set(metadataRef, { public: isPublic });
+            return true;
+        } catch (error) {
+            console.error('Error updating state publish status:', error);
+            return false;
+        }
+    }, [worldId, getUserPath, userUid]);
+
+    const getStatePublishStatus = useCallback((stateName: string): boolean => {
+        // For now, return false as default. This would need to be implemented
+        // with actual metadata loading from Firebase
+        return false;
+    }, []);
 
     // Load available states on component mount
     useEffect(() => {
@@ -1200,16 +1253,25 @@ export function useWorldEngine({
                     // Check if this is a --distance command
                     if (exec.args.length >= 2 && exec.args[0] === '--distance') {
                         const distanceStr = exec.args[1];
-                        const distance = parseInt(distanceStr, 10);
                         
-                        if (!isNaN(distance) && distance > 0) {
-                            // Update the labelProximityThreshold setting
-                            const newSettings = { labelProximityThreshold: distance };
+                        if (distanceStr.toLowerCase() === 'off') {
+                            // Set to maximum value to effectively disable distance filtering
+                            const newSettings = { labelProximityThreshold: 999999 };
                             updateSettings(newSettings);
                             saveSettingsToFirebase(newSettings);
-                            setDialogueWithRevert(`Label distance threshold set to ${distance}`, setDialogueText);
+                            setDialogueWithRevert("Label distance filtering disabled", setDialogueText);
                         } else {
-                            setDialogueWithRevert("Invalid distance. Please provide a positive number.", setDialogueText);
+                            const distance = parseInt(distanceStr, 10);
+                            
+                            if (!isNaN(distance) && distance > 0) {
+                                // Update the labelProximityThreshold setting
+                                const newSettings = { labelProximityThreshold: distance };
+                                updateSettings(newSettings);
+                                saveSettingsToFirebase(newSettings);
+                                setDialogueWithRevert(`Label distance threshold set to ${distance}`, setDialogueText);
+                            } else {
+                                setDialogueWithRevert("Invalid distance. Please provide a positive number or 'off'.", setDialogueText);
+                            }
                         }
                     } else if (exec.args.length >= 1) {
                         const text = exec.args[0];
@@ -1237,6 +1299,51 @@ export function useWorldEngine({
                         console.error('Sign out error:', error);
                         setDialogueWithRevert("Failed to sign out", setDialogueText);
                     });
+                } else if (exec.command === 'publish') {
+                    // Publish current state
+                    if (currentStateName) {
+                        setDialogueText("Publishing state...");
+                        publishState(currentStateName, true).then((success) => {
+                            if (success) {
+                                setDialogueWithRevert(`State "${currentStateName}" published successfully`, setDialogueText);
+                            } else {
+                                setDialogueWithRevert(`Failed to publish state "${currentStateName}"`, setDialogueText);
+                            }
+                        });
+                    } else {
+                        setDialogueWithRevert("No current state to publish", setDialogueText);
+                    }
+                } else if (exec.command === 'unpublish') {
+                    // Unpublish current state
+                    if (currentStateName) {
+                        setDialogueText("Unpublishing state...");
+                        publishState(currentStateName, false).then((success) => {
+                            if (success) {
+                                setDialogueWithRevert(`State "${currentStateName}" unpublished successfully`, setDialogueText);
+                            } else {
+                                setDialogueWithRevert(`Failed to unpublish state "${currentStateName}"`, setDialogueText);
+                            }
+                        });
+                    } else {
+                        setDialogueWithRevert("No current state to unpublish", setDialogueText);
+                    }
+                } else if (exec.command === 'cluster') {
+                    if (exec.args.length === 0) {
+                        // No arguments - generate/refresh clusters
+                        updateClusterLabels();
+                        setClustersVisible(true);
+                        setDialogueWithRevert("Generating cluster labels...", setDialogueText, 2000);
+                    } else if (exec.args[0] === 'on') {
+                        // Turn on cluster visibility
+                        setClustersVisible(true);
+                        setDialogueWithRevert("Cluster labels visible", setDialogueText);
+                    } else if (exec.args[0] === 'off') {
+                        // Turn off cluster visibility
+                        setClustersVisible(false);
+                        setDialogueWithRevert("Cluster labels hidden", setDialogueText);
+                    } else {
+                        setDialogueWithRevert("Usage: /cluster [on|off] or /cluster to refresh", setDialogueText);
+                    }
                 }
                 
                 setCursorPos(exec.commandStartPos);
