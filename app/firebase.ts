@@ -1,6 +1,6 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
-import { getDatabase, connectDatabaseEmulator, ref, onValue, set, get } from "firebase/database";
+import { getDatabase, connectDatabaseEmulator, ref, onValue, set, get, query, orderByChild, equalTo } from "firebase/database";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, User } from "firebase/auth";
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
@@ -62,6 +62,7 @@ export interface UserProfileData {
   email: string;
   uid: string;
   createdAt: string;
+  membership: string;
 }
 
 export const signUpUser = async (email: string, password: string, firstName: string, lastName: string, username: string): Promise<{success: boolean, user?: User, error?: string}> => {
@@ -82,14 +83,12 @@ export const signUpUser = async (email: string, password: string, firstName: str
       username,
       email,
       uid: user.uid,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      membership: 'fresh'
     };
     
     // Store user profile in database
     await set(ref(database, `users/${user.uid}`), userProfileData);
-    
-    // Store username mapping (to ensure usernames are unique)
-    await set(ref(database, `usernames/${username}`), user.uid);
     
     return { success: true, user };
   } catch (error: any) {
@@ -116,8 +115,9 @@ export const signInUser = async (email: string, password: string): Promise<{succ
 
 export const checkUsernameAvailability = async (username: string): Promise<boolean> => {
   try {
-    const snapshot = await get(ref(database, `usernames/${username}`));
-    return !snapshot.exists(); // Available if username doesn't exist
+    const usersQuery = query(ref(database, 'users'), orderByChild('username'), equalTo(username));
+    const snapshot = await get(usersQuery);
+    return !snapshot.exists(); // Available if no user has this username
   } catch (error) {
     console.error('Error checking username availability:', error);
     return false; // Assume not available on error

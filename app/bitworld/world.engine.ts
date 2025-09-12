@@ -544,6 +544,20 @@ export function useWorldEngine({
         }
     }, [worldData, currentStateName, userUid, getUserPath, useHierarchicalFrames, hierarchicalFrames, updateTextFrames]);
 
+    // === Responsive Frame Updates ===
+    // Auto-update frames when world data changes (with debounce)
+    useEffect(() => {
+        if (!framesVisible) return; // Only auto-update if frames are visible
+        
+        const debounceTimeout = setTimeout(() => {
+            console.log('=== AUTO-UPDATING FRAMES (worldData changed) ===');
+            updateTextFrames();
+            // Note: Cluster labels (AI) only regenerate when explicitly requested via /cluster command
+        }, 500); // 500ms debounce to avoid excessive updates while typing
+        
+        return () => clearTimeout(debounceTimeout);
+    }, [worldData, framesVisible, updateTextFrames]);
+
     // === Command System ===
     const { 
         commandState, 
