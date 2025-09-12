@@ -436,18 +436,27 @@ export function useWorldEngine({
                 const l2Frames = hierarchicalFrames.levels.get(HierarchyLevel.GROUPED) || [];
                 console.log('Found L2 frames:', l2Frames.length);
                 
-                // Create synthetic clusters directly from L2 frame bounding boxes
-                clustersToLabel = l2Frames.map((frame, index) => ({
-                    id: `l2_frame_${index}`,
-                    blocks: [], // Not needed for labeling
-                    lines: [], // Not needed for labeling
-                    boundingBox: frame.boundingBox,
-                    density: 1.0, // Set high enough to pass filtering
-                    totalCharacters: 100, // Fake values to pass filtering
-                    estimatedWords: 10,
-                    centroid: frame.center,
-                    leftMargin: frame.boundingBox.minX
-                }));
+                // Create synthetic clusters directly from L2 frame bounding boxes (filter out invalid ones)
+                clustersToLabel = l2Frames
+                    .filter(frame => {
+                        const bbox = frame.boundingBox;
+                        const isValid = !isNaN(bbox.minX) && !isNaN(bbox.maxX) && !isNaN(bbox.minY) && !isNaN(bbox.maxY);
+                        if (!isValid) {
+                            console.log('Filtering out invalid L2 frame:', frame.id, bbox);
+                        }
+                        return isValid;
+                    })
+                    .map((frame, index) => ({
+                        id: `l2_frame_${index}`,
+                        blocks: [], // Not needed for labeling
+                        lines: [], // Not needed for labeling
+                        boundingBox: frame.boundingBox,
+                        density: 1.0, // Set high enough to pass filtering
+                        totalCharacters: 100, // Fake values to pass filtering
+                        estimatedWords: 10,
+                        centroid: frame.center,
+                        leftMargin: frame.boundingBox.minX
+                    }));
                 console.log('Using synthetic L2 clusters from blue frames:', clustersToLabel.length);
             } else {
                 // Fallback: generate frames first to get clusters
@@ -456,17 +465,26 @@ export function useWorldEngine({
                 
                 if (generatedSystem) {
                     const l2Frames = generatedSystem.levels.get(HierarchyLevel.GROUPED) || [];
-                    clustersToLabel = l2Frames.map((frame, index) => ({
-                        id: `l2_frame_${index}`,
-                        blocks: [], 
-                        lines: [], 
-                        boundingBox: frame.boundingBox,
-                        density: 1.0,
-                        totalCharacters: 100,
-                        estimatedWords: 10,
-                        centroid: frame.center,
-                        leftMargin: frame.boundingBox.minX
-                    }));
+                    clustersToLabel = l2Frames
+                        .filter(frame => {
+                            const bbox = frame.boundingBox;
+                            const isValid = !isNaN(bbox.minX) && !isNaN(bbox.maxX) && !isNaN(bbox.minY) && !isNaN(bbox.maxY);
+                            if (!isValid) {
+                                console.log('Filtering out invalid L2 frame:', frame.id, bbox);
+                            }
+                            return isValid;
+                        })
+                        .map((frame, index) => ({
+                            id: `l2_frame_${index}`,
+                            blocks: [], 
+                            lines: [], 
+                            boundingBox: frame.boundingBox,
+                            density: 1.0,
+                            totalCharacters: 100,
+                            estimatedWords: 10,
+                            centroid: frame.center,
+                            leftMargin: frame.boundingBox.minX
+                        }));
                     console.log('Generated synthetic L2 clusters from blue frames:', clustersToLabel.length);
                 } else {
                     console.log('Failed to generate hierarchical frames, skipping cluster labels');
@@ -485,19 +503,11 @@ export function useWorldEngine({
                 });
             });
             
-            // Filter clusters that meet labeling conditions (more lenient for L2)
-            const l2FilterConditions = {
-                maxVerticalGap: 5,
-                minBlocksPerCluster: 1,      
-                maxHorizontalOverlap: 8,
-                minDensity: 0.02,            // Much lower density requirement for L2
-                minWords: 1                  // Just need 1+ words for L2
-            };
-            const qualifiedClusters = filterClustersForLabeling(clustersToLabel, l2FilterConditions);
-            console.log('Qualified L2 clusters:', qualifiedClusters.length);
+            // Skip filtering - use all valid L2 clusters directly for labeling
+            console.log('Using all L2 clusters directly for labeling:', clustersToLabel.length);
             
-            // Generate AI labels for qualified clusters
-            const aiLabels = await generateClusterLabels(qualifiedClusters, worldData);
+            // Generate AI labels for L2 clusters
+            const aiLabels = await generateClusterLabels(clustersToLabel, worldData);
             console.log('Generated AI labels for L2:', aiLabels.length);
             
             // Convert to simplified format for rendering
