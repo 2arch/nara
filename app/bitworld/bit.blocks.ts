@@ -275,6 +275,7 @@ export interface TextCluster {
     totalCharacters: number;
     estimatedWords: number;
     centroid: {x: number, y: number};
+    leftMargin: number; // Track the consistent left margin of this cluster
 }
 
 export interface ClusteringConditions {
@@ -288,7 +289,7 @@ export interface ClusteringConditions {
 export const defaultClusteringConditions: ClusteringConditions = {
     maxVerticalGap: 5,           // Allow larger gaps between lines
     minBlocksPerCluster: 1,      // Allow single blocks to be "clusters"
-    maxHorizontalOverlap: 50,    // Much more flexible horizontal alignment
+    maxHorizontalOverlap: 8,     // Much stricter horizontal alignment - only ~1 word gap
     minDensity: 0.1,            // Lower density requirement
     minWords: 2                  // Only need 2+ words
 };
@@ -467,7 +468,12 @@ function isBlockAlignedWithCluster(
     const overlap = Math.max(0, Math.min(blockRange.end, clusterRange.end) - Math.max(blockRange.start, clusterRange.start));
     const gap = Math.max(0, Math.max(blockRange.start, clusterRange.start) - Math.min(blockRange.end, clusterRange.end));
     
-    return overlap > 0 || gap <= conditions.maxHorizontalOverlap;
+    // Check if blocks share similar left margin (column alignment)
+    const leftMarginDifference = Math.abs(blockRange.start - clusterRange.start);
+    const sharesLeftMargin = leftMarginDifference <= 2; // Allow 2 char tolerance for left margin
+    
+    // Only cluster if there's overlap OR (small gap AND shares left margin)
+    return overlap > 0 || (gap <= conditions.maxHorizontalOverlap && sharesLeftMargin);
 }
 
 /**
@@ -521,6 +527,106 @@ export function filterClustersForLabeling(
         cluster.estimatedWords >= conditions.minWords &&
         cluster.blocks.length >= conditions.minBlocksPerCluster
     );
+}
+
+// === FRAME RENDERING UTILITIES ===
+
+export interface FrameRenderOptions {
+    strokeStyle?: string;
+    lineWidth?: number;
+    dashPattern?: number[];
+}
+
+export const defaultFrameOptions: FrameRenderOptions = {
+    strokeStyle: '#00FF00',
+    lineWidth: 2,
+    dashPattern: [5, 5]
+};
+
+export interface TextBlockFrame {
+    boundingBox: {
+        minX: number;
+        maxX: number;
+        minY: number;
+        maxY: number;
+    };
+}
+
+/**
+ * Generates simple bounding frames around text clusters (no AI)
+ * @param worldData Combined world data
+ * @param viewport Optional viewport bounds
+ * @returns Array of simple frames around text clusters
+ */
+export function generateTextBlockFrames(
+    worldData: WorldData, 
+    viewport?: {minX: number, maxX: number, minY: number, maxY: number}
+): TextBlockFrame[] {
+    const lineBlocks = extractAllTextBlocks(worldData, viewport);
+    const clusters = groupTextBlocksIntoClusters(lineBlocks);
+    
+    return clusters.map(cluster => ({
+        boundingBox: cluster.boundingBox
+    }));
+}
+
+/**
+ * Renders frames on canvas with proper grid alignment
+ * @param ctx Canvas rendering context
+ * @param frames Array of frames with bounding boxes
+ * @param worldToScreen Function to convert world coordinates to screen coordinates
+ * @param viewBounds Current viewport bounds for culling
+ * @param currentZoom Current zoom level
+ * @param currentOffset Current view offset
+ * @param options Frame rendering options
+ */
+export function renderFrames(
+    ctx: CanvasRenderingContext2D,
+    frames: Array<{boundingBox: {minX: number, maxX: number, minY: number, maxY: number}}>,
+    worldToScreen: (x: number, y: number, zoom: number, offset: {x: number, y: number}) => {x: number, y: number},
+    viewBounds: {minX: number, maxX: number, minY: number, maxY: number},
+    currentZoom: number,
+    currentOffset: {x: number, y: number},
+    options: FrameRenderOptions = defaultFrameOptions
+): void {
+    const {strokeStyle, lineWidth, dashPattern} = {...defaultFrameOptions, ...options};
+    
+    // Set frame style
+    ctx.strokeStyle = strokeStyle!;
+    ctx.lineWidth = lineWidth!;
+    if (dashPattern && dashPattern.length > 0) {
+        ctx.setLineDash(dashPattern);
+    }
+    
+    for (const frame of frames) {
+        const { boundingBox } = frame;
+        
+        // Check if frame bounding box intersects with viewport
+        const frameVisible = !(
+            boundingBox.maxX < viewBounds.minX || 
+            boundingBox.minX > viewBounds.maxX ||
+            boundingBox.maxY < viewBounds.minY || 
+            boundingBox.minY > viewBounds.maxY
+        );
+        
+        if (frameVisible) {
+            // Calculate frame bounds that align to character cell boundaries
+            const topLeft = worldToScreen(boundingBox.minX, boundingBox.minY, currentZoom, currentOffset);
+            const bottomRight = worldToScreen(boundingBox.maxX + 1, boundingBox.maxY + 1, currentZoom, currentOffset);
+            
+            // Snap frame to exact cell boundaries (no sub-pixel positioning)
+            const frameX = Math.floor(topLeft.x);
+            const frameY = Math.floor(topLeft.y);
+            const frameWidth = Math.ceil(bottomRight.x) - frameX;
+            const frameHeight = Math.ceil(bottomRight.y) - frameY;
+            
+            // Draw frame aligned to character grid
+            ctx.strokeRect(frameX + 0.5, frameY + 0.5, frameWidth - 1, frameHeight - 1);
+        }
+    }
+    
+    // Reset line dash
+    ctx.setLineDash([]);
 }
 
 // === CLUSTER LABEL GENERATION ===

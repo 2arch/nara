@@ -5,7 +5,7 @@ import type { WorldData, Point, WorldEngine, PanStartInfo } from './world.engine
 import { useDialogue, useDebugDialogue } from './dialogue';
 import { useMonogramSystem } from './monogram';
 import { useControllerSystem, createMonogramController, createCameraController } from './controllers';
-import { detectTextBlocks, extractLineCharacters } from './bit.blocks';
+import { detectTextBlocks, extractLineCharacters, renderFrames } from './bit.blocks';
 
 // --- Constants --- (Copied and relevant ones kept)
 const GRID_COLOR = '#F2F2F233';
@@ -918,38 +918,29 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
-        // === Render Cluster Frames ===
+        // === Render Text Frames (Simple Bounding Boxes) ===
+        if (engine.framesVisible && engine.textFrames.length > 0) {
+            renderFrames(
+                ctx, 
+                engine.textFrames, 
+                engine.worldToScreen, 
+                viewBounds, 
+                currentZoom, 
+                currentOffset
+            );
+        }
+
+        // === Render Cluster Frames (AI Clusters) ===
         if (engine.clustersVisible && engine.clusterLabels.length > 0) {
-            for (const clusterLabel of engine.clusterLabels) {
-                const { boundingBox } = clusterLabel;
-                
-                // Check if cluster bounding box intersects with viewport
-                const clusterVisible = !(
-                    boundingBox.maxX < viewBounds.minX || 
-                    boundingBox.minX > viewBounds.maxX ||
-                    boundingBox.maxY < viewBounds.minY || 
-                    boundingBox.minY > viewBounds.maxY
-                );
-                
-                if (clusterVisible) {
-                    // Calculate frame bounds that align to character cell boundaries
-                    const topLeft = engine.worldToScreen(boundingBox.minX, boundingBox.minY, currentZoom, currentOffset);
-                    const bottomRight = engine.worldToScreen(boundingBox.maxX + 1, boundingBox.maxY + 1, currentZoom, currentOffset);
-                    
-                    // Snap frame to exact cell boundaries (no sub-pixel positioning)
-                    const frameX = Math.floor(topLeft.x);
-                    const frameY = Math.floor(topLeft.y);
-                    const frameWidth = Math.ceil(bottomRight.x) - frameX;
-                    const frameHeight = Math.ceil(bottomRight.y) - frameY;
-                    
-                    // Draw cluster frame aligned to character grid
-                    ctx.strokeStyle = '#00FF00'; // Green frame color
-                    ctx.lineWidth = 2;
-                    ctx.setLineDash([5, 5]); // Dashed line
-                    ctx.strokeRect(frameX + 0.5, frameY + 0.5, frameWidth - 1, frameHeight - 1);
-                    ctx.setLineDash([]); // Reset to solid lines
-                }
-            }
+            renderFrames(
+                ctx, 
+                engine.clusterLabels, 
+                engine.worldToScreen, 
+                viewBounds, 
+                currentZoom, 
+                currentOffset,
+                { strokeStyle: '#FF6600', lineWidth: 2, dashPattern: [3, 3] } // Different style for AI clusters
+            );
         }
 
         // === Render Cluster Waypoint Arrows ===

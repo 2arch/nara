@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useWorldSave } from './world.save'; // Import the new hook
 import { useCommandSystem, CommandState, CommandExecution, BackgroundMode } from './commands'; // Import command system
-import { getSmartIndentation, calculateWordDeletion, extractLineCharacters, detectTextBlocks, findClosestBlock, extractAllTextBlocks, groupTextBlocksIntoClusters, filterClustersForLabeling } from './bit.blocks'; // Import block detection utilities
+import { getSmartIndentation, calculateWordDeletion, extractLineCharacters, detectTextBlocks, findClosestBlock, extractAllTextBlocks, groupTextBlocksIntoClusters, filterClustersForLabeling, generateTextBlockFrames } from './bit.blocks'; // Import block detection utilities
 import { useWorldSettings, WorldSettings } from './settings';
 import { set, ref } from 'firebase/database';
 import { database, auth } from '@/app/firebase';
@@ -134,7 +134,16 @@ export interface WorldEngine {
     loadAvailableStates: () => Promise<string[]>;
     username?: string;
     userUid?: string | null;
-    // Text cluster system
+    // Text frame and cluster system
+    textFrames: Array<{
+        boundingBox: {
+            minX: number;
+            maxX: number;
+            minY: number;
+            maxY: number;
+        };
+    }>;
+    framesVisible: boolean;
     clusterLabels: Array<{
         clusterId: string;
         position: { x: number; y: number };
@@ -242,7 +251,16 @@ export function useWorldEngine({
     const [chatData, setChatData] = useState<WorldData>({});
     const [searchData, setSearchData] = useState<WorldData>({});
     
-    // === Text Cluster System ===
+    // === Text Frame and Cluster System ===
+    const [textFrames, setTextFrames] = useState<Array<{
+        boundingBox: {
+            minX: number;
+            maxX: number;
+            minY: number;
+            maxY: number;
+        };
+    }>>([]);
+    const [framesVisible, setFramesVisible] = useState<boolean>(false);
     const [clusterLabels, setClusterLabels] = useState<Array<{
         clusterId: string;
         position: { x: number; y: number };
@@ -290,6 +308,21 @@ export function useWorldEngine({
             }
         }
         return labels;
+    }, [worldData]);
+
+    // === Text Frame Generation (No AI) ===
+    const updateTextFrames = useCallback(async () => {
+        try {
+            console.log('=== UPDATING TEXT FRAMES ===');
+            
+            // Generate simple bounding frames around text clusters
+            const frames = generateTextBlockFrames(worldData);
+            console.log('Generated frames:', frames.length);
+            
+            setTextFrames(frames);
+        } catch (error) {
+            console.error('Error updating text frames:', error);
+        }
     }, [worldData]);
 
     // === Character Dimensions Calculation ===
@@ -1329,20 +1362,49 @@ export function useWorldEngine({
                     }
                 } else if (exec.command === 'cluster') {
                     if (exec.args.length === 0) {
-                        // No arguments - generate/refresh clusters
+                        // Generate frames + AI clusters + waypoints (everything)
+                        updateTextFrames();
                         updateClusterLabels();
+                        setFramesVisible(true);
                         setClustersVisible(true);
-                        setDialogueWithRevert("Generating cluster labels...", setDialogueText, 2000);
+                        setDialogueWithRevert("Generating frames + AI cluster analysis with waypoints...", setDialogueText, 3000);
                     } else if (exec.args[0] === 'on') {
-                        // Turn on cluster visibility
+                        // Turn on cluster and frame visibility
+                        setFramesVisible(true);
                         setClustersVisible(true);
-                        setDialogueWithRevert("Cluster labels visible", setDialogueText);
+                        setDialogueWithRevert("Cluster labels and frames visible", setDialogueText);
                     } else if (exec.args[0] === 'off') {
-                        // Turn off cluster visibility
+                        // Turn off cluster and frame visibility
+                        setFramesVisible(false);
                         setClustersVisible(false);
-                        setDialogueWithRevert("Cluster labels hidden", setDialogueText);
+                        setDialogueWithRevert("Cluster labels and frames hidden", setDialogueText);
+                    } else if (exec.args[0] === 'refresh') {
+                        // Force regeneration of everything
+                        updateTextFrames();
+                        updateClusterLabels();
+                        setDialogueWithRevert("Force regenerating frames + clusters + waypoints...", setDialogueText, 3000);
                     } else {
-                        setDialogueWithRevert("Usage: /cluster [on|off] or /cluster to refresh", setDialogueText);
+                        setDialogueWithRevert("Usage: /cluster [on|off|refresh] - Generate frames + AI clusters + waypoints. Use /frames for frames only.", setDialogueText);
+                    }
+                } else if (exec.command === 'frames') {
+                    if (exec.args.length === 0 || exec.args[0] === 'toggle') {
+                        // Generate frames and toggle visibility
+                        updateTextFrames();
+                        const newVisibility = !framesVisible;
+                        setFramesVisible(newVisibility);
+                        const statusText = newVisibility ? 'visible' : 'hidden';
+                        setDialogueWithRevert(`Generating text frames... frames ${statusText}`, setDialogueText, 2000);
+                    } else if (exec.args[0] === 'on') {
+                        // Generate frames and turn on visibility
+                        updateTextFrames();
+                        setFramesVisible(true);
+                        setDialogueWithRevert("Generating text frames... frames visible", setDialogueText, 2000);
+                    } else if (exec.args[0] === 'off') {
+                        // Turn off frame visibility
+                        setFramesVisible(false);
+                        setDialogueWithRevert("Text frames hidden", setDialogueText);
+                    } else {
+                        setDialogueWithRevert("Usage: /frames [on|off|toggle] - Generate bounding frames around text blocks", setDialogueText);
                     }
                 }
                 
@@ -2763,7 +2825,10 @@ export function useWorldEngine({
         loadAvailableStates,
         username, // Expose username for routing
         userUid, // Expose userUid for Firebase operations
-        // Text cluster system
+        // Text frame and cluster system
+        textFrames,
+        framesVisible,
+        updateTextFrames,
         clusterLabels,
         clustersVisible,
         updateClusterLabels,
