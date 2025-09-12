@@ -514,6 +514,77 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         
         typeNextChar();
     }, [addEphemeralText, modeState.currentMode, calculateResponseWidth]);
+    
+    // Add instant AI response with character-by-character fade
+    const addInstantAIResponse = useCallback((startPos: Point, text: string, options?: {
+        wrapWidth?: number;
+        fadeDelay?: number;  // Delay before starting fade
+        fadeInterval?: number;  // Delay between each character fade
+        color?: string;
+        queryText?: string;
+    }) => {
+        const wrapWidth = options?.wrapWidth || (options?.queryText ? calculateResponseWidth(options.queryText) : 30);
+        const fadeDelay = options?.fadeDelay || 3000;  // Wait 3 seconds before starting fade
+        const fadeInterval = options?.fadeInterval || 50;  // 50ms between each character fade
+        const color = options?.color || '#808080';
+        
+        // Text wrapping that honors paragraph breaks
+        const wrapText = (text: string, maxWidth: number): string[] => {
+            const paragraphs = text.split('\n');
+            const lines: string[] = [];
+            
+            for (let i = 0; i < paragraphs.length; i++) {
+                const paragraph = paragraphs[i].trim();
+                
+                if (paragraph === '') {
+                    lines.push('');
+                    continue;
+                }
+                
+                const words = paragraph.split(' ');
+                let currentLine = '';
+                
+                for (const word of words) {
+                    const testLine = currentLine ? `${currentLine} ${word}` : word;
+                    if (testLine.length <= maxWidth) {
+                        currentLine = testLine;
+                    } else {
+                        if (currentLine) {
+                            lines.push(currentLine);
+                            currentLine = word;
+                        } else {
+                            lines.push(word.substring(0, maxWidth));
+                            currentLine = word.substring(maxWidth);
+                        }
+                    }
+                }
+                if (currentLine) lines.push(currentLine);
+            }
+            return lines;
+        };
+        
+        const wrappedLines = wrapText(text, wrapWidth);
+        const allCharPositions: Array<{ x: number; y: number; char: string }> = [];
+        
+        // Add all characters instantly
+        let y = startPos.y;
+        wrappedLines.forEach(line => {
+            for (let x = 0; x < line.length; x++) {
+                const char = line[x];
+                const worldX = startPos.x + x;
+                allCharPositions.push({ x: worldX, y, char });
+                
+                // Add character instantly with no initial fade
+                addEphemeralText({ x: worldX, y }, char, {
+                    color: color,
+                    animationDelay: fadeDelay + (allCharPositions.length * fadeInterval)  // Stagger fade times
+                });
+            }
+            y++;
+        });
+        
+        return { width: wrapWidth, height: wrappedLines.length };
+    }, [addEphemeralText, calculateResponseWidth]);
 
     // Start command mode when '/' is pressed
     const startCommand = useCallback((cursorPos: Point) => {
@@ -1470,6 +1541,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         switchMode,
         addEphemeralText,
         addAIResponse,
+        addInstantAIResponse,
         currentMode: modeState.currentMode,
         lightModeData: modeState.lightModeData,
         backgroundMode: modeState.backgroundMode,

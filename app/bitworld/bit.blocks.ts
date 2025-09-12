@@ -552,6 +552,410 @@ export interface TextBlockFrame {
     };
 }
 
+// === Hierarchical Clustering Interfaces ===
+
+export enum HierarchyLevel {
+    FINE_DETAIL = 1,    // Original clustering
+    GROUPED = 2,        // Merged clusters  
+}
+
+export interface HierarchicalFrame {
+    id: string;
+    level: HierarchyLevel;
+    boundingBox: {
+        minX: number;
+        maxX: number;
+        minY: number;
+        maxY: number;
+    };
+    center: {
+        x: number;
+        y: number;
+    };
+    viewerDistance: number;
+    mergeRadius: number;
+    children?: HierarchicalFrame[];  // For tree structure
+    clusters: TextCluster[];         // Source clusters
+    style: FrameStyle;
+}
+
+export interface FrameStyle {
+    strokeStyle: string;
+    lineWidth: number;
+    dashPattern: number[];
+    fillStyle?: string;
+    alpha?: number;
+}
+
+export interface HierarchicalFrameSystem {
+    levels: Map<HierarchyLevel, HierarchicalFrame[]>;
+    viewportCenter: { x: number; y: number };
+    zoomLevel: number;
+    activeFrames: HierarchicalFrame[];  // Frames to actually render
+}
+
+export interface DistanceBasedConfig {
+    baseRadius: number;           // Base merge radius (default: 50)
+    distanceScaling: number;      // Distance scaling factor (default: 1000)
+    zoomScaling: boolean;         // Whether to scale with zoom
+    levelThresholds: {
+        [HierarchyLevel.FINE_DETAIL]: number;
+        [HierarchyLevel.GROUPED]: number;
+    };
+}
+
+// === Distance-Based Clustering Utilities ===
+
+/**
+ * Calculate Euclidean distance between two points
+ */
+export function calculateDistance(p1: { x: number; y: number }, p2: { x: number; y: number }): number {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+/**
+ * Get the center point of a cluster's bounding box
+ */
+export function getClusterCenter(cluster: TextCluster): { x: number; y: number } {
+    const { boundingBox } = cluster;
+    return {
+        x: (boundingBox.minX + boundingBox.maxX) / 2,
+        y: (boundingBox.minY + boundingBox.maxY) / 2
+    };
+}
+
+/**
+ * Calculate dynamic merge radius based on distance from viewer
+ * Formula: baseRadius * (1 + viewerDistance / distanceScaling)
+ */
+export function getMergeRadius(
+    viewerDistance: number, 
+    config: DistanceBasedConfig
+): number {
+    const { baseRadius, distanceScaling } = config;
+    return baseRadius * (1 + viewerDistance / distanceScaling);
+}
+
+/**
+ * Calculate merge radius with zoom integration
+ * More aggressive merging when zoomed out
+ */
+export function getEffectiveMergeRadius(
+    viewerDistance: number,
+    zoomLevel: number,
+    config: DistanceBasedConfig
+): number {
+    const distanceFactor = 1 + viewerDistance / config.distanceScaling;
+    const zoomFactor = config.zoomScaling ? (1 / Math.max(0.1, zoomLevel)) : 1;
+    return config.baseRadius * distanceFactor * zoomFactor;
+}
+
+/**
+ * Determine hierarchy level based on distance from viewport center
+ */
+export function getHierarchyLevel(
+    viewerDistance: number,
+    config: DistanceBasedConfig
+): HierarchyLevel {
+    const { levelThresholds } = config;
+    
+    if (viewerDistance < levelThresholds[HierarchyLevel.FINE_DETAIL]) {
+        return HierarchyLevel.FINE_DETAIL;
+    } else {
+        return HierarchyLevel.GROUPED;
+    }
+}
+
+/**
+ * Default configuration for distance-based clustering
+ */
+export const defaultDistanceConfig: DistanceBasedConfig = {
+    baseRadius: 50,
+    distanceScaling: 1000,
+    zoomScaling: true,
+    levelThresholds: {
+        [HierarchyLevel.FINE_DETAIL]: 100,
+        [HierarchyLevel.GROUPED]: Infinity
+    }
+};
+
+/**
+ * Get visual style for a hierarchy level based on design document
+ */
+export function getHierarchyStyle(level: HierarchyLevel): FrameStyle {
+    switch (level) {
+        case HierarchyLevel.FINE_DETAIL:
+            return {
+                strokeStyle: '#00FF00',  // Green
+                lineWidth: 1,
+                dashPattern: [3, 3]
+            };
+        case HierarchyLevel.GROUPED:
+            return {
+                strokeStyle: '#0088FF',  // Blue
+                lineWidth: 2,
+                dashPattern: [5, 5]
+            };
+    }
+}
+
+/**
+ * Merge two clusters into a single hierarchical frame
+ */
+function mergeClusters(cluster1: TextCluster, cluster2: TextCluster): TextCluster {
+    return {
+        id: `merged_${cluster1.id}_${cluster2.id}`,
+        blocks: [...cluster1.blocks, ...cluster2.blocks],
+        lines: [...cluster1.lines, ...cluster2.lines].sort((a, b) => a - b),
+        boundingBox: {
+            minX: Math.min(cluster1.boundingBox.minX, cluster2.boundingBox.minX),
+            maxX: Math.max(cluster1.boundingBox.maxX, cluster2.boundingBox.maxX),
+            minY: Math.min(cluster1.boundingBox.minY, cluster2.boundingBox.minY),
+            maxY: Math.max(cluster1.boundingBox.maxY, cluster2.boundingBox.maxY)
+        },
+        density: (cluster1.density + cluster2.density) / 2  // Average density
+    };
+}
+
+/**
+ * Generate hierarchical frame system based on distance from viewport
+ */
+export function generateHierarchicalFrames(
+    worldData: WorldData,
+    viewportCenter: { x: number; y: number },
+    zoomLevel: number,
+    config: DistanceBasedConfig = defaultDistanceConfig,
+    viewport?: {minX: number, maxX: number, minY: number, maxY: number},
+    showAllLevels: boolean = true
+): HierarchicalFrameSystem {
+    // Start with base clusters
+    const lineBlocks = extractAllTextBlocks(worldData, viewport);
+    const baseClusters = groupTextBlocksIntoClusters(lineBlocks);
+    
+    console.log('=== HIERARCHICAL CLUSTERING ===');
+    console.log('Base clusters:', baseClusters.length);
+    console.log('Viewport center:', viewportCenter);
+    console.log('Zoom level:', zoomLevel);
+    
+    const levels = new Map<HierarchyLevel, HierarchicalFrame[]>();
+    
+    // Process each hierarchy level - build hierarchically
+    let previousClusters = baseClusters;
+    
+    for (const level of [HierarchyLevel.FINE_DETAIL, HierarchyLevel.GROUPED]) {
+        const levelFrames: HierarchicalFrame[] = [];
+        let currentClusters: TextCluster[];
+        
+        if (level === HierarchyLevel.FINE_DETAIL) {
+            // Level 1: Use original clustering logic (no distance-based merging)
+            currentClusters = [...baseClusters];
+        } else {
+            // Levels 2-4: Apply distance-based merging to the previous level's clusters
+            currentClusters = applyDistanceBasedMerging([...previousClusters], viewportCenter, zoomLevel, level, config);
+        }
+        
+        // Convert clusters to hierarchical frames
+        for (let i = 0; i < currentClusters.length; i++) {
+            const cluster = currentClusters[i];
+            const center = getClusterCenter(cluster);
+            const distance = calculateDistance(viewportCenter, center);
+            const mergeRadius = getEffectiveMergeRadius(distance, zoomLevel, config);
+            
+            const frame: HierarchicalFrame = {
+                id: `${level}_${cluster.id}_${i}`,
+                level: level,
+                boundingBox: cluster.boundingBox,
+                center: center,
+                viewerDistance: distance,
+                mergeRadius: mergeRadius,
+                clusters: [cluster],
+                style: getHierarchyStyle(level)
+            };
+            
+            levelFrames.push(frame);
+        }
+        
+        levels.set(level, levelFrames);
+        console.log(`Level ${level} frames:`, levelFrames.length);
+        
+        // Update previous clusters for the next level
+        previousClusters = currentClusters;
+    }
+    
+    // Determine which frames should be actively rendered
+    const activeFrames = selectActiveFrames(levels, viewportCenter, config, showAllLevels);
+    
+    return {
+        levels,
+        viewportCenter,
+        zoomLevel,
+        activeFrames
+    };
+}
+
+/**
+ * Apply simple proximity-based merging for L2 level
+ * Much more conservative than distance-based merging
+ */
+export function applySimpleProximityMerging(
+    clusters: TextCluster[],
+    maxMergeDistance: number = 5  // Very conservative merge distance
+): TextCluster[] {
+    if (clusters.length <= 1) return clusters;
+    
+    let currentClusters = [...clusters];
+    let changed = true;
+    
+    // Only do a single pass to avoid over-merging
+    const newClusters: TextCluster[] = [];
+    const processed = new Set<number>();
+    
+    for (let i = 0; i < currentClusters.length; i++) {
+        if (processed.has(i)) continue;
+        
+        let merged = currentClusters[i];
+        
+        // Only look at the next few clusters to avoid over-merging
+        for (let j = i + 1; j < Math.min(i + 3, currentClusters.length); j++) {
+            if (processed.has(j)) continue;
+            
+            const center1 = getClusterCenter(merged);
+            const center2 = getClusterCenter(currentClusters[j]);
+            const distance = calculateDistance(center1, center2);
+            
+            // Very conservative merge - only merge very close clusters
+            if (distance < maxMergeDistance) {
+                merged = mergeClusters(merged, currentClusters[j]);
+                processed.add(j);
+            }
+        }
+        
+        newClusters.push(merged);
+        processed.add(i);
+    }
+    
+    return newClusters;
+}
+
+/**
+ * Apply distance-based merging for a specific hierarchy level
+ */
+export function applyDistanceBasedMerging(
+    clusters: TextCluster[],
+    viewportCenter: { x: number; y: number },
+    zoomLevel: number,
+    targetLevel: HierarchyLevel,
+    config: DistanceBasedConfig
+): TextCluster[] {
+    // For L2, use simple proximity merging instead of complex distance-based merging
+    if (targetLevel === HierarchyLevel.GROUPED) {
+        return applySimpleProximityMerging(clusters, 8); // Only merge clusters within 8 units
+    }
+    
+    // Original complex logic for other levels (if we had them)
+    let currentClusters = [...clusters];
+    let changed = true;
+    
+    // Iterate until no more merges possible
+    while (changed && currentClusters.length > 1) {
+        changed = false;
+        const newClusters: TextCluster[] = [];
+        const processed = new Set<number>();
+        
+        for (let i = 0; i < currentClusters.length; i++) {
+            if (processed.has(i)) continue;
+            
+            let merged = currentClusters[i];
+            
+            for (let j = i + 1; j < currentClusters.length; j++) {
+                if (processed.has(j)) continue;
+                
+                if (shouldMergeClusters(merged, currentClusters[j], viewportCenter, zoomLevel, targetLevel, config)) {
+                    merged = mergeClusters(merged, currentClusters[j]);
+                    processed.add(j);
+                    changed = true;
+                }
+            }
+            
+            newClusters.push(merged);
+            processed.add(i);
+        }
+        
+        currentClusters = newClusters;
+    }
+    
+    return currentClusters;
+}
+
+/**
+ * Determine if two clusters should be merged based on distance and level
+ */
+function shouldMergeClusters(
+    cluster1: TextCluster,
+    cluster2: TextCluster,
+    viewportCenter: { x: number; y: number },
+    zoomLevel: number,
+    level: HierarchyLevel,
+    config: DistanceBasedConfig
+): boolean {
+    const center1 = getClusterCenter(cluster1);
+    const center2 = getClusterCenter(cluster2);
+    const midpoint = {
+        x: (center1.x + center2.x) / 2,
+        y: (center1.y + center2.y) / 2
+    };
+    
+    const viewerDistance = calculateDistance(viewportCenter, midpoint);
+    const mergeRadius = getEffectiveMergeRadius(viewerDistance, zoomLevel, config);
+    const clusterDistance = calculateDistance(center1, center2);
+    
+    // Apply level-specific merging thresholds
+    let levelMultiplier = 1;
+    switch (level) {
+        case HierarchyLevel.FINE_DETAIL:
+            levelMultiplier = 0.5;  // More conservative (not actually used since L1 doesn't merge)
+            break;
+        case HierarchyLevel.GROUPED:
+            levelMultiplier = 0.3;  // Much more conservative - only merge very close clusters
+            break;
+    }
+    
+    return clusterDistance < (mergeRadius * levelMultiplier);
+}
+
+/**
+ * Select which frames should be actively rendered based on distance
+ */
+function selectActiveFrames(
+    levels: Map<HierarchyLevel, HierarchicalFrame[]>,
+    viewportCenter: { x: number; y: number },
+    config: DistanceBasedConfig,
+    showAllLevels: boolean = true
+): HierarchicalFrame[] {
+    const activeFrames: HierarchicalFrame[] = [];
+    
+    if (showAllLevels) {
+        // Show all levels simultaneously for debugging/visualization
+        for (const [level, frames] of levels) {
+            activeFrames.push(...frames);
+        }
+    } else {
+        // Original logic: only show appropriate level based on distance
+        for (const [level, frames] of levels) {
+            for (const frame of frames) {
+                const shouldRender = getHierarchyLevel(frame.viewerDistance, config) === level;
+                if (shouldRender) {
+                    activeFrames.push(frame);
+                }
+            }
+        }
+    }
+    
+    return activeFrames;
+}
+
 /**
  * Generates simple bounding frames around text clusters (no AI)
  * @param worldData Combined world data
@@ -568,6 +972,97 @@ export function generateTextBlockFrames(
     return clusters.map(cluster => ({
         boundingBox: cluster.boundingBox
     }));
+}
+
+/**
+ * Renders hierarchical frames with level-specific styling
+ * @param ctx Canvas rendering context
+ * @param frames Array of hierarchical frames
+ * @param worldToScreen Function to convert world coordinates to screen coordinates
+ * @param viewBounds Current viewport bounds for culling
+ * @param currentZoom Current zoom level
+ * @param currentOffset Current view offset
+ */
+export function renderHierarchicalFrames(
+    ctx: CanvasRenderingContext2D,
+    frames: HierarchicalFrame[],
+    worldToScreen: (x: number, y: number, zoom: number, offset: {x: number, y: number}) => {x: number, y: number},
+    viewBounds: {minX: number, maxX: number, minY: number, maxY: number},
+    currentZoom: number,
+    currentOffset: {x: number, y: number}
+): void {
+    // Save current canvas state
+    ctx.save();
+    
+    for (const frame of frames) {
+        const { boundingBox, style, level } = frame;
+        
+        // Check if frame bounding box intersects with viewport
+        const frameVisible = !(
+            boundingBox.maxX < viewBounds.minX || 
+            boundingBox.minX > viewBounds.maxX ||
+            boundingBox.maxY < viewBounds.minY || 
+            boundingBox.minY > viewBounds.maxY
+        );
+
+        if (!frameVisible) continue;
+
+        // Convert world coordinates to screen coordinates
+        const topLeft = worldToScreen(boundingBox.minX, boundingBox.minY, currentZoom, currentOffset);
+        const bottomRight = worldToScreen(boundingBox.maxX, boundingBox.maxY, currentZoom, currentOffset);
+        
+        const width = bottomRight.x - topLeft.x;
+        const height = bottomRight.y - topLeft.y;
+        
+        // Skip frames that are too small or too large to avoid rendering issues
+        if (width < 1 || height < 1 || width > 10000 || height > 10000) continue;
+
+        // Apply frame-specific style
+        ctx.strokeStyle = style.strokeStyle;
+        ctx.lineWidth = style.lineWidth;
+        
+        // Set dash pattern
+        if (style.dashPattern && style.dashPattern.length > 0) {
+            ctx.setLineDash(style.dashPattern);
+        } else {
+            ctx.setLineDash([]);  // Solid line
+        }
+        
+        // Apply alpha if specified
+        if (style.alpha !== undefined) {
+            ctx.globalAlpha = style.alpha;
+        }
+        
+        // Apply fill if specified
+        if (style.fillStyle) {
+            ctx.fillStyle = style.fillStyle;
+            ctx.fillRect(topLeft.x, topLeft.y, width, height);
+        }
+        
+        // Draw frame border
+        ctx.strokeRect(topLeft.x, topLeft.y, width, height);
+        
+        // Reset alpha for next frame
+        if (style.alpha !== undefined) {
+            ctx.globalAlpha = 1.0;
+        }
+        
+        // Optional: Render level indicator in corner for debugging
+        if (level && currentZoom > 0.5) {  // Only at reasonable zoom levels
+            ctx.save();
+            ctx.fillStyle = style.strokeStyle;
+            ctx.font = `${Math.max(10, 12 * currentZoom)}px monospace`;
+            ctx.fillText(
+                `L${level}`, 
+                topLeft.x + 2, 
+                topLeft.y + Math.max(12, 14 * currentZoom)
+            );
+            ctx.restore();
+        }
+    }
+    
+    // Restore canvas state
+    ctx.restore();
 }
 
 /**

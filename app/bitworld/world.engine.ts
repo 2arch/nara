@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useWorldSave } from './world.save'; // Import the new hook
 import { useCommandSystem, CommandState, CommandExecution, BackgroundMode } from './commands'; // Import command system
-import { getSmartIndentation, calculateWordDeletion, extractLineCharacters, detectTextBlocks, findClosestBlock, extractAllTextBlocks, groupTextBlocksIntoClusters, filterClustersForLabeling, generateTextBlockFrames } from './bit.blocks'; // Import block detection utilities
+import { getSmartIndentation, calculateWordDeletion, extractLineCharacters, detectTextBlocks, findClosestBlock, extractAllTextBlocks, groupTextBlocksIntoClusters, filterClustersForLabeling, generateTextBlockFrames, generateHierarchicalFrames, HierarchicalFrameSystem, HierarchicalFrame, HierarchyLevel, defaultDistanceConfig, DistanceBasedConfig } from './bit.blocks'; // Import block detection utilities
 import { useWorldSettings, WorldSettings } from './settings';
 import { set, ref } from 'firebase/database';
 import { database, auth } from '@/app/firebase';
@@ -144,6 +144,11 @@ export interface WorldEngine {
         };
     }>;
     framesVisible: boolean;
+    updateTextFrames: () => Promise<void>;
+    // Hierarchical frame system
+    hierarchicalFrames: HierarchicalFrameSystem | null;
+    useHierarchicalFrames: boolean;
+    hierarchicalConfig: DistanceBasedConfig;
     clusterLabels: Array<{
         clusterId: string;
         position: { x: number; y: number };
@@ -261,6 +266,13 @@ export function useWorldEngine({
         };
     }>>([]);
     const [framesVisible, setFramesVisible] = useState<boolean>(false);
+    
+    // === Hierarchical Frame System ===
+    const [hierarchicalFrames, setHierarchicalFrames] = useState<HierarchicalFrameSystem | null>(null);
+    const [useHierarchicalFrames, setUseHierarchicalFrames] = useState<boolean>(true);
+    const [showAllLevels, setShowAllLevels] = useState<boolean>(true);
+    const [hierarchicalConfig, setHierarchicalConfig] = useState<DistanceBasedConfig>(defaultDistanceConfig);
+    
     const [clusterLabels, setClusterLabels] = useState<Array<{
         clusterId: string;
         position: { x: number; y: number };
@@ -310,20 +322,6 @@ export function useWorldEngine({
         return labels;
     }, [worldData]);
 
-    // === Text Frame Generation (No AI) ===
-    const updateTextFrames = useCallback(async () => {
-        try {
-            console.log('=== UPDATING TEXT FRAMES ===');
-            
-            // Generate simple bounding frames around text clusters
-            const frames = generateTextBlockFrames(worldData);
-            console.log('Generated frames:', frames.length);
-            
-            setTextFrames(frames);
-        } catch (error) {
-            console.error('Error updating text frames:', error);
-        }
-    }, [worldData]);
 
     // === Character Dimensions Calculation ===
     const getEffectiveCharDims = useCallback((zoom: number): { width: number; height: number; fontSize: number } => {
@@ -373,6 +371,45 @@ export function useWorldEngine({
         // Convert to world coordinates
         return screenToWorld(centerScreenX, centerScreenY, zoomLevel, viewOffset);
     }, [zoomLevel, viewOffset, getEffectiveCharDims, screenToWorld]);
+
+        // === Text Frame Generation (No AI) ===
+    const updateTextFrames = useCallback(async () => {
+        try {
+            console.log('=== UPDATING TEXT FRAMES ===');
+            
+            if (useHierarchicalFrames) {
+                // Generate hierarchical frames based on distance from viewport
+                const viewportCenter = getViewportCenter();
+                const hierarchicalSystem = generateHierarchicalFrames(
+                    worldData, 
+                    viewportCenter, 
+                    zoomLevel, 
+                    hierarchicalConfig,
+                    undefined,
+                    showAllLevels
+                );
+                console.log('Generated hierarchical frames:', hierarchicalSystem.activeFrames.length);
+                console.log('Levels:', Object.fromEntries(hierarchicalSystem.levels));
+                
+                setHierarchicalFrames(hierarchicalSystem);
+                
+                // Also generate simple frames for backward compatibility
+                const simpleFrames = hierarchicalSystem.activeFrames.map(frame => ({
+                    boundingBox: frame.boundingBox
+                }));
+                setTextFrames(simpleFrames);
+            } else {
+                // Generate simple bounding frames around text clusters
+                const frames = generateTextBlockFrames(worldData);
+                console.log('Generated simple frames:', frames.length);
+                
+                setTextFrames(frames);
+                setHierarchicalFrames(null);
+            }
+        } catch (error) {
+            console.error('Error updating text frames:', error);
+        }
+    }, [worldData, useHierarchicalFrames, zoomLevel, hierarchicalConfig, showAllLevels, getViewportCenter]);
 
     // === Text Cluster Label Generation ===
     const updateClusterLabels = useCallback(async () => {
@@ -450,6 +487,7 @@ export function useWorldEngine({
         currentMode,
         addEphemeralText,
         addAIResponse,
+        addInstantAIResponse,
         lightModeData,
         backgroundMode,
         backgroundColor,
@@ -1403,8 +1441,55 @@ export function useWorldEngine({
                         // Turn off frame visibility
                         setFramesVisible(false);
                         setDialogueWithRevert("Text frames hidden", setDialogueText);
+                    } else if (exec.args[0] === 'hierarchical') {
+                        if (exec.args[1] === 'on') {
+                            setUseHierarchicalFrames(true);
+                            updateTextFrames();
+                            setFramesVisible(true);
+                            setDialogueWithRevert("Hierarchical frames enabled - distance-based clustering active", setDialogueText, 2500);
+                        } else if (exec.args[1] === 'off') {
+                            setUseHierarchicalFrames(false);
+                            updateTextFrames();
+                            setDialogueWithRevert("Hierarchical frames disabled - using simple frames", setDialogueText, 2000);
+                        } else {
+                            setDialogueWithRevert("Usage: /frames hierarchical [on|off] - Enable/disable distance-based clustering", setDialogueText);
+                        }
+                    } else if (exec.args[0] === 'config') {
+                        if (exec.args[1] === 'radius' && exec.args[2]) {
+                            const newRadius = parseInt(exec.args[2], 10);
+                            if (!isNaN(newRadius) && newRadius > 0) {
+                                setHierarchicalConfig({...hierarchicalConfig, baseRadius: newRadius});
+                                if (useHierarchicalFrames) updateTextFrames();
+                                setDialogueWithRevert(`Base merge radius set to ${newRadius}`, setDialogueText);
+                            } else {
+                                setDialogueWithRevert("Invalid radius - must be positive number", setDialogueText);
+                            }
+                        } else if (exec.args[1] === 'scaling' && exec.args[2]) {
+                            const newScaling = parseInt(exec.args[2], 10);
+                            if (!isNaN(newScaling) && newScaling > 0) {
+                                setHierarchicalConfig({...hierarchicalConfig, distanceScaling: newScaling});
+                                if (useHierarchicalFrames) updateTextFrames();
+                                setDialogueWithRevert(`Distance scaling set to ${newScaling}`, setDialogueText);
+                            } else {
+                                setDialogueWithRevert("Invalid scaling - must be positive number", setDialogueText);
+                            }
+                        } else {
+                            setDialogueWithRevert("Usage: /frames config [radius|scaling] <value> - Configure hierarchical parameters", setDialogueText);
+                        }
+                    } else if (exec.args[0] === 'levels') {
+                        if (exec.args[1] === 'all') {
+                            setShowAllLevels(true);
+                            if (useHierarchicalFrames) updateTextFrames();
+                            setDialogueWithRevert("Showing all hierarchy levels simultaneously", setDialogueText);
+                        } else if (exec.args[1] === 'distance') {
+                            setShowAllLevels(false);
+                            if (useHierarchicalFrames) updateTextFrames();
+                            setDialogueWithRevert("Showing levels based on distance from viewport", setDialogueText);
+                        } else {
+                            setDialogueWithRevert("Usage: /frames levels [all|distance] - Control level display mode", setDialogueText);
+                        }
                     } else {
-                        setDialogueWithRevert("Usage: /frames [on|off|toggle] - Generate bounding frames around text blocks", setDialogueText);
+                        setDialogueWithRevert("Usage: /frames [on|off|toggle|hierarchical|config|levels] - Control frame generation and display", setDialogueText);
                     }
                 }
                 
@@ -1645,7 +1730,7 @@ export function useWorldEngine({
                                 x: chatMode.inputPositions[0]?.x || cursorPos.x,
                                 y: (chatMode.inputPositions[chatMode.inputPositions.length - 1]?.y || cursorPos.y) + 2 // Start 2 lines below last input line
                             };
-                            addAIResponse(responseStartPos, response, { queryText: chatMode.currentInput.trim() });
+                            addInstantAIResponse(responseStartPos, response, { queryText: chatMode.currentInput.trim() });
                             
                             // Clear current input from chat data after response
                             setChatData({});
@@ -2829,6 +2914,10 @@ export function useWorldEngine({
         textFrames,
         framesVisible,
         updateTextFrames,
+        // Hierarchical frame system
+        hierarchicalFrames,
+        useHierarchicalFrames,
+        hierarchicalConfig,
         clusterLabels,
         clustersVisible,
         updateClusterLabels,

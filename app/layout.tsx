@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "nara web services",
+  title: "Nara World Services",
   description: "typed canvas",
   icons: {
     icon: '/apple-icon.svg',

@@ -5,7 +5,7 @@ import type { WorldData, Point, WorldEngine, PanStartInfo } from './world.engine
 import { useDialogue, useDebugDialogue } from './dialogue';
 import { useMonogramSystem } from './monogram';
 import { useControllerSystem, createMonogramController, createCameraController } from './controllers';
-import { detectTextBlocks, extractLineCharacters, renderFrames } from './bit.blocks';
+import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchicalFrames, HierarchicalFrame, HierarchyLevel } from './bit.blocks';
 
 // --- Constants --- (Copied and relevant ones kept)
 const GRID_COLOR = '#F2F2F233';
@@ -468,11 +468,26 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const charData = engine.lightModeData[key];
                 const char = typeof charData === 'string' ? charData : charData.char;
                 const color = typeof charData === 'object' && charData.style?.color ? charData.style.color : '#808080';
+                
+                // Calculate opacity if fadeStart is set
+                let opacity = 1.0;
+                if (typeof charData === 'object' && charData.fadeStart) {
+                    const fadeProgress = (Date.now() - charData.fadeStart) / 1000; // Fade over 1 second
+                    opacity = Math.max(0, 1 - fadeProgress);
+                }
+                
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
                     if (char && char.trim() !== '') {
+                        // Apply opacity to color
+                        if (opacity < 1.0) {
+                            ctx.globalAlpha = opacity;
+                        }
                         ctx.fillStyle = color; // Use character's color or default
                         ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                        if (opacity < 1.0) {
+                            ctx.globalAlpha = 1.0; // Reset alpha
+                        }
                     }
                 }
             }
@@ -918,16 +933,29 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
-        // === Render Text Frames (Simple Bounding Boxes) ===
-        if (engine.framesVisible && engine.textFrames.length > 0) {
-            renderFrames(
-                ctx, 
-                engine.textFrames, 
-                engine.worldToScreen, 
-                viewBounds, 
-                currentZoom, 
-                currentOffset
-            );
+        // === Render Text Frames (Simple Bounding Boxes or Hierarchical) ===
+        if (engine.framesVisible) {
+            if (engine.hierarchicalFrames && engine.useHierarchicalFrames) {
+                // Render hierarchical frames with level-specific styling
+                renderHierarchicalFrames(
+                    ctx,
+                    engine.hierarchicalFrames.activeFrames,
+                    engine.worldToScreen,
+                    viewBounds,
+                    currentZoom,
+                    currentOffset
+                );
+            } else if (engine.textFrames.length > 0) {
+                // Render simple frames
+                renderFrames(
+                    ctx, 
+                    engine.textFrames, 
+                    engine.worldToScreen, 
+                    viewBounds, 
+                    currentZoom, 
+                    currentOffset
+                );
+            }
         }
 
         // === Render Cluster Frames (AI Clusters) ===
