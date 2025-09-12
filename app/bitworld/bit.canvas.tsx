@@ -967,7 +967,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 viewBounds, 
                 currentZoom, 
                 currentOffset,
-                { strokeStyle: '#FF6600', lineWidth: 2, dashPattern: [3, 3] } // Different style for AI clusters
+                { strokeStyle: '#FF69B4', lineWidth: 2, dashPattern: [3, 3] } // Pink style for L2 clusters
             );
         }
 

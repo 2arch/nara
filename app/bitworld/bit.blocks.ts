@@ -705,17 +705,41 @@ export function getHierarchyStyle(level: HierarchyLevel): FrameStyle {
  * Merge two clusters into a single hierarchical frame
  */
 function mergeClusters(cluster1: TextCluster, cluster2: TextCluster): TextCluster {
+    const mergedBlocks = [...cluster1.blocks, ...cluster2.blocks];
+    const mergedLines = [...cluster1.lines, ...cluster2.lines].sort((a, b) => a - b);
+    const boundingBox = {
+        minX: Math.min(cluster1.boundingBox.minX, cluster2.boundingBox.minX),
+        maxX: Math.max(cluster1.boundingBox.maxX, cluster2.boundingBox.maxX),
+        minY: Math.min(cluster1.boundingBox.minY, cluster2.boundingBox.minY),
+        maxY: Math.max(cluster1.boundingBox.maxY, cluster2.boundingBox.maxY)
+    };
+    
+    // Properly calculate merged properties
+    const totalCharacters = cluster1.totalCharacters + cluster2.totalCharacters;
+    const estimatedWords = cluster1.estimatedWords + cluster2.estimatedWords;
+    
+    // Calculate density based on new bounding box
+    const boundingArea = (boundingBox.maxX - boundingBox.minX + 1) * 
+                        (boundingBox.maxY - boundingBox.minY + 1);
+    const density = totalCharacters / boundingArea;
+    
+    // Calculate weighted centroid
+    const totalWeight = cluster1.totalCharacters + cluster2.totalCharacters;
+    const centroid = {
+        x: (cluster1.centroid.x * cluster1.totalCharacters + cluster2.centroid.x * cluster2.totalCharacters) / totalWeight,
+        y: (cluster1.centroid.y * cluster1.totalCharacters + cluster2.centroid.y * cluster2.totalCharacters) / totalWeight
+    };
+    
     return {
         id: `merged_${cluster1.id}_${cluster2.id}`,
-        blocks: [...cluster1.blocks, ...cluster2.blocks],
-        lines: [...cluster1.lines, ...cluster2.lines].sort((a, b) => a - b),
-        boundingBox: {
-            minX: Math.min(cluster1.boundingBox.minX, cluster2.boundingBox.minX),
-            maxX: Math.max(cluster1.boundingBox.maxX, cluster2.boundingBox.maxX),
-            minY: Math.min(cluster1.boundingBox.minY, cluster2.boundingBox.minY),
-            maxY: Math.max(cluster1.boundingBox.maxY, cluster2.boundingBox.maxY)
-        },
-        density: (cluster1.density + cluster2.density) / 2  // Average density
+        blocks: mergedBlocks,
+        lines: mergedLines,
+        boundingBox: boundingBox,
+        density: density,
+        totalCharacters: totalCharacters,
+        estimatedWords: estimatedWords,
+        centroid: centroid,
+        leftMargin: Math.min(cluster1.leftMargin || cluster1.boundingBox.minX, cluster2.leftMargin || cluster2.boundingBox.minX)
     };
 }
 
@@ -817,8 +841,8 @@ export function applySimpleProximityMerging(
         
         let merged = currentClusters[i];
         
-        // Only look at the next few clusters to avoid over-merging
-        for (let j = i + 1; j < Math.min(i + 3, currentClusters.length); j++) {
+        // Look at more nearby clusters for more aggressive merging
+        for (let j = i + 1; j < Math.min(i + 8, currentClusters.length); j++) {
             if (processed.has(j)) continue;
             
             const center1 = getClusterCenter(merged);
@@ -851,7 +875,7 @@ export function applyDistanceBasedMerging(
 ): TextCluster[] {
     // For L2, use simple proximity merging instead of complex distance-based merging
     if (targetLevel === HierarchyLevel.GROUPED) {
-        return applySimpleProximityMerging(clusters, 8); // Only merge clusters within 8 units
+        return applySimpleProximityMerging(clusters, 50); // Very aggressive merging to match blue frames
     }
     
     // Original complex logic for other levels (if we had them)
@@ -1146,7 +1170,13 @@ export interface ClusterLabel {
  * @param cluster Text cluster to extract content from
  * @returns Full text content with line breaks preserved
  */
-export function extractClusterContent(cluster: TextCluster): string {
+export function extractClusterContent(cluster: TextCluster, worldData?: WorldData): string {
+    // If cluster has no blocks (synthetic cluster), extract content from bounding box
+    if (cluster.blocks.length === 0 && worldData) {
+        return extractContentFromBoundingBox(cluster.boundingBox, worldData);
+    }
+    
+    // Original logic for clusters with blocks
     const lineTexts: string[] = [];
     
     // Group blocks by line and sort
@@ -1179,18 +1209,56 @@ export function extractClusterContent(cluster: TextCluster): string {
 }
 
 /**
+ * Extract text content directly from a bounding box region
+ */
+function extractContentFromBoundingBox(
+    boundingBox: {minX: number, maxX: number, minY: number, maxY: number},
+    worldData: WorldData
+): string {
+    const lineTexts: string[] = [];
+    
+    // Iterate through each line in the bounding box
+    for (let y = boundingBox.minY; y <= boundingBox.maxY; y++) {
+        const lineChars: {x: number, char: string}[] = [];
+        
+        // Collect all characters on this line within the bounding box
+        for (let x = boundingBox.minX; x <= boundingBox.maxX; x++) {
+            const key = `${x},${y}`;
+            const charData = worldData[key];
+            if (charData) {
+                const char = typeof charData === 'string' ? charData : charData.char;
+                if (char && char.trim() !== '') {
+                    lineChars.push({x, char});
+                }
+            }
+        }
+        
+        // Sort characters by x position and join them
+        if (lineChars.length > 0) {
+            lineChars.sort((a, b) => a.x - b.x);
+            const lineText = lineChars.map(c => c.char).join('');
+            if (lineText.trim()) {
+                lineTexts.push(lineText.trim());
+            }
+        }
+    }
+    
+    return lineTexts.join('\n');
+}
+
+/**
  * Generates intelligent labels for text clusters using AI
  * @param clusters Array of filtered text clusters
  * @returns Promise<ClusterLabel[]> Array of cluster labels
  */
-export async function generateClusterLabels(clusters: TextCluster[]): Promise<ClusterLabel[]> {
+export async function generateClusterLabels(clusters: TextCluster[], worldData?: WorldData): Promise<ClusterLabel[]> {
     // Import AI function dynamically to avoid circular dependencies
     const { generateClusterLabel } = await import('./ai');
     
     const labels: ClusterLabel[] = [];
     
     for (const cluster of clusters) {
-        const content = extractClusterContent(cluster);
+        const content = extractClusterContent(cluster, worldData);
         const aiLabel = await generateClusterLabel(content);
         
         if (aiLabel) {

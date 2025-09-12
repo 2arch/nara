@@ -398,6 +398,8 @@ export function useWorldEngine({
                     boundingBox: frame.boundingBox
                 }));
                 setTextFrames(simpleFrames);
+                
+                return hierarchicalSystem; // Return the generated system
             } else {
                 // Generate simple bounding frames around text clusters
                 const frames = generateTextBlockFrames(worldData);
@@ -405,9 +407,12 @@ export function useWorldEngine({
                 
                 setTextFrames(frames);
                 setHierarchicalFrames(null);
+                
+                return null; // No hierarchical system generated
             }
         } catch (error) {
             console.error('Error updating text frames:', error);
+            return null;
         }
     }, [worldData, useHierarchicalFrames, zoomLevel, hierarchicalConfig, showAllLevels, getViewportCenter]);
 
@@ -419,28 +424,81 @@ export function useWorldEngine({
             
             // Import clustering functions
             const { 
-                extractAllTextBlocks, 
-                groupTextBlocksIntoClusters, 
                 filterClustersForLabeling, 
-                generateClusterLabels 
+                generateClusterLabels,
+                HierarchyLevel
             } = await import('./bit.blocks');
 
-            // Process entire infinite canvas (no viewport restriction)
-            // Extract text blocks from all world data
-            const lineBlocks = extractAllTextBlocks(worldData);
-            console.log('Extracted line blocks:', lineBlocks.size);
+            let clustersToLabel;
+
+            if (useHierarchicalFrames && hierarchicalFrames) {
+                // Use L2 frames directly - create synthetic clusters from blue frame bounding boxes
+                const l2Frames = hierarchicalFrames.levels.get(HierarchyLevel.GROUPED) || [];
+                console.log('Found L2 frames:', l2Frames.length);
+                
+                // Create synthetic clusters directly from L2 frame bounding boxes
+                clustersToLabel = l2Frames.map((frame, index) => ({
+                    id: `l2_frame_${index}`,
+                    blocks: [], // Not needed for labeling
+                    lines: [], // Not needed for labeling
+                    boundingBox: frame.boundingBox,
+                    density: 1.0, // Set high enough to pass filtering
+                    totalCharacters: 100, // Fake values to pass filtering
+                    estimatedWords: 10,
+                    centroid: frame.center,
+                    leftMargin: frame.boundingBox.minX
+                }));
+                console.log('Using synthetic L2 clusters from blue frames:', clustersToLabel.length);
+            } else {
+                // Fallback: generate frames first to get clusters
+                console.log('No hierarchical frames available, generating them first...');
+                const generatedSystem = await updateTextFrames();
+                
+                if (generatedSystem) {
+                    const l2Frames = generatedSystem.levels.get(HierarchyLevel.GROUPED) || [];
+                    clustersToLabel = l2Frames.map((frame, index) => ({
+                        id: `l2_frame_${index}`,
+                        blocks: [], 
+                        lines: [], 
+                        boundingBox: frame.boundingBox,
+                        density: 1.0,
+                        totalCharacters: 100,
+                        estimatedWords: 10,
+                        centroid: frame.center,
+                        leftMargin: frame.boundingBox.minX
+                    }));
+                    console.log('Generated synthetic L2 clusters from blue frames:', clustersToLabel.length);
+                } else {
+                    console.log('Failed to generate hierarchical frames, skipping cluster labels');
+                    return;
+                }
+            }
             
-            // Group blocks into clusters
-            const clusters = groupTextBlocksIntoClusters(lineBlocks);
-            console.log('Found clusters:', clusters.length);
+            // Debug L2 cluster properties
+            clustersToLabel.forEach((cluster, i) => {
+                console.log(`L2 cluster ${i}:`, {
+                    id: cluster.id,
+                    blocks: cluster.blocks.length,
+                    density: cluster.density,
+                    words: cluster.estimatedWords,
+                    boundingBox: cluster.boundingBox
+                });
+            });
             
-            // Filter clusters that meet labeling conditions
-            const qualifiedClusters = filterClustersForLabeling(clusters);
-            console.log('Qualified clusters:', qualifiedClusters.length);
+            // Filter clusters that meet labeling conditions (more lenient for L2)
+            const l2FilterConditions = {
+                maxVerticalGap: 5,
+                minBlocksPerCluster: 1,      
+                maxHorizontalOverlap: 8,
+                minDensity: 0.02,            // Much lower density requirement for L2
+                minWords: 1                  // Just need 1+ words for L2
+            };
+            const qualifiedClusters = filterClustersForLabeling(clustersToLabel, l2FilterConditions);
+            console.log('Qualified L2 clusters:', qualifiedClusters.length);
             
             // Generate AI labels for qualified clusters
-            const aiLabels = await generateClusterLabels(qualifiedClusters);
-            console.log('Generated AI labels:', aiLabels.length);
+            const aiLabels = await generateClusterLabels(qualifiedClusters, worldData);
+            console.log('Generated AI labels for L2:', aiLabels.length);
             
             // Convert to simplified format for rendering
             const simplifiedLabels = aiLabels.map(label => ({
@@ -451,7 +509,7 @@ export function useWorldEngine({
                 boundingBox: label.boundingBox
             }));
             
-            console.log('Final simplified labels:', simplifiedLabels);
+            console.log('Final L2 cluster labels:', simplifiedLabels);
             setClusterLabels(simplifiedLabels);
             
             // Save cluster regions to Firebase if we have a current state
@@ -474,7 +532,7 @@ export function useWorldEngine({
             console.error('Error updating cluster labels:', error);
             // Don't clear existing labels on error, just log it
         }
-    }, [worldData, currentStateName, userUid, getUserPath]);
+    }, [worldData, currentStateName, userUid, getUserPath, useHierarchicalFrames, hierarchicalFrames, updateTextFrames]);
 
     // === Command System ===
     const { 
