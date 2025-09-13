@@ -1589,6 +1589,20 @@ export function useWorldEngine({
                     setTextFrames([]);
                     setHierarchicalFrames(null);
                     setDialogueWithRevert("Canvas cleared", setDialogueText);
+                } else if (exec.command === 'camera') {
+                    const newMode = exec.args[0];
+                    let modeText = '';
+                    switch (newMode) {
+                        case 'focus':
+                            modeText = 'Camera focus mode: cursor will stay centered';
+                            break;
+                        case 'ripstop':
+                            modeText = 'Camera ripstop mode: cursor will stay in view';
+                            break;
+                        default:
+                            modeText = 'Camera default mode: no automatic tracking';
+                    }
+                    setDialogueWithRevert(modeText, setDialogueText);
                 }
                 
                 setCursorPos(exec.commandStartPos);
@@ -2575,37 +2589,58 @@ export function useWorldEngine({
         if (moved) {
             setCursorPos(nextCursorPos);
             
-            // Camera ripstop mode: Keep cursor in view
-            if (cameraMode === 'ripstop' && typeof window !== 'undefined') {
+            // Camera tracking modes
+            if (typeof window !== 'undefined') {
                 const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
                 if (effectiveCharWidth > 0 && effectiveCharHeight > 0) {
                     const viewportCharWidth = window.innerWidth / effectiveCharWidth;
                     const viewportCharHeight = window.innerHeight / effectiveCharHeight;
                     
-                    // Check if cursor is outside current viewport bounds
-                    const cursorOutsideLeft = nextCursorPos.x < viewOffset.x;
-                    const cursorOutsideRight = nextCursorPos.x >= viewOffset.x + viewportCharWidth;
-                    const cursorOutsideTop = nextCursorPos.y < viewOffset.y;
-                    const cursorOutsideBottom = nextCursorPos.y >= viewOffset.y + viewportCharHeight;
-                    
-                    let newViewOffset = { ...viewOffset };
-                    
-                    // Adjust view to keep cursor in bounds
-                    if (cursorOutsideLeft) {
-                        newViewOffset.x = nextCursorPos.x;
-                    } else if (cursorOutsideRight) {
-                        newViewOffset.x = nextCursorPos.x - viewportCharWidth + 1;
-                    }
-                    
-                    if (cursorOutsideTop) {
-                        newViewOffset.y = nextCursorPos.y;
-                    } else if (cursorOutsideBottom) {
-                        newViewOffset.y = nextCursorPos.y - viewportCharHeight + 1;
-                    }
-                    
-                    // Update view offset if needed
-                    if (newViewOffset.x !== viewOffset.x || newViewOffset.y !== viewOffset.y) {
-                        setViewOffset(newViewOffset);
+                    if (cameraMode === 'ripstop') {
+                        // Ripstop mode: Keep cursor in view
+                        // Check if cursor is outside current viewport bounds
+                        const cursorOutsideLeft = nextCursorPos.x < viewOffset.x;
+                        const cursorOutsideRight = nextCursorPos.x >= viewOffset.x + viewportCharWidth;
+                        const cursorOutsideTop = nextCursorPos.y < viewOffset.y;
+                        const cursorOutsideBottom = nextCursorPos.y >= viewOffset.y + viewportCharHeight;
+                        
+                        let newViewOffset = { ...viewOffset };
+                        
+                        // Adjust view to keep cursor in bounds
+                        if (cursorOutsideLeft) {
+                            newViewOffset.x = nextCursorPos.x;
+                        } else if (cursorOutsideRight) {
+                            newViewOffset.x = nextCursorPos.x - viewportCharWidth + 1;
+                        }
+                        
+                        if (cursorOutsideTop) {
+                            newViewOffset.y = nextCursorPos.y;
+                        } else if (cursorOutsideBottom) {
+                            newViewOffset.y = nextCursorPos.y - viewportCharHeight + 1;
+                        }
+                        
+                        // Update view offset if needed
+                        if (newViewOffset.x !== viewOffset.x || newViewOffset.y !== viewOffset.y) {
+                            setViewOffset(newViewOffset);
+                        }
+                    } else if (cameraMode === 'focus') {
+                        // Focus mode: Maintain relative offset between cursor and viewport center
+                        if (!focusOffset) {
+                            // If no offset set yet, calculate it now (first time in focus mode)
+                            const viewportCenterX = viewOffset.x + viewportCharWidth / 2;
+                            const viewportCenterY = viewOffset.y + viewportCharHeight / 2;
+                            
+                            const offsetX = nextCursorPos.x - viewportCenterX;
+                            const offsetY = nextCursorPos.y - viewportCenterY;
+                            
+                            setFocusOffset({ x: offsetX, y: offsetY });
+                        } else {
+                            // Use existing offset to maintain relative position
+                            const centerX = nextCursorPos.x - focusOffset.x - viewportCharWidth / 2;
+                            const centerY = nextCursorPos.y - focusOffset.y - viewportCharHeight / 2;
+                            
+                            setViewOffset({ x: centerX, y: centerY });
+                        }
                     }
                 }
             }
@@ -2753,21 +2788,8 @@ export function useWorldEngine({
         if (isPanningRef.current) {
             isPanningRef.current = false;
             setViewOffset(newOffset); // Set final state
-            
-            // Track viewport center for direction calculation
-            if (typeof window !== 'undefined') {
-                // Calculate center inline to avoid dependency issues
-                const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
-                if (effectiveCharWidth > 0 && effectiveCharHeight > 0) {
-                    const viewportWidth = window.innerWidth;
-                    const viewportHeight = window.innerHeight;
-                    const centerX = newOffset.x + (viewportWidth / effectiveCharWidth) / 2;
-                    const centerY = newOffset.y + (viewportHeight / effectiveCharHeight) / 2;
-                    
-                }
-            }
         }
-    }, [zoomLevel, getEffectiveCharDims]);
+    }, []);
 
     const handleSelectionStart = useCallback((canvasRelativeX: number, canvasRelativeY: number): void => {
         const worldPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);

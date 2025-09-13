@@ -28,7 +28,7 @@ export interface CommandExecution {
 // --- Mode System Types ---
 export type CanvasMode = 'default' | 'air' | 'chat';
 export type BackgroundMode = 'transparent' | 'color' | 'image' | 'video' | 'space' | 'stream';
-export type CameraMode = 'default' | 'ripstop';
+export type CameraMode = 'default' | 'ripstop' | 'focus';
 
 export interface ModeState {
     currentMode: CanvasMode;
@@ -64,7 +64,7 @@ const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'white', 'black', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro'];
 const NAV_COMMANDS: string[] = [];
-const CAMERA_COMMANDS = ['default', 'ripstop'];
+const CAMERA_COMMANDS = ['default', 'ripstop', 'focus'];
 
 // --- Command System Hook ---
 export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates = [], username }: UseCommandSystemProps) {
@@ -1388,10 +1388,22 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     cameraMode: cameraMode as CameraMode
                 }));
                 
-                const modeText = cameraMode === 'ripstop' ? 
-                    'Camera ripstop mode: cursor will stay in view' :
-                    'Camera default mode: no automatic tracking';
-                setDialogueText(modeText);
+                // Return command execution to let world engine calculate initial offset
+                setCommandData({});
+                setCommandState({
+                    isActive: false,
+                    input: '',
+                    matchedCommands: [],
+                    selectedIndex: 0,
+                    commandStartPos: { x: 0, y: 0 },
+                    hasNavigated: false
+                });
+                
+                return {
+                    command: 'camera',
+                    args: [cameraMode],
+                    commandStartPos: commandState.commandStartPos
+                };
             } else if (!cameraMode) {
                 setDialogueText(`Current camera mode: ${modeState.cameraMode}`);
             } else {
