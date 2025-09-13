@@ -1956,6 +1956,7 @@ export function useWorldEngine({
         }
         // === Pending Command Handling ===
         else if (key === 'Enter' && pendingCommand && pendingCommand.isWaitingForSelection) {
+            console.log('=== ENTER KEY PRESSED (pending command handler line 1958) ===');
             const currentSelection = getSelectedText();
             if (currentSelection) {
                 // Execute the pending command with the selected text
@@ -2007,6 +2008,7 @@ export function useWorldEngine({
         }
         // === Quick Chat (Cmd+Enter) ===
         else if (key === 'Enter' && metaKey && !chatMode.isActive) {
+            console.log('=== ENTER KEY PRESSED (Quick Chat Cmd+Enter line 2010) ===');
             // Extract text to send to AI - selection, enclosing text block, or current line
             let textToSend = '';
             let chatStartPos = cursorPos;
@@ -2184,6 +2186,7 @@ export function useWorldEngine({
         }
         // --- Movement ---
         else if (key === 'Enter') {
+            console.log('=== ENTER KEY PRESSED (world.engine.ts line 2186) ===');
             const dataToCheck = currentMode === 'air' ? 
                 { ...worldData, ...lightModeData } : 
                 worldData;
@@ -2196,8 +2199,16 @@ export function useWorldEngine({
             
             let targetIndent;
             if (currentLineHasText) {
-                // Line has text - use smart indentation and remember this X position
+                // Line has text - use smart indentation, but fallback to leftmost nearby text block
                 targetIndent = getSmartIndentation(dataToCheck, cursorPos);
+                
+                // If smart indentation returns 0, try to find leftmost text block on nearby lines
+                if (targetIndent === 0) {
+                    const nearbyIndent = getNearbySmartIndentation(dataToCheck, cursorPos, 50);
+                    if (nearbyIndent !== null) {
+                        targetIndent = nearbyIndent;
+                    }
+                }
                 setLastEnterX(targetIndent);
             } else if (lastEnterX !== null) {
                 // Empty line and we have a previous Enter X position - use it
