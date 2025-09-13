@@ -2187,9 +2187,59 @@ export function useWorldEngine({
         // --- Movement ---
         else if (key === 'Enter') {
             console.log('=== ENTER KEY PRESSED (world.engine.ts line 2186) ===');
+            console.log('commandState.isActive:', commandState.isActive);
+            console.log('chatMode.isActive:', chatMode.isActive);
             const dataToCheck = currentMode === 'air' ? 
                 { ...worldData, ...lightModeData } : 
                 worldData;
+            
+            // Function to find reasonable text block alignment in current viewport
+            const getViewportSmartIndentation = (worldData: WorldData, cursorPos: {x: number, y: number}): number | null => {
+                if (typeof window === 'undefined') return null;
+                
+                const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
+                if (effectiveCharWidth === 0 || effectiveCharHeight === 0) return null;
+                
+                const viewportCharWidth = window.innerWidth / effectiveCharWidth;
+                const viewportCharHeight = window.innerHeight / effectiveCharHeight;
+                
+                const viewportMinY = Math.floor(viewOffset.y);
+                const viewportMaxY = Math.ceil(viewOffset.y + viewportCharHeight);
+                const viewportMinX = Math.floor(viewOffset.x);
+                const viewportMaxX = Math.ceil(viewOffset.x + viewportCharWidth);
+                
+                let bestIndent: number | null = null;
+                const maxDistance = 10; // Only consider blocks within 10 characters of cursor
+                
+                console.log('Checking viewport bounds:', { viewportMinY, viewportMaxY, viewportMinX, viewportMaxX });
+                console.log('Cursor position:', cursorPos);
+                
+                // Only check lines that are visible in viewport
+                for (let checkY = viewportMinY; checkY <= viewportMaxY; checkY++) {
+                    const lineChars = extractLineCharacters(worldData, checkY);
+                    
+                    if (lineChars.length === 0) continue;
+                    
+                    const blocks = detectTextBlocks(lineChars);
+                    console.log(`Line ${checkY} has ${blocks.length} text blocks`);
+                    
+                    // Find blocks that are within reasonable distance (ignore viewport X bounds for now)
+                    for (const block of blocks) {
+                        const distance = Math.abs(block.start - cursorPos.x);
+                        
+                        console.log(`Block at ${block.start}: distance=${distance}`);
+                        
+                        if (distance <= maxDistance) {
+                            if (bestIndent === null || block.start < bestIndent) {
+                                bestIndent = block.start;
+                            }
+                        }
+                    }
+                }
+                
+                console.log('Final bestIndent (close and visible only):', bestIndent);
+                return bestIndent;
+            };
             
             // Check if current line has any characters
             const currentLineHasText = Object.keys(dataToCheck).some(key => {
@@ -2202,9 +2252,9 @@ export function useWorldEngine({
                 // Line has text - use smart indentation, but fallback to leftmost nearby text block
                 targetIndent = getSmartIndentation(dataToCheck, cursorPos);
                 
-                // If smart indentation returns 0, try to find leftmost text block on nearby lines
+                // If smart indentation returns 0, try to find leftmost text block in viewport
                 if (targetIndent === 0) {
-                    const nearbyIndent = getNearbySmartIndentation(dataToCheck, cursorPos, 50);
+                    const nearbyIndent = getViewportSmartIndentation(dataToCheck, cursorPos);
                     if (nearbyIndent !== null) {
                         targetIndent = nearbyIndent;
                     }
@@ -2215,7 +2265,7 @@ export function useWorldEngine({
                 targetIndent = lastEnterX;
             } else {
                 // Empty line, no previous Enter position - check for nearby text blocks
-                const nearbyIndent = getNearbySmartIndentation(dataToCheck, cursorPos, 50); // Max 50 units away
+                const nearbyIndent = getViewportSmartIndentation(dataToCheck, cursorPos); // Find leftmost text block in viewport
                 if (nearbyIndent !== null) {
                     targetIndent = nearbyIndent;
                     setLastEnterX(targetIndent);
@@ -2225,6 +2275,27 @@ export function useWorldEngine({
                     setLastEnterX(targetIndent);
                 }
             }
+            
+            // Viewport bounds check - don't jump outside visible area
+            const { width: effectiveCharWidth } = getEffectiveCharDims(zoomLevel);
+            if (effectiveCharWidth > 0 && typeof window !== 'undefined') {
+                const viewportCharWidth = window.innerWidth / effectiveCharWidth;
+                const viewportMinX = Math.floor(viewOffset.x);
+                const viewportMaxX = Math.ceil(viewOffset.x + viewportCharWidth);
+                
+                console.log('Viewport X bounds:', { viewportMinX, viewportMaxX });
+                console.log('Proposed targetIndent:', targetIndent);
+                console.log('Current cursor X:', cursorPos.x);
+                
+                // If targetIndent would put cursor outside viewport, use current column instead
+                if (targetIndent < viewportMinX || targetIndent > viewportMaxX) {
+                    console.log('Target indent is outside viewport, using current column');
+                    targetIndent = cursorPos.x;
+                    setLastEnterX(targetIndent);
+                }
+            }
+            
+            console.log('Final targetIndent after viewport check:', targetIndent);
             
             nextCursorPos.y = cursorPos.y + 1;
             nextCursorPos.x = targetIndent;

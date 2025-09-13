@@ -1528,6 +1528,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             setCursorPos({ x: cursorPos.x + 1, y: cursorPos.y });
             return true;
         } else if (key === 'Enter') {
+            console.log('=== ENTER KEY PRESSED (commands.ts line 1530 - executeCommand) ===');
             return executeCommand();
         } else if (key === 'Escape') {
             // Exit command mode without executing
