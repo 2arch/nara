@@ -1589,7 +1589,7 @@ export function useWorldEngine({
                     setTextFrames([]);
                     setHierarchicalFrames(null);
                     setDialogueWithRevert("Canvas cleared", setDialogueText);
-                } else if (exec.command === 'camera') {
+                } else if (exec.command === 'cam') {
                     const newMode = exec.args[0];
                     let modeText = '';
                     switch (newMode) {
@@ -2624,23 +2624,11 @@ export function useWorldEngine({
                             setViewOffset(newViewOffset);
                         }
                     } else if (cameraMode === 'focus') {
-                        // Focus mode: Maintain relative offset between cursor and viewport center
-                        if (!focusOffset) {
-                            // If no offset set yet, calculate it now (first time in focus mode)
-                            const viewportCenterX = viewOffset.x + viewportCharWidth / 2;
-                            const viewportCenterY = viewOffset.y + viewportCharHeight / 2;
-                            
-                            const offsetX = nextCursorPos.x - viewportCenterX;
-                            const offsetY = nextCursorPos.y - viewportCenterY;
-                            
-                            setFocusOffset({ x: offsetX, y: offsetY });
-                        } else {
-                            // Use existing offset to maintain relative position
-                            const centerX = nextCursorPos.x - focusOffset.x - viewportCharWidth / 2;
-                            const centerY = nextCursorPos.y - focusOffset.y - viewportCharHeight / 2;
-                            
-                            setViewOffset({ x: centerX, y: centerY });
-                        }
+                        // Focus mode: Center cursor in viewport
+                        const centerX = nextCursorPos.x - viewportCharWidth / 2;
+                        const centerY = nextCursorPos.y - viewportCharHeight / 2;
+                        
+                        setViewOffset({ x: centerX, y: centerY });
                     }
                 }
             }

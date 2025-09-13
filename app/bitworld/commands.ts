@@ -59,7 +59,7 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'cluster', 'frames', 'clear', 'camera'];
+const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'cluster', 'frames', 'clear', 'cam'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'white', 'black', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro'];
@@ -251,16 +251,16 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return ['label', 'label --distance'];
         }
 
-        if (lowerInput === 'camera') {
+        if (lowerInput === 'cam') {
             const parts = input.toLowerCase().split(' ');
             if (parts.length > 1) {
                 // Show camera subcommands that match the second part
                 const cameraInput = parts[1];
                 return CAMERA_COMMANDS
                     .filter(camera => camera.startsWith(cameraInput))
-                    .map(camera => `camera ${camera}`);
+                    .map(camera => `cam ${camera}`);
             }
-            return CAMERA_COMMANDS.map(camera => `camera ${camera}`);
+            return CAMERA_COMMANDS.map(camera => `cam ${camera}`);
         }
         
         return AVAILABLE_COMMANDS.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
@@ -1377,7 +1377,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             };
         }
 
-        if (commandToExecute.startsWith('camera')) {
+        if (commandToExecute.startsWith('cam')) {
             const parts = commandToExecute.split(' ');
             const cameraMode = parts[1];
             
@@ -1400,7 +1400,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 });
                 
                 return {
-                    command: 'camera',
+                    command: 'cam',
                     args: [cameraMode],
                     commandStartPos: commandState.commandStartPos
                 };
