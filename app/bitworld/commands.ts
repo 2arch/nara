@@ -48,6 +48,7 @@ export interface ModeState {
     searchPattern: string; // Current search pattern
     isSearchActive: boolean; // Whether search highlighting is active
     cameraMode: CameraMode; // Camera tracking mode
+    isIndentEnabled: boolean; // Whether smart indentation is enabled for Enter key
 }
 
 interface UseCommandSystemProps {
@@ -59,7 +60,7 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'cluster', 'frames', 'clear', 'cam'];
+const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'cluster', 'frames', 'clear', 'cam', 'indent'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'white', 'black', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro'];
@@ -101,6 +102,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         searchPattern: '', // No search pattern initially
         isSearchActive: false, // Search not active initially
         cameraMode: 'default', // Default camera mode (no intervention)
+        isIndentEnabled: true, // Smart indentation enabled by default
     });
 
     // Utility function to match commands based on input
@@ -1424,6 +1426,30 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return null;
         }
 
+        if (commandToExecute.startsWith('indent')) {
+            // Toggle smart indentation
+            setModeState(prev => ({
+                ...prev,
+                isIndentEnabled: !prev.isIndentEnabled
+            }));
+            
+            const newState = !modeState.isIndentEnabled;
+            setDialogueText(newState ? "Smart indentation enabled" : "Smart indentation disabled");
+            
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+            
+            return null;
+        }
+
         if (commandToExecute.startsWith('signout')) {
             // Clear command mode
             setCommandState({
@@ -1641,5 +1667,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         isSearchActive: modeState.isSearchActive,
         clearSearch: () => setModeState(prev => ({ ...prev, searchPattern: '', isSearchActive: false })),
         cameraMode: modeState.cameraMode,
+        isIndentEnabled: modeState.isIndentEnabled,
     };
 }

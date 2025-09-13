@@ -582,6 +582,7 @@ export function useWorldEngine({
         isSearchActive,
         clearSearch,
         cameraMode,
+        isIndentEnabled,
     } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates, username });
 
     // Generate search data when search pattern changes
@@ -2240,6 +2241,38 @@ export function useWorldEngine({
                 console.log('Final bestIndent (close and visible only):', bestIndent);
                 return bestIndent;
             };
+
+            // Function to find the beginning x position of the current text block
+            const getCurrentTextBlockStart = (worldData: WorldData, cursorPos: {x: number, y: number}): number | null => {
+                const lineChars = extractLineCharacters(worldData, cursorPos.y);
+                if (lineChars.length === 0) return null;
+                
+                const blocks = detectTextBlocks(lineChars);
+                
+                // Find the block that contains the cursor position OR the cursor is just after it
+                for (const block of blocks) {
+                    // Check if cursor is inside the block or just after it (common when typing)
+                    if (cursorPos.x >= block.start && cursorPos.x <= block.end + 1) {
+                        return block.start;
+                    }
+                }
+                
+                // If cursor is not directly associated with any block, find the closest one to the left
+                let closestBlock = null;
+                let minDistance = Infinity;
+                
+                for (const block of blocks) {
+                    if (block.end < cursorPos.x) {
+                        const distance = cursorPos.x - block.end;
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            closestBlock = block;
+                        }
+                    }
+                }
+                
+                return closestBlock ? closestBlock.start : null;
+            };
             
             // Check if current line has any characters
             const currentLineHasText = Object.keys(dataToCheck).some(key => {
@@ -2248,31 +2281,67 @@ export function useWorldEngine({
             });
             
             let targetIndent;
-            if (currentLineHasText) {
-                // Line has text - use smart indentation, but fallback to leftmost nearby text block
-                targetIndent = getSmartIndentation(dataToCheck, cursorPos);
-                
-                // If smart indentation returns 0, try to find leftmost text block in viewport
-                if (targetIndent === 0) {
-                    const nearbyIndent = getViewportSmartIndentation(dataToCheck, cursorPos);
+            
+            console.log('=== INDENT LOGIC DEBUG ===');
+            console.log('isIndentEnabled:', isIndentEnabled);
+            console.log('currentLineHasText:', currentLineHasText);
+            console.log('lastEnterX:', lastEnterX);
+            
+            if (isIndentEnabled) {
+                // Smart indentation is enabled - use current behavior
+                if (currentLineHasText) {
+                    // Line has text - use smart indentation, but fallback to leftmost nearby text block
+                    targetIndent = getSmartIndentation(dataToCheck, cursorPos);
+                    
+                    // If smart indentation returns 0, try to find leftmost text block in viewport
+                    if (targetIndent === 0) {
+                        const nearbyIndent = getViewportSmartIndentation(dataToCheck, cursorPos);
+                        if (nearbyIndent !== null) {
+                            targetIndent = nearbyIndent;
+                        }
+                    }
+                    setLastEnterX(targetIndent);
+                } else if (lastEnterX !== null) {
+                    // Empty line and we have a previous Enter X position - use it
+                    targetIndent = lastEnterX;
+                } else {
+                    // Empty line, no previous Enter position - check for nearby text blocks
+                    const nearbyIndent = getViewportSmartIndentation(dataToCheck, cursorPos); // Find leftmost text block in viewport
                     if (nearbyIndent !== null) {
                         targetIndent = nearbyIndent;
+                        setLastEnterX(targetIndent);
+                    } else {
+                        // No nearby text - use current X position and remember it
+                        targetIndent = cursorPos.x;
+                        setLastEnterX(targetIndent);
                     }
                 }
-                setLastEnterX(targetIndent);
-            } else if (lastEnterX !== null) {
-                // Empty line and we have a previous Enter X position - use it
-                targetIndent = lastEnterX;
             } else {
-                // Empty line, no previous Enter position - check for nearby text blocks
-                const nearbyIndent = getViewportSmartIndentation(dataToCheck, cursorPos); // Find leftmost text block in viewport
-                if (nearbyIndent !== null) {
-                    targetIndent = nearbyIndent;
-                    setLastEnterX(targetIndent);
+                // Smart indentation is disabled - maintain beginning position of current text block
+                console.log('=== SMART INDENTATION DISABLED ===');
+                if (currentLineHasText && lastEnterX === null) {
+                    // First Enter on a line with text - find the beginning of the current text block and remember it
+                    const blockStart = getCurrentTextBlockStart(dataToCheck, cursorPos);
+                    console.log('First Enter on text line, getCurrentTextBlockStart returned:', blockStart);
+                    if (blockStart !== null) {
+                        targetIndent = blockStart;
+                        setLastEnterX(targetIndent);
+                        console.log('Using and remembering block start:', targetIndent);
+                    } else {
+                        // Fallback to current position if no block found
+                        targetIndent = cursorPos.x;
+                        setLastEnterX(targetIndent);
+                        console.log('No block found, using and remembering current position:', targetIndent);
+                    }
+                } else if (lastEnterX !== null) {
+                    // We already have a remembered position - stick to it regardless of current line content
+                    targetIndent = lastEnterX;
+                    console.log('Using remembered lastEnterX:', targetIndent);
                 } else {
-                    // No nearby text - use current X position and remember it
+                    // Empty line, no previous position - use current X position and remember it
                     targetIndent = cursorPos.x;
                     setLastEnterX(targetIndent);
+                    console.log('Empty line, no lastEnterX, using and remembering current position:', targetIndent);
                 }
             }
             
@@ -2777,6 +2846,7 @@ export function useWorldEngine({
             // Extend selection if shift is held and selection exists
             setSelectionEnd(newCursorPos);
             setCursorPos(newCursorPos); // Update cursor with selection
+            setLastEnterX(null); // Reset Enter X tracking when clicking
         } else if (clearSelection && !clickedInsideSelection) {
             // Only clear selection if:
             // 1. We're explicitly asked to clear it AND
@@ -2784,9 +2854,11 @@ export function useWorldEngine({
             setSelectionStart(null);
             setSelectionEnd(null);
             setCursorPos(newCursorPos);
+            setLastEnterX(null); // Reset Enter X tracking when clicking
         } else {
             // Just move the cursor without affecting selection
             setCursorPos(newCursorPos);
+            setLastEnterX(null); // Reset Enter X tracking when clicking
         }
     }, [zoomLevel, viewOffset, screenToWorld, selectionStart, selectionEnd, chatMode]);
 
