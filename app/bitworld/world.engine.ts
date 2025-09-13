@@ -30,6 +30,7 @@ export interface StyledCharacter {
         color?: string;
         background?: string;
     };
+    fadeStart?: number; // Timestamp for fade animation
 }
 
 export interface WorldData { [key: string]: string | StyledCharacter; }
@@ -428,8 +429,6 @@ export function useWorldEngine({
                     boundingBox: frame.boundingBox
                 }));
                 setTextFrames(simpleFrames);
-                
-                return hierarchicalSystem; // Return the generated system
             } else {
                 // Generate simple bounding frames around text clusters
                 const frames = generateTextBlockFrames(worldData);
@@ -437,12 +436,9 @@ export function useWorldEngine({
                 
                 setTextFrames(frames);
                 setHierarchicalFrames(null);
-                
-                return null; // No hierarchical system generated
             }
         } catch (error) {
             console.error('Error updating text frames:', error);
-            return null;
         }
     }, [worldData, useHierarchicalFrames, zoomLevel, hierarchicalConfig, showAllLevels, getViewportCenter]);
 
@@ -491,10 +487,10 @@ export function useWorldEngine({
             } else {
                 // Fallback: generate frames first to get clusters
                 console.log('No hierarchical frames available, generating them first...');
-                const generatedSystem = await updateTextFrames();
+                await updateTextFrames();
                 
-                if (generatedSystem) {
-                    const l2Frames = generatedSystem.levels.get(HierarchyLevel.GROUPED) || [];
+                if (hierarchicalFrames) {
+                    const l2Frames = hierarchicalFrames.levels.get(HierarchyLevel.GROUPED) || [];
                     clustersToLabel = l2Frames
                         .filter(frame => {
                             const bbox = frame.boundingBox;
@@ -629,15 +625,7 @@ export function useWorldEngine({
         clearSearch,
         cameraMode,
         isIndentEnabled,
-    } = useCommandSystem({ 
-        setDialogueText, 
-        initialBackgroundColor, 
-        getAllLabels, 
-        availableStates, 
-        username,
-        hasSelection: hasActiveSelection,
-        getNormalizedSelection: getNormalizedSelection
-    });
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates, username });
 
     // Generate search data when search pattern changes
     useEffect(() => {

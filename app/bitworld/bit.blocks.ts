@@ -382,7 +382,8 @@ export function groupTextBlocksIntoClusters(
                 density: 0,
                 totalCharacters: currentBlocks[blockIndex].characters.length,
                 estimatedWords: estimateWordsInBlock(currentBlocks[blockIndex]),
-                centroid: {x: 0, y: 0}
+                centroid: {x: 0, y: 0},
+                leftMargin: currentBlocks[blockIndex].start
             };
             
             processedBlocks.add(blockId);
