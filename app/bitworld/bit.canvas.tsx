@@ -493,10 +493,37 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Bounded Region Backgrounds ===
+        for (const key in engine.worldData) {
+            if (key.startsWith('bound_')) {
+                try {
+                    const boundData = JSON.parse(engine.worldData[key] as string);
+                    const { startX, endX, startY, endY, color } = boundData;
+                    
+                    // Render background for all positions in the bounded region
+                    for (let y = startY; y <= endY; y++) {
+                        for (let x = startX; x <= endX; x++) {
+                            // Only render if in viewport
+                            if (x >= startWorldX - 5 && x <= endWorldX + 5 && y >= startWorldY - 5 && y <= endWorldY + 5) {
+                                const screenPos = engine.worldToScreen(x, y, currentZoom, currentOffset);
+                                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && 
+                                    screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                                    ctx.fillStyle = color;
+                                    ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Skip invalid bound data
+                }
+            }
+        }
+
         ctx.fillStyle = engine.textColor;
         for (const key in engine.worldData) {
-            // Skip block and label data - we render those separately
-            if (key.startsWith('block_') || key.startsWith('label_')) continue;
+            // Skip block, label, and bound data - we render those separately
+            if (key.startsWith('block_') || key.startsWith('label_') || key.startsWith('bound_')) continue;
             
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
@@ -506,12 +533,14 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const charStyle = charData ? engine.getCharacterStyle(charData) : undefined;
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                    // Apply text background if specified (even for empty spaces)
+                    if (charStyle && charStyle.background) {
+                        ctx.fillStyle = charStyle.background;
+                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                    }
+                    
+                    // Render text only if there's actual content
                     if (char && char.trim() !== '') {
-                        // Apply text background if specified
-                        if (charStyle && charStyle.background) {
-                            ctx.fillStyle = charStyle.background;
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                        }
                         // Apply text color
                         ctx.fillStyle = (charStyle && charStyle.color) || engine.textColor;
                         ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);

@@ -120,6 +120,7 @@ export interface WorldEngine {
     navMode: 'labels' | 'states';
     toggleNavMode: () => void;
     getAllLabels: () => Array<{text: string, x: number, y: number, color: string}>;
+    getAllBounds: () => Array<{startX: number, endX: number, startY: number, endY: number, color: string}>;
     getSortedLabels: (sortMode: 'chronological' | 'closest' | 'farthest', originPos: Point) => Array<{text: string, x: number, y: number, color: string}>;
     getUniqueColors: () => string[];
     toggleColorFilter: (color: string) => void;
@@ -179,6 +180,8 @@ interface UseWorldEngineProps {
     initialStateName?: string | null; // Initial state name from URL
 }
 
+
+
 /**
  * Gets smart indentation only if there are nearby text blocks (within maxDistance)
  * @param worldData Combined world data
@@ -223,6 +226,10 @@ export function useWorldEngine({
     // === Router ===
     const router = useRouter();
     
+    const [isSelecting, setIsSelecting] = useState(false);
+    const [selectionStart, setSelectionStart] = useState<Point | null>(null);
+    const [selectionEnd, setSelectionEnd] = useState<Point | null>(null);
+
     // === State ===
     const [worldData, setWorldData] = useState<WorldData>(initialWorldData);
     const [cursorPos, setCursorPos] = useState<Point>(initialCursorPos);
@@ -322,6 +329,29 @@ export function useWorldEngine({
         return labels;
     }, [worldData]);
 
+    const getAllBounds = useCallback(() => {
+        const bounds: Array<{startX: number, endX: number, startY: number, endY: number, color: string}> = [];
+        for (const key in worldData) {
+            if (key.startsWith('bound_')) {
+                try {
+                    const boundData = JSON.parse(worldData[key] as string);
+                    if (boundData.startX !== undefined && boundData.endX !== undefined && 
+                        boundData.startY !== undefined && boundData.endY !== undefined) {
+                        bounds.push({
+                            startX: boundData.startX,
+                            endX: boundData.endX,
+                            startY: boundData.startY,
+                            endY: boundData.endY,
+                            color: boundData.color || '#FFFF00'
+                        });
+                    }
+                } catch (e) {
+                    // Skip invalid bound data
+                }
+            }
+        }
+        return bounds;
+    }, [worldData]);
 
     // === Character Dimensions Calculation ===
     const getEffectiveCharDims = useCallback((zoom: number): { width: number; height: number; fontSize: number } => {
@@ -558,6 +588,22 @@ export function useWorldEngine({
         return () => clearTimeout(debounceTimeout);
     }, [worldData, framesVisible, updateTextFrames]);
 
+    // === Selection Helper Functions ===
+    // Helper function to get normalized selection bounds
+    const getNormalizedSelection = useCallback(() => {
+        if (!selectionStart || !selectionEnd) return null;
+        const startX = Math.min(selectionStart.x, selectionEnd.x);
+        const startY = Math.min(selectionStart.y, selectionEnd.y);
+        const endX = Math.max(selectionStart.x, selectionEnd.x);
+        const endY = Math.max(selectionStart.y, selectionEnd.y);
+        return { startX, startY, endX, endY };
+    }, [selectionStart, selectionEnd]);
+
+    // Helper function to check if there's an active selection
+    const hasActiveSelection = useCallback(() => {
+        return selectionStart !== null && selectionEnd !== null;
+    }, [selectionStart, selectionEnd]);
+
     // === Command System ===
     const { 
         commandState, 
@@ -583,7 +629,15 @@ export function useWorldEngine({
         clearSearch,
         cameraMode,
         isIndentEnabled,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates, username });
+    } = useCommandSystem({ 
+        setDialogueText, 
+        initialBackgroundColor, 
+        getAllLabels, 
+        availableStates, 
+        username,
+        hasSelection: hasActiveSelection,
+        getNormalizedSelection: getNormalizedSelection
+    });
 
     // Generate search data when search pattern changes
     useEffect(() => {
@@ -597,8 +651,8 @@ export function useWorldEngine({
 
         // Search through worldData for matches
         for (const key in worldData) {
-            // Skip special keys (blocks, labels, etc.)
-            if (key.startsWith('block_') || key.startsWith('label_')) {
+            // Skip special keys (blocks, labels, bounds, etc.)
+            if (key.startsWith('block_') || key.startsWith('label_') || key.startsWith('bound_')) {
                 continue;
             }
 
@@ -661,8 +715,8 @@ export function useWorldEngine({
         
         // Group characters by line
         for (const key in worldData) {
-            // Skip special keys (blocks, labels, etc.)
-            if (key.startsWith('block_') || key.startsWith('label_')) {
+            // Skip special keys (blocks, labels, bounds, etc.)
+            if (key.startsWith('block_') || key.startsWith('label_') || key.startsWith('bound_')) {
                 continue;
             }
             
@@ -1026,9 +1080,6 @@ export function useWorldEngine({
 
     
     const isPanningRef = useRef(false);
-    const [isSelecting, setIsSelecting] = useState(false);
-    const [selectionStart, setSelectionStart] = useState<Point | null>(null);
-    const [selectionEnd, setSelectionEnd] = useState<Point | null>(null);
     const clipboardRef = useRef<{ text: string, width: number, height: number } | null>(null);
 
     // === Persistence ===
@@ -1093,6 +1144,38 @@ export function useWorldEngine({
         return data.style;
     }, []);
 
+    // === Bounded Region Detection ===
+    const getBoundedRegion = useCallback((worldData: WorldData, cursorPos: Point): { startX: number; endX: number; y: number } | null => {
+        // Check if cursor is within any bounded region
+        const cursorX = cursorPos.x;
+        const cursorY = cursorPos.y;
+        
+        // Look through all bound_ entries to find one that contains the cursor
+        for (const key in worldData) {
+            if (key.startsWith('bound_')) {
+                try {
+                    const boundData = JSON.parse(worldData[key] as string);
+                    
+                    // Check if cursor is within the bounds of this region
+                    if (cursorX >= boundData.startX && cursorX <= boundData.endX &&
+                        cursorY >= boundData.startY && cursorY <= boundData.endY) {
+                        
+                        // Return the bounds for the current row (supporting multi-row bounded regions)
+                        return { 
+                            startX: boundData.startX, 
+                            endX: boundData.endX, 
+                            y: cursorY 
+                        };
+                    }
+                } catch (e) {
+                    // Skip invalid bound data
+                }
+            }
+        }
+        
+        return null;
+    }, []);
+
     // === Helper Functions (Largely unchanged, but use state variables) ===
     const worldToScreen = useCallback((worldX: number, worldY: number, currentZoom: number, currentOffset: Point): Point => {
         const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(currentZoom);
@@ -1100,16 +1183,6 @@ export function useWorldEngine({
         const screenY = (worldY - currentOffset.y) * effectiveCharHeight;
         return { x: screenX, y: screenY };
     }, [getEffectiveCharDims]);
-
-    // === Helper Functions ===
-    const getNormalizedSelection = useCallback(() => {
-        if (!selectionStart || !selectionEnd) return null;
-        const startX = Math.min(selectionStart.x, selectionEnd.x);
-        const startY = Math.min(selectionStart.y, selectionEnd.y);
-        const endX = Math.max(selectionStart.x, selectionEnd.x);
-        const endY = Math.max(selectionStart.y, selectionEnd.y);
-        return { startX, startY, endX, endY };
-    }, [selectionStart, selectionEnd]);
 
     // Helper function to get selected text as string
     const getSelectedText = useCallback(() => {
@@ -1997,6 +2070,28 @@ export function useWorldEngine({
                         }).catch(() => {
                             setDialogueWithRevert(`Could not summarize text`, setDialogueText);
                         });
+                    } else if (exec.command === 'bound') {
+                        // Create bounded region entry spanning the selected area
+                        const selection = getNormalizedSelection();
+                        if (selection) {
+                            const color = exec.args.length > 1 ? exec.args[1] : '#FFFF00'; // Default yellow background
+                            
+                            // Store bounded region as a single entry like labels
+                            const boundKey = `bound_${selection.startX},${selection.startY}`;
+                            const boundData = {
+                                startX: selection.startX,
+                                endX: selection.endX,
+                                startY: selection.startY,
+                                endY: selection.endY,
+                                color: color
+                            };
+                            
+                            let newWorldData = { ...worldData };
+                            newWorldData[boundKey] = JSON.stringify(boundData);
+                            
+                            setWorldData(newWorldData);
+                            setDialogueWithRevert(`Bounded region created`, setDialogueText);
+                        }
                     }
                 }
                 
@@ -2667,7 +2762,19 @@ export function useWorldEngine({
             }
 
             // Now type the character - handle different modes
-            nextCursorPos = { x: cursorAfterDelete.x + 1, y: cursorAfterDelete.y }; // Move cursor right
+            let proposedCursorPos = { x: cursorAfterDelete.x + 1, y: cursorAfterDelete.y }; // Move cursor right
+            
+            // Check for bounded region word wrapping
+            const boundedRegion = getBoundedRegion(dataToDeleteFrom, cursorAfterDelete);
+            if (boundedRegion && proposedCursorPos.x > boundedRegion.endX) {
+                // We're typing past the right edge of a bounded region - wrap to next line
+                proposedCursorPos = { 
+                    x: boundedRegion.startX, 
+                    y: cursorAfterDelete.y + 1 
+                };
+            }
+            
+            nextCursorPos = proposedCursorPos;
             moved = true;
             
             if (currentMode === 'air') {
@@ -3180,6 +3287,7 @@ export function useWorldEngine({
         getCursorDistanceFromCenter,
         getBlocksInRegion,
         getAllLabels,
+        getAllBounds,
         getSortedLabels,
         getUniqueColors,
         toggleColorFilter,
