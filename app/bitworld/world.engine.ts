@@ -581,6 +581,7 @@ export function useWorldEngine({
         searchPattern,
         isSearchActive,
         clearSearch,
+        cameraMode,
     } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates, username });
 
     // Generate search data when search pattern changes
@@ -1573,6 +1574,21 @@ export function useWorldEngine({
                     } else {
                         setDialogueWithRevert("Usage: /frames [on|off|toggle|hierarchical|config|levels] - Control frame generation and display", setDialogueText);
                     }
+                } else if (exec.command === 'clear') {
+                    // Clear the entire canvas
+                    setWorldData({});
+                    setChatData({});
+                    setSearchData({});
+                    // Reset cursor to origin
+                    setCursorPos({ x: 0, y: 0 });
+                    // Clear any selections
+                    setSelectionStart(null);
+                    setSelectionEnd(null);
+                    // Clear cluster labels and frames
+                    setClusterLabels([]);
+                    setTextFrames([]);
+                    setHierarchicalFrames(null);
+                    setDialogueWithRevert("Canvas cleared", setDialogueText);
                 }
                 
                 setCursorPos(exec.commandStartPos);
@@ -2558,6 +2574,42 @@ export function useWorldEngine({
         // === Update State ===
         if (moved) {
             setCursorPos(nextCursorPos);
+            
+            // Camera ripstop mode: Keep cursor in view
+            if (cameraMode === 'ripstop' && typeof window !== 'undefined') {
+                const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
+                if (effectiveCharWidth > 0 && effectiveCharHeight > 0) {
+                    const viewportCharWidth = window.innerWidth / effectiveCharWidth;
+                    const viewportCharHeight = window.innerHeight / effectiveCharHeight;
+                    
+                    // Check if cursor is outside current viewport bounds
+                    const cursorOutsideLeft = nextCursorPos.x < viewOffset.x;
+                    const cursorOutsideRight = nextCursorPos.x >= viewOffset.x + viewportCharWidth;
+                    const cursorOutsideTop = nextCursorPos.y < viewOffset.y;
+                    const cursorOutsideBottom = nextCursorPos.y >= viewOffset.y + viewportCharHeight;
+                    
+                    let newViewOffset = { ...viewOffset };
+                    
+                    // Adjust view to keep cursor in bounds
+                    if (cursorOutsideLeft) {
+                        newViewOffset.x = nextCursorPos.x;
+                    } else if (cursorOutsideRight) {
+                        newViewOffset.x = nextCursorPos.x - viewportCharWidth + 1;
+                    }
+                    
+                    if (cursorOutsideTop) {
+                        newViewOffset.y = nextCursorPos.y;
+                    } else if (cursorOutsideBottom) {
+                        newViewOffset.y = nextCursorPos.y - viewportCharHeight + 1;
+                    }
+                    
+                    // Update view offset if needed
+                    if (newViewOffset.x !== viewOffset.x || newViewOffset.y !== viewOffset.y) {
+                        setViewOffset(newViewOffset);
+                    }
+                }
+            }
+            
             // Update selection based on movement and shift key
             // Only use shift for selection when using navigation keys, not when typing
             if (shiftKey && (key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight')) {
@@ -2583,9 +2635,9 @@ export function useWorldEngine({
         return preventDefault;
     }, [
         cursorPos, worldData, selectionStart, selectionEnd, commandState, chatMode, chatData, // State dependencies
-        currentMode, addEphemeralText, // Mode system dependencies
+        currentMode, addEphemeralText, cameraMode, viewOffset, zoomLevel, getEffectiveCharDims, // Mode system dependencies
         getNormalizedSelection, deleteSelectedCharacters, copySelectedCharacters, cutSelection, pasteText, getSelectedText, // Callback dependencies
-        handleCommandKeyDown
+        handleCommandKeyDown, textColor, currentTextStyle
         // Include setters used directly in the handler (if any, preferably avoid)
         // setCursorPos, setWorldData, setSelectionStart, setSelectionEnd // Setters are stable, no need to list
     ]);

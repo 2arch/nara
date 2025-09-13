@@ -9,8 +9,8 @@ import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchic
 
 // --- Constants --- (Copied and relevant ones kept)
 const GRID_COLOR = '#F2F2F233';
-const CURSOR_COLOR_PRIMARY = '#003DFF55';
-const CURSOR_COLOR_SECONDARY = '#0022DD55';
+const CURSOR_COLOR_PRIMARY = '#D3D3D355';
+const CURSOR_COLOR_SECONDARY = '#B8B8B855';
 const CURSOR_COLOR_SAVE = '#F2F2F2'; // Green color for saving state
 const CURSOR_COLOR_ERROR = '#FF0000'; // Red color for error state
 const CURSOR_TEXT_COLOR = '#FFFFFF';

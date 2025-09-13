@@ -28,6 +28,7 @@ export interface CommandExecution {
 // --- Mode System Types ---
 export type CanvasMode = 'default' | 'air' | 'chat';
 export type BackgroundMode = 'transparent' | 'color' | 'image' | 'video' | 'space' | 'stream';
+export type CameraMode = 'default' | 'ripstop';
 
 export interface ModeState {
     currentMode: CanvasMode;
@@ -46,6 +47,7 @@ export interface ModeState {
     }; // Current persistent text style
     searchPattern: string; // Current search pattern
     isSearchActive: boolean; // Whether search highlighting is active
+    cameraMode: CameraMode; // Camera tracking mode
 }
 
 interface UseCommandSystemProps {
@@ -57,11 +59,12 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'cluster', 'frames'];
+const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'cluster', 'frames', 'clear', 'camera'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'white', 'black', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro'];
 const NAV_COMMANDS: string[] = [];
+const CAMERA_COMMANDS = ['default', 'ripstop'];
 
 // --- Command System Hook ---
 export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates = [], username }: UseCommandSystemProps) {
@@ -97,6 +100,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         },
         searchPattern: '', // No search pattern initially
         isSearchActive: false, // Search not active initially
+        cameraMode: 'default', // Default camera mode (no intervention)
     });
 
     // Utility function to match commands based on input
@@ -245,6 +249,18 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 }
             }
             return ['label', 'label --distance'];
+        }
+
+        if (lowerInput === 'camera') {
+            const parts = input.toLowerCase().split(' ');
+            if (parts.length > 1) {
+                // Show camera subcommands that match the second part
+                const cameraInput = parts[1];
+                return CAMERA_COMMANDS
+                    .filter(camera => camera.startsWith(cameraInput))
+                    .map(camera => `camera ${camera}`);
+            }
+            return CAMERA_COMMANDS.map(camera => `camera ${camera}`);
         }
         
         return AVAILABLE_COMMANDS.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
@@ -1341,6 +1357,61 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             };
         }
 
+        if (commandToExecute.startsWith('clear')) {
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+            
+            // Return command execution for world engine to handle clearing the canvas
+            return {
+                command: 'clear',
+                args: [],
+                commandStartPos: commandState.commandStartPos
+            };
+        }
+
+        if (commandToExecute.startsWith('camera')) {
+            const parts = commandToExecute.split(' ');
+            const cameraMode = parts[1];
+            
+            if (CAMERA_COMMANDS.includes(cameraMode)) {
+                // Update camera mode in state
+                setModeState(prev => ({
+                    ...prev,
+                    cameraMode: cameraMode as CameraMode
+                }));
+                
+                const modeText = cameraMode === 'ripstop' ? 
+                    'Camera ripstop mode: cursor will stay in view' :
+                    'Camera default mode: no automatic tracking';
+                setDialogueText(modeText);
+            } else if (!cameraMode) {
+                setDialogueText(`Current camera mode: ${modeState.cameraMode}`);
+            } else {
+                setDialogueText(`Unknown camera mode. Available: ${CAMERA_COMMANDS.join(', ')}`);
+            }
+            
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+            
+            return null;
+        }
+
         if (commandToExecute.startsWith('signout')) {
             // Clear command mode
             setCommandState({
@@ -1556,5 +1627,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         searchPattern: modeState.searchPattern,
         isSearchActive: modeState.isSearchActive,
         clearSearch: () => setModeState(prev => ({ ...prev, searchPattern: '', isSearchActive: false })),
+        cameraMode: modeState.cameraMode,
     };
 }
