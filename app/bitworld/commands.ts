@@ -1469,9 +1469,37 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 commandStartPos: commandState.commandStartPos
             };
         }
+
+        if (commandToExecute.startsWith('bound')) {
+            console.log('=== BOUND COMMAND DETECTED ===');
+            console.log('commandToExecute:', commandToExecute);
+            console.log('inputParts:', inputParts);
+            
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+            
+            // Return command execution for immediate processing
+            const args = inputParts.slice(1);
+            console.log('Bound command args:', args);
+            console.log('Returning command execution object');
+            
+            return {
+                command: 'bound',
+                args: args,
+                commandStartPos: commandState.commandStartPos
+            };
+        }
         
         // Handle commands that need text selection
-        if (['transform', 'explain', 'summarize', 'bound'].includes(commandToExecute.toLowerCase().split(' ')[0])) {
+        if (['transform', 'explain', 'summarize'].includes(commandToExecute.toLowerCase().split(' ')[0])) {
             // Clear command mode
             setCommandState({
                 isActive: false,

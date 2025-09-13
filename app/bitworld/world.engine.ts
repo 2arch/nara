@@ -1419,9 +1419,11 @@ export function useWorldEngine({
         // === Command Handling (Early Priority) ===
         if (enableCommands) {
             const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos);
+            console.log('=== COMMAND RESULT ===', commandResult);
             if (commandResult && typeof commandResult === 'object') {
                 // It's a command execution object - handle it
                 const exec = commandResult as CommandExecution;
+                console.log('=== EXECUTING COMMAND ===', exec);
                 if (exec.command === 'debug') {
                     if (exec.args[0] === 'on') {
                         const newSettings = { isDebugVisible: true };
@@ -1665,6 +1667,47 @@ export function useWorldEngine({
                             modeText = 'Camera default mode: no automatic tracking';
                     }
                     setDialogueWithRevert(modeText, setDialogueText);
+                } else if (exec.command === 'bound') {
+                    console.log('=== HANDLING BOUND COMMAND IN WORLD ENGINE ===');
+                    console.log('exec:', exec);
+                    console.log('selectionStart:', selectionStart);
+                    console.log('selectionEnd:', selectionEnd);
+                    
+                    // Create bounded region entry spanning the selected area
+                    const selection = getNormalizedSelection();
+                    console.log('getNormalizedSelection() result:', selection);
+                    
+                    if (selection) {
+                        const color = exec.args.length > 0 ? exec.args[0] : '#FFFF00'; // Default yellow background
+                        console.log('Using color:', color);
+                        
+                        // Store bounded region as a single entry like labels
+                        const boundKey = `bound_${selection.startX},${selection.startY}`;
+                        const boundData = {
+                            startX: selection.startX,
+                            endX: selection.endX,
+                            startY: selection.startY,
+                            endY: selection.endY,
+                            color: color
+                        };
+                        console.log('boundKey:', boundKey);
+                        console.log('boundData:', boundData);
+                        
+                        let newWorldData = { ...worldData };
+                        newWorldData[boundKey] = JSON.stringify(boundData);
+                        
+                        console.log('Setting worldData with new bound region');
+                        setWorldData(newWorldData);
+                        setDialogueWithRevert(`Bounded region created`, setDialogueText);
+                        
+                        // Clear the selection after creating the bound
+                        console.log('Clearing selection');
+                        setSelectionStart(null);
+                        setSelectionEnd(null);
+                    } else {
+                        console.log('No selection found!');
+                        setDialogueWithRevert(`No region selected. Select an area first by clicking and dragging, then use /bound`, setDialogueText);
+                    }
                 }
                 
                 setCursorPos(exec.commandStartPos);
@@ -2059,10 +2102,18 @@ export function useWorldEngine({
                             setDialogueWithRevert(`Could not summarize text`, setDialogueText);
                         });
                     } else if (exec.command === 'bound') {
+                        console.log('=== HANDLING BOUND COMMAND IN WORLD ENGINE ===');
+                        console.log('exec:', exec);
+                        console.log('selectionStart:', selectionStart);
+                        console.log('selectionEnd:', selectionEnd);
+                        
                         // Create bounded region entry spanning the selected area
                         const selection = getNormalizedSelection();
+                        console.log('getNormalizedSelection() result:', selection);
+                        
                         if (selection) {
-                            const color = exec.args.length > 1 ? exec.args[1] : '#FFFF00'; // Default yellow background
+                            const color = exec.args.length > 0 ? exec.args[0] : '#FFFF00'; // Default yellow background
+                            console.log('Using color:', color);
                             
                             // Store bounded region as a single entry like labels
                             const boundKey = `bound_${selection.startX},${selection.startY}`;
@@ -2073,12 +2124,23 @@ export function useWorldEngine({
                                 endY: selection.endY,
                                 color: color
                             };
+                            console.log('boundKey:', boundKey);
+                            console.log('boundData:', boundData);
                             
                             let newWorldData = { ...worldData };
                             newWorldData[boundKey] = JSON.stringify(boundData);
                             
+                            console.log('Setting worldData with new bound region');
                             setWorldData(newWorldData);
                             setDialogueWithRevert(`Bounded region created`, setDialogueText);
+                            
+                            // Clear the selection after creating the bound
+                            console.log('Clearing selection');
+                            setSelectionStart(null);
+                            setSelectionEnd(null);
+                        } else {
+                            console.log('No selection found!');
+                            setDialogueWithRevert(`No region selected. Select an area first by clicking and dragging, then use /bound`, setDialogueText);
                         }
                     }
                 }
