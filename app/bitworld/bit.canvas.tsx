@@ -498,18 +498,37 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             if (key.startsWith('bound_')) {
                 try {
                     const boundData = JSON.parse(engine.worldData[key] as string);
-                    const { startX, endX, startY, endY, color } = boundData;
+                    const { startX, endX, startY, endY, maxY, color } = boundData;
+                    
+                    // Determine the actual end Y for rendering based on maxY
+                    // If maxY is set, use it as the render boundary (it extends beyond endY)
+                    const renderEndY = (maxY !== null && maxY !== undefined) ? maxY : endY;
                     
                     // Render background for all positions in the bounded region
-                    for (let y = startY; y <= endY; y++) {
+                    for (let y = startY; y <= renderEndY; y++) {
                         for (let x = startX; x <= endX; x++) {
                             // Only render if in viewport
                             if (x >= startWorldX - 5 && x <= endWorldX + 5 && y >= startWorldY - 5 && y <= endWorldY + 5) {
                                 const screenPos = engine.worldToScreen(x, y, currentZoom, currentOffset);
                                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && 
                                     screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-                                    ctx.fillStyle = color;
-                                    ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                    
+                                    // Check if this is the bottom row of a limited bound
+                                    const isBottomRow = (maxY !== null && maxY !== undefined && y === renderEndY);
+                                    
+                                    if (isBottomRow) {
+                                        // Apply darker shade for bottom row
+                                        ctx.fillStyle = color || '#FFFF00';
+                                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                        
+                                        // Add a darker overlay or bottom border
+                                        ctx.fillStyle = 'rgba(0, 0, 0, 0.2)'; // 20% black overlay
+                                        ctx.fillRect(screenPos.x, screenPos.y + effectiveCharHeight - 2, effectiveCharWidth, 2); // Bottom border
+                                    } else {
+                                        // Regular fill
+                                        ctx.fillStyle = color || '#FFFF00';
+                                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                    }
                                 }
                             }
                         }
