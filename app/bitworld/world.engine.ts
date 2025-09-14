@@ -1766,9 +1766,8 @@ export function useWorldEngine({
                             return true;
                         }
                         
-                        // Check if selection fully encloses an existing bound
-                        let enclosedBoundKey: string | null = null;
-                        let enclosedBoundData: any = null;
+                        // Check if selection fully encloses existing bounds OR includes their top bars
+                        const enclosedBounds: Array<{key: string, data: any}> = [];
                         
                         for (const key in worldData) {
                             if (key.startsWith('bound_')) {
@@ -1776,14 +1775,28 @@ export function useWorldEngine({
                                     const boundData = JSON.parse(worldData[key] as string);
                                     
                                     // Check if this bound is fully enclosed by the selection
-                                    if (selection.startX <= boundData.startX && 
+                                    const fullyEncloses = selection.startX <= boundData.startX && 
                                         selection.endX >= boundData.endX &&
                                         selection.startY <= boundData.startY && 
-                                        selection.endY >= boundData.endY) {
-                                        
-                                        enclosedBoundKey = key;
-                                        enclosedBoundData = boundData;
-                                        break; // Use the first enclosed bound found
+                                        selection.endY >= boundData.endY;
+                                    
+                                    // Special case: For infinite bounds, check if selection includes the top bar
+                                    const isInfiniteBound = boundData.maxY === null || boundData.maxY === undefined;
+                                    const includesTopBar = isInfiniteBound &&
+                                        selection.startX <= boundData.startX && 
+                                        selection.endX >= boundData.endX &&
+                                        selection.startY <= boundData.startY && 
+                                        selection.endY >= boundData.startY; // Just needs to include the top row
+                                    
+                                    // Also check if selection partially overlaps with the bound's top bar
+                                    const partiallyIncludesTopBar = boundData.startY >= selection.startY && 
+                                        boundData.startY <= selection.endY &&
+                                        ((boundData.startX >= selection.startX && boundData.startX <= selection.endX) ||
+                                         (boundData.endX >= selection.startX && boundData.endX <= selection.endX) ||
+                                         (selection.startX >= boundData.startX && selection.startX <= boundData.endX));
+                                    
+                                    if (fullyEncloses || includesTopBar || partiallyIncludesTopBar) {
+                                        enclosedBounds.push({key, data: boundData});
                                     }
                                 } catch (e) {
                                     // Skip invalid bound data
@@ -1792,7 +1805,7 @@ export function useWorldEngine({
                         }
                         
                         // Parse arguments: color (optional) and height (optional)
-                        let color = '#FFFF00'; // Default yellow background
+                        let color = '#B0B0B0'; // Default heather gray background
                         let height: number | null = null; // null means infinite
                         
                         if (exec.args.length > 0) {
@@ -1824,31 +1837,66 @@ export function useWorldEngine({
                         console.log('Using height:', height);
                         
                         // Calculate maxY based on height
-                        const maxY = height !== null ? selection.endY + height - 1 : null;
+                        // Height represents total rows from startY, not additional rows from endY
+                        const maxY = height !== null ? selection.startY + height - 1 : null;
                         
-                        // Store bounded region as a single entry like labels
-                        const boundKey = `bound_${selection.startX},${selection.startY}`;
-                        const boundData = {
-                            startX: selection.startX,
-                            endX: selection.endX,
-                            startY: selection.startY,
-                            endY: selection.endY,
-                            maxY: maxY, // New field: maximum Y where this bound has effect
-                            color: color
-                        };
-                        console.log('boundKey:', boundKey);
-                        console.log('boundData:', boundData);
+                        // If we found enclosed bounds, merge them into one
+                        if (enclosedBounds.length > 0) {
+                            console.log('=== MERGING/UPDATING ENCLOSED BOUNDS ===');
+                            console.log('Found', enclosedBounds.length, 'bounds to merge');
+                            console.log('New selection:', selection);
+                            
+                            // Remove all old bounds
+                            const newWorldData = { ...worldData };
+                            for (const {key} of enclosedBounds) {
+                                delete newWorldData[key];
+                            }
+                            
+                            // Create merged bound with new dimensions
+                            const boundKey = `bound_${selection.startX},${selection.startY}`;
+                            const boundData = {
+                                startX: selection.startX,
+                                endX: selection.endX,
+                                startY: selection.startY,
+                                endY: selection.endY,
+                                maxY: maxY, // Use new height if specified
+                                color: color // Use new color
+                            };
+                            
+                            newWorldData[boundKey] = JSON.stringify(boundData);
+                            setWorldData(newWorldData);
+                            console.log('Created merged bound:', boundData);
+                            
+                            const mergeMsg = enclosedBounds.length > 1 ? 
+                                `Merged ${enclosedBounds.length} bounds` : 
+                                'Updated existing bound';
+                            const heightMsg = height !== null ? ` (height: ${height} rows)` : ' (infinite height)';
+                            setDialogueWithRevert(`${mergeMsg}${heightMsg}`, setDialogueText);
+                        } else {
+                            // Store bounded region as a single entry like labels
+                            const boundKey = `bound_${selection.startX},${selection.startY}`;
+                            const boundData = {
+                                startX: selection.startX,
+                                endX: selection.endX,
+                                startY: selection.startY,
+                                endY: selection.endY,
+                                maxY: maxY, // New field: maximum Y where this bound has effect
+                                color: color
+                            };
+                            console.log('boundKey:', boundKey);
+                            console.log('boundData:', boundData);
+                            
+                            let newWorldData = { ...worldData };
+                            newWorldData[boundKey] = JSON.stringify(boundData);
+                            
+                            console.log('Setting worldData with new bound region');
+                            setWorldData(newWorldData);
+                            
+                            const heightMsg = height !== null ? ` (height: ${height} rows)` : ' (infinite height)';
+                            setDialogueWithRevert(`Bounded region created${heightMsg}`, setDialogueText);
+                        }
                         
-                        let newWorldData = { ...worldData };
-                        newWorldData[boundKey] = JSON.stringify(boundData);
-                        
-                        console.log('Setting worldData with new bound region');
-                        setWorldData(newWorldData);
-                        
-                        const heightMsg = height !== null ? ` (height: ${height} rows)` : ' (infinite height)';
-                        setDialogueWithRevert(`Bounded region created${heightMsg}`, setDialogueText);
-                        
-                        // Clear the selection after creating the bound
+                        // Clear the selection after creating/updating the bound
                         console.log('Clearing selection');
                         setSelectionStart(null);
                         setSelectionEnd(null);

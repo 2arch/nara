@@ -504,32 +504,30 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     // If maxY is set, use it as the render boundary (it extends beyond endY)
                     const renderEndY = (maxY !== null && maxY !== undefined) ? maxY : endY;
                     
-                    // Render background for all positions in the bounded region
-                    for (let y = startY; y <= renderEndY; y++) {
-                        for (let x = startX; x <= endX; x++) {
-                            // Only render if in viewport
-                            if (x >= startWorldX - 5 && x <= endWorldX + 5 && y >= startWorldY - 5 && y <= endWorldY + 5) {
-                                const screenPos = engine.worldToScreen(x, y, currentZoom, currentOffset);
-                                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && 
-                                    screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-                                    
-                                    // Check if this is the bottom row of a limited bound
-                                    const isBottomRow = (maxY !== null && maxY !== undefined && y === renderEndY);
-                                    
-                                    if (isBottomRow) {
-                                        // Apply darker shade for bottom row
-                                        ctx.fillStyle = color || '#FFFF00';
-                                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                                        
-                                        // Add a darker overlay or bottom border
-                                        ctx.fillStyle = 'rgba(0, 0, 0, 0.2)'; // 20% black overlay
-                                        ctx.fillRect(screenPos.x, screenPos.y + effectiveCharHeight - 2, effectiveCharWidth, 2); // Bottom border
-                                    } else {
-                                        // Regular fill
-                                        ctx.fillStyle = color || '#FFFF00';
-                                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                                    }
-                                }
+                    // Check if this is a finite height bound (has maxY)
+                    const isFiniteHeight = (maxY !== null && maxY !== undefined);
+                    
+                    // Always render just bars, never full fill
+                    // For infinite bounds: only top bar (black)
+                    // For finite bounds: top bar (black) + bottom bar (gray)
+                    for (let x = startX; x <= endX; x++) {
+                        // Always render top bar (black background)
+                        if (x >= startWorldX - 5 && x <= endWorldX + 5 && startY >= startWorldY - 5 && startY <= endWorldY + 5) {
+                            const topScreenPos = engine.worldToScreen(x, startY, currentZoom, currentOffset);
+                            if (topScreenPos.x > -effectiveCharWidth * 2 && topScreenPos.x < cssWidth + effectiveCharWidth && 
+                                topScreenPos.y > -effectiveCharHeight * 2 && topScreenPos.y < cssHeight + effectiveCharHeight) {
+                                ctx.fillStyle = '#000000'; // Black background for top bar
+                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            }
+                        }
+                        
+                        // Only render bottom bar if this is a finite height bound
+                        if (isFiniteHeight && x >= startWorldX - 5 && x <= endWorldX + 5 && renderEndY >= startWorldY - 5 && renderEndY <= endWorldY + 5) {
+                            const bottomScreenPos = engine.worldToScreen(x, renderEndY, currentZoom, currentOffset);
+                            if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth && 
+                                bottomScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
+                                ctx.fillStyle = '#B0B0B0'; // Heather gray for bottom bar
+                                ctx.fillRect(bottomScreenPos.x, bottomScreenPos.y, effectiveCharWidth, effectiveCharHeight);
                             }
                         }
                     }
@@ -560,8 +558,32 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     
                     // Render text only if there's actual content
                     if (char && char.trim() !== '') {
-                        // Apply text color
-                        ctx.fillStyle = (charStyle && charStyle.color) || engine.textColor;
+                        // Check if this text is on a black top bar of any bound
+                        let isOnBlackTopBar = false;
+                        for (const boundKey in engine.worldData) {
+                            if (boundKey.startsWith('bound_')) {
+                                try {
+                                    const boundData = JSON.parse(engine.worldData[boundKey] as string);
+                                    const { startX, endX, startY } = boundData;
+                                    
+                                    // All bounds now have black top bars
+                                    if (worldX >= startX && worldX <= endX && 
+                                        worldY === startY) {
+                                        isOnBlackTopBar = true;
+                                        break;
+                                    }
+                                } catch (e) {
+                                    // Skip invalid bound data
+                                }
+                            }
+                        }
+                        
+                        // Apply text color - white for black top bars, normal color otherwise
+                        if (isOnBlackTopBar) {
+                            ctx.fillStyle = '#FFFFFF'; // White text on black top bars
+                        } else {
+                            ctx.fillStyle = (charStyle && charStyle.color) || engine.textColor;
+                        }
                         ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
                     }
                 }
