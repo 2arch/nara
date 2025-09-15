@@ -52,6 +52,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const [statePublishStatuses, setStatePublishStatuses] = useState<Record<string, boolean>>({});
     const [mouseWorldPos, setMouseWorldPos] = useState<Point | null>(null);
     const [isShiftPressed, setIsShiftPressed] = useState<boolean>(false);
+    const [shiftDragStartPos, setShiftDragStartPos] = useState<Point | null>(null);
     const lastCursorPosRef = useRef<Point | null>(null);
 
     // Track shift key state globally
@@ -476,65 +477,52 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
     }, [engine]);
 
+    // Draw distance vector during shift+drag
+    const drawDistanceVector = useCallback((ctx: CanvasRenderingContext2D, currentZoom: number, currentOffset: Point, effectiveCharWidth: number, effectiveCharHeight: number) => {
+        if (!shiftDragStartPos || !mouseWorldPos || !isShiftPressed) return;
+        
+        // Calculate screen positions
+        const startScreen = engine.worldToScreen(shiftDragStartPos.x + 0.5, shiftDragStartPos.y + 0.5, currentZoom, currentOffset);
+        const endScreen = engine.worldToScreen(mouseWorldPos.x + 0.5, mouseWorldPos.y + 0.5, currentZoom, currentOffset);
+        
+        // Draw vector line
+        ctx.save();
+        ctx.strokeStyle = 'rgba(128, 128, 128, 0.6)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        
+        ctx.beginPath();
+        ctx.moveTo(startScreen.x, startScreen.y);
+        ctx.lineTo(endScreen.x, endScreen.y);
+        ctx.stroke();
+        
+        // Draw arrow head at end
+        const angle = Math.atan2(endScreen.y - startScreen.y, endScreen.x - startScreen.x);
+        const arrowLength = 10;
+        const arrowAngle = Math.PI / 6;
+        
+        ctx.beginPath();
+        ctx.moveTo(endScreen.x, endScreen.y);
+        ctx.lineTo(
+            endScreen.x - arrowLength * Math.cos(angle - arrowAngle),
+            endScreen.y - arrowLength * Math.sin(angle - arrowAngle)
+        );
+        ctx.moveTo(endScreen.x, endScreen.y);
+        ctx.lineTo(
+            endScreen.x - arrowLength * Math.cos(angle + arrowAngle),
+            endScreen.y - arrowLength * Math.sin(angle + arrowAngle)
+        );
+        ctx.stroke();
+        
+        ctx.restore();
+    }, [shiftDragStartPos, mouseWorldPos, isShiftPressed, engine]);
+
     // Helper function to find connected text block (including spaces)
     const findTextBlock = useCallback((startPos: Point, worldData: any, engine: any): Point[] => {
-        // First, check if we're starting from a text character
-        const startKey = `${startPos.x},${startPos.y}`;
-        const startData = worldData[startKey];
-        const startHasText = startData && engine.getCharacter(startData) !== '';
-        
-        let actualStartPos = startPos;
-        
-        // If starting from a space, look for nearby text in a small radius
-        if (!startHasText) {
-            let foundNearbyText = false;
-            
-            // Check immediate neighbors first (radius 1)
-            for (let dy = -1; dy <= 1; dy++) {
-                for (let dx = -1; dx <= 1; dx++) {
-                    if (dx === 0 && dy === 0) continue; // Skip center
-                    
-                    const checkPos = { x: startPos.x + dx, y: startPos.y + dy };
-                    const checkKey = `${checkPos.x},${checkPos.y}`;
-                    const checkData = worldData[checkKey];
-                    
-                    if (checkData && engine.getCharacter(checkData) !== '') {
-                        actualStartPos = checkPos;
-                        foundNearbyText = true;
-                        break;
-                    }
-                }
-                if (foundNearbyText) break;
-            }
-            
-            // If no immediate neighbors, check a slightly larger radius (2)
-            if (!foundNearbyText) {
-                for (let dy = -2; dy <= 2; dy++) {
-                    for (let dx = -2; dx <= 2; dx++) {
-                        if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) continue; // Skip already checked
-                        
-                        const checkPos = { x: startPos.x + dx, y: startPos.y + dy };
-                        const checkKey = `${checkPos.x},${checkPos.y}`;
-                        const checkData = worldData[checkKey];
-                        
-                        if (checkData && engine.getCharacter(checkData) !== '') {
-                            actualStartPos = checkPos;
-                            foundNearbyText = true;
-                            break;
-                        }
-                    }
-                    if (foundNearbyText) break;
-                }
-            }
-            
-            // If no nearby text found, return empty
-            if (!foundNearbyText) return [];
-        }
-        
-        // Now do the flood-fill from the actual text position
+        // Simple flood-fill to find all connected text
         const visited = new Set<string>();
-        const block: Point[] = [];
-        const queue: Point[] = [actualStartPos];
+        const textPositions: Point[] = [];
+        const queue: Point[] = [startPos];
         
         while (queue.length > 0) {
             const pos = queue.shift()!;
@@ -543,54 +531,69 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             if (visited.has(key)) continue;
             visited.add(key);
             
-            // Check if this position has text or should be included as a connecting space
             const charData = worldData[key];
-            const hasContent = charData && engine.getCharacter(charData) !== '';
+            const char = charData ? engine.getCharacter(charData) : '';
             
-            // Include if it has content
-            if (hasContent) {
-                block.push(pos);
+            // Include position if it has text
+            if (char && char.trim() !== '') {
+                textPositions.push(pos);
                 
-                // Add adjacent positions to queue
-                const adjacent = [
-                    { x: pos.x - 1, y: pos.y },     // Left
-                    { x: pos.x + 1, y: pos.y },     // Right
-                    { x: pos.x, y: pos.y - 1 },     // Up
-                    { x: pos.x, y: pos.y + 1 },     // Down
+                // Check all 4 directions
+                const directions = [
+                    { x: pos.x - 1, y: pos.y },
+                    { x: pos.x + 1, y: pos.y },
+                    { x: pos.x, y: pos.y - 1 },
+                    { x: pos.x, y: pos.y + 1 }
                 ];
                 
-                for (const adjPos of adjacent) {
-                    const adjKey = `${adjPos.x},${adjPos.y}`;
-                    if (!visited.has(adjKey)) {
-                        queue.push(adjPos);
+                for (const dir of directions) {
+                    const dirKey = `${dir.x},${dir.y}`;
+                    if (!visited.has(dirKey)) {
+                        queue.push(dir);
                     }
                 }
-            } else {
-                // For empty spaces, check if they connect text on the same line
-                const leftKey = `${pos.x - 1},${pos.y}`;
-                const rightKey = `${pos.x + 1},${pos.y}`;
-                const leftData = worldData[leftKey];
-                const rightData = worldData[rightKey];
-                const hasTextLeft = leftData && engine.getCharacter(leftData) !== '';
-                const hasTextRight = rightData && engine.getCharacter(rightData) !== '';
+            } else if (textPositions.length > 0) {
+                // If we've found text and this is a space, check if it connects text
+                const hasTextLeft = worldData[`${pos.x - 1},${pos.y}`] && engine.getCharacter(worldData[`${pos.x - 1},${pos.y}`]).trim() !== '';
+                const hasTextRight = worldData[`${pos.x + 1},${pos.y}`] && engine.getCharacter(worldData[`${pos.x + 1},${pos.y}`]).trim() !== '';
                 
-                // Include spaces that connect text horizontally (like spaces between words)
-                if (hasTextLeft && hasTextRight) {
-                    block.push(pos);
+                if (hasTextLeft || hasTextRight) {
+                    // Continue searching horizontally through spaces
+                    if (!visited.has(`${pos.x - 1},${pos.y}`)) queue.push({ x: pos.x - 1, y: pos.y });
+                    if (!visited.has(`${pos.x + 1},${pos.y}`)) queue.push({ x: pos.x + 1, y: pos.y });
+                }
+            }
+        }
+        
+        // If no text found at start position, search nearby
+        if (textPositions.length === 0) {
+            // Look for text in a 3x3 area around the click
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    const checkPos = { x: startPos.x + dx, y: startPos.y + dy };
+                    const checkKey = `${checkPos.x},${checkPos.y}`;
+                    const checkData = worldData[checkKey];
                     
-                    // Continue search from this space
-                    const adjacent = [
-                        { x: pos.x - 1, y: pos.y },     // Left
-                        { x: pos.x + 1, y: pos.y },     // Right
-                    ];
-                    
-                    for (const adjPos of adjacent) {
-                        const adjKey = `${adjPos.x},${adjPos.y}`;
-                        if (!visited.has(adjKey)) {
-                            queue.push(adjPos);
-                        }
+                    if (checkData && engine.getCharacter(checkData).trim() !== '') {
+                        // Found text nearby, use that as start
+                        return findTextBlock(checkPos, worldData, engine);
                     }
                 }
+            }
+            return [];
+        }
+        
+        // Calculate bounding box
+        const minX = Math.min(...textPositions.map(p => p.x));
+        const maxX = Math.max(...textPositions.map(p => p.x));
+        const minY = Math.min(...textPositions.map(p => p.y));
+        const maxY = Math.max(...textPositions.map(p => p.y));
+        
+        // Return all positions in bounding box
+        const block: Point[] = [];
+        for (let y = minY; y <= maxY; y++) {
+            for (let x = minX; x <= maxX; x++) {
+                block.push({ x, y });
             }
         }
         
@@ -1471,6 +1474,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             // drawPositionInfo(ctx, mouseWorldPos, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight, effectiveFontSize, cssWidth, cssHeight);
         }
 
+        // === Render Distance Vector ===
+        if (shiftDragStartPos) {
+            drawDistanceVector(ctx, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight);
+        }
+
         if (showCursor) {
             // Draw cursor trail (older positions first, for proper layering)
             const now = Date.now();
@@ -1600,7 +1608,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock]);
+    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, drawHoverPreview, drawDistanceVector, drawModeSpecificPreview, drawPositionInfo, findTextBlock]);
 
 
     // --- Drawing Loop Effect ---
@@ -1729,11 +1737,23 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             panStartInfoRef.current = info;
             intermediatePanOffsetRef.current = { ...engine.viewOffset }; // Clone to avoid reference issues
             if (canvasRef.current) canvasRef.current.style.cursor = 'grabbing';
-        } else if (e.button === 0) { // Left mouse button - selection start
-            isSelectingMouseDownRef.current = true; // Track mouse down state
+        } else if (e.button === 0) { // Left mouse button
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
-            engine.handleSelectionStart(x, y); // Let the engine manage selection state
+            
+            if (e.shiftKey) {
+                // Track shift+drag start position
+                const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
+                setShiftDragStartPos({
+                    x: Math.floor(worldPos.x),
+                    y: Math.floor(worldPos.y)
+                });
+            } else {
+                // Regular selection start
+                isSelectingMouseDownRef.current = true; // Track mouse down state
+                engine.handleSelectionStart(x, y); // Let the engine manage selection state
+            }
+            
             canvasRef.current?.focus();
         }
     }, [engine]);
@@ -1772,11 +1792,94 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             if (canvasRef.current) canvasRef.current.style.cursor = 'text';
         }
 
-        if (isSelectingMouseDownRef.current && e.button === 0) { // Left mouse button - selection end
-            isSelectingMouseDownRef.current = false; // Stop tracking mouse down state
-            engine.handleSelectionEnd(); // Finalize selection state in engine
+        if (e.button === 0) { // Left mouse button
+            if (e.shiftKey && shiftDragStartPos) {
+                // Calculate distance from shift+drag start to current position
+                const rect = canvasRef.current?.getBoundingClientRect();
+                if (rect) {
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
+                    const endPos = {
+                        x: Math.floor(worldPos.x),
+                        y: Math.floor(worldPos.y)
+                    };
+                    
+                    // Calculate distance vector
+                    const distanceX = endPos.x - shiftDragStartPos.x;
+                    const distanceY = endPos.y - shiftDragStartPos.y;
+                    
+                    // Only move if there's actual distance
+                    if (distanceX !== 0 || distanceY !== 0) {
+                        // Find text block at start position
+                        const textBlock = findTextBlock(shiftDragStartPos, engine.worldData, engine);
+                        
+                        if (textBlock.length > 0) {
+                            console.log('=== SHIFT+DRAG MOVE OPERATION ===');
+                            console.log('Text block positions:', textBlock);
+                            console.log('Distance:', { distanceX, distanceY });
+                            
+                            // Debug: Check what's in worldData at these positions
+                            console.log('=== WORLDDATA AT TEXT BLOCK POSITIONS ===');
+                            for (const pos of textBlock) {
+                                const key = `${pos.x},${pos.y}`;
+                                const data = engine.worldData[key];
+                                console.log(`Position (${pos.x},${pos.y}) key="${key}" data:`, data);
+                            }
+                            
+                            // Capture all character data from the text block
+                            const capturedChars: Array<{x: number, y: number, char: string}> = [];
+                            
+                            for (const pos of textBlock) {
+                                const key = `${pos.x},${pos.y}`;
+                                const data = engine.worldData[key];
+                                if (data) {
+                                    const char = engine.getCharacter(data);
+                                    if (char) {
+                                        capturedChars.push({ x: pos.x, y: pos.y, char });
+                                        console.log(`✓ Captured: '${char}' at (${pos.x},${pos.y}), char length: ${char.length}`);
+                                    } else {
+                                        console.log(`✗ No char extracted from data at (${pos.x},${pos.y}):`, data);
+                                    }
+                                } else {
+                                    console.log(`✗ No data at (${pos.x},${pos.y})`);
+                                }
+                            }
+                            
+                            console.log('Total characters captured:', capturedChars.length);
+                            console.log('Captured chars array:', capturedChars);
+                            
+                            if (capturedChars.length > 0) {
+                                // Prepare batch move data
+                                const moves = capturedChars.map(({ x, y, char }) => ({
+                                    fromX: x,
+                                    fromY: y,
+                                    toX: x + distanceX,
+                                    toY: y + distanceY,
+                                    char
+                                }));
+                                
+                                console.log('=== BATCH MOVE OPERATION ===');
+                                console.log('Moves:', moves);
+                                
+                                // Execute batch move
+                                engine.batchMoveCharacters(moves);
+                            }
+                            
+                            console.log('=== MOVE OPERATION COMPLETE ===');
+                        }
+                    }
+                }
+                
+                // Clear shift drag state
+                setShiftDragStartPos(null);
+            } else if (isSelectingMouseDownRef.current) {
+                // Regular selection end
+                isSelectingMouseDownRef.current = false;
+                engine.handleSelectionEnd();
+            }
         }
-    }, [engine]);
+    }, [engine, shiftDragStartPos, findTextBlock]);
 
     const handleCanvasMouseLeave = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         // Clear hover position when mouse leaves canvas

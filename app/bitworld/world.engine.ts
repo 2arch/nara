@@ -85,6 +85,7 @@ export interface WorldEngine {
     handleSelectionEnd: () => void;
     deleteCharacter: (x: number, y: number) => void;
     placeCharacter: (char: string, x: number, y: number) => void;
+    batchMoveCharacters: (moves: Array<{fromX: number, fromY: number, toX: number, toY: number, char: string}>) => void;
     deleteSelection: () => boolean;
     copySelection: () => boolean;
     cutSelection: () => boolean;
@@ -3620,6 +3621,25 @@ export function useWorldEngine({
         setWorldData(newWorldData);
     }, [worldData]);
 
+    const batchMoveCharacters = useCallback((moves: Array<{fromX: number, fromY: number, toX: number, toY: number, char: string}>): void => {
+        const newWorldData = { ...worldData };
+        
+        // First, delete all characters from their original positions
+        for (const move of moves) {
+            const fromKey = `${move.fromX},${move.fromY}`;
+            delete newWorldData[fromKey];
+        }
+        
+        // Then, place all characters at their new positions
+        for (const move of moves) {
+            const toKey = `${move.toX},${move.toY}`;
+            newWorldData[toKey] = move.char;
+        }
+        
+        // Apply all changes in one batch
+        setWorldData(newWorldData);
+    }, [worldData]);
+
     const getCursorDistanceFromCenter = useCallback((): number => {
         const center = getViewportCenter();
         const deltaX = cursorPos.x - center.x;
@@ -3818,6 +3838,7 @@ export function useWorldEngine({
         handleSelectionEnd,
         deleteCharacter,
         placeCharacter,
+        batchMoveCharacters,
         deleteSelection: deleteSelectedCharacters,
         copySelection: copySelectedCharacters,
         cutSelection: cutSelection,
