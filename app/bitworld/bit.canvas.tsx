@@ -1728,8 +1728,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const y = e.clientY - rect.top;
             
             if (e.shiftKey) {
-                // Track shift+drag start position and ensure no selection is active
+                // Track shift+drag start position and clear any existing selection
                 isSelectingMouseDownRef.current = false; // Ensure selection is disabled
+                // Clear any existing selection by using the engine's click handler with clearSelection=true
+                engine.handleCanvasClick(x, y, true);
                 const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
                 setShiftDragStartPos({
                     x: Math.floor(worldPos.x),
