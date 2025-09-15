@@ -49,6 +49,7 @@ export interface ModeState {
     isSearchActive: boolean; // Whether search highlighting is active
     cameraMode: CameraMode; // Camera tracking mode
     isIndentEnabled: boolean; // Whether smart indentation is enabled for Enter key
+    isMoveMode: boolean; // Whether move mode is active for dragging text blocks
 }
 
 interface UseCommandSystemProps {
@@ -60,7 +61,7 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'cluster', 'frames', 'clear', 'cam', 'indent', 'bound', 'unbound'];
+const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'cluster', 'frames', 'clear', 'cam', 'indent', 'bound', 'unbound', 'move'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'white', 'black', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro'];
@@ -103,6 +104,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         isSearchActive: false, // Search not active initially
         cameraMode: 'default', // Default camera mode (no intervention)
         isIndentEnabled: true, // Smart indentation enabled by default
+        isMoveMode: false, // Move mode not active initially
     });
 
     // Utility function to match commands based on input
@@ -1517,6 +1519,30 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 commandStartPos: commandState.commandStartPos
             };
         }
+
+        if (commandToExecute.startsWith('move')) {
+            // Toggle move mode
+            setModeState(prev => ({
+                ...prev,
+                isMoveMode: !prev.isMoveMode
+            }));
+            
+            const newState = !modeState.isMoveMode;
+            setDialogueText(newState ? "Move mode enabled - hover over text blocks to drag them. Press Escape to exit." : "Move mode disabled");
+            
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+            
+            return null;
+        }
         
         // Handle commands that need text selection
         if (['transform', 'explain', 'summarize'].includes(commandToExecute.toLowerCase().split(' ')[0])) {
@@ -1716,5 +1742,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         clearSearch: () => setModeState(prev => ({ ...prev, searchPattern: '', isSearchActive: false })),
         cameraMode: modeState.cameraMode,
         isIndentEnabled: modeState.isIndentEnabled,
+        isMoveMode: modeState.isMoveMode,
+        exitMoveMode: () => setModeState(prev => ({ ...prev, isMoveMode: false })),
     };
 }

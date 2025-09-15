@@ -342,6 +342,36 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
 
 
+    // --- Bounds Spatial Index Cache ---
+    const boundsIndexRef = useRef<Map<string, {isFocused: boolean, textColor: string}> | null>(null);
+    const lastBoundsDataRef = useRef<string>('');
+    
+    const updateBoundsIndex = useCallback(() => {
+        // Create a spatial index of all bound top bars for O(1) lookup
+        const boundsIndex = new Map<string, {isFocused: boolean, textColor: string}>();
+        
+        for (const boundKey in engine.worldData) {
+            if (boundKey.startsWith('bound_')) {
+                try {
+                    const boundData = JSON.parse(engine.worldData[boundKey] as string);
+                    const { startX, endX, startY } = boundData;
+                    const isFocused = engine.focusedBoundKey === boundKey;
+                    const textColor = isFocused ? '#FFFFFF' : '#000000';
+                    
+                    // Index every position on the top bar
+                    for (let x = startX; x <= endX; x++) {
+                        const key = `${x},${startY}`;
+                        boundsIndex.set(key, { isFocused, textColor });
+                    }
+                } catch (e) {
+                    // Skip invalid bound data
+                }
+            }
+        }
+        
+        boundsIndexRef.current = boundsIndex;
+    }, [engine.worldData, engine.focusedBoundKey]);
+
     // --- Drawing Logic ---
     const draw = useCallback(() => {
         const canvas = canvasRef.current;
@@ -358,6 +388,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             height: effectiveCharHeight,
             fontSize: effectiveFontSize
         } = engine.getEffectiveCharDims(currentZoom);
+        
+        // Update bounds index if world data changed
+        const currentBoundsData = JSON.stringify(Object.keys(engine.worldData).filter(k => k.startsWith('bound_')));
+        if (currentBoundsData !== lastBoundsDataRef.current) {
+            updateBoundsIndex();
+            lastBoundsDataRef.current = currentBoundsData;
+        }
 
         // Use intermediate offset if panning, otherwise use engine's state
         const currentOffset = isMiddleMouseDownRef.current ? intermediatePanOffsetRef.current : engine.viewOffset;
@@ -561,30 +598,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     
                     // Render text only if there's actual content
                     if (char && char.trim() !== '') {
-                        // Check if this text is on a top bar of any bound and determine text color
-                        let textColorOverride: string | null = null;
-                        for (const boundKey in engine.worldData) {
-                            if (boundKey.startsWith('bound_')) {
-                                try {
-                                    const boundData = JSON.parse(engine.worldData[boundKey] as string);
-                                    const { startX, endX, startY } = boundData;
-                                    
-                                    // Check if text is on the top bar of this bound
-                                    if (worldX >= startX && worldX <= endX && 
-                                        worldY === startY) {
-                                        const isFocused = engine.focusedBoundKey === boundKey;
-                                        textColorOverride = isFocused ? '#FFFFFF' : '#000000'; // White on black (focused), black on gray (unfocused)
-                                        break;
-                                    }
-                                } catch (e) {
-                                    // Skip invalid bound data
-                                }
-                            }
-                        }
+                        // O(1) lookup for bound text color using spatial index
+                        const posKey = `${worldX},${worldY}`;
+                        const boundInfo = boundsIndexRef.current?.get(posKey);
                         
                         // Apply text color based on background
-                        if (textColorOverride) {
-                            ctx.fillStyle = textColorOverride;
+                        if (boundInfo) {
+                            ctx.fillStyle = boundInfo.textColor;
                         } else {
                             ctx.fillStyle = (charStyle && charStyle.color) || engine.textColor;
                         }
@@ -1286,7 +1306,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport]);
+    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex]);
 
 
     // --- Drawing Loop Effect ---

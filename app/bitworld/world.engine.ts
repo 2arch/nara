@@ -673,6 +673,8 @@ export function useWorldEngine({
         clearSearch,
         cameraMode,
         isIndentEnabled,
+        isMoveMode,
+        exitMoveMode,
     } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates, username });
 
     // Generate search data when search pattern changes
@@ -1480,6 +1482,13 @@ export function useWorldEngine({
         if (key === 'Escape' && isSearchActive) {
             clearSearch();
             setDialogueWithRevert("Search cleared", setDialogueText);
+            return true;
+        }
+
+        // === Move Mode Exit ===
+        if (key === 'Escape' && isMoveMode) {
+            exitMoveMode();
+            setDialogueWithRevert("Move mode disabled", setDialogueText);
             return true;
         }
         
