@@ -1233,6 +1233,7 @@ export function useWorldEngine({
         return closestBoundAbove;
     }, []);
 
+
     // === Helper Functions (Largely unchanged, but use state variables) ===
     const worldToScreen = useCallback((worldX: number, worldY: number, currentZoom: number, currentOffset: Point): Point => {
         const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(currentZoom);

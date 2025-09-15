@@ -384,13 +384,15 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         if (screenPos.x < -effectiveCharWidth || screenPos.x > cssWidth || 
             screenPos.y < -effectiveCharHeight || screenPos.y > cssHeight) return;
         
-        // Check if there's existing text at this position
+        // Check if there's existing text at this position OR if we're within a text block
         const key = `${worldPos.x},${worldPos.y}`;
-        const hasText = engine.worldData[key] && engine.getCharacter(engine.worldData[key]).trim() !== '';
+        const hasDirectText = engine.worldData[key] && engine.getCharacter(engine.worldData[key]).trim() !== '';
         
-        if (hasText) {
-            // Find the entire text block that contains this position
-            const textBlock = findTextBlock(worldPos, engine.worldData, engine);
+        // Try to find a text block starting from this position
+        const textBlock = findTextBlock(worldPos, engine.worldData, engine);
+        const isWithinTextBlock = textBlock.length > 0;
+        
+        if (hasDirectText || isWithinTextBlock) {
             
             // Draw heather gray overlay for the entire text block
             ctx.fillStyle = 'rgba(176, 176, 176, 0.3)'; // Heather gray overlay
@@ -422,9 +424,63 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
     // Helper function to find connected text block (including spaces)
     const findTextBlock = useCallback((startPos: Point, worldData: any, engine: any): Point[] => {
+        // First, check if we're starting from a text character
+        const startKey = `${startPos.x},${startPos.y}`;
+        const startData = worldData[startKey];
+        const startHasText = startData && engine.getCharacter(startData) !== '';
+        
+        let actualStartPos = startPos;
+        
+        // If starting from a space, look for nearby text in a small radius
+        if (!startHasText) {
+            let foundNearbyText = false;
+            
+            // Check immediate neighbors first (radius 1)
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    if (dx === 0 && dy === 0) continue; // Skip center
+                    
+                    const checkPos = { x: startPos.x + dx, y: startPos.y + dy };
+                    const checkKey = `${checkPos.x},${checkPos.y}`;
+                    const checkData = worldData[checkKey];
+                    
+                    if (checkData && engine.getCharacter(checkData) !== '') {
+                        actualStartPos = checkPos;
+                        foundNearbyText = true;
+                        break;
+                    }
+                }
+                if (foundNearbyText) break;
+            }
+            
+            // If no immediate neighbors, check a slightly larger radius (2)
+            if (!foundNearbyText) {
+                for (let dy = -2; dy <= 2; dy++) {
+                    for (let dx = -2; dx <= 2; dx++) {
+                        if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) continue; // Skip already checked
+                        
+                        const checkPos = { x: startPos.x + dx, y: startPos.y + dy };
+                        const checkKey = `${checkPos.x},${checkPos.y}`;
+                        const checkData = worldData[checkKey];
+                        
+                        if (checkData && engine.getCharacter(checkData) !== '') {
+                            actualStartPos = checkPos;
+                            foundNearbyText = true;
+                            break;
+                        }
+                    }
+                    if (foundNearbyText) break;
+                }
+            }
+            
+            // If no nearby text found, return empty
+            if (!foundNearbyText) return [];
+        }
+        
+        // Now do the flood-fill from the actual text position
         const visited = new Set<string>();
         const block: Point[] = [];
-        const queue: Point[] = [startPos];
+        const queue: Point[] = [actualStartPos];
         
         while (queue.length > 0) {
             const pos = queue.shift()!;
@@ -1564,6 +1620,49 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         
         canvasRef.current?.focus(); // Ensure focus for keyboard
     }, [engine, canvasSize, router, handleNavClick, handleCoordinateClick, handleColorFilterClick, handleSortModeClick, handleStateClick, handleIndexClick]);
+
+    const handleCanvasDoubleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+        if (e.button !== 0) return; // Only left clicks
+
+        // Get canvas-relative coordinates
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (!rect) return;
+
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
+        
+        // Convert to world coordinates
+        const worldPos = engine.screenToWorld(clickX, clickY, engine.zoomLevel, engine.viewOffset);
+        const snappedWorldPos = {
+            x: Math.floor(worldPos.x),
+            y: Math.floor(worldPos.y)
+        };
+        
+        // Find the text block at this position
+        const textBlock = findTextBlock(snappedWorldPos, engine.worldData, engine);
+        
+        if (textBlock.length > 0) {
+            // Calculate bounding rectangle of the text block
+            const minX = Math.min(...textBlock.map(p => p.x));
+            const maxX = Math.max(...textBlock.map(p => p.x));
+            const minY = Math.min(...textBlock.map(p => p.y));
+            const maxY = Math.max(...textBlock.map(p => p.y));
+            
+            // Convert world coordinates back to canvas coordinates for the selection API
+            const startScreen = engine.worldToScreen(minX, minY, engine.zoomLevel, engine.viewOffset);
+            const endScreen = engine.worldToScreen(maxX, maxY, engine.zoomLevel, engine.viewOffset);
+            
+            // Use the proper selection API methods
+            engine.handleSelectionStart(startScreen.x, startScreen.y);
+            engine.handleSelectionMove(endScreen.x, endScreen.y);
+            engine.handleSelectionEnd();
+            
+            // Set flag to prevent trail creation
+            isClickMovementRef.current = true;
+        }
+        
+        canvasRef.current?.focus(); // Ensure focus for keyboard
+    }, [engine, findTextBlock]);
     
     const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -1667,6 +1766,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             ref={canvasRef}
             className={className}
             onClick={handleCanvasClick}
+            onDoubleClick={handleCanvasDoubleClick}
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={handleCanvasMouseMove}
             onMouseUp={handleCanvasMouseUp}
