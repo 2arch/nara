@@ -50,6 +50,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
     const [cursorTrail, setCursorTrail] = useState<CursorTrailPosition[]>([]);
     const [statePublishStatuses, setStatePublishStatuses] = useState<Record<string, boolean>>({});
+    const [mouseWorldPos, setMouseWorldPos] = useState<Point | null>(null);
     const lastCursorPosRef = useRef<Point | null>(null);
     const router = useRouter();
     
@@ -371,6 +372,183 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         
         boundsIndexRef.current = boundsIndex;
     }, [engine.worldData, engine.focusedBoundKey]);
+
+    // --- Cursor Preview Functions ---
+    const drawHoverPreview = useCallback((ctx: CanvasRenderingContext2D, worldPos: Point, currentZoom: number, currentOffset: Point, effectiveCharWidth: number, effectiveCharHeight: number, cssWidth: number, cssHeight: number) => {
+        // Only show preview if different from current cursor position
+        if (worldPos.x === engine.cursorPos.x && worldPos.y === engine.cursorPos.y) return;
+        
+        const screenPos = engine.worldToScreen(worldPos.x, worldPos.y, currentZoom, currentOffset);
+        
+        // Only draw if visible on screen
+        if (screenPos.x < -effectiveCharWidth || screenPos.x > cssWidth || 
+            screenPos.y < -effectiveCharHeight || screenPos.y > cssHeight) return;
+        
+        // Check if there's existing text at this position
+        const key = `${worldPos.x},${worldPos.y}`;
+        const hasText = engine.worldData[key] && engine.getCharacter(engine.worldData[key]).trim() !== '';
+        
+        if (hasText) {
+            // Find the entire text block that contains this position
+            const textBlock = findTextBlock(worldPos, engine.worldData, engine);
+            
+            // Draw heather gray overlay for the entire text block
+            ctx.fillStyle = 'rgba(176, 176, 176, 0.3)'; // Heather gray overlay
+            
+            for (const blockPos of textBlock) {
+                const blockScreenPos = engine.worldToScreen(blockPos.x, blockPos.y, currentZoom, currentOffset);
+                
+                // Only draw if visible on screen
+                if (blockScreenPos.x >= -effectiveCharWidth && blockScreenPos.x <= cssWidth && 
+                    blockScreenPos.y >= -effectiveCharHeight && blockScreenPos.y <= cssHeight) {
+                    ctx.fillRect(blockScreenPos.x, blockScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                }
+            }
+            
+            // Draw outline around the hovered cell
+            ctx.strokeStyle = 'rgba(176, 176, 176, 0.8)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+        } else {
+            // Regular light gray preview for empty cells
+            ctx.strokeStyle = 'rgba(211, 211, 211, 0.7)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+            
+            ctx.fillStyle = 'rgba(211, 211, 211, 0.2)';
+            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+        }
+    }, [engine]);
+
+    // Helper function to find connected text block (including spaces)
+    const findTextBlock = useCallback((startPos: Point, worldData: any, engine: any): Point[] => {
+        const visited = new Set<string>();
+        const block: Point[] = [];
+        const queue: Point[] = [startPos];
+        
+        while (queue.length > 0) {
+            const pos = queue.shift()!;
+            const key = `${pos.x},${pos.y}`;
+            
+            if (visited.has(key)) continue;
+            visited.add(key);
+            
+            // Check if this position has text or should be included as a connecting space
+            const charData = worldData[key];
+            const hasContent = charData && engine.getCharacter(charData) !== '';
+            
+            // Include if it has content
+            if (hasContent) {
+                block.push(pos);
+                
+                // Add adjacent positions to queue
+                const adjacent = [
+                    { x: pos.x - 1, y: pos.y },     // Left
+                    { x: pos.x + 1, y: pos.y },     // Right
+                    { x: pos.x, y: pos.y - 1 },     // Up
+                    { x: pos.x, y: pos.y + 1 },     // Down
+                ];
+                
+                for (const adjPos of adjacent) {
+                    const adjKey = `${adjPos.x},${adjPos.y}`;
+                    if (!visited.has(adjKey)) {
+                        queue.push(adjPos);
+                    }
+                }
+            } else {
+                // For empty spaces, check if they connect text on the same line
+                const leftKey = `${pos.x - 1},${pos.y}`;
+                const rightKey = `${pos.x + 1},${pos.y}`;
+                const leftData = worldData[leftKey];
+                const rightData = worldData[rightKey];
+                const hasTextLeft = leftData && engine.getCharacter(leftData) !== '';
+                const hasTextRight = rightData && engine.getCharacter(rightData) !== '';
+                
+                // Include spaces that connect text horizontally (like spaces between words)
+                if (hasTextLeft && hasTextRight) {
+                    block.push(pos);
+                    
+                    // Continue search from this space
+                    const adjacent = [
+                        { x: pos.x - 1, y: pos.y },     // Left
+                        { x: pos.x + 1, y: pos.y },     // Right
+                    ];
+                    
+                    for (const adjPos of adjacent) {
+                        const adjKey = `${adjPos.x},${adjPos.y}`;
+                        if (!visited.has(adjKey)) {
+                            queue.push(adjPos);
+                        }
+                    }
+                }
+            }
+        }
+        
+        return block;
+    }, []);
+    
+
+    const drawModeSpecificPreview = useCallback((ctx: CanvasRenderingContext2D, worldPos: Point, currentZoom: number, currentOffset: Point, effectiveCharWidth: number, effectiveCharHeight: number, effectiveFontSize: number) => {
+        const screenPos = engine.worldToScreen(worldPos.x, worldPos.y, currentZoom, currentOffset);
+        
+        if (engine.isMoveMode) {
+            // Show move cursor - crosshairs
+            ctx.strokeStyle = 'rgba(0, 150, 255, 0.8)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            // Horizontal line
+            ctx.moveTo(screenPos.x + effectiveCharWidth * 0.2, screenPos.y + effectiveCharHeight * 0.5);
+            ctx.lineTo(screenPos.x + effectiveCharWidth * 0.8, screenPos.y + effectiveCharHeight * 0.5);
+            // Vertical line
+            ctx.moveTo(screenPos.x + effectiveCharWidth * 0.5, screenPos.y + effectiveCharHeight * 0.2);
+            ctx.lineTo(screenPos.x + effectiveCharWidth * 0.5, screenPos.y + effectiveCharHeight * 0.8);
+            ctx.stroke();
+        } else if (engine.commandState.isActive) {
+            // Show command cursor
+            ctx.fillStyle = 'rgba(255, 107, 53, 0.8)';
+            ctx.font = `${effectiveFontSize}px ${fontFamily}`;
+            ctx.fillText('/', screenPos.x, screenPos.y);
+        }
+    }, [engine, fontFamily]);
+
+    const drawPositionInfo = useCallback((ctx: CanvasRenderingContext2D, worldPos: Point, currentZoom: number, currentOffset: Point, effectiveCharWidth: number, effectiveCharHeight: number, effectiveFontSize: number, cssWidth: number, cssHeight: number) => {
+        const screenPos = engine.worldToScreen(worldPos.x, worldPos.y, currentZoom, currentOffset);
+        
+        // Calculate distance from current cursor
+        const deltaX = worldPos.x - engine.cursorPos.x;
+        const deltaY = worldPos.y - engine.cursorPos.y;
+        const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+        
+        // Create info text
+        const infoText = `(${worldPos.x},${worldPos.y}) [${Math.round(distance)}]`;
+        const fontSize = Math.max(10, effectiveFontSize * 0.8);
+        ctx.font = `${fontSize}px ${fontFamily}`;
+        const textMetrics = ctx.measureText(infoText);
+        const textWidth = textMetrics.width;
+        const textHeight = fontSize;
+        
+        // Position info box to avoid going off screen
+        let infoX = screenPos.x + effectiveCharWidth + 8;
+        let infoY = screenPos.y - textHeight - 4;
+        
+        // Adjust if going off right edge
+        if (infoX + textWidth + 8 > cssWidth) {
+            infoX = screenPos.x - textWidth - 8;
+        }
+        
+        // Adjust if going off top edge
+        if (infoY < 0) {
+            infoY = screenPos.y + effectiveCharHeight + 4;
+        }
+        
+        // Draw background
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillRect(infoX - 4, infoY - 2, textWidth + 8, textHeight + 4);
+        
+        // Draw text
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillText(infoText, infoX, infoY + textHeight - 2);
+    }, [engine, fontFamily]);
 
     // --- Drawing Logic ---
     const draw = useCallback(() => {
@@ -1176,6 +1354,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Mouse Hover Preview ===
+        if (mouseWorldPos && showCursor) {
+            drawHoverPreview(ctx, mouseWorldPos, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight, cssWidth, cssHeight);
+            drawModeSpecificPreview(ctx, mouseWorldPos, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight, effectiveFontSize);
+            // drawPositionInfo(ctx, mouseWorldPos, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight, effectiveFontSize, cssWidth, cssHeight);
+        }
 
         if (showCursor) {
             // Draw cursor trail (older positions first, for proper layering)
@@ -1306,7 +1490,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex]);
+    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock]);
 
 
     // --- Drawing Loop Effect ---
@@ -1405,13 +1589,24 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return;
 
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        // Always track mouse position for preview (when not actively dragging)
+        if (!isMiddleMouseDownRef.current && !isSelectingMouseDownRef.current) {
+            const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
+            const snappedWorldPos = {
+                x: Math.floor(worldPos.x),
+                y: Math.floor(worldPos.y)
+            };
+            setMouseWorldPos(snappedWorldPos);
+        }
+
         if (isMiddleMouseDownRef.current && panStartInfoRef.current) {
             // Handle panning move
             intermediatePanOffsetRef.current = engine.handlePanMove(e.clientX, e.clientY, panStartInfoRef.current);
         } else if (isSelectingMouseDownRef.current) { // Check mouse down ref
             // Handle selection move
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
             engine.handleSelectionMove(x, y); // Update engine's selection end
         }
     }, [engine]);
@@ -1431,6 +1626,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     }, [engine]);
 
     const handleCanvasMouseLeave = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+        // Clear hover position when mouse leaves canvas
+        setMouseWorldPos(null);
+
         // End panning if mouse leaves canvas
         if (isMiddleMouseDownRef.current) {
             isMiddleMouseDownRef.current = false;
