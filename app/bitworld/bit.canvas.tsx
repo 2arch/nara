@@ -508,15 +508,18 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     const isFiniteHeight = (maxY !== null && maxY !== undefined);
                     
                     // Always render just bars, never full fill
-                    // For infinite bounds: only top bar (black)
-                    // For finite bounds: top bar (black) + bottom bar (gray)
+                    // For infinite bounds: only top bar (black if focused, gray if not)
+                    // For finite bounds: top bar (black if focused, gray if not) + bottom bar (gray)
+                    const isFocused = engine.focusedBoundKey === key;
+                    const topBarColor = isFocused ? '#000000' : '#B0B0B0'; // Black if focused, heather gray if not
+                    
                     for (let x = startX; x <= endX; x++) {
-                        // Always render top bar (black background)
+                        // Always render top bar 
                         if (x >= startWorldX - 5 && x <= endWorldX + 5 && startY >= startWorldY - 5 && startY <= endWorldY + 5) {
                             const topScreenPos = engine.worldToScreen(x, startY, currentZoom, currentOffset);
                             if (topScreenPos.x > -effectiveCharWidth * 2 && topScreenPos.x < cssWidth + effectiveCharWidth && 
                                 topScreenPos.y > -effectiveCharHeight * 2 && topScreenPos.y < cssHeight + effectiveCharHeight) {
-                                ctx.fillStyle = '#000000'; // Black background for top bar
+                                ctx.fillStyle = topBarColor;
                                 ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight);
                             }
                         }
@@ -558,18 +561,19 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     
                     // Render text only if there's actual content
                     if (char && char.trim() !== '') {
-                        // Check if this text is on a black top bar of any bound
-                        let isOnBlackTopBar = false;
+                        // Check if this text is on a top bar of any bound and determine text color
+                        let textColorOverride: string | null = null;
                         for (const boundKey in engine.worldData) {
                             if (boundKey.startsWith('bound_')) {
                                 try {
                                     const boundData = JSON.parse(engine.worldData[boundKey] as string);
                                     const { startX, endX, startY } = boundData;
                                     
-                                    // All bounds now have black top bars
+                                    // Check if text is on the top bar of this bound
                                     if (worldX >= startX && worldX <= endX && 
                                         worldY === startY) {
-                                        isOnBlackTopBar = true;
+                                        const isFocused = engine.focusedBoundKey === boundKey;
+                                        textColorOverride = isFocused ? '#FFFFFF' : '#000000'; // White on black (focused), black on gray (unfocused)
                                         break;
                                     }
                                 } catch (e) {
@@ -578,9 +582,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             }
                         }
                         
-                        // Apply text color - white for black top bars, normal color otherwise
-                        if (isOnBlackTopBar) {
-                            ctx.fillStyle = '#FFFFFF'; // White text on black top bars
+                        // Apply text color based on background
+                        if (textColorOverride) {
+                            ctx.fillStyle = textColorOverride;
                         } else {
                             ctx.fillStyle = (charStyle && charStyle.color) || engine.textColor;
                         }

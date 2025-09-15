@@ -236,6 +236,8 @@ export function useWorldEngine({
     const [cursorPos, setCursorPos] = useState<Point>(initialCursorPos);
     const [viewOffset, setViewOffset] = useState<Point>(initialViewOffset);
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
+    const [focusedBoundKey, setFocusedBoundKey] = useState<string | null>(null); // Track which bound is focused
+    const [boundCycleIndex, setBoundCycleIndex] = useState<number>(0); // Track which bound to cycle to next
     const [dialogueText, setDialogueText] = useState('');
     
     // Double ESC detection for AI interruption
@@ -244,6 +246,52 @@ export function useWorldEngine({
     
     // Auto-clear temporary dialogue messages
     useAutoDialogue(dialogueText, setDialogueText);
+    
+    // Effect to detect when cursor is on a bounded region
+    useEffect(() => {
+        let foundBoundKey: string | null = null;
+        let bestMatch: { key: string, priority: number } | null = null;
+        
+        for (const key in worldData) {
+            if (key.startsWith('bound_')) {
+                try {
+                    const boundData = JSON.parse(worldData[key] as string);
+                    const { startX, endX, startY, endY, maxY } = boundData;
+                    
+                    // Check if cursor is within the bounded region
+                    const withinOriginalBounds = cursorPos.x >= startX && cursorPos.x <= endX &&
+                                                 cursorPos.y >= startY && cursorPos.y <= endY;
+                    
+                    // Also check if cursor is in the column constraint area (below the bound but within maxY)
+                    const withinColumnConstraint = endY < cursorPos.y && 
+                                                  cursorPos.x >= startX && cursorPos.x <= endX &&
+                                                  (maxY === null || maxY === undefined || cursorPos.y <= maxY);
+                    
+                    if (withinOriginalBounds || withinColumnConstraint) {
+                        // Priority system: prefer bounds where cursor is on top bar, then original bounds, then column constraints
+                        let priority = 0;
+                        if (cursorPos.y === startY) {
+                            priority = 3; // Highest priority: cursor is on the top bar
+                        } else if (withinOriginalBounds) {
+                            priority = 2; // Medium priority: cursor is within original bounds
+                        } else if (withinColumnConstraint) {
+                            priority = 1; // Lowest priority: cursor is in column constraint area
+                        }
+                        
+                        // Use the bound with highest priority, or if tied, the first one found
+                        if (!bestMatch || priority > bestMatch.priority) {
+                            bestMatch = { key, priority };
+                        }
+                    }
+                } catch (e) {
+                    // Skip invalid bound data
+                }
+            }
+        }
+        
+        foundBoundKey = bestMatch?.key || null;
+        setFocusedBoundKey(foundBoundKey);
+    }, [cursorPos, worldData]);
     
     // Helper function to get world paths directly under /worlds/{userUid}/
     const getUserPath = useCallback((worldPath: string) => userUid ? `worlds/${userUid}/${worldPath.replace('worlds/', '')}` : `worlds/${worldPath.replace('worlds/', '')}`, [userUid]);
@@ -3077,6 +3125,65 @@ export function useWorldEngine({
                 }
             }
             moved = true; // Cursor position changed or selection was deleted
+        } else if (key === 'Tab') {
+            // Cycle through all available bounds
+            const bounds: Array<{key: string, data: any}> = [];
+            
+            for (const key in worldData) {
+                if (key.startsWith('bound_')) {
+                    try {
+                        const boundData = JSON.parse(worldData[key] as string);
+                        bounds.push({key, data: boundData});
+                    } catch (e) {
+                        // Skip invalid bound data
+                    }
+                }
+            }
+            
+            if (bounds.length === 0) {
+                console.log('No bounds found');
+            } else {
+                // Sort bounds by their position for consistent cycling
+                bounds.sort((a, b) => {
+                    if (a.data.startY !== b.data.startY) {
+                        return a.data.startY - b.data.startY; // Sort by Y first
+                    }
+                    return a.data.startX - b.data.startX; // Then by X
+                });
+                
+                // Cycle to next bound
+                const nextIndex = boundCycleIndex % bounds.length;
+                const targetBound = bounds[nextIndex];
+                
+                // Move cursor to the start of the target bound
+                nextCursorPos = { 
+                    x: targetBound.data.startX, 
+                    y: targetBound.data.startY 
+                };
+                
+                console.log(`=== CYCLING TO BOUND ${nextIndex + 1}/${bounds.length} ===`);
+                console.log(`${targetBound.key}: (${targetBound.data.startX},${targetBound.data.startY}) to (${targetBound.data.endX},${targetBound.data.endY})`);
+                
+                // Immediately center viewport on the new cursor position
+                if (typeof window !== 'undefined') {
+                    const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
+                    if (effectiveCharWidth > 0 && effectiveCharHeight > 0) {
+                        const viewportCharWidth = window.innerWidth / effectiveCharWidth;
+                        const viewportCharHeight = window.innerHeight / effectiveCharHeight;
+                        
+                        const centerX = nextCursorPos.x - viewportCharWidth / 2;
+                        const centerY = nextCursorPos.y - viewportCharHeight / 2;
+                        
+                        setViewOffset({ x: centerX, y: centerY });
+                        console.log('=== VIEWPORT CENTERED ===', { centerX, centerY });
+                    }
+                }
+                
+                setBoundCycleIndex(nextIndex + 1); // Prepare for next cycle
+                moved = true;
+            }
+            
+            preventDefault = true; // Prevent Tab from moving focus
         } else if (key === 'Delete') {
             if (currentSelectionActive) {
                  if (deleteSelectedCharacters()) {
@@ -3137,11 +3244,66 @@ export function useWorldEngine({
             // Check for bounded region word wrapping
             const boundedRegion = getBoundedRegion(dataToDeleteFrom, cursorAfterDelete);
             if (boundedRegion && proposedCursorPos.x > boundedRegion.endX) {
-                // We're typing past the right edge of a bounded region - wrap to next line
-                proposedCursorPos = { 
-                    x: boundedRegion.startX, 
-                    y: cursorAfterDelete.y + 1 
-                };
+                // We're typing past the right edge of a bounded region
+                // Check if we can wrap to next line without exceeding height limit
+                const nextLineY = cursorAfterDelete.y + 1;
+                
+                // Find the bound that controls this region to check maxY and if we're within bounds
+                let canWrap = true;
+                let isWithinBoundedRegion = false;
+                
+                for (const key in dataToDeleteFrom) {
+                    if (key.startsWith('bound_')) {
+                        try {
+                            const boundData = JSON.parse(dataToDeleteFrom[key] as string);
+                            
+                            // Check if we're currently within this bound's original region or its column constraint area
+                            const withinOriginalBounds = cursorAfterDelete.x >= boundData.startX && 
+                                                         cursorAfterDelete.x <= boundData.endX &&
+                                                         cursorAfterDelete.y >= boundData.startY && 
+                                                         cursorAfterDelete.y <= boundData.endY;
+                            
+                            const withinColumnConstraint = boundData.endY < cursorAfterDelete.y && 
+                                                          cursorAfterDelete.x >= boundData.startX && 
+                                                          cursorAfterDelete.x <= boundData.endX &&
+                                                          (boundData.maxY === null || boundData.maxY === undefined || cursorAfterDelete.y <= boundData.maxY);
+                            
+                            if (withinOriginalBounds || withinColumnConstraint) {
+                                isWithinBoundedRegion = true;
+                                
+                                // Check if wrapping would exceed height limit
+                                if (boundData.maxY !== null && boundData.maxY !== undefined && nextLineY > boundData.maxY) {
+                                    canWrap = false;
+                                    break;
+                                }
+                            }
+                        } catch (e) {
+                            // Skip invalid bound data
+                        }
+                    }
+                }
+                
+                if (isWithinBoundedRegion) {
+                    if (canWrap) {
+                        // Wrap to next line within bounded region
+                        proposedCursorPos = { 
+                            x: boundedRegion.startX, 
+                            y: nextLineY 
+                        };
+                    } else {
+                        // Can't wrap within bounded region - allow typing beyond bounds
+                        proposedCursorPos = { 
+                            x: cursorAfterDelete.x + 1, 
+                            y: cursorAfterDelete.y 
+                        };
+                    }
+                } else {
+                    // We're outside bounded region - normal wrapping rules apply
+                    proposedCursorPos = { 
+                        x: boundedRegion.startX, 
+                        y: nextLineY 
+                    };
+                }
             }
             
             nextCursorPos = proposedCursorPos;
@@ -3697,5 +3859,6 @@ export function useWorldEngine({
         clusterLabels,
         clustersVisible,
         updateClusterLabels,
+        focusedBoundKey, // Expose focused bound for rendering
     };
 }
