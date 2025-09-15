@@ -85,6 +85,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const backgroundImageRef = useRef<HTMLImageElement | null>(null);
     const backgroundImageUrlRef = useRef<string | null>(null);
     
+    // Cache for uploaded images to avoid reloading
+    const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
+    
     // Dialogue system
     const { renderDialogue, renderDebugDialogue, renderNavDialogue, renderMonogramControls, handleNavClick } = useDialogue();
     
@@ -830,10 +833,89 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Images ===
+        const renderedImages = new Set<string>(); // Track which images we've already rendered
+        for (const key in engine.worldData) {
+            if (key.startsWith('image_') && !renderedImages.has(key)) {
+                const imageData = engine.worldData[key];
+                if (engine.isImageData(imageData)) {
+                    renderedImages.add(key);
+                    
+                    // Check if image is visible in current viewport
+                    const imageVisible = imageData.startX <= endWorldX && imageData.endX >= startWorldX &&
+                                        imageData.startY <= endWorldY && imageData.endY >= startWorldY;
+                    
+                    if (imageVisible) {
+                        // Calculate screen positions
+                        const startScreenPos = engine.worldToScreen(imageData.startX, imageData.startY, currentZoom, currentOffset);
+                        const endScreenPos = engine.worldToScreen(imageData.endX + 1, imageData.endY + 1, currentZoom, currentOffset);
+                        
+                        // Calculate target dimensions based on grid cells
+                        const targetWidth = endScreenPos.x - startScreenPos.x;
+                        const targetHeight = endScreenPos.y - startScreenPos.y;
+                        
+                        // Check if image is already cached
+                        let img = imageCache.current.get(imageData.src);
+                        if (!img) {
+                            // Create and cache new image
+                            img = new Image();
+                            img.onload = () => {
+                                // Image loaded, next frame will render it
+                            };
+                            img.src = imageData.src;
+                            imageCache.current.set(imageData.src, img);
+                        }
+                        
+                        // Only draw if image is fully loaded
+                        if (img.complete && img.naturalWidth > 0) {
+                            // Calculate crop and fit dimensions
+                            const aspectRatio = img.width / img.height;
+                            const targetAspectRatio = targetWidth / targetHeight;
+                            
+                            let drawWidth = targetWidth;
+                            let drawHeight = targetHeight;
+                            let offsetX = 0;
+                            let offsetY = 0;
+                            
+                            // Crop to fit - fill the entire target area
+                            if (aspectRatio > targetAspectRatio) {
+                                // Image is wider than target - crop sides
+                                const scaledWidth = targetHeight * aspectRatio;
+                                offsetX = (targetWidth - scaledWidth) / 2;
+                                drawWidth = scaledWidth;
+                            } else {
+                                // Image is taller than target - crop top/bottom
+                                const scaledHeight = targetWidth / aspectRatio;
+                                offsetY = (targetHeight - scaledHeight) / 2;
+                                drawHeight = scaledHeight;
+                            }
+                            
+                            // Use clipping to ensure image doesn't exceed target bounds
+                            ctx.save();
+                            ctx.beginPath();
+                            ctx.rect(startScreenPos.x, startScreenPos.y, targetWidth, targetHeight);
+                            ctx.clip();
+                            
+                            // Draw the image
+                            ctx.drawImage(
+                                img,
+                                startScreenPos.x + offsetX,
+                                startScreenPos.y + offsetY,
+                                drawWidth,
+                                drawHeight
+                            );
+                            
+                            ctx.restore();
+                        }
+                    }
+                }
+            }
+        }
+
         ctx.fillStyle = engine.textColor;
         for (const key in engine.worldData) {
-            // Skip block, label, and bound data - we render those separately
-            if (key.startsWith('block_') || key.startsWith('label_') || key.startsWith('bound_')) continue;
+            // Skip block, label, bound, and image data - we render those separately
+            if (key.startsWith('block_') || key.startsWith('label_') || key.startsWith('bound_') || key.startsWith('image_')) continue;
             
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);

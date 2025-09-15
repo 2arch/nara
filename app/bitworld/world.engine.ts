@@ -33,7 +33,18 @@ export interface StyledCharacter {
     fadeStart?: number; // Timestamp for fade animation
 }
 
-export interface WorldData { [key: string]: string | StyledCharacter; }
+export interface ImageData {
+    type: 'image';
+    src: string; // Data URL or blob URL
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+    originalWidth: number;
+    originalHeight: number;
+}
+
+export interface WorldData { [key: string]: string | StyledCharacter | ImageData; }
 export interface Point { x: number; y: number; }
 
 export interface PanStartInfo {
@@ -129,6 +140,7 @@ export interface WorldEngine {
     cycleSortMode: () => void;
     getCharacter: (data: string | StyledCharacter) => string;
     getCharacterStyle: (data: string | StyledCharacter) => { color?: string; background?: string } | undefined;
+    isImageData: (data: string | StyledCharacter | ImageData) => data is ImageData;
     getCanvasSize: () => { width: number; height: number };
     saveState: (stateName: string) => Promise<boolean>;
     loadState: (stateName: string) => Promise<boolean>;
@@ -1183,6 +1195,10 @@ export function useWorldEngine({
         return data.style;
     }, []);
 
+    const isImageData = useCallback((data: string | StyledCharacter | ImageData): data is ImageData => {
+        return typeof data === 'object' && 'type' in data && data.type === 'image';
+    }, []);
+
     // === Bounded Region Detection ===
     const getBoundedRegion = useCallback((worldData: WorldData, cursorPos: Point): { startX: number; endX: number; y: number } | null => {
         // Check if cursor is within any bounded region
@@ -2087,6 +2103,77 @@ export function useWorldEngine({
                     } else {
                         setDialogueWithRevert(`No bounded region found at cursor position`, setDialogueText);
                     }
+                } else if (exec.command === 'upload') {
+                    // Check if there's a selection for image placement
+                    const selection = getNormalizedSelection();
+                    if (!selection) {
+                        setDialogueWithRevert("Please select a region first, then use /upload", setDialogueText);
+                        return true;
+                    }
+                    
+                    // Create and trigger file input
+                    const fileInput = document.createElement('input');
+                    fileInput.type = 'file';
+                    fileInput.accept = 'image/*';
+                    fileInput.style.display = 'none';
+                    
+                    fileInput.onchange = async (e) => {
+                        const file = (e.target as HTMLInputElement).files?.[0];
+                        if (!file) return;
+                        
+                        try {
+                            setDialogueText("Processing image...");
+                            
+                            // Convert file to data URL
+                            const reader = new FileReader();
+                            reader.onload = async (event) => {
+                                const dataUrl = event.target?.result as string;
+                                
+                                // Create image to get dimensions
+                                const img = new Image();
+                                img.onload = () => {
+                                    // Calculate selection dimensions
+                                    const selectionWidth = selection.endX - selection.startX + 1;
+                                    const selectionHeight = selection.endY - selection.startY + 1;
+                                    
+                                    // Create image data entry
+                                    const imageData: ImageData = {
+                                        type: 'image',
+                                        src: dataUrl,
+                                        startX: selection.startX,
+                                        startY: selection.startY,
+                                        endX: selection.endX,
+                                        endY: selection.endY,
+                                        originalWidth: img.width,
+                                        originalHeight: img.height
+                                    };
+                                    
+                                    // Store image with unique key
+                                    const imageKey = `image_${selection.startX},${selection.startY}`;
+                                    setWorldData(prev => ({
+                                        ...prev,
+                                        [imageKey]: imageData
+                                    }));
+                                    
+                                    // Clear selection
+                                    setSelectionStart(null);
+                                    setSelectionEnd(null);
+                                    
+                                    setDialogueWithRevert(`Image uploaded to region (${selectionWidth}x${selectionHeight} cells)`, setDialogueText);
+                                };
+                                img.src = dataUrl;
+                            };
+                            reader.readAsDataURL(file);
+                        } catch (error) {
+                            console.error('Error uploading image:', error);
+                            setDialogueWithRevert("Error uploading image", setDialogueText);
+                        } finally {
+                            document.body.removeChild(fileInput);
+                        }
+                    };
+                    
+                    document.body.appendChild(fileInput);
+                    fileInput.click();
                 }
                 
                 setCursorPos(exec.commandStartPos);
@@ -3869,6 +3956,7 @@ export function useWorldEngine({
         setChatMode,
         getCharacter,
         getCharacterStyle,
+        isImageData,
         getCompiledText: () => compiledTextCache,
         getCanvasSize: () => ({ width: window.innerWidth, height: window.innerHeight }),
         // State management functions
