@@ -51,7 +51,31 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const [cursorTrail, setCursorTrail] = useState<CursorTrailPosition[]>([]);
     const [statePublishStatuses, setStatePublishStatuses] = useState<Record<string, boolean>>({});
     const [mouseWorldPos, setMouseWorldPos] = useState<Point | null>(null);
+    const [isShiftPressed, setIsShiftPressed] = useState<boolean>(false);
     const lastCursorPosRef = useRef<Point | null>(null);
+
+    // Track shift key state globally
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Shift') {
+                setIsShiftPressed(true);
+            }
+        };
+
+        const handleKeyUp = (e: KeyboardEvent) => {
+            if (e.key === 'Shift') {
+                setIsShiftPressed(false);
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+        };
+    }, []);
     const router = useRouter();
     
     // Cache for background images to avoid reloading
@@ -374,7 +398,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     }, [engine.worldData, engine.focusedBoundKey]);
 
     // --- Cursor Preview Functions ---
-    const drawHoverPreview = useCallback((ctx: CanvasRenderingContext2D, worldPos: Point, currentZoom: number, currentOffset: Point, effectiveCharWidth: number, effectiveCharHeight: number, cssWidth: number, cssHeight: number) => {
+    const drawHoverPreview = useCallback((ctx: CanvasRenderingContext2D, worldPos: Point, currentZoom: number, currentOffset: Point, effectiveCharWidth: number, effectiveCharHeight: number, cssWidth: number, cssHeight: number, shiftPressed: boolean = false) => {
         // Only show preview if different from current cursor position
         if (worldPos.x === engine.cursorPos.x && worldPos.y === engine.cursorPos.y) return;
         
@@ -407,18 +431,48 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
             }
             
-            // Draw outline around the hovered cell
-            ctx.strokeStyle = 'rgba(176, 176, 176, 0.8)';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+            if (shiftPressed) {
+                // When shift is pressed, draw gray border around the entire text block
+                const minX = Math.min(...textBlock.map(p => p.x));
+                const maxX = Math.max(...textBlock.map(p => p.x));
+                const minY = Math.min(...textBlock.map(p => p.y));
+                const maxY = Math.max(...textBlock.map(p => p.y));
+                
+                const topLeftScreen = engine.worldToScreen(minX, minY, currentZoom, currentOffset);
+                const bottomRightScreen = engine.worldToScreen(maxX + 1, maxY + 1, currentZoom, currentOffset);
+                
+                ctx.strokeStyle = 'rgba(128, 128, 128, 0.8)'; // Gray border
+                ctx.lineWidth = 2;
+                ctx.strokeRect(
+                    topLeftScreen.x, 
+                    topLeftScreen.y, 
+                    bottomRightScreen.x - topLeftScreen.x, 
+                    bottomRightScreen.y - topLeftScreen.y
+                );
+            } else {
+                // Draw outline around the hovered cell
+                ctx.strokeStyle = 'rgba(176, 176, 176, 0.8)';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+            }
         } else {
-            // Regular light gray preview for empty cells
-            ctx.strokeStyle = 'rgba(211, 211, 211, 0.7)';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-            
-            ctx.fillStyle = 'rgba(211, 211, 211, 0.2)';
-            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+            if (shiftPressed) {
+                // When shift is pressed over empty cell, draw gray border
+                ctx.strokeStyle = 'rgba(128, 128, 128, 0.7)';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                
+                ctx.fillStyle = 'rgba(128, 128, 128, 0.1)';
+                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+            } else {
+                // Regular light gray preview for empty cells
+                ctx.strokeStyle = 'rgba(211, 211, 211, 0.7)';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                
+                ctx.fillStyle = 'rgba(211, 211, 211, 0.2)';
+                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+            }
         }
     }, [engine]);
 
@@ -1412,7 +1466,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         // === Render Mouse Hover Preview ===
         if (mouseWorldPos && showCursor) {
-            drawHoverPreview(ctx, mouseWorldPos, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight, cssWidth, cssHeight);
+            drawHoverPreview(ctx, mouseWorldPos, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight, cssWidth, cssHeight, isShiftPressed);
             drawModeSpecificPreview(ctx, mouseWorldPos, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight, effectiveFontSize);
             // drawPositionInfo(ctx, mouseWorldPos, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight, effectiveFontSize, cssWidth, cssHeight);
         }
@@ -1546,7 +1600,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock]);
+    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock]);
 
 
     // --- Drawing Loop Effect ---
