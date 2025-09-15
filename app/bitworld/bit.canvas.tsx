@@ -1430,7 +1430,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         // === Render Mouse Hover Preview ===
-        if (mouseWorldPos && showCursor) {
+        if (mouseWorldPos && showCursor && !shiftDragStartPos) {
             drawHoverPreview(ctx, mouseWorldPos, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight, cssWidth, cssHeight, isShiftPressed);
             drawModeSpecificPreview(ctx, mouseWorldPos, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight, effectiveFontSize);
             // drawPositionInfo(ctx, mouseWorldPos, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight, effectiveFontSize, cssWidth, cssHeight);
@@ -1728,7 +1728,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const y = e.clientY - rect.top;
             
             if (e.shiftKey) {
-                // Track shift+drag start position
+                // Track shift+drag start position and ensure no selection is active
+                isSelectingMouseDownRef.current = false; // Ensure selection is disabled
                 const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
                 setShiftDragStartPos({
                     x: Math.floor(worldPos.x),
@@ -1764,11 +1765,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         if (isMiddleMouseDownRef.current && panStartInfoRef.current) {
             // Handle panning move
             intermediatePanOffsetRef.current = engine.handlePanMove(e.clientX, e.clientY, panStartInfoRef.current);
-        } else if (isSelectingMouseDownRef.current) { // Check mouse down ref
+        } else if (isSelectingMouseDownRef.current && !shiftDragStartPos) { // Check mouse down ref and not shift+dragging
             // Handle selection move
             engine.handleSelectionMove(x, y); // Update engine's selection end
         }
-    }, [engine]);
+    }, [engine, shiftDragStartPos]);
 
     const handleCanvasMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         if (isMiddleMouseDownRef.current && e.button === 1) { // Middle mouse button - panning end
@@ -1860,9 +1861,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 // Clear shift drag state
                 setShiftDragStartPos(null);
             } else if (isSelectingMouseDownRef.current) {
-                // Regular selection end
+                // Regular selection end (only if not shift+dragging)
                 isSelectingMouseDownRef.current = false;
-                engine.handleSelectionEnd();
+                if (!shiftDragStartPos) {
+                    engine.handleSelectionEnd();
+                }
             }
         }
     }, [engine, shiftDragStartPos, findTextBlock]);
