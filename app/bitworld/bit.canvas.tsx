@@ -66,6 +66,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         const handleKeyUp = (e: KeyboardEvent) => {
             if (e.key === 'Shift') {
                 setIsShiftPressed(false);
+                // Clear shift drag state when shift is released
+                setShiftDragStartPos(null);
             }
         };
 
@@ -476,46 +478,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
     }, [engine]);
-
-    // Draw distance vector during shift+drag
-    const drawDistanceVector = useCallback((ctx: CanvasRenderingContext2D, currentZoom: number, currentOffset: Point, effectiveCharWidth: number, effectiveCharHeight: number) => {
-        if (!shiftDragStartPos || !mouseWorldPos || !isShiftPressed) return;
-        
-        // Calculate screen positions
-        const startScreen = engine.worldToScreen(shiftDragStartPos.x + 0.5, shiftDragStartPos.y + 0.5, currentZoom, currentOffset);
-        const endScreen = engine.worldToScreen(mouseWorldPos.x + 0.5, mouseWorldPos.y + 0.5, currentZoom, currentOffset);
-        
-        // Draw vector line
-        ctx.save();
-        ctx.strokeStyle = 'rgba(128, 128, 128, 0.6)';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([5, 5]);
-        
-        ctx.beginPath();
-        ctx.moveTo(startScreen.x, startScreen.y);
-        ctx.lineTo(endScreen.x, endScreen.y);
-        ctx.stroke();
-        
-        // Draw arrow head at end
-        const angle = Math.atan2(endScreen.y - startScreen.y, endScreen.x - startScreen.x);
-        const arrowLength = 10;
-        const arrowAngle = Math.PI / 6;
-        
-        ctx.beginPath();
-        ctx.moveTo(endScreen.x, endScreen.y);
-        ctx.lineTo(
-            endScreen.x - arrowLength * Math.cos(angle - arrowAngle),
-            endScreen.y - arrowLength * Math.sin(angle - arrowAngle)
-        );
-        ctx.moveTo(endScreen.x, endScreen.y);
-        ctx.lineTo(
-            endScreen.x - arrowLength * Math.cos(angle + arrowAngle),
-            endScreen.y - arrowLength * Math.sin(angle + arrowAngle)
-        );
-        ctx.stroke();
-        
-        ctx.restore();
-    }, [shiftDragStartPos, mouseWorldPos, isShiftPressed, engine]);
 
     // Helper function to find connected text block (including spaces)
     const findTextBlock = useCallback((startPos: Point, worldData: any, engine: any): Point[] => {
@@ -1474,9 +1436,33 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             // drawPositionInfo(ctx, mouseWorldPos, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight, effectiveFontSize, cssWidth, cssHeight);
         }
 
-        // === Render Distance Vector ===
-        if (shiftDragStartPos) {
-            drawDistanceVector(ctx, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight);
+
+        // === Render Blue Preview Region During Shift+Drag ===
+        if (shiftDragStartPos && mouseWorldPos && isShiftPressed) {
+            const distanceX = mouseWorldPos.x - shiftDragStartPos.x;
+            const distanceY = mouseWorldPos.y - shiftDragStartPos.y;
+            
+            if (distanceX !== 0 || distanceY !== 0) {
+                // Find text block at start position
+                const textBlock = findTextBlock(shiftDragStartPos, engine.worldData, engine);
+                
+                if (textBlock.length > 0) {
+                    // Draw blue preview rectangles for each destination position
+                    ctx.fillStyle = 'rgba(0, 100, 255, 0.3)'; // Blue with transparency
+                    
+                    for (const pos of textBlock) {
+                        const destX = pos.x + distanceX;
+                        const destY = pos.y + distanceY;
+                        const destScreenPos = engine.worldToScreen(destX, destY, currentZoom, currentOffset);
+                        
+                        // Only draw if visible on screen
+                        if (destScreenPos.x >= -effectiveCharWidth && destScreenPos.x <= cssWidth && 
+                            destScreenPos.y >= -effectiveCharHeight && destScreenPos.y <= cssHeight) {
+                            ctx.fillRect(destScreenPos.x, destScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        }
+                    }
+                }
+            }
         }
 
         if (showCursor) {
@@ -1608,7 +1594,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, drawHoverPreview, drawDistanceVector, drawModeSpecificPreview, drawPositionInfo, findTextBlock]);
+    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock]);
 
 
     // --- Drawing Loop Effect ---
