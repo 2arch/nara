@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useWorldEngine } from '../../bitworld/world.engine';
 import { BitCanvas } from '../../bitworld/bit.canvas';
-import SpaceBackground from '../../bitworld/canvas.bg';
+import Grid3DBackground from '../../bitworld/canvas.grid3d';
 import { auth } from '../../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 
@@ -53,8 +53,13 @@ export default function UserState() {
 
   return (
     <div className="w-screen h-screen relative" style={{}}>
-      {/* Render SpaceBackground when space mode is active */}
-      {engine.backgroundMode === 'space' && <SpaceBackground />}
+      {/* Render Grid3DBackground when space mode is active */}
+      {engine.backgroundMode === 'space' && (
+        <Grid3DBackground 
+          viewOffset={engine.viewOffset}
+          zoomLevel={engine.zoomLevel}
+        />
+      )}
       
       <BitCanvas
         engine={engine}

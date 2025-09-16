@@ -938,10 +938,10 @@ const useMonogramSystem = (
                 const char = getCharForIntensity(intensity, options.mode);
                 
                 let color: string;
-                if (trailEffect > 0.2) {
-                    // Highlight trail areas with distinctive color
-                    const trailHue = (time * 50 + worldX * 0.1 + worldY * 0.1) % 360;
-                    color = `hsl(${trailHue}, 70%, 50%)`;
+                if (trailEffect > 0.1) {
+                    // Monochromatic trail - brighter intensity for trail areas
+                    const trailBrightness = 20 + trailEffect * 60; // 20-80% brightness range
+                    color = `hsl(0, 0%, ${trailBrightness}%)`;
                 } else if (options.mode === 'nara') {
                     // Pure black for NARA mode for maximum visibility
                     color = 'black';
