@@ -1,6 +1,14 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Point } from './world.engine';
 
+// Trail position interface for interactive monogram trails
+interface MonogramTrailPosition {
+    x: number;
+    y: number;
+    timestamp: number;
+    intensity: number;
+}
+
 // --- Monogram Pattern Types ---
 export type MonogramMode = 'plasma' | 'perlin' | 'nara' | 'geometry3d';
 
@@ -48,6 +56,10 @@ export interface MonogramOptions {
     // 3D geometry options
     geometryType: GeometryType;
     customGeometry?: Geometry3D; // For loading custom 3D files
+    // Interactive trail options
+    interactiveTrails: boolean; // Enable mouse interaction trails
+    trailIntensity: number; // Trail effect intensity (0.1 - 2.0)
+    trailFadeMs: number; // Trail fade duration in milliseconds
 }
 
 // --- Mathematical Pattern Generators ---
@@ -62,9 +74,16 @@ const useMonogramSystem = (
             complexity: 1.0,
             colorShift: 0,
             enabled: false,
-            geometryType: 'octahedron'
+            geometryType: 'octahedron',
+            interactiveTrails: true,
+            trailIntensity: 1.0,
+            trailFadeMs: 2000
         }
     );
+
+    // Mouse trail tracking
+    const [mouseTrail, setMouseTrail] = useState<MonogramTrailPosition[]>([]);
+    const lastMousePosRef = useRef<Point | null>(null);
 
     const timeRef = useRef<number>(0);
     const animationFrameRef = useRef<number>(0);
@@ -105,6 +124,52 @@ const useMonogramSystem = (
             onOptionsChange(options);
         }
     }, [options]); // Remove onOptionsChange from deps to avoid infinite loop
+
+    // Update mouse position for interactive trails
+    const updateMousePosition = useCallback((worldPos: Point) => {
+        if (!options.interactiveTrails) return;
+
+        const currentPos = worldPos;
+        
+        // Only add to trail if mouse has actually moved significantly
+        if (!lastMousePosRef.current || 
+            Math.abs(currentPos.x - lastMousePosRef.current.x) > 0.5 || 
+            Math.abs(currentPos.y - lastMousePosRef.current.y) > 0.5) {
+            
+            setMouseTrail(prev => {
+                const now = Date.now();
+                
+                // Add new position with calculated intensity
+                const intensity = options.trailIntensity * (0.8 + Math.random() * 0.4);
+                const newTrail = [...prev, {
+                    x: currentPos.x,
+                    y: currentPos.y,
+                    timestamp: now,
+                    intensity
+                }];
+                
+                // Remove old positions
+                return newTrail.filter(pos => now - pos.timestamp < options.trailFadeMs);
+            });
+            
+            lastMousePosRef.current = currentPos;
+        }
+    }, [options.interactiveTrails, options.trailIntensity, options.trailFadeMs]);
+
+    // Clean up old trail positions periodically
+    useEffect(() => {
+        if (!options.interactiveTrails) {
+            setMouseTrail([]);
+            return;
+        }
+
+        const cleanup = setInterval(() => {
+            const now = Date.now();
+            setMouseTrail(prev => prev.filter(pos => now - pos.timestamp < options.trailFadeMs));
+        }, 200); // Clean up every 200ms
+
+        return () => clearInterval(cleanup);
+    }, [options.interactiveTrails, options.trailFadeMs]);
 
     // Character sets for different intensities
     const getCharForIntensity = useCallback((intensity: number, mode: MonogramMode): string => {
@@ -772,6 +837,59 @@ const useMonogramSystem = (
         }
     }, [calculatePlasma, calculatePerlin, calculateNara, calculate3DGeometry]);
 
+    // Calculate comet trail effect at a specific position
+    const calculateTrailEffect = useCallback((x: number, y: number): number => {
+        if (!options.interactiveTrails || mouseTrail.length < 2) return 0;
+
+        const now = Date.now();
+        let maxTrailIntensity = 0;
+
+        // Create comet trail by connecting trail positions in sequence
+        for (let i = 0; i < mouseTrail.length - 1; i++) {
+            const currentPos = mouseTrail[i];
+            const nextPos = mouseTrail[i + 1];
+            
+            const age = now - currentPos.timestamp;
+            if (age > options.trailFadeMs) continue;
+
+            // Calculate distance from point to line segment between trail positions
+            const dx = nextPos.x - currentPos.x;
+            const dy = nextPos.y - currentPos.y;
+            const segmentLength = Math.sqrt(dx * dx + dy * dy);
+            
+            if (segmentLength > 0) {
+                // Project point onto line segment
+                const t = Math.max(0, Math.min(1, ((x - currentPos.x) * dx + (y - currentPos.y) * dy) / (segmentLength * segmentLength)));
+                const projX = currentPos.x + t * dx;
+                const projY = currentPos.y + t * dy;
+                
+                // Distance from current position to line segment
+                const distance = Math.sqrt((x - projX) ** 2 + (y - projY) ** 2);
+                
+                // Trail width decreases with age (comet tail effect)
+                const ageFactor = 1 - (age / options.trailFadeMs);
+                const trailWidth = 1.5 + options.complexity * 1.5 * ageFactor;
+                
+                if (distance <= trailWidth) {
+                    // Calculate fade based on distance to path and age
+                    const distanceFade = 1 - (distance / trailWidth);
+                    const pathFade = ageFactor;
+                    
+                    // Position along trail (0 = oldest, 1 = newest)
+                    const positionFactor = i / Math.max(1, mouseTrail.length - 1);
+                    
+                    // Comet intensity: brighter at head, dimmer at tail
+                    const cometFade = 0.3 + 0.7 * positionFactor;
+                    
+                    const trailIntensity = distanceFade * pathFade * cometFade * options.trailIntensity;
+                    maxTrailIntensity = Math.max(maxTrailIntensity, trailIntensity);
+                }
+            }
+        }
+
+        return Math.min(1, maxTrailIntensity);
+    }, [options.interactiveTrails, options.trailFadeMs, options.complexity, options.trailIntensity, mouseTrail]);
+
     // Generate monogram pattern for given viewport bounds
     const generateMonogramPattern = useCallback((
         startWorldX: number,
@@ -808,14 +926,23 @@ const useMonogramSystem = (
                     intensity = Math.abs(rawValue);
                 }
                 
-                // Skip very low intensity cells for performance
-                if ((options.mode === 'nara' || options.mode === 'geometry3d') && intensity < 0.15) continue; // Higher threshold to avoid artifacts
-                if (options.mode !== 'nara' && options.mode !== 'geometry3d' && intensity < 0.1) continue;
+                // Calculate and blend trail effect
+                const trailEffect = calculateTrailEffect(worldX, worldY);
+                intensity = Math.max(intensity, trailEffect);
+                
+                // Skip very low intensity cells for performance (adjusted for trail effects)
+                const minThreshold = trailEffect > 0 ? 0.05 : 
+                    ((options.mode === 'nara' || options.mode === 'geometry3d') ? 0.15 : 0.1);
+                if (intensity < minThreshold) continue;
                 
                 const char = getCharForIntensity(intensity, options.mode);
                 
                 let color: string;
-                if (options.mode === 'nara') {
+                if (trailEffect > 0.2) {
+                    // Highlight trail areas with distinctive color
+                    const trailHue = (time * 50 + worldX * 0.1 + worldY * 0.1) % 360;
+                    color = `hsl(${trailHue}, 70%, 50%)`;
+                } else if (options.mode === 'nara') {
                     // Pure black for NARA mode for maximum visibility
                     color = 'black';
                 } else if (options.mode === 'geometry3d') {
@@ -887,7 +1014,9 @@ const useMonogramSystem = (
         cycleMode,
         toggleEnabled,
         updateOption,
-        setOptions
+        setOptions,
+        updateMousePosition,
+        mouseTrail
     };
 };
 

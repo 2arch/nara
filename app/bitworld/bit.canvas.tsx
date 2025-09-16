@@ -2013,6 +2013,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 y: Math.floor(worldPos.y)
             };
             setMouseWorldPos(snappedWorldPos);
+            
+            // Update monogram trail with mouse position
+            if (monogramEnabled && monogramSystem.options.interactiveTrails) {
+                monogramSystem.updateMousePosition(worldPos);
+            }
         }
 
         if (isMiddleMouseDownRef.current && panStartInfoRef.current) {
