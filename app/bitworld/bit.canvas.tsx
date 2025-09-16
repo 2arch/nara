@@ -388,7 +388,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     const boundData = JSON.parse(engine.worldData[boundKey] as string);
                     const { startX, endX, startY } = boundData;
                     const isFocused = engine.focusedBoundKey === boundKey;
-                    const textColor = isFocused ? '#FFFFFF' : '#000000';
+                    const textColor = '#FFFFFF'; // Always white
                     
                     // Index every position on the top bar
                     for (let x = startX; x <= endX; x++) {
@@ -451,7 +451,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const topLeftScreen = engine.worldToScreen(imageAtPosition.startX, imageAtPosition.startY, currentZoom, currentOffset);
                 const bottomRightScreen = engine.worldToScreen(imageAtPosition.endX + 1, imageAtPosition.endY + 1, currentZoom, currentOffset);
                 
-                ctx.strokeStyle = 'rgba(128, 128, 128, 0.8)'; // Gray border
+                ctx.strokeStyle = 'rgba(211, 211, 211, 0.7)'; // Light gray border matching cursor preview
                 ctx.lineWidth = 2;
                 ctx.strokeRect(
                     topLeftScreen.x, 
@@ -486,7 +486,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const topLeftScreen = engine.worldToScreen(minX, minY, currentZoom, currentOffset);
                 const bottomRightScreen = engine.worldToScreen(maxX + 1, maxY + 1, currentZoom, currentOffset);
                 
-                ctx.strokeStyle = 'rgba(128, 128, 128, 0.8)'; // Gray border
+                ctx.strokeStyle = 'rgba(211, 211, 211, 0.7)'; // Light gray border matching cursor preview
                 ctx.lineWidth = 2;
                 ctx.strokeRect(
                     topLeftScreen.x, 
@@ -503,11 +503,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         } else {
             if (shiftPressed) {
                 // When shift is pressed over empty cell, draw gray border
-                ctx.strokeStyle = 'rgba(128, 128, 128, 0.7)';
+                ctx.strokeStyle = 'rgba(211, 211, 211, 0.7)'; // Light gray matching cursor preview
                 ctx.lineWidth = 2;
                 ctx.strokeRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
                 
-                ctx.fillStyle = 'rgba(128, 128, 128, 0.1)';
+                ctx.fillStyle = 'rgba(211, 211, 211, 0.2)'; // Match preview cursor fill
                 ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
             } else {
                 // Regular light gray preview for empty cells
@@ -683,8 +683,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             fontSize: effectiveFontSize
         } = engine.getEffectiveCharDims(currentZoom);
         
-        // Update bounds index if world data changed
-        const currentBoundsData = JSON.stringify(Object.keys(engine.worldData).filter(k => k.startsWith('bound_')));
+        // Update bounds index if world data changed or focus changed
+        const currentBoundsData = JSON.stringify(Object.keys(engine.worldData).filter(k => k.startsWith('bound_'))) + '|' + engine.focusedBoundKey;
         if (currentBoundsData !== lastBoundsDataRef.current) {
             updateBoundsIndex();
             lastBoundsDataRef.current = currentBoundsData;
