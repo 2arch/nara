@@ -180,6 +180,8 @@ export interface WorldEngine {
     }>;
     clustersVisible: boolean;
     updateClusterLabels: () => Promise<void>;
+    focusedBoundKey: string | null;
+    isMoveMode: boolean;
 }
 
 // --- Hook Input ---
@@ -713,6 +715,12 @@ export function useWorldEngine({
             const x = parseInt(xStr, 10);
             const y = parseInt(yStr, 10);
             const charData = worldData[key];
+            
+            // Skip image data - only process text characters
+            if (isImageData(charData)) {
+                continue;
+            }
+            
             const char = getCharacter(charData);
 
             if (char && !isNaN(x) && !isNaN(y)) {
@@ -725,7 +733,7 @@ export function useWorldEngine({
                 for (let i = 0; i < pattern.length; i++) {
                     const checkKey = `${x + i},${y}`;
                     const checkCharData = worldData[checkKey];
-                    if (checkCharData) {
+                    if (checkCharData && !isImageData(checkCharData)) {
                         const checkChar = getCharacter(checkCharData);
                         textAtPosition += checkChar.toLowerCase();
                     } else {
@@ -778,6 +786,10 @@ export function useWorldEngine({
             const y = parseInt(yStr, 10);
             
             if (!isNaN(x) && !isNaN(y)) {
+                // Skip image data - only process text characters
+                if (isImageData(worldData[key])) {
+                    continue;
+                }
                 const char = getCharacter(worldData[key]);
                 
                 if (!lineData[y]) {
@@ -1166,6 +1178,12 @@ export function useWorldEngine({
 
                 try {
                     const charData = worldData[key];
+                    
+                    // Skip image data - only process text/label characters
+                    if (isImageData(charData)) {
+                        continue;
+                    }
+                    
                     const charString = getCharacter(charData);
                     const data = JSON.parse(charString);
                     const text = data.text || '';
@@ -1272,7 +1290,7 @@ export function useWorldEngine({
             for (let x = selection.startX; x <= selection.endX; x++) {
                 const key = `${x},${y}`;
                 const charData = worldData[key];
-                const char = charData ? getCharacter(charData) : ' ';
+                const char = charData && !isImageData(charData) ? getCharacter(charData) : ' ';
                 rowText += char;
             }
             if (y > selection.startY) selectedText += '\n';
@@ -1311,6 +1329,12 @@ export function useWorldEngine({
 
                 try {
                     const charData = newWorldData[key];
+                    
+                    // Skip image data - only process text/label characters
+                    if (isImageData(charData)) {
+                        continue;
+                    }
+                    
                     const charString = getCharacter(charData);
                     const data = JSON.parse(charString);
                     const text = data.text || '';
@@ -1359,7 +1383,7 @@ export function useWorldEngine({
             for (let x = selection.startX; x <= selection.endX; x++) {
                 const key = `${x},${y}`;
                 const charData = worldData[key];
-                const char = charData ? getCharacter(charData) : ' ';
+                const char = charData && !isImageData(charData) ? getCharacter(charData) : ' ';
                 line += char; // Use space for empty cells
             }
             lines.push(line);
@@ -2640,7 +2664,7 @@ export function useWorldEngine({
                     for (let x = minX; x <= maxX; x++) {
                         const key = `${x},${y}`;
                         const charData = worldData[key];
-                        if (charData) {
+                        if (charData && !isImageData(charData)) {
                             const char = getCharacter(charData);
                             lineText += char;
                         } else {
@@ -2687,7 +2711,7 @@ export function useWorldEngine({
                         for (let x = minX; x <= maxX; x++) {
                             const key = `${x},${currentY}`;
                             const charData = worldData[key];
-                            if (charData) {
+                            if (charData && !isImageData(charData)) {
                                 const char = getCharacter(charData);
                                 lineText += char;
                             } else {
@@ -3047,7 +3071,7 @@ export function useWorldEngine({
                 while (x >= leftmostX) {
                     const key = `${x},${cursorPos.y}`;
                     const charData = worldData[key];
-                    const char = charData ? getCharacter(charData) : '';
+                    const char = charData && !isImageData(charData) ? getCharacter(charData) : '';
                     if (!char || char === ' ' || char === '\t') {
                         x--;
                     } else {
@@ -3062,7 +3086,7 @@ export function useWorldEngine({
                     while (x >= leftmostX) {
                         const key = `${x-1},${cursorPos.y}`;
                         const charData = worldData[key];
-                        const char = charData ? getCharacter(charData) : '';
+                        const char = charData && !isImageData(charData) ? getCharacter(charData) : '';
                         if (!char || char === ' ' || char === '\t') {
                             break;
                         }
@@ -3098,14 +3122,14 @@ export function useWorldEngine({
                 // First, see if we're in the middle of a word
                 const startKey = `${x},${currentLine}`;
                 const startCharData = worldData[startKey];
-                const startChar = startCharData ? getCharacter(startCharData) : '';
+                const startChar = startCharData && !isImageData(startCharData) ? getCharacter(startCharData) : '';
                 let inWord = !!startChar && startChar !== ' ' && startChar !== '\t';
                 
                 // Find the end of current word or beginning of next word
                 while (x <= rightmostX) {
                     const key = `${x},${currentLine}`;
                     const charData = worldData[key];
-                    const char = charData ? getCharacter(charData) : '';
+                    const char = charData && !isImageData(charData) ? getCharacter(charData) : '';
                     
                     if (!char) {
                         // No character at this position, keep looking
@@ -3164,7 +3188,7 @@ export function useWorldEngine({
                 while (x >= leftmostX) {
                     const key = `${x},${cursorPos.y}`;
                     const charData = worldData[key];
-                    const char = charData ? getCharacter(charData) : '';
+                    const char = charData && !isImageData(charData) ? getCharacter(charData) : '';
                     
                     // Stop at whitespace or when no character exists
                     if (!char || char === ' ' || char === '\t') {
@@ -3806,6 +3830,12 @@ export function useWorldEngine({
             if (key.startsWith('label_')) {
                 try {
                     const charData = worldData[key];
+                    
+                    // Skip image data - only process text/label characters
+                    if (isImageData(charData)) {
+                        continue;
+                    }
+                    
                     const charString = getCharacter(charData);
                     const labelData = JSON.parse(charString);
                     const color = labelData.color || '#000000';
@@ -3864,6 +3894,10 @@ export function useWorldEngine({
                 const y = parseInt(yStr, 10);
                 if (!isNaN(x) && !isNaN(y)) {
                     try {
+                        // Skip image data - only process text/label characters
+                        if (isImageData(worldData[key])) {
+                            continue;
+                        }
                         const labelData = JSON.parse(getCharacter(worldData[key]));
                         const text = labelData.text || '';
                         const color = labelData.color || '#000000';
@@ -4025,5 +4059,6 @@ export function useWorldEngine({
         clustersVisible,
         updateClusterLabels,
         focusedBoundKey, // Expose focused bound for rendering
+        isMoveMode,
     };
 }

@@ -435,7 +435,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         
         // Check if there's existing text at this position OR if we're within a text block
         const key = `${worldPos.x},${worldPos.y}`;
-        const hasDirectText = engine.worldData[key] && engine.getCharacter(engine.worldData[key]).trim() !== '';
+        const hasDirectText = engine.worldData[key] && !engine.isImageData(engine.worldData[key]) && engine.getCharacter(engine.worldData[key]).trim() !== '';
         
         // Try to find a text block starting from this position
         const textBlock = findTextBlock(worldPos, engine.worldData, engine);
@@ -558,8 +558,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
             } else if (textPositions.length > 0) {
                 // If we've found text and this is a space, check if it connects text
-                const hasTextLeft = worldData[`${pos.x - 1},${pos.y}`] && engine.getCharacter(worldData[`${pos.x - 1},${pos.y}`]).trim() !== '';
-                const hasTextRight = worldData[`${pos.x + 1},${pos.y}`] && engine.getCharacter(worldData[`${pos.x + 1},${pos.y}`]).trim() !== '';
+                const hasTextLeft = worldData[`${pos.x - 1},${pos.y}`] && !engine.isImageData(worldData[`${pos.x - 1},${pos.y}`]) && engine.getCharacter(worldData[`${pos.x - 1},${pos.y}`]).trim() !== '';
+                const hasTextRight = worldData[`${pos.x + 1},${pos.y}`] && !engine.isImageData(worldData[`${pos.x + 1},${pos.y}`]) && engine.getCharacter(worldData[`${pos.x + 1},${pos.y}`]).trim() !== '';
                 
                 if (hasTextLeft || hasTextRight) {
                     // Continue searching horizontally through spaces
@@ -578,7 +578,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     const checkKey = `${checkPos.x},${checkPos.y}`;
                     const checkData = worldData[checkKey];
                     
-                    if (checkData && engine.getCharacter(checkData).trim() !== '') {
+                    if (checkData && !engine.isImageData(checkData) && engine.getCharacter(checkData).trim() !== '') {
                         // Found text nearby, use that as start
                         return findTextBlock(checkPos, worldData, engine);
                     }
@@ -777,7 +777,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         // Only render if there's no regular text at this position
                         const textKey = `${worldX},${worldY}`;
                         const charData = engine.worldData[textKey];
-                        const char = charData ? engine.getCharacter(charData) : '';
+                        const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';
                         if ((!char || char.trim() === '') && !engine.commandData[textKey]) {
                             // Set color and render character
                             ctx.fillStyle = cell.color;
@@ -797,6 +797,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const worldY = parseInt(yStr, 10);
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.lightModeData[key];
+                
+                // Skip image data - only process text characters
+                if (engine.isImageData(charData)) {
+                    continue;
+                }
+                
                 const char = typeof charData === 'string' ? charData : charData.char;
                 const color = typeof charData === 'object' && charData.style?.color ? charData.style.color : '#808080';
                 
@@ -959,8 +965,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.worldData[key];
-                const char = charData ? engine.getCharacter(charData) : '';
-                const charStyle = charData ? engine.getCharacterStyle(charData) : undefined;
+                const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';
+                const charStyle = charData && !engine.isImageData(charData) ? engine.getCharacterStyle(charData) : undefined;
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
                     // Apply text background if specified (even for empty spaces)
@@ -993,6 +999,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.chatData[key];
+                
+                // Skip image data - only process text characters
+                if (engine.isImageData(charData)) {
+                    continue;
+                }
+                
                 const char = typeof charData === 'string' ? charData : charData.char;
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
@@ -1017,6 +1029,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.searchData[key];
+                
+                // Skip image data - only process text characters
+                if (engine.isImageData(charData)) {
+                    continue;
+                }
+                
                 const char = typeof charData === 'string' ? charData : charData.char;
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
@@ -1052,6 +1070,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.commandData[key];
+                
+                // Skip image data - only process text characters
+                if (engine.isImageData(charData)) {
+                    continue;
+                }
+                
                 const char = typeof charData === 'string' ? charData : charData.char;
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
@@ -1114,8 +1138,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const checkKey = `${worldX + i},${worldY}`;
                         if (engine.searchData[checkKey]) {
                             const charData = engine.searchData[checkKey];
-                            const char = typeof charData === 'string' ? charData : charData.char;
-                            matchText += char;
+                            if (!engine.isImageData(charData)) {
+                                const char = typeof charData === 'string' ? charData : charData.char;
+                                matchText += char;
+                            }
                         }
                     }
                     searchMatches.set(matchKey, { x: worldX, y: worldY, text: matchText });
@@ -1196,7 +1222,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                     try {
                         const charData = engine.worldData[key];
-                        const charString = engine.getCharacter(charData);
+                        const charString = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
                         const labelData = JSON.parse(charString);
                         const text = labelData.text || '';
                         const color = labelData.color || '#000000';
@@ -1693,7 +1719,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     ctx.fillRect(cursorScreenPos.x, cursorScreenPos.y, effectiveCharWidth, effectiveCharHeight);
                     const charData = engine.worldData[key];
                     if (charData) {
-                        const char = engine.getCharacter(charData);
+                        const char = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
                         ctx.fillStyle = CURSOR_TEXT_COLOR;
                         ctx.fillText(char, cursorScreenPos.x, cursorScreenPos.y + verticalTextOffset);
                     }
@@ -2048,7 +2074,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 const key = `${pos.x},${pos.y}`;
                                 const data = engine.worldData[key];
                                 if (data) {
-                                    const char = engine.getCharacter(data);
+                                    const char = engine.isImageData(data) ? '' : engine.getCharacter(data);
                                     if (char) {
                                         capturedChars.push({ x: pos.x, y: pos.y, char });
                                         console.log(`✓ Captured: '${char}' at (${pos.x},${pos.y}), char length: ${char.length}`);

@@ -998,7 +998,7 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
                         // Only render if there's no regular text at this position
                         const textKey = `${worldX},${worldY}`;
                         const charData = engine.worldData[textKey];
-                        const char = charData ? engine.getCharacter(charData) : '';
+                        const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';
                         if (!char || char.trim() === '') {
                             ctx.fillStyle = cell.color;
                             ctx.fillText(cell.char, screenPos.x, screenPos.y + verticalTextOffset);
@@ -1019,7 +1019,7 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
             
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.worldData[key];
-                const char = charData ? engine.getCharacter(charData) : '';
+                const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && 

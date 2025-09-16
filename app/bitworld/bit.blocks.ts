@@ -1,9 +1,13 @@
 // Text block detection utilities for bitworld canvas
 // Uses the "2+ space gap rule" for intelligent text analysis
 
-import type { WorldData, StyledCharacter } from './world.engine';
+import type { WorldData, StyledCharacter, ImageData } from './world.engine';
 
 // Utility functions to handle both string and StyledCharacter
+function isImageData(data: string | StyledCharacter | ImageData): data is ImageData {
+    return typeof data === 'object' && data !== null && 'type' in data && data.type === 'image';
+}
+
 function getCharacter(data: string | StyledCharacter): string {
     if (typeof data === 'string') {
         return data;
@@ -127,6 +131,12 @@ export function extractLineCharacters(
         if (y === lineY) {
             const x = parseInt(xStr, 10);
             const charData = worldData[key];
+            
+            // Skip image data - we only process text characters
+            if (isImageData(charData)) {
+                continue;
+            }
+            
             const char = getCharacter(charData);
             
             // Include character if it's non-empty or we want spaces
@@ -206,8 +216,8 @@ export function calculateWordDeletion(worldData: WorldData, cursorPos: {x: numbe
     const startKey = `${x},${lineY}`;
     const startCharData = worldData[startKey];
     
-    if (!startCharData) {
-        // No character at starting position - delete single position
+    if (!startCharData || isImageData(startCharData)) {
+        // No character at starting position or it's an image - delete single position
         return {
             deleteFromX: x,
             deleteToX: x,
@@ -225,8 +235,8 @@ export function calculateWordDeletion(worldData: WorldData, cursorPos: {x: numbe
         const key = `${x},${lineY}`;
         const charData = worldData[key];
         
-        if (!charData) {
-            // No character at this position
+        if (!charData || isImageData(charData)) {
+            // No character at this position or it's an image
             if (deletedAny) {
                 // We've deleted some characters, stop here
                 break;
@@ -1226,7 +1236,7 @@ function extractContentFromBoundingBox(
         for (let x = boundingBox.minX; x <= boundingBox.maxX; x++) {
             const key = `${x},${y}`;
             const charData = worldData[key];
-            if (charData) {
+            if (charData && !isImageData(charData)) {
                 const char = typeof charData === 'string' ? charData : charData.char;
                 if (char && char.trim() !== '') {
                     lineChars.push({x, char});

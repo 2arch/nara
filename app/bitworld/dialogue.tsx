@@ -792,6 +792,12 @@ export function useDebugDialogue(engine: WorldEngine) {
                 const x = parseInt(xStr, 10);
                 const y = parseInt(yStr, 10);
                 const charData = engine.worldData[key];
+                
+                // Skip image data - only process text characters
+                if (engine.isImageData(charData)) {
+                    continue;
+                }
+                
                 const char = engine.getCharacter(charData);
                 
                 if (!isNaN(x) && !isNaN(y) && char) {
