@@ -739,35 +739,17 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             ctx.lineWidth = GRID_LINE_WIDTH / dpr;
             ctx.beginPath();
             
-            // Check if we have command data visible to avoid grid lines in command areas
-            const hasCommandData = Object.keys(engine.commandData).length > 0;
-            const commandStartY = hasCommandData ? engine.commandState.commandStartPos.y : -1;
-            const commandEndY = hasCommandData ? commandStartY + engine.commandState.matchedCommands.length : -1;
-            
+            // Draw vertical grid lines (always visible)
             for (let worldX = Math.floor(startWorldX); worldX <= Math.ceil(endWorldX); worldX++) {
                 const screenX = Math.floor((worldX - currentOffset.x) * effectiveCharWidth) + 0.5 / dpr;
                 if (screenX >= -effectiveCharWidth && screenX <= cssWidth + effectiveCharWidth) { 
-                    // Skip vertical grid lines that intersect with command areas
-                    if (hasCommandData) {
-                        const commandStartX = engine.commandState.commandStartPos.x;
-                        const maxCommandLength = Math.max(...engine.commandState.matchedCommands.map(cmd => cmd.length), engine.commandState.input.length + 1);
-                        const commandEndX = commandStartX + maxCommandLength;
-                        
-                        // Skip if this vertical line would intersect command area
-                        if (worldX >= commandStartX && worldX <= commandEndX && 
-                            commandStartY <= endWorldY && commandEndY >= startWorldY) {
-                            continue;
-                        }
-                    }
                     ctx.moveTo(screenX, 0); 
                     ctx.lineTo(screenX, cssHeight); 
                 }
             }
+            
+            // Draw horizontal grid lines (always visible)
             for (let worldY = Math.floor(startWorldY); worldY <= Math.ceil(endWorldY); worldY++) {
-                // Skip grid lines in command areas
-                if (hasCommandData && worldY >= commandStartY && worldY <= commandEndY) {
-                    continue;
-                }
                 const screenY = Math.floor((worldY - currentOffset.y) * effectiveCharHeight) + 0.5 / dpr;
                 if (screenY >= -effectiveCharHeight && screenY <= cssHeight + effectiveCharHeight) { 
                     ctx.moveTo(0, screenY); 
@@ -2205,7 +2187,15 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             onMouseLeave={handleCanvasMouseLeave}
             onKeyDown={handleCanvasKeyDown}
             tabIndex={0}
-            style={{ display: 'block', outline: 'none', width: '100%', height: '100%', cursor: 'text' /* Default cursor */ }}
+            style={{ 
+                display: 'block', 
+                outline: 'none', 
+                width: '100%', 
+                height: '100%', 
+                cursor: 'text',
+                position: 'relative',
+                zIndex: 1
+            }}
         />
     );
 }

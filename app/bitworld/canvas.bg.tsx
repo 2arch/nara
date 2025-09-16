@@ -34,7 +34,14 @@ const SpaceBackground: React.FC = () => {
     // Setup renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setClearColor(0x000000, 1);
+    renderer.setClearColor(0x000000, 0.9); // Slightly transparent black for space effect
+    
+    // Style the canvas element to ensure it doesn't interfere with pointer events
+    renderer.domElement.style.pointerEvents = 'none';
+    renderer.domElement.style.position = 'absolute';
+    renderer.domElement.style.top = '0';
+    renderer.domElement.style.left = '0';
+    
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
