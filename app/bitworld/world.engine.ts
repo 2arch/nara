@@ -670,6 +670,7 @@ export function useWorldEngine({
         commandState, 
         commandData, 
         handleKeyDown: handleCommandKeyDown,
+        selectCommand,
         pendingCommand,
         executePendingCommand,
         setPendingCommand,
@@ -3279,10 +3280,33 @@ export function useWorldEngine({
                 const nextIndex = boundCycleIndex % bounds.length;
                 const targetBound = bounds[nextIndex];
                 
-                // Move cursor to the start of the target bound
+                // Find the last character within the bounded region
+                let lastCharX = targetBound.data.startX;
+                let lastCharY = targetBound.data.startY;
+                let foundChar = false;
+                
+                // Scan from bottom-right to top-left to find the last character
+                for (let y = targetBound.data.endY; y >= targetBound.data.startY; y--) {
+                    for (let x = targetBound.data.endX; x >= targetBound.data.startX; x--) {
+                        const key = `${x},${y}`;
+                        const charData = worldData[key];
+                        if (charData && !isImageData(charData)) {
+                            const char = getCharacter(charData);
+                            if (char && char !== ' ' && char !== '\t') {
+                                lastCharX = x;
+                                lastCharY = y;
+                                foundChar = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (foundChar) break;
+                }
+                
+                // Move cursor to the last character position (or start if no text found)
                 nextCursorPos = { 
-                    x: targetBound.data.startX, 
-                    y: targetBound.data.startY 
+                    x: lastCharX, 
+                    y: lastCharY 
                 };
                 
                 console.log(`=== CYCLING TO BOUND ${nextIndex + 1}/${bounds.length} ===`);
@@ -3967,6 +3991,7 @@ export function useWorldEngine({
         worldData,
         commandData,
         commandState,
+        commandSystem: { selectCommand },
         chatData,
         lightModeData,
         searchData,

@@ -1711,10 +1711,47 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         return false;
     }, [commandState.isActive, startCommand, executeCommand, navigateUp, navigateDown, handleBackspace, addCharacter]);
 
+    // Select a command from dropdown (for click handling)
+    const selectCommand = useCallback((selectedCommand: string) => {
+        setCommandState(prev => {
+            const newMatchedCommands = matchCommands(selectedCommand);
+            
+            // Update command display
+            const newCommandData: WorldData = {};
+            const commandText = `/${selectedCommand}`;
+            
+            // Draw command text at original command start position
+            for (let i = 0; i < commandText.length; i++) {
+                const key = `${prev.commandStartPos.x + i},${prev.commandStartPos.y}`;
+                newCommandData[key] = commandText[i];
+            }
+            
+            // Draw autocomplete suggestions below (if any)
+            newMatchedCommands.forEach((command, index) => {
+                const suggestionY = prev.commandStartPos.y + 1 + index;
+                for (let i = 0; i < command.length; i++) {
+                    const key = `${prev.commandStartPos.x + i},${suggestionY}`;
+                    newCommandData[key] = command[i];
+                }
+            });
+            
+            setCommandData(newCommandData);
+            
+            return {
+                ...prev,
+                input: selectedCommand,
+                matchedCommands: newMatchedCommands,
+                selectedIndex: 0,
+                hasNavigated: true // Mark as navigated since user clicked
+            };
+        });
+    }, [matchCommands]);
+
     return {
         commandState,
         commandData,
         handleKeyDown,
+        selectCommand,
         isCommandMode: commandState.isActive,
         // Pending command system
         pendingCommand,

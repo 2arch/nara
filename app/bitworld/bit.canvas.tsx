@@ -619,11 +619,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             ctx.moveTo(screenPos.x + effectiveCharWidth * 0.5, screenPos.y + effectiveCharHeight * 0.2);
             ctx.lineTo(screenPos.x + effectiveCharWidth * 0.5, screenPos.y + effectiveCharHeight * 0.8);
             ctx.stroke();
-        } else if (engine.commandState.isActive) {
-            // Show command cursor
-            ctx.fillStyle = 'rgba(255, 107, 53, 0.8)';
-            ctx.font = `${effectiveFontSize}px ${fontFamily}`;
-            ctx.fillText('/', screenPos.x, screenPos.y);
         }
     }, [engine, fontFamily]);
 
@@ -745,13 +740,41 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             ctx.strokeStyle = GRID_COLOR;
             ctx.lineWidth = GRID_LINE_WIDTH / dpr;
             ctx.beginPath();
+            
+            // Check if we have command data visible to avoid grid lines in command areas
+            const hasCommandData = Object.keys(engine.commandData).length > 0;
+            const commandStartY = hasCommandData ? engine.commandState.commandStartPos.y : -1;
+            const commandEndY = hasCommandData ? commandStartY + engine.commandState.matchedCommands.length : -1;
+            
             for (let worldX = Math.floor(startWorldX); worldX <= Math.ceil(endWorldX); worldX++) {
                 const screenX = Math.floor((worldX - currentOffset.x) * effectiveCharWidth) + 0.5 / dpr;
-                if (screenX >= -effectiveCharWidth && screenX <= cssWidth + effectiveCharWidth) { ctx.moveTo(screenX, 0); ctx.lineTo(screenX, cssHeight); }
+                if (screenX >= -effectiveCharWidth && screenX <= cssWidth + effectiveCharWidth) { 
+                    // Skip vertical grid lines that intersect with command areas
+                    if (hasCommandData) {
+                        const commandStartX = engine.commandState.commandStartPos.x;
+                        const maxCommandLength = Math.max(...engine.commandState.matchedCommands.map(cmd => cmd.length), engine.commandState.input.length + 1);
+                        const commandEndX = commandStartX + maxCommandLength;
+                        
+                        // Skip if this vertical line would intersect command area
+                        if (worldX >= commandStartX && worldX <= commandEndX && 
+                            commandStartY <= endWorldY && commandEndY >= startWorldY) {
+                            continue;
+                        }
+                    }
+                    ctx.moveTo(screenX, 0); 
+                    ctx.lineTo(screenX, cssHeight); 
+                }
             }
             for (let worldY = Math.floor(startWorldY); worldY <= Math.ceil(endWorldY); worldY++) {
+                // Skip grid lines in command areas
+                if (hasCommandData && worldY >= commandStartY && worldY <= commandEndY) {
+                    continue;
+                }
                 const screenY = Math.floor((worldY - currentOffset.y) * effectiveCharHeight) + 0.5 / dpr;
-                if (screenY >= -effectiveCharHeight && screenY <= cssHeight + effectiveCharHeight) { ctx.moveTo(0, screenY); ctx.lineTo(cssWidth, screenY); }
+                if (screenY >= -effectiveCharHeight && screenY <= cssHeight + effectiveCharHeight) { 
+                    ctx.moveTo(0, screenY); 
+                    ctx.lineTo(cssWidth, screenY); 
+                }
             }
             ctx.stroke();
         }
@@ -1081,20 +1104,20 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
                     // Draw background for command data
                     if (worldY === engine.commandState.commandStartPos.y) {
-                        // Orange background for command line (typed command)
-                        ctx.fillStyle = '#FF6B35';
+                        // Heather gray background for command line (typed command)
+                        ctx.fillStyle = '#8B9AAF';
                         ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                        ctx.fillStyle = '#000000';
-                    } else if (engine.commandState.isActive && worldY === engine.commandState.commandStartPos.y + 1 + engine.commandState.selectedIndex) {
-                        // White background for selected suggestion
                         ctx.fillStyle = '#FFFFFF';
+                    } else if (engine.commandState.isActive && worldY === engine.commandState.commandStartPos.y + 1 + engine.commandState.selectedIndex) {
+                        // Light heather gray background for selected suggestion
+                        ctx.fillStyle = '#C2C9D6';
                         ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                        ctx.fillStyle = '#000000';
+                        ctx.fillStyle = '#2C3E50';
                     } else {
-                        // Gray background for other suggestions
-                        ctx.fillStyle = '#333333';
+                        // Muted gray background for other suggestions
+                        ctx.fillStyle = '#6B7280';
                         ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                        ctx.fillStyle = '#CCCCCC';
+                        ctx.fillStyle = '#D1D5DB';
                     }
                     
                     // Draw text (only if not a space)
@@ -1846,6 +1869,29 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         if (engine.isNavVisible && canvasRef.current) {
             if (handleNavClick(canvasRef.current, clickX, clickY, handleCoordinateClick, handleColorFilterClick, handleSortModeClick, handleStateClick, handleIndexClick, handlePublishClick, handleNavigateClick)) {
                 return; // Click was handled by nav, don't process further
+            }
+        }
+        
+        // Check for command dropdown clicks
+        if (engine.commandState.isActive && Object.keys(engine.commandData).length > 0) {
+            const worldPos = engine.screenToWorld(clickX, clickY, engine.zoomLevel, engine.viewOffset);
+            const clickedWorldX = Math.floor(worldPos.x);
+            const clickedWorldY = Math.floor(worldPos.y);
+            
+            // Check if click is on a command suggestion (not the typed command line)
+            if (clickedWorldY > engine.commandState.commandStartPos.y && 
+                clickedWorldY <= engine.commandState.commandStartPos.y + engine.commandState.matchedCommands.length) {
+                
+                const suggestionIndex = clickedWorldY - engine.commandState.commandStartPos.y - 1;
+                if (suggestionIndex >= 0 && suggestionIndex < engine.commandState.matchedCommands.length) {
+                    const selectedCommand = engine.commandState.matchedCommands[suggestionIndex];
+                    
+                    // Use the command system to populate the input with the selected command
+                    if (engine.commandSystem && typeof engine.commandSystem.selectCommand === 'function') {
+                        engine.commandSystem.selectCommand(selectedCommand);
+                    }
+                    return; // Command was selected, don't process as regular click
+                }
             }
         }
         
