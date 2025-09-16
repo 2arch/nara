@@ -57,6 +57,7 @@ export interface WorldEngine {
     worldData: WorldData;
     commandData: WorldData;
     commandState: CommandState;
+    commandSystem: { selectCommand: (command: string) => void };
     chatData: WorldData;
     lightModeData: WorldData;
     searchData: WorldData;
