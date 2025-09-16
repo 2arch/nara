@@ -361,15 +361,11 @@ export function groupTextBlocksIntoClusters(
     lineBlocks: Map<number, TextBlock[]>,
     conditions: ClusteringConditions = defaultClusteringConditions
 ): TextCluster[] {
-    console.log('=== CLUSTERING DEBUG ===');
-    console.log('Input line blocks:', Array.from(lineBlocks.entries()));
-    console.log('Clustering conditions:', conditions);
     
     const clusters: TextCluster[] = [];
     const processedBlocks = new Set<string>();
     
     const sortedLines = Array.from(lineBlocks.keys()).sort((a, b) => a - b);
-    console.log('Sorted lines:', sortedLines);
     
     for (const currentLine of sortedLines) {
         const currentBlocks = lineBlocks.get(currentLine) || [];
@@ -402,13 +398,9 @@ export function groupTextBlocksIntoClusters(
             expandCluster(cluster, lineBlocks, processedBlocks, currentLine, conditions);
             
             // Only keep clusters meeting minimum requirements
-            console.log('Cluster created with', cluster.blocks.length, 'blocks, min required:', conditions.minBlocksPerCluster);
             if (cluster.blocks.length >= conditions.minBlocksPerCluster) {
                 finalizecluster(cluster);
                 clusters.push(cluster);
-                console.log('Cluster added to list');
-            } else {
-                console.log('Cluster rejected - not enough blocks');
             }
         }
     }
@@ -769,10 +761,6 @@ export function generateHierarchicalFrames(
     const lineBlocks = extractAllTextBlocks(worldData, viewport);
     const baseClusters = groupTextBlocksIntoClusters(lineBlocks);
     
-    console.log('=== HIERARCHICAL CLUSTERING ===');
-    console.log('Base clusters:', baseClusters.length);
-    console.log('Viewport center:', viewportCenter);
-    console.log('Zoom level:', zoomLevel);
     
     const levels = new Map<HierarchyLevel, HierarchicalFrame[]>();
     
@@ -813,7 +801,6 @@ export function generateHierarchicalFrames(
         }
         
         levels.set(level, levelFrames);
-        console.log(`Level ${level} frames:`, levelFrames.length);
         
         // Update previous clusters for the next level
         previousClusters = currentClusters;

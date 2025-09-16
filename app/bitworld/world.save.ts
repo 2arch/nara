@@ -69,7 +69,6 @@ export function useWorldSave(
             (isBlogs ? `worlds/blog/posts/${currentStateName}/settings` : getWorldPath(`${currentStateName}/settings`)) :
             getWorldPath(`${worldId}/settings`);
             
-        console.log('Blog save hook - paths:', { dataPath, settingsPath, currentStateName, isBlogs });
         const dataRef = ref(database, dataPath);
         const settingsRef = ref(database, settingsPath);
 
@@ -157,7 +156,6 @@ export function useWorldSave(
         
         // For blog posts, disable auto-save hook since state system handles saving
         if (isBlogs) {
-            console.log('Skipping auto-save for blog posts - using state system');
             return;
         }
 
@@ -177,22 +175,14 @@ export function useWorldSave(
         const lastSyncedStr = JSON.stringify(lastSyncedDataRef.current || {});
         const currentStr = JSON.stringify(localWorldData || {});
 
-        console.log('Save hook diff check:', { 
-            lastSyncedKeys: Object.keys(lastSyncedDataRef.current || {}),
-            currentKeys: Object.keys(localWorldData || {}),
-            isBlogs,
-            currentStateName
-        });
 
         const diff = makeDiff(lastSyncedStr, currentStr);
         const hasChanges = diff.length > 1 || (diff.length === 1 && diff[0][0] !== DIFF_EQUAL);
 
         if (!hasChanges) {
-            console.log('No changes detected, skipping save');
             return;
         }
         
-        console.log('Changes detected, preparing to save');
 
         saveTimeoutRef.current = setTimeout(async () => {
             if (!worldId || !worldDataRefPath) return;

@@ -164,7 +164,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const handlePublishClick = useCallback(async (state: string) => {
         const isCurrentlyPublished = getStatePublishStatus(state);
         const action = isCurrentlyPublished ? 'Unpublishing' : 'Publishing';
-        console.log(`${action} state: ${state}`);
         engine.setDialogueText(`${action} state...`);
         
         try {
@@ -192,7 +191,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     
     // Handle navigate clicks
     const handleNavigateClick = useCallback((state: string) => {
-        console.log(`Navigate clicked for state: ${state}`);
         if (engine.username) {
             router.push(`/@${engine.username}/${state}`);
         }
@@ -2075,9 +2073,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const imageAtPosition = findImageAtPosition(shiftDragStartPos);
                         
                         if (imageAtPosition) {
-                            console.log('=== SHIFT+DRAG IMAGE MOVE OPERATION ===');
-                            console.log('Image data:', imageAtPosition);
-                            console.log('Distance:', { distanceX, distanceY });
                             
                             // Find the original image key
                             let imageKey = null;
@@ -2094,24 +2089,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             if (imageKey) {
                                 // Use the engine's moveImage method
                                 engine.moveImage(imageKey, distanceX, distanceY);
-                                console.log('Image moved successfully');
                             }
                         } else {
                             // If no image, check for text block at start position
                             const textBlock = findTextBlock(shiftDragStartPos, engine.worldData, engine);
                             
                             if (textBlock.length > 0) {
-                            console.log('=== SHIFT+DRAG MOVE OPERATION ===');
-                            console.log('Text block positions:', textBlock);
-                            console.log('Distance:', { distanceX, distanceY });
                             
-                            // Debug: Check what's in worldData at these positions
-                            console.log('=== WORLDDATA AT TEXT BLOCK POSITIONS ===');
-                            for (const pos of textBlock) {
-                                const key = `${pos.x},${pos.y}`;
-                                const data = engine.worldData[key];
-                                console.log(`Position (${pos.x},${pos.y}) key="${key}" data:`, data);
-                            }
                             
                             // Capture all character data from the text block
                             const capturedChars: Array<{x: number, y: number, char: string}> = [];
@@ -2123,17 +2107,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     const char = engine.isImageData(data) ? '' : engine.getCharacter(data);
                                     if (char) {
                                         capturedChars.push({ x: pos.x, y: pos.y, char });
-                                        console.log(`✓ Captured: '${char}' at (${pos.x},${pos.y}), char length: ${char.length}`);
                                     } else {
-                                        console.log(`✗ No char extracted from data at (${pos.x},${pos.y}):`, data);
                                     }
                                 } else {
-                                    console.log(`✗ No data at (${pos.x},${pos.y})`);
                                 }
                             }
                             
-                            console.log('Total characters captured:', capturedChars.length);
-                            console.log('Captured chars array:', capturedChars);
                             
                             if (capturedChars.length > 0) {
                                 // Prepare batch move data
@@ -2145,14 +2124,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     char
                                 }));
                                 
-                                console.log('=== BATCH MOVE OPERATION ===');
-                                console.log('Moves:', moves);
                                 
                                 // Execute batch move
                                 engine.batchMoveCharacters(moves);
                             }
                             
-                                console.log('=== MOVE OPERATION COMPLETE ===');
                             }
                         }
                     }

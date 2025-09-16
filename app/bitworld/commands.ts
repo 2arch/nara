@@ -1473,9 +1473,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         }
 
         if (commandToExecute.startsWith('bound')) {
-            console.log('=== BOUND COMMAND DETECTED ===');
-            console.log('commandToExecute:', commandToExecute);
-            console.log('inputParts:', inputParts);
             
             // Clear command mode
             setCommandState({
@@ -1490,8 +1487,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             
             // Return command execution for immediate processing
             const args = inputParts.slice(1);
-            console.log('Bound command args:', args);
-            console.log('Returning command execution object');
             
             return {
                 command: 'bound',
@@ -1628,7 +1623,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             setCursorPos({ x: cursorPos.x + 1, y: cursorPos.y });
             return true;
         } else if (key === 'Enter') {
-            console.log('=== ENTER KEY PRESSED (commands.ts line 1530 - executeCommand) ===');
             return executeCommand();
         } else if (key === 'Escape') {
             // Exit command mode without executing

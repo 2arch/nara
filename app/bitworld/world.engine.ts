@@ -472,7 +472,6 @@ export function useWorldEngine({
         // === Text Frame Generation (No AI) ===
     const updateTextFrames = useCallback(async () => {
         try {
-            console.log('=== UPDATING TEXT FRAMES ===');
             
             if (useHierarchicalFrames) {
                 // Generate hierarchical frames based on distance from viewport
@@ -511,8 +510,6 @@ export function useWorldEngine({
     // === Text Cluster Label Generation ===
     const updateClusterLabels = useCallback(async () => {
         try {
-            console.log('=== UPDATING CLUSTER LABELS ===');
-            console.log('Current world data keys:', Object.keys(worldData).length);
             
             // Import clustering functions
             const { 
@@ -642,7 +639,6 @@ export function useWorldEngine({
         if (!framesVisible) return; // Only auto-update if frames are visible
         
         const debounceTimeout = setTimeout(() => {
-            console.log('=== AUTO-UPDATING FRAMES (worldData changed) ===');
             updateTextFrames();
             // Note: Cluster labels (AI) only regenerate when explicitly requested via /cluster command
         }, 500); // 500ms debounce to avoid excessive updates while typing
@@ -1541,11 +1537,9 @@ export function useWorldEngine({
         // === Command Handling (Early Priority) ===
         if (enableCommands) {
             const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos);
-            console.log('=== COMMAND RESULT ===', commandResult);
             if (commandResult && typeof commandResult === 'object') {
                 // It's a command execution object - handle it
                 const exec = commandResult as CommandExecution;
-                console.log('=== EXECUTING COMMAND ===', exec);
                 if (exec.command === 'debug') {
                     if (exec.args[0] === 'on') {
                         const newSettings = { isDebugVisible: true };
@@ -1814,14 +1808,9 @@ export function useWorldEngine({
                     }
                     setDialogueWithRevert(modeText, setDialogueText);
                 } else if (exec.command === 'bound') {
-                    console.log('=== HANDLING BOUND COMMAND IN WORLD ENGINE ===');
-                    console.log('exec:', exec);
-                    console.log('selectionStart:', selectionStart);
-                    console.log('selectionEnd:', selectionEnd);
                     
                     // Create bounded region entry spanning the selected area
                     let selection = getNormalizedSelection();
-                    console.log('getNormalizedSelection() result:', selection);
                     
                     // Check for single-cell selection on existing bound
                     let isOnExistingBound = false;
@@ -1945,9 +1934,6 @@ export function useWorldEngine({
                         
                         // If we found enclosed bounds, merge them into one
                         if (enclosedBounds.length > 0) {
-                            console.log('=== MERGING/UPDATING ENCLOSED BOUNDS ===');
-                            console.log('Found', enclosedBounds.length, 'bounds to merge');
-                            console.log('New selection:', selection);
                             
                             // Remove all old bounds
                             const newWorldData = { ...worldData };
@@ -2555,7 +2541,6 @@ export function useWorldEngine({
         }
         // === Pending Command Handling ===
         else if (key === 'Enter' && pendingCommand && pendingCommand.isWaitingForSelection) {
-            console.log('=== ENTER KEY PRESSED (pending command handler line 1958) ===');
             const currentSelection = getSelectedText();
             if (currentSelection) {
                 // Execute the pending command with the selected text
@@ -2596,18 +2581,12 @@ export function useWorldEngine({
                             setDialogueWithRevert(`Could not summarize text`, setDialogueText);
                         });
                     } else if (exec.command === 'bound') {
-                        console.log('=== HANDLING BOUND COMMAND IN WORLD ENGINE ===');
-                        console.log('exec:', exec);
-                        console.log('selectionStart:', selectionStart);
-                        console.log('selectionEnd:', selectionEnd);
                         
                         // Create bounded region entry spanning the selected area
                         const selection = getNormalizedSelection();
-                        console.log('getNormalizedSelection() result:', selection);
                         
                         if (selection) {
                             const color = exec.args.length > 0 ? exec.args[0] : '#FFFF00'; // Default yellow background
-                            console.log('Using color:', color);
                             
                             // Store bounded region as a single entry like labels
                             const boundKey = `bound_${selection.startX},${selection.startY}`;
@@ -2648,7 +2627,6 @@ export function useWorldEngine({
         }
         // === Quick Chat (Cmd+Enter) ===
         else if (key === 'Enter' && metaKey && !chatMode.isActive) {
-            console.log('=== ENTER KEY PRESSED (Quick Chat Cmd+Enter line 2010) ===');
             // Extract text to send to AI - selection, enclosing text block, or current line
             let textToSend = '';
             let chatStartPos = cursorPos;
@@ -2826,9 +2804,6 @@ export function useWorldEngine({
         }
         // --- Movement ---
         else if (key === 'Enter') {
-            console.log('=== ENTER KEY PRESSED (world.engine.ts line 2186) ===');
-            console.log('commandState.isActive:', commandState.isActive);
-            console.log('chatMode.isActive:', chatMode.isActive);
             const dataToCheck = currentMode === 'air' ? 
                 { ...worldData, ...lightModeData } : 
                 worldData;
@@ -2921,10 +2896,6 @@ export function useWorldEngine({
             
             let targetIndent;
             
-            console.log('=== INDENT LOGIC DEBUG ===');
-            console.log('isIndentEnabled:', isIndentEnabled);
-            console.log('currentLineHasText:', currentLineHasText);
-            console.log('lastEnterX:', lastEnterX);
             
             if (isIndentEnabled) {
                 // Smart indentation is enabled - use current behavior
@@ -2957,30 +2928,24 @@ export function useWorldEngine({
                 }
             } else {
                 // Smart indentation is disabled - maintain beginning position of current text block
-                console.log('=== SMART INDENTATION DISABLED ===');
                 if (currentLineHasText && lastEnterX === null) {
                     // First Enter on a line with text - find the beginning of the current text block and remember it
                     const blockStart = getCurrentTextBlockStart(dataToCheck, cursorPos);
-                    console.log('First Enter on text line, getCurrentTextBlockStart returned:', blockStart);
                     if (blockStart !== null) {
                         targetIndent = blockStart;
                         setLastEnterX(targetIndent);
-                        console.log('Using and remembering block start:', targetIndent);
                     } else {
                         // Fallback to current position if no block found
                         targetIndent = cursorPos.x;
                         setLastEnterX(targetIndent);
-                        console.log('No block found, using and remembering current position:', targetIndent);
                     }
                 } else if (lastEnterX !== null) {
                     // We already have a remembered position - stick to it regardless of current line content
                     targetIndent = lastEnterX;
-                    console.log('Using remembered lastEnterX:', targetIndent);
                 } else {
                     // Empty line, no previous position - use current X position and remember it
                     targetIndent = cursorPos.x;
                     setLastEnterX(targetIndent);
-                    console.log('Empty line, no lastEnterX, using and remembering current position:', targetIndent);
                 }
             }
             
@@ -3310,8 +3275,6 @@ export function useWorldEngine({
                     y: lastCharY 
                 };
                 
-                console.log(`=== CYCLING TO BOUND ${nextIndex + 1}/${bounds.length} ===`);
-                console.log(`${targetBound.key}: (${targetBound.data.startX},${targetBound.data.startY}) to (${targetBound.data.endX},${targetBound.data.endY})`);
                 
                 // Immediately center viewport on the new cursor position
                 if (typeof window !== 'undefined') {
@@ -3324,7 +3287,6 @@ export function useWorldEngine({
                         const centerY = nextCursorPos.y - viewportCharHeight / 2;
                         
                         setViewOffset({ x: centerX, y: centerY });
-                        console.log('=== VIEWPORT CENTERED ===', { centerX, centerY });
                     }
                 }
                 

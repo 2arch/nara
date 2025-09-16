@@ -87,7 +87,6 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
             
             if (result.success) {
                 setSubmitSuccess(true);
-                console.log('User created successfully:', result.user);
                 // Navigate to user's homepage
                 if (onAuthSuccess) {
                     onAuthSuccess(username.value.trim());
@@ -119,7 +118,6 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
             
             if (result.success && result.user) {
                 setSubmitSuccess(true);
-                console.log('User signed in successfully:', result.user);
                 // Get username and navigate to user's homepage
                 const username = await getUsernameByUid(result.user.uid);
                 if (username && onAuthSuccess) {

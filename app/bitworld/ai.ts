@@ -250,7 +250,6 @@ export function updateWorldContext(worldContext: {
     metadata?: string;
 }): void {
     currentWorldContext = worldContext;
-    console.log('World context updated for ambient navigation');
 }
 
 /**
@@ -381,7 +380,6 @@ export function clearChatHistory(): void {
  */
 export function clearWorldContext(): void {
     currentWorldContext = null;
-    console.log('World context cleared');
 }
 
 /**
@@ -427,7 +425,6 @@ export async function generateImage(prompt: string): Promise<string | null> {
  */
 export async function generateVideo(prompt: string): Promise<string | null> {
     try {
-        console.log('Starting video generation with prompt:', prompt);
         
         // Start the video generation operation
         let operation = await ai.models.generateVideos({
@@ -435,7 +432,6 @@ export async function generateVideo(prompt: string): Promise<string | null> {
             prompt: prompt,
         });
 
-        console.log('Initial operation response:', operation);
 
         // Poll the operation status until the video is ready
         let pollCount = 0;
@@ -443,7 +439,6 @@ export async function generateVideo(prompt: string): Promise<string | null> {
         
         while (!operation.done && pollCount < maxPolls) {
             pollCount++;
-            console.log(`Waiting for video generation to complete... (poll ${pollCount})`);
             await new Promise((resolve) => setTimeout(resolve, 5000)); // Poll every 5 seconds
             
             try {
@@ -457,15 +452,6 @@ export async function generateVideo(prompt: string): Promise<string | null> {
                 // Continue with the existing operation object
             }
             
-            console.log(`Poll ${pollCount} response:`, operation);
-            console.log(`Poll ${pollCount} details:`, {
-                done: operation.done,
-                hasResponse: !!operation.response,
-                hasError: !!operation.error,
-                hasMetadata: !!operation.metadata,
-                operationName: operation.name,
-                fullOperation: JSON.stringify(operation, null, 2)
-            });
         }
         
         if (pollCount >= maxPolls) {
@@ -473,24 +459,20 @@ export async function generateVideo(prompt: string): Promise<string | null> {
             return null;
         }
 
-        console.log('Operation completed. Full response:', operation);
 
         // Get the generated video from the completed operation
         const generatedVideo = operation.response?.generatedVideos?.[0];
-        console.log('Generated video object:', generatedVideo);
         
         // Check if we have video bytes directly
         if (generatedVideo?.video?.videoBytes) {
             // Convert base64 video bytes to data URL
             const mimeType = generatedVideo.video.mimeType || 'video/mp4';
             const dataUrl = `data:${mimeType};base64,${generatedVideo.video.videoBytes}`;
-            console.log('Video data URL created successfully from bytes');
             return dataUrl;
         }
         
         // Check if we have a URI to download the video from
         if (generatedVideo?.video?.uri) {
-            console.log('Video URI received:', generatedVideo.video.uri);
             
             try {
                 // Fetch the video from the URI
@@ -502,14 +484,12 @@ export async function generateVideo(prompt: string): Promise<string | null> {
                 
                 // Get the video as a blob
                 const blob = await response.blob();
-                console.log('Video blob received, size:', blob.size, 'type:', blob.type);
                 
                 // Convert blob to data URL
                 return new Promise((resolve) => {
                     const reader = new FileReader();
                     reader.onloadend = () => {
                         const dataUrl = reader.result as string;
-                        console.log('Video data URL created successfully from URI');
                         resolve(dataUrl);
                     };
                     reader.onerror = () => {
@@ -521,7 +501,6 @@ export async function generateVideo(prompt: string): Promise<string | null> {
             } catch (fetchError) {
                 console.error('Error fetching video from URI:', fetchError);
                 // As a fallback, just return the URI directly
-                console.log('Returning URI directly as fallback');
                 return generatedVideo.video.uri;
             }
         }
@@ -555,8 +534,6 @@ export async function generateVideo(prompt: string): Promise<string | null> {
  */
 export async function generateClusterLabel(clusterContent: string): Promise<string | null> {
     try {
-        console.log('=== CLUSTER LABEL GENERATION ===');
-        console.log('Input content:', clusterContent);
         
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash-lite',
@@ -579,15 +556,12 @@ Respond with ONLY the label, no explanation.`,
         });
 
         const label = response.text?.trim();
-        console.log('AI response:', label);
         
         // Validate the label is reasonably short and meaningful
         if (label && label.length >= 3 && label.length <= 30 && !label.includes('"')) {
-            console.log('Generated label:', label);
             return label;
         }
         
-        console.log('Label validation failed:', { label, length: label?.length });
         return null;
     } catch (error) {
         console.error('Error generating cluster label:', error);
