@@ -53,6 +53,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const [mouseWorldPos, setMouseWorldPos] = useState<Point | null>(null);
     const [isShiftPressed, setIsShiftPressed] = useState<boolean>(false);
     const [shiftDragStartPos, setShiftDragStartPos] = useState<Point | null>(null);
+    const [selectedImageKey, setSelectedImageKey] = useState<string | null>(null);
     const lastCursorPosRef = useRef<Point | null>(null);
 
     // Track shift key state globally
@@ -402,6 +403,24 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         
         boundsIndexRef.current = boundsIndex;
     }, [engine.worldData, engine.focusedBoundKey]);
+    // Helper function to find image at a specific position
+    
+    const findImageAtPosition = useCallback((pos: Point): any => {
+        for (const key in engine.worldData) {
+            if (key.startsWith('image_')) {
+                const imageData = engine.worldData[key];
+                if (engine.isImageData(imageData)) {
+                    // Check if position is within image bounds
+                    if (pos.x >= imageData.startX && pos.x <= imageData.endX &&
+                        pos.y >= imageData.startY && pos.y <= imageData.endY) {
+                        return imageData;
+                    }
+                }
+            }
+        }
+        return null;
+    }, [engine]);
+
 
     // --- Cursor Preview Functions ---
     const drawHoverPreview = useCallback((ctx: CanvasRenderingContext2D, worldPos: Point, currentZoom: number, currentOffset: Point, effectiveCharWidth: number, effectiveCharHeight: number, cssWidth: number, cssHeight: number, shiftPressed: boolean = false) => {
@@ -422,7 +441,27 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         const textBlock = findTextBlock(worldPos, engine.worldData, engine);
         const isWithinTextBlock = textBlock.length > 0;
         
-        if (hasDirectText || isWithinTextBlock) {
+        // Check if we're hovering over an image
+        const imageAtPosition = findImageAtPosition(worldPos);
+        const isWithinImage = imageAtPosition !== null;
+        
+        if (isWithinImage) {
+            if (shiftPressed) {
+                // When shift is pressed, draw gray border around the entire image
+                const topLeftScreen = engine.worldToScreen(imageAtPosition.startX, imageAtPosition.startY, currentZoom, currentOffset);
+                const bottomRightScreen = engine.worldToScreen(imageAtPosition.endX + 1, imageAtPosition.endY + 1, currentZoom, currentOffset);
+                
+                ctx.strokeStyle = 'rgba(128, 128, 128, 0.8)'; // Gray border
+                ctx.lineWidth = 2;
+                ctx.strokeRect(
+                    topLeftScreen.x, 
+                    topLeftScreen.y, 
+                    bottomRightScreen.x - topLeftScreen.x, 
+                    bottomRightScreen.y - topLeftScreen.y
+                );
+            }
+            // For normal hover over images: no visual feedback (no gray overlay, no border)
+        } else if (hasDirectText || isWithinTextBlock) {
             
             // Draw heather gray overlay for the entire text block
             ctx.fillStyle = 'rgba(176, 176, 176, 0.3)'; // Heather gray overlay
@@ -480,7 +519,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
             }
         }
-    }, [engine]);
+    }, [engine, findImageAtPosition]);
 
     // Helper function to find connected text block (including spaces)
     const findTextBlock = useCallback((startPos: Point, worldData: any, engine: any): Point[] => {
@@ -565,7 +604,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         return block;
     }, []);
     
-
     const drawModeSpecificPreview = useCallback((ctx: CanvasRenderingContext2D, worldPos: Point, currentZoom: number, currentOffset: Point, effectiveCharWidth: number, effectiveCharHeight: number, effectiveFontSize: number) => {
         const screenPos = engine.worldToScreen(worldPos.x, worldPos.y, currentZoom, currentOffset);
         
@@ -1511,6 +1549,26 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Selected Image Border ===
+        if (selectedImageKey) {
+            const selectedImageData = engine.worldData[selectedImageKey];
+            if (engine.isImageData(selectedImageData)) {
+                // Draw selection border around the selected image
+                const topLeftScreen = engine.worldToScreen(selectedImageData.startX, selectedImageData.startY, currentZoom, currentOffset);
+                const bottomRightScreen = engine.worldToScreen(selectedImageData.endX + 1, selectedImageData.endY + 1, currentZoom, currentOffset);
+                
+                // Use the same color as text selection border
+                ctx.strokeStyle = `rgba(${hexToRgb(CURSOR_COLOR_PRIMARY)}, 0.8)`;
+                ctx.lineWidth = 3; // Slightly thicker to indicate selection
+                ctx.strokeRect(
+                    topLeftScreen.x, 
+                    topLeftScreen.y, 
+                    bottomRightScreen.x - topLeftScreen.x, 
+                    bottomRightScreen.y - topLeftScreen.y
+                );
+            }
+        }
+
         // === Render Mouse Hover Preview ===
         if (mouseWorldPos && showCursor && !shiftDragStartPos) {
             drawHoverPreview(ctx, mouseWorldPos, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight, cssWidth, cssHeight, isShiftPressed);
@@ -1525,22 +1583,45 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const distanceY = mouseWorldPos.y - shiftDragStartPos.y;
             
             if (distanceX !== 0 || distanceY !== 0) {
-                // Find text block at start position
-                const textBlock = findTextBlock(shiftDragStartPos, engine.worldData, engine);
+                // First check if we're moving an image
+                const imageAtPosition = findImageAtPosition(shiftDragStartPos);
                 
-                if (textBlock.length > 0) {
-                    // Draw blue preview rectangles for each destination position
+                if (imageAtPosition) {
+                    // Draw blue preview for image destination
                     ctx.fillStyle = 'rgba(0, 100, 255, 0.3)'; // Blue with transparency
                     
-                    for (const pos of textBlock) {
-                        const destX = pos.x + distanceX;
-                        const destY = pos.y + distanceY;
-                        const destScreenPos = engine.worldToScreen(destX, destY, currentZoom, currentOffset);
+                    // Create all positions within the image bounds at the new location
+                    for (let y = imageAtPosition.startY; y <= imageAtPosition.endY; y++) {
+                        for (let x = imageAtPosition.startX; x <= imageAtPosition.endX; x++) {
+                            const destX = x + distanceX;
+                            const destY = y + distanceY;
+                            const destScreenPos = engine.worldToScreen(destX, destY, currentZoom, currentOffset);
+                            
+                            // Only draw if visible on screen
+                            if (destScreenPos.x >= -effectiveCharWidth && destScreenPos.x <= cssWidth && 
+                                destScreenPos.y >= -effectiveCharHeight && destScreenPos.y <= cssHeight) {
+                                ctx.fillRect(destScreenPos.x, destScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            }
+                        }
+                    }
+                } else {
+                    // If no image, check for text block at start position
+                    const textBlock = findTextBlock(shiftDragStartPos, engine.worldData, engine);
+                    
+                    if (textBlock.length > 0) {
+                        // Draw blue preview rectangles for each destination position
+                        ctx.fillStyle = 'rgba(0, 100, 255, 0.3)'; // Blue with transparency
                         
-                        // Only draw if visible on screen
-                        if (destScreenPos.x >= -effectiveCharWidth && destScreenPos.x <= cssWidth && 
-                            destScreenPos.y >= -effectiveCharHeight && destScreenPos.y <= cssHeight) {
-                            ctx.fillRect(destScreenPos.x, destScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        for (const pos of textBlock) {
+                            const destX = pos.x + distanceX;
+                            const destY = pos.y + distanceY;
+                            const destScreenPos = engine.worldToScreen(destX, destY, currentZoom, currentOffset);
+                            
+                            // Only draw if visible on screen
+                            if (destScreenPos.x >= -effectiveCharWidth && destScreenPos.x <= cssWidth && 
+                                destScreenPos.y >= -effectiveCharHeight && destScreenPos.y <= cssHeight) {
+                                ctx.fillRect(destScreenPos.x, destScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            }
                         }
                     }
                 }
@@ -1676,7 +1757,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock]);
+    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
 
 
     // --- Drawing Loop Effect ---
@@ -1768,10 +1849,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             y: Math.floor(worldPos.y)
         };
         
-        // Find the text block at this position
+        // Find the text block at this position (prioritize text)
         const textBlock = findTextBlock(snappedWorldPos, engine.worldData, engine);
         
         if (textBlock.length > 0) {
+            // Clear any selected image when selecting text
+            setSelectedImageKey(null);
+            
             // Calculate bounding rectangle of the text block
             const minX = Math.min(...textBlock.map(p => p.x));
             const maxX = Math.max(...textBlock.map(p => p.x));
@@ -1789,10 +1873,40 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             
             // Set flag to prevent trail creation
             isClickMovementRef.current = true;
+        } else {
+            // If no text block found, check for image
+            const imageAtPosition = findImageAtPosition(snappedWorldPos);
+            
+            if (imageAtPosition) {
+                // Find the image key
+                let imageKey = null;
+                for (const key in engine.worldData) {
+                    if (key.startsWith('image_')) {
+                        const data = engine.worldData[key];
+                        if (engine.isImageData(data) && data === imageAtPosition) {
+                            imageKey = key;
+                            break;
+                        }
+                    }
+                }
+                
+                if (imageKey) {
+                    // Clear any text selection and select the image
+                    engine.handleSelectionStart(0, 0);
+                    engine.handleSelectionEnd(); // This clears the text selection
+                    setSelectedImageKey(imageKey);
+                    
+                    // Set flag to prevent trail creation
+                    isClickMovementRef.current = true;
+                }
+            } else {
+                // Clear any image selection if clicking on empty space
+                setSelectedImageKey(null);
+            }
         }
         
         canvasRef.current?.focus(); // Ensure focus for keyboard
-    }, [engine, findTextBlock]);
+    }, [engine, findTextBlock, findImageAtPosition]);
     
     const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -1820,6 +1934,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     y: Math.floor(worldPos.y)
                 });
             } else {
+                // Clear image selection when starting regular selection
+                setSelectedImageKey(null);
+                
                 // Regular selection start
                 isSelectingMouseDownRef.current = true; // Track mouse down state
                 engine.handleSelectionStart(x, y); // Let the engine manage selection state
@@ -1882,10 +1999,36 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     
                     // Only move if there's actual distance
                     if (distanceX !== 0 || distanceY !== 0) {
-                        // Find text block at start position
-                        const textBlock = findTextBlock(shiftDragStartPos, engine.worldData, engine);
+                        // First, check if we're moving an image
+                        const imageAtPosition = findImageAtPosition(shiftDragStartPos);
                         
-                        if (textBlock.length > 0) {
+                        if (imageAtPosition) {
+                            console.log('=== SHIFT+DRAG IMAGE MOVE OPERATION ===');
+                            console.log('Image data:', imageAtPosition);
+                            console.log('Distance:', { distanceX, distanceY });
+                            
+                            // Find the original image key
+                            let imageKey = null;
+                            for (const key in engine.worldData) {
+                                if (key.startsWith('image_')) {
+                                    const data = engine.worldData[key];
+                                    if (engine.isImageData(data) && data === imageAtPosition) {
+                                        imageKey = key;
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            if (imageKey) {
+                                // Use the engine's moveImage method
+                                engine.moveImage(imageKey, distanceX, distanceY);
+                                console.log('Image moved successfully');
+                            }
+                        } else {
+                            // If no image, check for text block at start position
+                            const textBlock = findTextBlock(shiftDragStartPos, engine.worldData, engine);
+                            
+                            if (textBlock.length > 0) {
                             console.log('=== SHIFT+DRAG MOVE OPERATION ===');
                             console.log('Text block positions:', textBlock);
                             console.log('Distance:', { distanceX, distanceY });
@@ -1937,7 +2080,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 engine.batchMoveCharacters(moves);
                             }
                             
-                            console.log('=== MOVE OPERATION COMPLETE ===');
+                                console.log('=== MOVE OPERATION COMPLETE ===');
+                            }
                         }
                     }
                 }
@@ -1952,7 +2096,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
             }
         }
-    }, [engine, shiftDragStartPos, findTextBlock]);
+    }, [engine, shiftDragStartPos, findTextBlock, findImageAtPosition]);
 
     const handleCanvasMouseLeave = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         // Clear hover position when mouse leaves canvas
@@ -1983,13 +2127,23 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             return;
         }
         
+        // Handle image-specific keys before passing to engine
+        if (selectedImageKey && e.key === 'Backspace') {
+            // Delete the selected image
+            engine.deleteImage(selectedImageKey);
+            setSelectedImageKey(null); // Clear selection
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+        
         // Let engine handle all key input (including regular typing)
         const preventDefault = engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey, e.shiftKey);
         if (preventDefault) {
             e.preventDefault();
             e.stopPropagation();
         }
-    }, [engine, handleKeyDownFromController]);
+    }, [engine, handleKeyDownFromController, selectedImageKey]);
 
     return (
         <canvas

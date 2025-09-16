@@ -97,6 +97,8 @@ export interface WorldEngine {
     deleteCharacter: (x: number, y: number) => void;
     placeCharacter: (char: string, x: number, y: number) => void;
     batchMoveCharacters: (moves: Array<{fromX: number, fromY: number, toX: number, toY: number, char: string}>) => void;
+    moveImage: (imageKey: string, deltaX: number, deltaY: number) => void;
+    deleteImage: (imageKey: string) => void;
     deleteSelection: () => boolean;
     copySelection: () => boolean;
     cutSelection: () => boolean;
@@ -3727,6 +3729,48 @@ export function useWorldEngine({
         setWorldData(newWorldData);
     }, [worldData]);
 
+    const moveImage = useCallback((imageKey: string, deltaX: number, deltaY: number): void => {
+        const imageData = worldData[imageKey];
+        if (!imageData || !isImageData(imageData)) {
+            console.error('Invalid image key or data:', imageKey);
+            return;
+        }
+        
+        // Create new image data with updated coordinates
+        const newImageData: ImageData = {
+            ...imageData,
+            startX: imageData.startX + deltaX,
+            startY: imageData.startY + deltaY,
+            endX: imageData.endX + deltaX,
+            endY: imageData.endY + deltaY
+        };
+        
+        // Create new image key based on new position
+        const newImageKey = `image_${newImageData.startX},${newImageData.startY}`;
+        
+        // Update world data - remove old image and add new one
+        setWorldData(prev => {
+            const newData = { ...prev };
+            delete newData[imageKey]; // Remove old image
+            newData[newImageKey] = newImageData; // Add moved image
+            return newData;
+        });
+    }, [worldData, isImageData]);
+
+    const deleteImage = useCallback((imageKey: string): void => {
+        if (!worldData[imageKey]) {
+            console.error('Image key not found:', imageKey);
+            return;
+        }
+        
+        // Remove the image from world data
+        setWorldData(prev => {
+            const newData = { ...prev };
+            delete newData[imageKey];
+            return newData;
+        });
+    }, [worldData]);
+
     const getCursorDistanceFromCenter = useCallback((): number => {
         const center = getViewportCenter();
         const deltaX = cursorPos.x - center.x;
@@ -3926,6 +3970,8 @@ export function useWorldEngine({
         deleteCharacter,
         placeCharacter,
         batchMoveCharacters,
+        moveImage,
+        deleteImage,
         deleteSelection: deleteSelectedCharacters,
         copySelection: copySelectedCharacters,
         cutSelection: cutSelection,
