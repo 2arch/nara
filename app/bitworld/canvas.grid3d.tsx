@@ -4,12 +4,19 @@ import React, { useRef, useEffect, useCallback } from 'react';
 import * as THREE from 'three';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer';
 
+export type GridMode = 'dots' | 'lines';
+export type ArtifactType = 'images' | 'questions';
+
 interface Grid3DBackgroundProps {
   chunkSize?: number;
   renderDistance?: number;
   voxelSize?: number;
   viewOffset?: { x: number; y: number }; // Sync with BitCanvas view offset
   zoomLevel?: number; // Sync with BitCanvas zoom
+  gridMode?: GridMode; // Grid rendering mode
+  artefactsEnabled?: boolean; // Whether to show 3D artifacts
+  artifactType?: ArtifactType; // Type of artifacts to show (images or questions)
+  getCompiledText?: () => { [lineY: number]: string }; // Content stream access
 }
 
 const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({ 
@@ -17,7 +24,11 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
   renderDistance = 2, 
   voxelSize = 0.1,
   viewOffset = { x: 0, y: 0 },
-  zoomLevel = 1
+  zoomLevel = 1,
+  gridMode = 'dots',
+  artefactsEnabled = true,
+  artifactType = 'images',
+  getCompiledText
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -56,8 +67,8 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
   
   // Artifact generation around camera
   const ARTIFACT_COUNT = 12;
-  const ARTIFACT_SPAWN_RADIUS = 20;
-  const ARTIFACT_DESPAWN_RADIUS = 20;
+  const ARTIFACT_SPAWN_RADIUS = 10; // Spawn closer to camera
+  const ARTIFACT_DESPAWN_RADIUS = 25; // Despawn further away
   
   // Performance optimization constants
   const CHUNK_UPDATE_THRESHOLD = 2.0; // Only update chunks if camera moved > 2 units
@@ -67,6 +78,134 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
   const EXPENSIVE_OP_FRAME_INTERVAL = 3; // Only do expensive ops every 3rd frame
   const FADE_OUT_DURATION = 1200; // 1200ms fade out duration for smoother effect
   const FADE_IN_DURATION = 800; // 800ms fade in duration
+  
+  // Clear artifacts when artifact type changes
+  const lastArtifactTypeRef = useRef<ArtifactType>(artifactType);
+  const artifactCleanupTimeoutRef = useRef<number | null>(null);
+  
+  useEffect(() => {
+    if (lastArtifactTypeRef.current !== artifactType) {
+      lastArtifactTypeRef.current = artifactType;
+      
+      // Clear all existing artifacts when type changes
+      const scene = sceneRef.current;
+      if (scene) {
+        // Clear active artifacts
+        artifactsRef.current.forEach((artifact) => {
+          scene.remove(artifact);
+          artifact.traverse((child) => {
+            if (child instanceof CSS2DObject) {
+              if (child.element && child.element.parentNode) {
+                child.element.parentNode.removeChild(child.element);
+              }
+            }
+          });
+          artifact.geometry.dispose();
+          (artifact.material as THREE.Material).dispose();
+        });
+        artifactsRef.current.clear();
+        
+        // Clear fading artifacts
+        fadingArtifactsRef.current.forEach((fadingArtifact) => {
+          scene.remove(fadingArtifact.mesh);
+          fadingArtifact.mesh.traverse((child) => {
+            if (child instanceof CSS2DObject) {
+              if (child.element && child.element.parentNode) {
+                child.element.parentNode.removeChild(child.element);
+              }
+            }
+          });
+          fadingArtifact.mesh.geometry.dispose();
+          (fadingArtifact.mesh.material as THREE.Material).dispose();
+        });
+        fadingArtifactsRef.current.clear();
+        
+        // Clear fading-in artifacts
+        fadingInArtifactsRef.current.forEach((fadingInArtifact) => {
+          scene.remove(fadingInArtifact.mesh);
+          fadingInArtifact.mesh.traverse((child) => {
+            if (child instanceof CSS2DObject) {
+              if (child.element && child.element.parentNode) {
+                child.element.parentNode.removeChild(child.element);
+              }
+            }
+          });
+          fadingInArtifact.mesh.geometry.dispose();
+          (fadingInArtifact.mesh.material as THREE.Material).dispose();
+        });
+        fadingInArtifactsRef.current.clear();
+        
+        console.log('🧹 Cleared all artifacts due to type change:', artifactType);
+        
+        // Clear any pending cleanup timeout
+        if (artifactCleanupTimeoutRef.current) {
+          clearTimeout(artifactCleanupTimeoutRef.current);
+        }
+        
+        // Add a small delay before allowing new artifacts to be created
+        artifactCleanupTimeoutRef.current = window.setTimeout(() => {
+          console.log('🚀 Ready to create new artifacts for type:', artifactType);
+        }, 500);
+      }
+    }
+  }, [artifactType]);
+  
+  // Memoize questions to prevent infinite re-renders
+  const questionsRef = useRef<string[]>([]);
+  const lastContentRef = useRef<string>('');
+  
+  // Extract questions from compiled text
+  const extractQuestionsFromContent = useCallback((): string[] => {
+    if (!getCompiledText) return [];
+    
+    const compiledText = getCompiledText();
+    
+    // Create a content hash to detect changes
+    const contentHash = JSON.stringify(compiledText);
+    if (contentHash === lastContentRef.current) {
+      return questionsRef.current; // Return cached questions if content hasn't changed
+    }
+    
+    lastContentRef.current = contentHash;
+    const questions: string[] = [];
+    
+    console.log('🔍 Extracting questions from compiled text. Lines found:', Object.keys(compiledText).length);
+    
+    // Look for text lines that end with question marks
+    for (const lineY in compiledText) {
+      const content = compiledText[lineY].trim();
+      
+      // Filter for questions (end with ?) and have some substance (> 5 chars)
+      if (content.endsWith('?') && content.length > 5) {
+        console.log('❓ Found question ending with ?:', content);
+        questions.push(content);
+      }
+    }
+    
+    // Also look for common question patterns
+    const questionPatterns = [
+      /^(what|how|why|when|where|who|which|can|could|would|should|will|is|are|do|does|did)\s/i,
+      /\?$/
+    ];
+    
+    for (const lineY in compiledText) {
+      const content = compiledText[lineY].trim();
+      
+      // Look for question patterns, avoid duplicates
+      if (content.length > 10 && 
+          questionPatterns.some(pattern => pattern.test(content)) && 
+          !questions.includes(content)) {
+        console.log('❓ Found question by pattern:', content);
+        questions.push(content);
+      }
+    }
+    
+    console.log('✅ Total questions extracted:', questions.length);
+    questions.forEach((q, i) => console.log(`  ${i + 1}. ${q}`));
+    
+    questionsRef.current = questions;
+    return questions;
+  }, []);
   
   // Easing functions for smooth animations
   const easeOutCubic = (t: number): number => {
@@ -204,38 +343,88 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
     const chunk = new THREE.Group();
     chunk.name = `chunk_${chunkX}_${chunkY}_${chunkZ}`;
 
-    // Create grid point positions
-    const positions: number[] = [];
-    
-    for (let x = 0; x < chunkSize; x++) {
-      for (let y = 0; y < chunkSize; y++) {
-        for (let z = 0; z < chunkSize; z++) {
-          // Show fewer grid points - every 4th position
-          if (x % 4 === 0 && y % 4 === 0 && z % 4 === 0) {
-            positions.push(
-              chunkX * chunkSize + x,
-              chunkY * chunkSize + y,
-              chunkZ * chunkSize + z
-            );
+    if (gridMode === 'dots') {
+      // Create grid point positions
+      const positions: number[] = [];
+      
+      for (let x = 0; x < chunkSize; x++) {
+        for (let y = 0; y < chunkSize; y++) {
+          for (let z = 0; z < chunkSize; z++) {
+            // Show fewer grid points - every 4th position
+            if (x % 4 === 0 && y % 4 === 0 && z % 4 === 0) {
+              positions.push(
+                chunkX * chunkSize + x,
+                chunkY * chunkSize + y,
+                chunkZ * chunkSize + z
+              );
+            }
           }
         }
       }
+      
+      // Create points geometry for grid markers
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      const material = new THREE.PointsMaterial({
+        color: 0x999999, // Heather gray
+        size: 3,
+        sizeAttenuation: false
+      });
+      
+      const points = new THREE.Points(geometry, material);
+      chunk.add(points);
+    } else if (gridMode === 'lines') {
+      // Create line grid positions
+      const linePositions: number[] = [];
+      
+      // Grid line spacing - every 4th position like dots
+      const spacing = 4;
+      
+      // Create lines parallel to X axis
+      for (let y = 0; y < chunkSize; y += spacing) {
+        for (let z = 0; z < chunkSize; z += spacing) {
+          linePositions.push(
+            chunkX * chunkSize, chunkY * chunkSize + y, chunkZ * chunkSize + z,
+            chunkX * chunkSize + chunkSize, chunkY * chunkSize + y, chunkZ * chunkSize + z
+          );
+        }
+      }
+      
+      // Create lines parallel to Y axis
+      for (let x = 0; x < chunkSize; x += spacing) {
+        for (let z = 0; z < chunkSize; z += spacing) {
+          linePositions.push(
+            chunkX * chunkSize + x, chunkY * chunkSize, chunkZ * chunkSize + z,
+            chunkX * chunkSize + x, chunkY * chunkSize + chunkSize, chunkZ * chunkSize + z
+          );
+        }
+      }
+      
+      // Create lines parallel to Z axis
+      for (let x = 0; x < chunkSize; x += spacing) {
+        for (let y = 0; y < chunkSize; y += spacing) {
+          linePositions.push(
+            chunkX * chunkSize + x, chunkY * chunkSize + y, chunkZ * chunkSize,
+            chunkX * chunkSize + x, chunkY * chunkSize + y, chunkZ * chunkSize + chunkSize
+          );
+        }
+      }
+      
+      // Create line geometry
+      const lineGeometry = new THREE.BufferGeometry();
+      lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3));
+      const lineMaterial = new THREE.LineBasicMaterial({
+        color: 0xc2c2c2, // Heather gray
+        transparent: true,
+        opacity: 0.6
+      });
+      
+      const lines = new THREE.LineSegments(lineGeometry, lineMaterial);
+      chunk.add(lines);
     }
-    
-    // Create points geometry for grid markers
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    const material = new THREE.PointsMaterial({
-      color: 0x999999, // Heather gray
-      size: 3,
-      sizeAttenuation: false
-    });
-    
-    const points = new THREE.Points(geometry, material);
-    chunk.add(points);
 
     return chunk;
-  }, [chunkSize, voxelSize]);
+  }, [chunkSize, voxelSize, gridMode]);
   
   
   const createLoadingPlaceholder = useCallback((position: {x: number, y: number, z: number, size: number, id: number}) => {
@@ -298,8 +487,60 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
     labelDiv.style.overflow = 'hidden';
     labelDiv.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
     
-    // Use preloaded images for artifacts
-    if (imagesPreloadedRef.current && preloadedImagesRef.current.size > 0) {
+    console.log('🎯 Creating artifact with type:', artifactType);
+    
+    if (artifactType === 'questions') {
+      // Handle questions artifact type
+      console.log('📝 Creating questions artifact...');
+      const questions = extractQuestionsFromContent();
+      
+      if (questions.length > 0) {
+        // Pick a random question
+        const randomQuestion = questions[Math.floor(Math.random() * questions.length)];
+        
+        // Style for question display
+        labelDiv.style.cssText = `
+          padding: 16px;
+          background: transparent;
+          font-family: 'Optima', sans-serif;
+          font-weight: bold;
+          letter-spacing: -0.1em;
+          font-size: 54px;
+          line-height: 1.4;
+          color: #2c3e50;
+          text-align: center;
+          pointer-events: none;
+          white-space: pre-wrap;
+          word-wrap: break-word;
+        `;
+        
+        labelDiv.textContent = randomQuestion;
+        
+        console.log('✨ Creating question artifact', position.id, 'with question:', randomQuestion);
+      } else {
+        // Fallback if no questions found - use the preloaded question
+        labelDiv.style.cssText = `
+          padding: 16px;
+          background: transparent;
+          font-family: 'Optima', sans-serif;
+          font-weight: regular;
+          letter-spacing: -0.05em;
+          font-size: 54px;
+          line-height: 1.4;
+          color: #2c3e50;
+          text-align: center;
+          pointer-events: none;
+          white-space: pre-wrap;
+          word-wrap: break-word;
+        `;
+        labelDiv.textContent = 'A space for your biggest questions.';
+        console.log('⚠️ No questions found in content, showing preloaded question');
+      }
+    } else {
+      // Handle images artifact type (existing logic)
+      console.log('🖼️ Creating image artifact...');
+      // Use preloaded images for artifacts
+      if (imagesPreloadedRef.current && preloadedImagesRef.current.size > 0) {
       let blockIndex: number;
       
       // If we haven't used all available blocks, pick the next unused one
@@ -358,6 +599,7 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
       labelDiv.style.display = 'none';
       return null; // Return null instead of throwing error
     }
+    }
     
     const label = new CSS2DObject(labelDiv);
     label.position.set(0, 0, 0);
@@ -373,7 +615,7 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
     console.log('Created artifact', position);
     
     return mesh;
-  }, []);
+  }, [artifactType, extractQuestionsFromContent]);
 
   // Update fading artifacts opacity
   const updateFadingArtifacts = useCallback(() => {
@@ -470,7 +712,12 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
     });
   }, []);
 
-  const updateArtifacts = useCallback(() => {
+  // Separate timing for position updates vs creation logic
+  const lastArtifactCreationRef = useRef<number>(0);
+  const ARTIFACT_CREATION_COOLDOWN = 1000; // Only limit artifact creation, not position updates
+  
+  // Smooth position updates that run every frame
+  const updateArtifactPositions = useCallback(() => {
     const camera = cameraRef.current;
     const scene = sceneRef.current;
     if (!camera || !scene) return;
@@ -478,18 +725,155 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
     // Update fading artifacts
     updateFadingArtifacts();
 
-    // Start fade-out for artifacts too far from camera
+    // Update artifact positions with smooth animations
+    const time = Date.now() * 0.001; // Convert to seconds for smoother animation
+    
+    artifactsRef.current.forEach((artifact, artifactId) => {
+      if (artifactType === 'questions') {
+        // Base offsets
+        const baseOffsetX = 0;    // Centered horizontally
+        const baseOffsetY = -3;   // Slightly below camera view
+        const baseOffsetZ = -8;   // In front of camera
+        
+        // Wave motion parameters
+        const waveAmplitudeX = 0.3;  // Side-to-side sway
+        const waveAmplitudeY = 0.2;  // Gentle up-down bob
+        const waveAmplitudeZ = 0.4;  // Forward-back drift
+        const waveSpeed = 0.8;       // Gentle wave speed
+        
+        // Create wave motion with different phases for natural movement
+        const waveX = Math.sin(time * waveSpeed) * waveAmplitudeX;
+        const waveY = Math.sin(time * waveSpeed * 1.2) * waveAmplitudeY; // Slightly different frequency
+        const waveZ = Math.cos(time * waveSpeed * 0.9) * waveAmplitudeZ; // Different phase for depth
+        
+        // Calculate target position (where the artifact should be)
+        const targetX = camera.position.x + baseOffsetX + waveX;
+        const targetY = camera.position.y + baseOffsetY + waveY;
+        const targetZ = camera.position.z + baseOffsetZ + waveZ;
+        
+        // Smooth interpolation towards target position
+        const lerpFactor = 0.08; // Adjust this for follow smoothness (0.02 = very smooth/slow, 0.2 = snappy)
+        
+        artifact.position.x += (targetX - artifact.position.x) * lerpFactor;
+        artifact.position.y += (targetY - artifact.position.y) * lerpFactor;
+        artifact.position.z += (targetZ - artifact.position.z) * lerpFactor;
+        
+        return;
+      }
+      
+      // Add gentle wave motion to image artifacts too
+      if (artifactType === 'images') {
+        // Get the artifact's base position (where it was originally spawned)
+        if (!artifact.userData.basePosition) {
+          artifact.userData.basePosition = {
+            x: artifact.position.x,
+            y: artifact.position.y, 
+            z: artifact.position.z
+          };
+        }
+        
+        const basePos = artifact.userData.basePosition;
+        const artifactId_num = parseInt(artifactId.split('_')[1]) || 1;
+        
+        // Vary wave motion slightly per artifact for more natural look
+        const phaseOffset = artifactId_num * 0.5; // Different phase per artifact
+        const waveAmplitude = 0.15; // Smaller motion for images
+        const waveSpeed = 0.6;
+        
+        const waveX = Math.sin(time * waveSpeed + phaseOffset) * waveAmplitude;
+        const waveY = Math.sin(time * waveSpeed * 1.1 + phaseOffset) * waveAmplitude * 0.7;
+        const waveZ = Math.cos(time * waveSpeed * 0.8 + phaseOffset) * waveAmplitude;
+        
+        artifact.position.set(
+          basePos.x + waveX,
+          basePos.y + waveY,
+          basePos.z + waveZ
+        );
+      }
+    });
+  }, [artifactType, updateFadingArtifacts]);
+
+  const updateArtifacts = useCallback(() => {
+    const camera = cameraRef.current;
+    const scene = sceneRef.current;
+    if (!camera || !scene) return;
+
+    // For questions: aggressively clean up if we have more than 1 artifact
+    if (artifactType === 'questions' && artifactsRef.current.size > 1) {
+      console.log('🧹 Cleaning up excess question artifacts, current count:', artifactsRef.current.size);
+      const artifactsToRemove: string[] = [];
+      let keepFirst = true;
+      
+      artifactsRef.current.forEach((artifact, artifactId) => {
+        if (keepFirst) {
+          keepFirst = false;
+          return; // Keep the first one
+        }
+        
+        // Remove excess artifacts
+        scene.remove(artifact);
+        artifact.traverse((child) => {
+          if (child instanceof CSS2DObject) {
+            if (child.element && child.element.parentNode) {
+              child.element.parentNode.removeChild(child.element);
+            }
+            child.removeFromParent();
+          }
+        });
+        artifact.geometry.dispose();
+        (artifact.material as THREE.Material).dispose();
+        artifactsToRemove.push(artifactId);
+      });
+      
+      artifactsToRemove.forEach(artifactId => {
+        artifactsRef.current.delete(artifactId);
+      });
+      
+      console.log('🧹 Cleaned up', artifactsToRemove.length, 'excess question artifacts');
+    }
+
+    // Don't update artifacts if they're disabled
+    if (!artefactsEnabled) {
+      // Remove all existing artifacts when disabled
+      artifactsRef.current.forEach((artifact, artifactId) => {
+        scene.remove(artifact);
+        
+        // Dispose of CSS2D labels
+        artifact.traverse((child) => {
+          if (child instanceof CSS2DObject) {
+            if (child.element && child.element.parentNode) {
+              child.element.parentNode.removeChild(child.element);
+            }
+            child.removeFromParent();
+          }
+        });
+        
+        artifact.geometry.dispose();
+        (artifact.material as THREE.Material).dispose();
+      });
+      artifactsRef.current.clear();
+      
+      // Clear fading artifacts too
+      fadingArtifactsRef.current.clear();
+      fadingInArtifactsRef.current.clear();
+      
+      return;
+    }
+
+    // Handle fade-out for artifacts too far from camera (images only)
     const artifactsToFade: string[] = [];
     artifactsRef.current.forEach((artifact, artifactId) => {
-      const distance = camera.position.distanceTo(artifact.position);
-      if (distance > ARTIFACT_DESPAWN_RADIUS && !fadingArtifactsRef.current.has(artifactId)) {
-        // Start fade-out animation
-        fadingArtifactsRef.current.set(artifactId, {
-          mesh: artifact,
-          startTime: Date.now(),
-          duration: FADE_OUT_DURATION
-        });
-        artifactsToFade.push(artifactId);
+      if (artifactType === 'images') {
+        const distance = camera.position.distanceTo(artifact.position);
+        if (distance > ARTIFACT_DESPAWN_RADIUS && !fadingArtifactsRef.current.has(artifactId)) {
+          // Start fade-out animation
+          fadingArtifactsRef.current.set(artifactId, {
+            mesh: artifact,
+            startTime: Date.now(),
+            duration: FADE_OUT_DURATION
+          });
+          artifactsToFade.push(artifactId);
+        }
       }
     });
 
@@ -498,13 +882,21 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
       artifactsRef.current.delete(artifactId);
     });
 
-    // Show loading placeholders if blocks are loaded but images aren't preloaded yet
-    if (arenaLoadedRef.current && !imagesPreloadedRef.current) {
+    // Show loading placeholders if blocks are loaded but images aren't preloaded yet (only for images type)
+    if (artifactType === 'images' && arenaLoadedRef.current && !imagesPreloadedRef.current) {
       console.log('Showing loading placeholders while preloading images...');
       
       // Create simple placeholder artifacts
+      // For questions: only show ONE placeholder
+      const placeholderTargetCount = artifactType === 'questions' ? 1 : Math.min(ARTIFACT_COUNT, 10);
+      
+      // Hard limit for questions - never create more than 1 placeholder
+      if (artifactType === 'questions' && artifactsRef.current.size >= 1) {
+        return;
+      }
+      
       let currentIndex = 1;
-      while (artifactsRef.current.size < Math.min(ARTIFACT_COUNT, 10)) { // Limit to 10 placeholders
+      while (artifactsRef.current.size < placeholderTargetCount) { // Limit to target count
         while (artifactsRef.current.has(`artifact_${currentIndex}`) && currentIndex <= ARTIFACT_COUNT) {
           currentIndex++;
         }
@@ -543,8 +935,8 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
       return;
     }
     
-    // Only create full artifacts if images are preloaded
-    if (!imagesPreloadedRef.current) {
+    // Only create full artifacts if images are preloaded (for image type only)
+    if (artifactType === 'images' && !imagesPreloadedRef.current) {
       return;
     }
     
@@ -608,9 +1000,23 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
       }
     });
 
-    // Generate new artifacts if we have fewer than target count
-    let currentIndex = 1;
-    while (artifactsRef.current.size < ARTIFACT_COUNT) {
+    // Generate new artifacts if we have fewer than target count (rate limited)
+    const now = Date.now();
+    const shouldCreateArtifacts = now - lastArtifactCreationRef.current > ARTIFACT_CREATION_COOLDOWN;
+    
+    if (shouldCreateArtifacts) {
+      lastArtifactCreationRef.current = now;
+      
+      // For questions: only show ONE artifact
+      const targetCount = artifactType === 'questions' ? 1 : ARTIFACT_COUNT;
+      
+      // Hard limit for questions - never create more than 1
+      if (artifactType === 'questions' && artifactsRef.current.size >= 1) {
+        return;
+      }
+      
+      let currentIndex = 1;
+      while (artifactsRef.current.size < targetCount) {
       // Find next available index from 1-25
       while (artifactsRef.current.has(`artifact_${currentIndex}`) && currentIndex <= ARTIFACT_COUNT) {
         currentIndex++;
@@ -618,21 +1024,34 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
       
       if (currentIndex > ARTIFACT_COUNT) break;
       
-      // Spawn artifacts within the sphere that's ahead of the camera
-      const sphereCenterZ = camera.position.z - 15; // Same offset as sphere
+      let artifactPos;
       
-      // Generate random point within the sphere
-      const angle = Math.random() * Math.PI * 2;
-      const radius = Math.random() * ARTIFACT_SPAWN_RADIUS; // 0 to 25 units from sphere center
-      const height = (Math.random() - 0.5) * ARTIFACT_SPAWN_RADIUS * 2; // Within sphere bounds
-      
-      const artifactPos = {
-        x: camera.position.x + Math.cos(angle) * radius,
-        y: camera.position.y + Math.sin(angle) * radius,
-        z: sphereCenterZ + height, // Position within the sphere ahead of camera
-        size: 3.0 + Math.random() * 2.0, // Random size between 3-5
-        id: currentIndex
-      };
+      if (artifactType === 'questions') {
+        // For questions: position relative to camera (will be updated to follow camera)
+        artifactPos = {
+          x: camera.position.x,
+          y: camera.position.y - 3,
+          z: camera.position.z - 8,
+          size: 3.0,
+          id: currentIndex
+        };
+      } else {
+        // For images: spawn around camera as before
+        const sphereCenterZ = camera.position.z - 10; // Closer to camera
+        
+        // Generate random point within the sphere
+        const angle = Math.random() * Math.PI * 2;
+        const radius = Math.random() * ARTIFACT_SPAWN_RADIUS; // 0 to 25 units from sphere center
+        const height = (Math.random() - 0.5) * ARTIFACT_SPAWN_RADIUS * 2; // Within sphere bounds
+        
+        artifactPos = {
+          x: camera.position.x + Math.cos(angle) * radius,
+          y: camera.position.y + Math.sin(angle) * radius,
+          z: sphereCenterZ + height, // Position within the sphere ahead of camera
+          size: 3.0 + Math.random() * 2.0, // Random size between 3-5
+          id: currentIndex
+        };
+      }
       
       // Create artifact synchronously and start fade-in animation
       const artifact = createArtifact(artifactPos);
@@ -651,7 +1070,8 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
       
       currentIndex++;
     }
-  }, [createArtifact, createLoadingPlaceholder, updateFadingArtifacts]);
+    } // Close the shouldCreateArtifacts block
+  }, [createArtifact, createLoadingPlaceholder, updateFadingArtifacts, artefactsEnabled, artifactType]);
 
   const updateVisibleChunks = useCallback(() => {
     const camera = cameraRef.current;
@@ -827,6 +1247,9 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
       camera.position.y = currentCameraPosition.current.y;
       camera.position.z = currentCameraPosition.current.z;
       
+      // Update artifact positions every frame for smooth animation
+      updateArtifactPositions();
+      
       // Only run expensive operations every few frames, but always run on first frame
       if (frameCount.current % EXPENSIVE_OP_FRAME_INTERVAL === 0 || frameCount.current === 1) {
         updateVisibleChunks();
@@ -841,7 +1264,7 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
     }
     
     animationFrameRef.current = requestAnimationFrame(animate);
-  }, [updateVisibleChunks]);
+  }, [updateVisibleChunks, updateArtifactPositions]);
 
   useEffect(() => {
     if (!containerRef.current) return;

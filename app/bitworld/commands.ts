@@ -30,6 +30,9 @@ export type CanvasMode = 'default' | 'air' | 'chat';
 export type BackgroundMode = 'transparent' | 'color' | 'image' | 'video' | 'space' | 'stream';
 export type CameraMode = 'default' | 'ripstop' | 'focus';
 
+export type GridMode = 'dots' | 'lines';
+export type ArtifactType = 'images' | 'questions';
+
 export interface ModeState {
     currentMode: CanvasMode;
     lightModeData: WorldData; // Ephemeral text data for air mode
@@ -50,6 +53,9 @@ export interface ModeState {
     cameraMode: CameraMode; // Camera tracking mode
     isIndentEnabled: boolean; // Whether smart indentation is enabled for Enter key
     isMoveMode: boolean; // Whether move mode is active for dragging text blocks
+    gridMode: GridMode; // 3D grid rendering mode
+    artefactsEnabled: boolean; // Whether 3D artifacts are enabled in space mode
+    artifactType: ArtifactType; // Type of artifacts to show (images or questions)
 }
 
 interface UseCommandSystemProps {
@@ -61,7 +67,7 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'cluster', 'frames', 'clear', 'cam', 'indent', 'bound', 'unbound', 'move', 'upload'];
+const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'cluster', 'frames', 'clear', 'cam', 'indent', 'bound', 'unbound', 'move', 'upload', 'artefacts'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'white', 'black', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro'];
@@ -105,6 +111,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         cameraMode: 'default', // Default camera mode (no intervention)
         isIndentEnabled: true, // Smart indentation enabled by default
         isMoveMode: false, // Move mode not active initially
+        gridMode: 'dots', // Default grid mode
+        artefactsEnabled: true, // Artifacts enabled by default in space mode
+        artifactType: 'images', // Default to image artifacts
     });
 
     // Utility function to match commands based on input
@@ -253,6 +262,35 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 }
             }
             return ['label', 'label --distance', "label 'text with spaces'"];
+        }
+
+        if (lowerInput === 'bound') {
+            const parts = input.split(' ');
+            
+            if (parts.length > 1) {
+                const secondArg = parts[1];
+                
+                // Handle --x and --y flags
+                if (secondArg === '--x') {
+                    if (parts.length > 2) {
+                        // User is typing the x value
+                        return [input];
+                    }
+                    // Just typed --x, show example
+                    return ['bound --x <width>'];
+                } else if (secondArg === '--y') {
+                    if (parts.length > 2) {
+                        // User is typing the y value
+                        return [input];
+                    }
+                    // Just typed --y, show example
+                    return ['bound --y <height>'];
+                } else {
+                    // Regular bound command - show as typed
+                    return [input];
+                }
+            }
+            return ['bound', 'bound --x', 'bound --y', 'bound --x <width> --y <height>'];
         }
 
         if (lowerInput === 'cam') {
@@ -1538,6 +1576,51 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             
             return null;
         }
+
+        if (commandToExecute.startsWith('artefacts')) {
+            const inputParts = commandState.input.trim().split(/\s+/);
+            const typeArg = inputParts.length > 1 ? inputParts[1] : undefined;
+            
+            if (typeArg === '--images') {
+                // Switch to images artifact type and enable artifacts
+                setModeState(prev => ({
+                    ...prev,
+                    artefactsEnabled: true,
+                    artifactType: 'images'
+                }));
+                setDialogueText("3D image artifacts enabled");
+            } else if (typeArg === '--questions') {
+                // Switch to questions artifact type and enable artifacts
+                setModeState(prev => ({
+                    ...prev,
+                    artefactsEnabled: true,
+                    artifactType: 'questions'
+                }));
+                setDialogueText("3D question artifacts enabled");
+            } else {
+                // No type specified - toggle artifacts enabled state
+                setModeState(prev => ({
+                    ...prev,
+                    artefactsEnabled: !prev.artefactsEnabled
+                }));
+                
+                const newState = !modeState.artefactsEnabled;
+                setDialogueText(newState ? "3D artifacts enabled" : "3D artifacts disabled");
+            }
+            
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+            
+            return null;
+        }
         
         // Handle commands that need text selection
         if (['transform', 'explain', 'summarize'].includes(commandToExecute.toLowerCase().split(' ')[0])) {
@@ -1775,5 +1858,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         isIndentEnabled: modeState.isIndentEnabled,
         isMoveMode: modeState.isMoveMode,
         exitMoveMode: () => setModeState(prev => ({ ...prev, isMoveMode: false })),
+        gridMode: modeState.gridMode,
+        cycleGridMode: () => setModeState(prev => ({ 
+            ...prev, 
+            gridMode: prev.gridMode === 'dots' ? 'lines' : 'dots' 
+        })),
+        artefactsEnabled: modeState.artefactsEnabled,
+        artifactType: modeState.artifactType,
     };
 }

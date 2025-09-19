@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import type { WorldData, Point, WorldEngine, PanStartInfo } from './world.engine'; // Adjust path as needed
 import { useDialogue, useDebugDialogue } from './dialogue';
 import { useMonogramSystem } from './monogram';
-import { useControllerSystem, createMonogramController, createCameraController } from './controllers';
+import { useControllerSystem, createMonogramController, createCameraController, createGridController } from './controllers';
 import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchicalFrames, HierarchicalFrame, HierarchyLevel } from './bit.blocks';
 
 // --- Constants --- (Copied and relevant ones kept)
@@ -272,7 +272,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     useEffect(() => {
         registerGroup(createMonogramController(monogramSystem));
         registerGroup(createCameraController(engine));
-    }, [registerGroup]);
+        registerGroup(createGridController({ cycleGridMode: engine.cycleGridMode }));
+    }, [registerGroup, engine.cycleGridMode]);
     
     // Enhanced debug text without monogram info - only calculate if debug is visible
     const enhancedDebugText = engine.settings.isDebugVisible ? `${debugText}

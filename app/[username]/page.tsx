@@ -55,6 +55,10 @@ export default function UserHome() {
         <Grid3DBackground 
           viewOffset={engine.viewOffset}
           zoomLevel={engine.zoomLevel}
+          gridMode={engine.gridMode}
+          artefactsEnabled={engine.artefactsEnabled}
+          artifactType={engine.artifactType}
+          getCompiledText={engine.getCompiledText}
         />
       )}
       

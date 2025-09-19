@@ -183,6 +183,10 @@ export interface WorldEngine {
     updateClusterLabels: () => Promise<void>;
     focusedBoundKey: string | null;
     isMoveMode: boolean;
+    gridMode: import('./commands').GridMode;
+    cycleGridMode: () => void;
+    artefactsEnabled: boolean;
+    artifactType: import('./commands').ArtifactType;
 }
 
 // --- Hook Input ---
@@ -690,6 +694,10 @@ export function useWorldEngine({
         isIndentEnabled,
         isMoveMode,
         exitMoveMode,
+        gridMode,
+        cycleGridMode,
+        artefactsEnabled,
+        artifactType,
     } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates, username });
 
     // Generate search data when search pattern changes
@@ -4048,5 +4056,9 @@ export function useWorldEngine({
         updateClusterLabels,
         focusedBoundKey, // Expose focused bound for rendering
         isMoveMode,
+        gridMode,
+        cycleGridMode,
+        artefactsEnabled,
+        artifactType,
     };
 }

@@ -58,6 +58,10 @@ export default function UserState() {
         <Grid3DBackground 
           viewOffset={engine.viewOffset}
           zoomLevel={engine.zoomLevel}
+          gridMode={engine.gridMode}
+          artefactsEnabled={engine.artefactsEnabled}
+          artifactType={engine.artifactType}
+          getCompiledText={engine.getCompiledText}
         />
       )}
       

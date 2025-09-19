@@ -221,3 +221,24 @@ export function createCameraController(engine: any): ControllerGroup {
         ]
     };
 }
+
+// --- Grid Controller ---
+export function createGridController(gridSystem: any): ControllerGroup {
+    return {
+        name: 'grid',
+        description: '3D Grid Controls',
+        enabled: true,
+        bindings: [
+            {
+                key: 'g',
+                ctrlOrMeta: true,
+                description: 'Cycle grid mode (dots/lines)',
+                action: () => {
+                    if (gridSystem?.cycleGridMode) {
+                        gridSystem.cycleGridMode();
+                    }
+                }
+            }
+        ]
+    };
+}
