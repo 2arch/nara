@@ -3,6 +3,10 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 import * as THREE from 'three';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass';
+import { SepiaShader, CoronaShader } from './shaders';
 
 export type GridMode = 'dots' | 'lines';
 export type ArtifactType = 'images' | 'questions';
@@ -35,6 +39,7 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const labelRendererRef = useRef<CSS2DRenderer | null>(null);
+  const composerRef = useRef<EffectComposer | null>(null);
   const chunksRef = useRef<Map<string, THREE.Group>>(new Map());
   const artifactsRef = useRef<Map<string, THREE.Mesh>>(new Map());
   const fadingArtifactsRef = useRef<Map<string, {mesh: THREE.Mesh, startTime: number, duration: number}>>(new Map());
@@ -100,8 +105,14 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
               }
             }
           });
-          artifact.geometry.dispose();
-          (artifact.material as THREE.Material).dispose();
+          if (artifact.geometry) artifact.geometry.dispose();
+          if (artifact.material) {
+            if (Array.isArray(artifact.material)) {
+              artifact.material.forEach(mat => mat.dispose());
+            } else {
+              (artifact.material as THREE.Material).dispose();
+            }
+          }
         });
         artifactsRef.current.clear();
         
@@ -149,6 +160,92 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
       }
     }
   }, [artifactType]);
+
+  // Content change monitoring for question artifacts
+  const contentMonitorRef = useRef<NodeJS.Timeout | null>(null);
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Function to force artifact refresh
+  const forceQuestionArtifactRefresh = useCallback(() => {
+    console.log('🔄 Forcing question artifact refresh');
+    
+    const scene = sceneRef.current;
+    if (scene && artifactsRef.current.size > 0) {
+      // Clear existing question artifacts to force regeneration
+      artifactsRef.current.forEach((artifact, artifactId) => {
+        scene.remove(artifact);
+        artifact.traverse((child) => {
+          if (child instanceof CSS2DObject) {
+            if (child.element && child.element.parentNode) {
+              child.element.parentNode.removeChild(child.element);
+            }
+          }
+        });
+        artifact.geometry.dispose();
+        (artifact.material as THREE.Material).dispose();
+      });
+      artifactsRef.current.clear();
+      
+      // Clear the cache so new questions will be extracted fresh
+      questionsRef.current = [];
+      lastContentRef.current = '';
+    }
+  }, []);
+  
+  useEffect(() => {
+    if (artifactType === 'questions' && getCompiledText) {
+      // Clear any existing monitor
+      if (contentMonitorRef.current) {
+        clearInterval(contentMonitorRef.current);
+      }
+      
+      // Set up content monitoring (every 1 second, less aggressive)
+      contentMonitorRef.current = setInterval(() => {
+        const compiledText = getCompiledText();
+        const contentHash = JSON.stringify(compiledText);
+        
+        // Only refresh if content actually changed and we have existing artifacts
+        if (contentHash !== lastContentRef.current && 
+            lastContentRef.current !== '' && 
+            artifactsRef.current.size > 0) {
+          
+          console.log('📝 Content change detected, will refresh...');
+          
+          // Clear any pending refresh to avoid multiple triggers
+          if (refreshTimeoutRef.current) {
+            clearTimeout(refreshTimeoutRef.current);
+          }
+          
+          // Debounced refresh - wait 2 seconds after last change
+          refreshTimeoutRef.current = setTimeout(() => {
+            forceQuestionArtifactRefresh();
+          }, 2000);
+        }
+      }, 1000); // Check every 1 second (less aggressive)
+    } else {
+      // Clear monitor if not question type
+      if (contentMonitorRef.current) {
+        clearInterval(contentMonitorRef.current);
+        contentMonitorRef.current = null;
+      }
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+        refreshTimeoutRef.current = null;
+      }
+    }
+    
+    // Cleanup on unmount or type change
+    return () => {
+      if (contentMonitorRef.current) {
+        clearInterval(contentMonitorRef.current);
+        contentMonitorRef.current = null;
+      }
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+        refreshTimeoutRef.current = null;
+      }
+    };
+  }, [artifactType, forceQuestionArtifactRefresh]);
   
   // Memoize questions to prevent infinite re-renders
   const questionsRef = useRef<string[]>([]);
@@ -171,8 +268,11 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
     
     console.log('🔍 Extracting questions from compiled text. Lines found:', Object.keys(compiledText).length);
     
+    // Sort line numbers to process in chronological order (top to bottom)
+    const sortedLineYs = Object.keys(compiledText).map(y => parseInt(y)).sort((a, b) => a - b);
+    
     // Look for text lines that end with question marks
-    for (const lineY in compiledText) {
+    for (const lineY of sortedLineYs) {
       const content = compiledText[lineY].trim();
       
       // Filter for questions (end with ?) and have some substance (> 5 chars)
@@ -188,7 +288,7 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
       /\?$/
     ];
     
-    for (const lineY in compiledText) {
+    for (const lineY of sortedLineYs) {
       const content = compiledText[lineY].trim();
       
       // Look for question patterns, avoid duplicates
@@ -468,6 +568,9 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
   }, []);
   
   const createArtifact = useCallback((position: {x: number, y: number, z: number, size: number, id: number}) => {
+    let mesh: THREE.Object3D;
+    
+    // Use simple point geometry for all artifacts (including questions)
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
     const material = new THREE.PointsMaterial({
@@ -476,7 +579,8 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
       sizeAttenuation: false
     });
     
-    const mesh = new THREE.Points(geometry, material);
+    mesh = new THREE.Points(geometry, material);
+    
     mesh.position.set(position.x, position.y, position.z);
     
     // Create CSS2D label
@@ -495,16 +599,14 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
       const questions = extractQuestionsFromContent();
       
       if (questions.length > 0) {
-        // Pick a random question
-        const randomQuestion = questions[Math.floor(Math.random() * questions.length)];
+        // Pick the most recent question (last one in the array)
+        const mostRecentQuestion = questions[questions.length - 1];
         
         // Style for question display
         labelDiv.style.cssText = `
           padding: 16px;
           background: transparent;
           font-family: 'Optima', sans-serif;
-          font-weight: bold;
-          letter-spacing: -0.1em;
           font-size: 54px;
           line-height: 1.4;
           color: #2c3e50;
@@ -514,9 +616,9 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
           word-wrap: break-word;
         `;
         
-        labelDiv.textContent = randomQuestion;
+        labelDiv.textContent = mostRecentQuestion;
         
-        console.log('✨ Creating question artifact', position.id, 'with question:', randomQuestion);
+        console.log('✨ Creating question artifact', position.id, 'with question:', mostRecentQuestion);
       } else {
         // Fallback if no questions found - use the preloaded question
         labelDiv.style.cssText = `
@@ -730,34 +832,8 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
     
     artifactsRef.current.forEach((artifact, artifactId) => {
       if (artifactType === 'questions') {
-        // Base offsets
-        const baseOffsetX = 0;    // Centered horizontally
-        const baseOffsetY = -3;   // Slightly below camera view
-        const baseOffsetZ = -8;   // In front of camera
-        
-        // Wave motion parameters
-        const waveAmplitudeX = 0.3;  // Side-to-side sway
-        const waveAmplitudeY = 0.2;  // Gentle up-down bob
-        const waveAmplitudeZ = 0.4;  // Forward-back drift
-        const waveSpeed = 0.8;       // Gentle wave speed
-        
-        // Create wave motion with different phases for natural movement
-        const waveX = Math.sin(time * waveSpeed) * waveAmplitudeX;
-        const waveY = Math.sin(time * waveSpeed * 1.2) * waveAmplitudeY; // Slightly different frequency
-        const waveZ = Math.cos(time * waveSpeed * 0.9) * waveAmplitudeZ; // Different phase for depth
-        
-        // Calculate target position (where the artifact should be)
-        const targetX = camera.position.x + baseOffsetX + waveX;
-        const targetY = camera.position.y + baseOffsetY + waveY;
-        const targetZ = camera.position.z + baseOffsetZ + waveZ;
-        
-        // Smooth interpolation towards target position
-        const lerpFactor = 0.08; // Adjust this for follow smoothness (0.02 = very smooth/slow, 0.2 = snappy)
-        
-        artifact.position.x += (targetX - artifact.position.x) * lerpFactor;
-        artifact.position.y += (targetY - artifact.position.y) * lerpFactor;
-        artifact.position.z += (targetZ - artifact.position.z) * lerpFactor;
-        
+        // Keep corona as large fixed background - don't move it
+        // The corona should stay at its original position to maintain size
         return;
       }
       
@@ -1218,8 +1294,9 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
     const labelRenderer = labelRendererRef.current;
     const scene = sceneRef.current;
     const camera = cameraRef.current;
+    const composer = composerRef.current;
 
-    if (renderer && scene && camera) {
+    if (renderer && scene && camera && composer) {
       frameCount.current++;
       
       // Adaptive camera interpolation based on distance and zoom state
@@ -1250,12 +1327,14 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
       // Update artifact positions every frame for smooth animation
       updateArtifactPositions();
       
+      // Corona shader removed - no time updates needed
+      
       // Only run expensive operations every few frames, but always run on first frame
       if (frameCount.current % EXPENSIVE_OP_FRAME_INTERVAL === 0 || frameCount.current === 1) {
         updateVisibleChunks();
       }
       
-      renderer.render(scene, camera);
+      composer.render();
       
       // Render labels
       if (labelRenderer) {
@@ -1284,7 +1363,7 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
     sceneRef.current = scene;
 
     // Add fog for depth perception - fade out before render distance
-    const fogColor = new THREE.Color(0xf2f2f2);
+    const fogColor = new THREE.Color(0x000000);
     scene.fog = new THREE.Fog(fogColor, 5, 40);
 
     // Setup camera
@@ -1303,7 +1382,7 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
     // Setup renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setClearColor(0xf2f2f2, 1); // Light gray background
+    renderer.setClearColor(0x000000, 1); // Black background for corona effect
     
     // Style the canvas element
     renderer.domElement.style.pointerEvents = 'none';
@@ -1324,6 +1403,17 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
     containerRef.current.appendChild(labelRenderer.domElement);
     labelRendererRef.current = labelRenderer;
 
+    // Setup post-processing with sepia effect
+    const composer = new EffectComposer(renderer);
+    const renderPass = new RenderPass(scene, camera);
+    composer.addPass(renderPass);
+    
+    // Disable sepia for corona effect
+    // const sepiaPass = new ShaderPass(SepiaShader);
+    // sepiaPass.uniforms['amount'].value = 0.5; // 50% sepia effect
+    // composer.addPass(sepiaPass);
+    
+    composerRef.current = composer;
 
     // Fetch Are.na blocks
     fetchArenaBlocks();
@@ -1343,6 +1433,10 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
       
       if (labelRenderer) {
         labelRenderer.setSize(window.innerWidth, window.innerHeight);
+      }
+      
+      if (composer) {
+        composer.setSize(window.innerWidth, window.innerHeight);
       }
     };
     

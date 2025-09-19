@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Point, WorldData } from './world.engine';
-import { generateImage, generateVideo } from './ai';
+import { generateImage, generateVideo, setDialogueWithRevert } from './ai';
 
 // --- Command System Types ---
 export interface CommandState {
@@ -1120,7 +1120,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                         background: undefined
                     }
                 }));
-                setDialogueText("Text style reset to default");
+                setDialogueWithRevert("Text style reset to default", setDialogueText);
             }
             
             // Clear command mode
@@ -1154,7 +1154,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                         ...prev,
                         fontFamily: selectedFont
                     }));
-                    setDialogueText(`Font changed to: ${selectedFont}`);
+                    setDialogueWithRevert(`Font changed to: ${selectedFont}`, setDialogueText);
                 } else {
                     setDialogueText(`Font not found. Available fonts: ${FONT_COMMANDS.join(', ')}`);
                 }
@@ -1224,7 +1224,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     searchPattern: searchTerm,
                     isSearchActive: true
                 }));
-                setDialogueText(`Search active: "${searchTerm}" - Press Escape to clear`);
+                setDialogueWithRevert(`Search active: "${searchTerm}" - Press Escape to clear`, setDialogueText);
             } else {
                 // No search term - clear search
                 setModeState(prev => ({
@@ -1232,7 +1232,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     searchPattern: '',
                     isSearchActive: false
                 }));
-                setDialogueText("Search cleared");
+                setDialogueWithRevert("Search cleared", setDialogueText);
             }
             
             // Clear command mode
@@ -1320,10 +1320,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 
                 // Navigate to random existing state page
                 router.push(`/@${username}/${randomStateName}`);
-                setDialogueText(`Random state: ${randomStateName}`);
+                setDialogueWithRevert(`Random state: ${randomStateName}`, setDialogueText);
                 return null;
             } else if (availableStates.length === 0) {
-                setDialogueText("No existing states found to navigate to");
+                setDialogueWithRevert("No existing states found to navigate to", setDialogueText);
                 return null;
             }
             
@@ -1474,7 +1474,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             }));
             
             const newState = !modeState.isIndentEnabled;
-            setDialogueText(newState ? "Smart indentation enabled" : "Smart indentation disabled");
+            setDialogueWithRevert(newState ? "Smart indentation enabled" : "Smart indentation disabled", setDialogueText);
             
             // Clear command mode
             setCommandState({
@@ -1561,7 +1561,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             }));
             
             const newState = !modeState.isMoveMode;
-            setDialogueText(newState ? "Move mode enabled - hover over text blocks to drag them. Press Escape to exit." : "Move mode disabled");
+            setDialogueWithRevert(newState ? "Move mode enabled - hover over text blocks to drag them. Press Escape to exit." : "Move mode disabled", setDialogueText);
             
             // Clear command mode
             setCommandState({
@@ -1588,7 +1588,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     artefactsEnabled: true,
                     artifactType: 'images'
                 }));
-                setDialogueText("3D image artifacts enabled");
+                setDialogueWithRevert("3D image artifacts enabled", setDialogueText);
             } else if (typeArg === '--questions') {
                 // Switch to questions artifact type and enable artifacts
                 setModeState(prev => ({
@@ -1596,7 +1596,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     artefactsEnabled: true,
                     artifactType: 'questions'
                 }));
-                setDialogueText("3D question artifacts enabled");
+                setDialogueWithRevert("3D question artifacts enabled", setDialogueText);
             } else {
                 // No type specified - toggle artifacts enabled state
                 setModeState(prev => ({
@@ -1605,7 +1605,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 }));
                 
                 const newState = !modeState.artefactsEnabled;
-                setDialogueText(newState ? "3D artifacts enabled" : "3D artifacts disabled");
+                setDialogueWithRevert(newState ? "3D artifacts enabled" : "3D artifacts disabled", setDialogueText);
             }
             
             // Clear command mode

@@ -10,6 +10,10 @@ const DEFAULT_TEXT = '';
 // Global abort controller for interrupting AI operations
 let globalAbortController: AbortController | null = null;
 
+// Global cache management
+let currentCachedContent: string | null = null;
+let cacheExpiration: number | null = null;
+
 /**
  * Create a new abort controller for AI operations
  */
@@ -109,15 +113,15 @@ export async function transformText(text: string, instructions: string): Promise
         const response = await Promise.race([
             ai.models.generateContent({
                 model: 'gemini-2.5-flash-lite',
-                contents: `Transform the following text according to these instructions: "${instructions}"
+                contents: `Transform: "${instructions}"
 
-Original text: "${text}"
+Text: "${text}"
 
-Respond with ONLY the transformed text. No explanation, no quotes.`,
+Output only the result.`,
                 config: {
-                    maxOutputTokens: 150,
-                    temperature: 0.3,
-                    systemInstruction: 'You transform text according to user instructions. Respond only with the transformed result.'
+                    maxOutputTokens: 75,
+                    temperature: 0.9,
+                    systemInstruction: 'Transform text. Output result only. Be sharp and direct.'
                 }
             }),
             new Promise((_, reject) => {
@@ -150,17 +154,21 @@ export async function explainText(text: string, analysisType: string = 'analysis
         }
 
         const prompt = analysisType === 'analysis' 
-            ? `Explain this text: "${text}"`
-            : `Explain this text focusing on "${analysisType}": "${text}"`;
+            ? `What's the core insight here?
+
+"${text}"`
+            : `What's the ${analysisType} pattern here?
+
+"${text}"`;
 
         const response = await Promise.race([
             ai.models.generateContent({
                 model: 'gemini-2.5-flash-lite',
                 contents: prompt,
                 config: {
-                    maxOutputTokens: 200,
-                    temperature: 0.2,
-                    systemInstruction: 'You explain text clearly and concisely. Focus on the key meaning and context.'
+                    maxOutputTokens: 60,
+                    temperature: 0.9,
+                    systemInstruction: 'Lead with sharp questions. Get to the core insight. Maximum 2 sentences.'
                 }
             }),
             new Promise((_, reject) => {
@@ -193,17 +201,21 @@ export async function summarizeText(text: string, focus?: string): Promise<strin
         }
 
         const prompt = focus 
-            ? `Summarize this text focusing on "${focus}": "${text}"`
-            : `Summarize this text: "${text}"`;
+            ? `What's the essence of "${focus}" here?
+
+"${text}"`
+            : `What's the essence here?
+
+"${text}"`;
 
         const response = await Promise.race([
             ai.models.generateContent({
                 model: 'gemini-2.5-flash-lite',
                 contents: prompt,
                 config: {
-                    maxOutputTokens: 150,
-                    temperature: 0.1,
-                    systemInstruction: 'You summarize text concisely, capturing the main points in a clear and brief way.'
+                    maxOutputTokens: 50,
+                    temperature: 0.9,
+                    systemInstruction: 'Distill to essence. Lead with sharp questions. Maximum 2 sentences.'
                 }
             }),
             new Promise((_, reject) => {
@@ -286,33 +298,57 @@ export async function chatWithAI(message: string, useCache: boolean = true): Pro
             throw new Error('AI operation was interrupted');
         }
         
-        // Use world context if available and enabled
+        // Use world context cache if available and enabled
         if (useCache && currentWorldContext) {
             try {
-                const contextContent = `Canvas context: ${currentWorldContext.compiledText}\nLabels: ${currentWorldContext.labels.map(l => l.text).join(', ')}\n\nUser: ${message}\n\nRespond briefly and conversationally. Reference canvas content when relevant.`;
+                // Create or get cached content for world context
+                const cachedContentName = await createWorldContextCache();
                 
-                // Create a promise race with abort signal
-                response = await Promise.race([
-                    ai.models.generateContent({
-                        model: 'gemini-2.5-flash-lite',
-                        contents: contextContent,
-                        config: {
-                            maxOutputTokens: 100,
-                            temperature: 0.7,
-                            systemInstruction: 'You are a concise ambient navigator. Give brief, helpful responses about canvas content connections. Be conversational, not academic.'
-                        }
-                    }),
-                    new Promise((_, reject) => {
-                        abortController.signal.addEventListener('abort', () => {
-                            reject(new Error('AI operation was interrupted'));
-                        });
-                    })
-                ]);
+                if (cachedContentName) {
+                    // Use cached content with user message
+                    response = await Promise.race([
+                        ai.models.generateContent({
+                            model: 'gemini-2.5-flash-lite',
+                            contents: message,
+                            config: {
+                                cachedContent: cachedContentName,
+                                maxOutputTokens: 50,
+                                temperature: 0.9,
+                                systemInstruction: 'Lead with a sharp question. Be brutally concise. Maximum 2 sentences total.'
+                            }
+                        }),
+                        new Promise((_, reject) => {
+                            abortController.signal.addEventListener('abort', () => {
+                                reject(new Error('AI operation was interrupted'));
+                            });
+                        })
+                    ]);
+                } else {
+                    // Fallback to old method if caching fails
+                    const contextContent = `Canvas context: ${currentWorldContext.compiledText}\nLabels: ${currentWorldContext.labels.map(l => l.text).join(', ')}\n\nUser: ${message}\n\nLead with a sharp question. Be brutally concise.`;
+                    
+                    response = await Promise.race([
+                        ai.models.generateContent({
+                            model: 'gemini-2.5-flash-lite',
+                            contents: contextContent,
+                            config: {
+                                maxOutputTokens: 50,
+                                temperature: 0.9,
+                                systemInstruction: 'Lead with a sharp question. Be brutally concise. Maximum 2 sentences total.'
+                            }
+                        }),
+                        new Promise((_, reject) => {
+                            abortController.signal.addEventListener('abort', () => {
+                                reject(new Error('AI operation was interrupted'));
+                            });
+                        })
+                    ]);
+                }
             } catch (error) {
                 if (error instanceof Error && error.message === 'AI operation was interrupted') {
                     throw error;
                 }
-                console.error('Error using world context, falling back:', error);
+                console.error('Error using world context cache, falling back:', error);
                 // Fall back to non-cached request
                 useCache = false;
             }
@@ -333,11 +369,11 @@ ${conversationContext}
 
 User: ${message}
 
-Respond naturally and conversationally. Keep responses concise but complete.`,
+Start with a provocative question. Maximum 2 sentences total.`,
                     config: {
-                        maxOutputTokens: 300,
-                        temperature: 0.7,
-                        systemInstruction: 'You are a helpful assistant engaged in a natural conversation. Be conversational, helpful, and concise. Remember the context of the conversation.'
+                        maxOutputTokens: 75,
+                        temperature: 0.9,
+                        systemInstruction: 'Start with a provocative question. Maximum 2 sentences total.'
                     }
                 }),
                 new Promise((_, reject) => {
@@ -380,6 +416,83 @@ export function clearChatHistory(): void {
  */
 export function clearWorldContext(): void {
     currentWorldContext = null;
+}
+
+/**
+ * Create or update cached content for world context
+ */
+export async function createWorldContextCache(): Promise<string | null> {
+    if (!currentWorldContext) {
+        return null;
+    }
+
+    try {
+        // Check if current cache is still valid
+        if (currentCachedContent && cacheExpiration && Date.now() < cacheExpiration) {
+            return currentCachedContent;
+        }
+
+        // Create comprehensive world context content
+        const worldContextContent = [
+            {
+                role: 'user',
+                parts: [
+                    {
+                        text: `Canvas World Context:
+
+Compiled Text Content:
+${currentWorldContext.compiledText}
+
+Labels and Positions:
+${currentWorldContext.labels.map(l => `- "${l.text}" at (${l.x}, ${l.y})`).join('\n')}
+
+Metadata:
+${currentWorldContext.metadata || 'No additional metadata'}
+
+This context represents the current state of the canvas/world that the user is working with. Use this information to provide contextually relevant responses about the canvas content, spatial relationships, and connections between elements.`
+                    }
+                ]
+            }
+        ];
+
+        // Create cached content with 1 hour TTL
+        const cachedContent = await ai.caches.create({
+            model: 'gemini-2.5-flash-lite',
+            config: {
+                contents: worldContextContent,
+                systemInstruction: {
+                    role: 'system',
+                    parts: [{ text: 'You are a concise ambient navigator. Lead with sharp questions. Be brutally concise. No explanations.' }]
+                },
+                ttl: '3600s', // 1 hour cache
+                displayName: 'World Context Cache'
+            }
+        });
+
+        // Store cache reference and expiration
+        currentCachedContent = cachedContent.name || null;
+        cacheExpiration = Date.now() + (60 * 60 * 1000); // 1 hour from now
+
+        return currentCachedContent;
+    } catch (error) {
+        console.error('Error creating world context cache:', error);
+        return null;
+    }
+}
+
+/**
+ * Clear cached content
+ */
+export async function clearWorldContextCache(): Promise<void> {
+    if (currentCachedContent) {
+        try {
+            await ai.caches.delete({ name: currentCachedContent });
+        } catch (error) {
+            console.error('Error deleting cache:', error);
+        }
+        currentCachedContent = null;
+        cacheExpiration = null;
+    }
 }
 
 /**
