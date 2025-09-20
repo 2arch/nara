@@ -62,6 +62,7 @@ export default function UserState() {
           artefactsEnabled={engine.artefactsEnabled}
           artifactType={engine.artifactType}
           getCompiledText={engine.getCompiledText}
+          compiledTextCache={engine.compiledTextCache}
         />
       )}
       

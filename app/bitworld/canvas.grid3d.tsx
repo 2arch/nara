@@ -20,7 +20,8 @@ interface Grid3DBackgroundProps {
   gridMode?: GridMode; // Grid rendering mode
   artefactsEnabled?: boolean; // Whether to show 3D artifacts
   artifactType?: ArtifactType; // Type of artifacts to show (images or questions)
-  getCompiledText?: () => { [lineY: number]: string }; // Content stream access
+  getCompiledText?: () => { [lineY: number]: string }; // Access to compiled text from world engine
+  compiledTextCache?: { [lineY: number]: string }; // Direct access to compiled text cache for updates
 }
 
 const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({ 
@@ -32,7 +33,8 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
   gridMode = 'dots',
   artefactsEnabled = true,
   artifactType = 'images',
-  getCompiledText
+  getCompiledText,
+  compiledTextCache
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -146,7 +148,6 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
         });
         fadingInArtifactsRef.current.clear();
         
-        console.log('🧹 Cleared all artifacts due to type change:', artifactType);
         
         // Clear any pending cleanup timeout
         if (artifactCleanupTimeoutRef.current) {
@@ -155,157 +156,30 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
         
         // Add a small delay before allowing new artifacts to be created
         artifactCleanupTimeoutRef.current = window.setTimeout(() => {
-          console.log('🚀 Ready to create new artifacts for type:', artifactType);
         }, 500);
       }
     }
   }, [artifactType]);
 
-  // Content change monitoring for question artifacts
-  const contentMonitorRef = useRef<NodeJS.Timeout | null>(null);
-  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  
-  // Function to force artifact refresh
-  const forceQuestionArtifactRefresh = useCallback(() => {
-    console.log('🔄 Forcing question artifact refresh');
-    
-    const scene = sceneRef.current;
-    if (scene && artifactsRef.current.size > 0) {
-      // Clear existing question artifacts to force regeneration
-      artifactsRef.current.forEach((artifact, artifactId) => {
-        scene.remove(artifact);
+  // Update questions content when compiled text changes
+  useEffect(() => {
+    if (artifactType === 'questions' && compiledTextCache) {
+      // Update existing question artifacts with new content
+      artifactsRef.current.forEach((artifact) => {
         artifact.traverse((child) => {
           if (child instanceof CSS2DObject) {
-            if (child.element && child.element.parentNode) {
-              child.element.parentNode.removeChild(child.element);
+            const contentLines = Object.values(compiledTextCache);
+            let questionsText = 'A space for your biggest questions.';
+            if (contentLines.length > 0) {
+              questionsText = contentLines.join('\n').trim() || questionsText;
             }
+            child.element.textContent = questionsText;
           }
         });
-        artifact.geometry.dispose();
-        (artifact.material as THREE.Material).dispose();
       });
-      artifactsRef.current.clear();
-      
-      // Clear the cache so new questions will be extracted fresh
-      questionsRef.current = [];
-      lastContentRef.current = '';
     }
-  }, []);
-  
-  useEffect(() => {
-    if (artifactType === 'questions' && getCompiledText) {
-      // Clear any existing monitor
-      if (contentMonitorRef.current) {
-        clearInterval(contentMonitorRef.current);
-      }
-      
-      // Set up content monitoring (every 1 second, less aggressive)
-      contentMonitorRef.current = setInterval(() => {
-        const compiledText = getCompiledText();
-        const contentHash = JSON.stringify(compiledText);
-        
-        // Only refresh if content actually changed and we have existing artifacts
-        if (contentHash !== lastContentRef.current && 
-            lastContentRef.current !== '' && 
-            artifactsRef.current.size > 0) {
-          
-          console.log('📝 Content change detected, will refresh...');
-          
-          // Clear any pending refresh to avoid multiple triggers
-          if (refreshTimeoutRef.current) {
-            clearTimeout(refreshTimeoutRef.current);
-          }
-          
-          // Debounced refresh - wait 2 seconds after last change
-          refreshTimeoutRef.current = setTimeout(() => {
-            forceQuestionArtifactRefresh();
-          }, 2000);
-        }
-      }, 1000); // Check every 1 second (less aggressive)
-    } else {
-      // Clear monitor if not question type
-      if (contentMonitorRef.current) {
-        clearInterval(contentMonitorRef.current);
-        contentMonitorRef.current = null;
-      }
-      if (refreshTimeoutRef.current) {
-        clearTimeout(refreshTimeoutRef.current);
-        refreshTimeoutRef.current = null;
-      }
-    }
-    
-    // Cleanup on unmount or type change
-    return () => {
-      if (contentMonitorRef.current) {
-        clearInterval(contentMonitorRef.current);
-        contentMonitorRef.current = null;
-      }
-      if (refreshTimeoutRef.current) {
-        clearTimeout(refreshTimeoutRef.current);
-        refreshTimeoutRef.current = null;
-      }
-    };
-  }, [artifactType, forceQuestionArtifactRefresh]);
-  
-  // Memoize questions to prevent infinite re-renders
-  const questionsRef = useRef<string[]>([]);
-  const lastContentRef = useRef<string>('');
-  
-  // Extract questions from compiled text
-  const extractQuestionsFromContent = useCallback((): string[] => {
-    if (!getCompiledText) return [];
-    
-    const compiledText = getCompiledText();
-    
-    // Create a content hash to detect changes
-    const contentHash = JSON.stringify(compiledText);
-    if (contentHash === lastContentRef.current) {
-      return questionsRef.current; // Return cached questions if content hasn't changed
-    }
-    
-    lastContentRef.current = contentHash;
-    const questions: string[] = [];
-    
-    console.log('🔍 Extracting questions from compiled text. Lines found:', Object.keys(compiledText).length);
-    
-    // Sort line numbers to process in chronological order (top to bottom)
-    const sortedLineYs = Object.keys(compiledText).map(y => parseInt(y)).sort((a, b) => a - b);
-    
-    // Look for text lines that end with question marks
-    for (const lineY of sortedLineYs) {
-      const content = compiledText[lineY].trim();
-      
-      // Filter for questions (end with ?) and have some substance (> 5 chars)
-      if (content.endsWith('?') && content.length > 5) {
-        console.log('❓ Found question ending with ?:', content);
-        questions.push(content);
-      }
-    }
-    
-    // Also look for common question patterns
-    const questionPatterns = [
-      /^(what|how|why|when|where|who|which|can|could|would|should|will|is|are|do|does|did)\s/i,
-      /\?$/
-    ];
-    
-    for (const lineY of sortedLineYs) {
-      const content = compiledText[lineY].trim();
-      
-      // Look for question patterns, avoid duplicates
-      if (content.length > 10 && 
-          questionPatterns.some(pattern => pattern.test(content)) && 
-          !questions.includes(content)) {
-        console.log('❓ Found question by pattern:', content);
-        questions.push(content);
-      }
-    }
-    
-    console.log('✅ Total questions extracted:', questions.length);
-    questions.forEach((q, i) => console.log(`  ${i + 1}. ${q}`));
-    
-    questionsRef.current = questions;
-    return questions;
-  }, []);
+  }, [artifactType, compiledTextCache]);
+
   
   // Easing functions for smooth animations
   const easeOutCubic = (t: number): number => {
@@ -326,7 +200,6 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
   const preloadArenaImages = useCallback(async () => {
     if (imagesPreloadedRef.current || arenaBlocksRef.current.length === 0) return;
     
-    console.log('Preloading', arenaBlocksRef.current.length, 'arena images...');
     
     const imagePromises = arenaBlocksRef.current.map(async (block, index) => {
       if (!block.image) return null;
@@ -339,11 +212,9 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
         img.crossOrigin = 'anonymous';
         img.onload = () => {
           preloadedImagesRef.current.set(index, img);
-          console.log(`Preloaded image ${index + 1}/${arenaBlocksRef.current.length}`);
           resolve(img);
         };
         img.onerror = () => {
-          console.log(`Failed to preload image ${index + 1}: ${imageUrl.substring(0, 50)}...`);
           resolve(null);
         };
         img.src = imageUrl;
@@ -352,7 +223,6 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
     
     await Promise.all(imagePromises);
     imagesPreloadedRef.current = true;
-    console.log('Finished preloading arena images. Cached:', preloadedImagesRef.current.size, 'images');
   }, []);
   
   // Fetch Are.na channel blocks
@@ -361,7 +231,6 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
     
     arenaLoadingRef.current = true;
     try {
-      console.log('Fetching Are.na blocks...');
       // Use the correct API format for channel contents
       const response = await fetch('https://api.are.na/v2/channels/cool-yita1womc2m?per=50', {
         headers: {
@@ -374,40 +243,23 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
       }
       
       const data = await response.json();
-      console.log('Arena API response:', data);
       
       // Handle search response structure
       let blocks = [];
       if (data.blocks && Array.isArray(data.blocks)) {
         blocks = data.blocks;
-        console.log('Using data.blocks array');
       } else if (data.contents && Array.isArray(data.contents)) {
         blocks = data.contents;
-        console.log('Using data.contents array');
       } else if (Array.isArray(data)) {
         blocks = data;
-        console.log('Using data as array');
       } else {
-        console.log('Unexpected data structure:', Object.keys(data));
         blocks = [];
       }
       
-      console.log('Raw blocks:', blocks.length);
-      console.log('Sample block:', blocks[0]);
       
       // Filter for image blocks only
       const imageBlocks = blocks.filter((block: any) => {
         if (block.class === 'Image') {
-          console.log('Image block structure:', {
-            id: block.id,
-            title: block.title,
-            image: block.image,
-            hasImageObj: !!block.image,
-            hasUrl: !!block.image?.url,
-            hasDisplay: !!block.image?.display?.url,
-            hasLarge: !!block.image?.large?.url,
-            hasOriginal: !!block.image?.original?.url
-          });
         }
         
         // Check for any available image URL
@@ -424,8 +276,6 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
       
       arenaBlocksRef.current = imageBlocks;
       arenaLoadedRef.current = true;
-      console.log('Filtered Arena image blocks:', imageBlocks.length);
-      console.log('Sample image block:', imageBlocks[0]);
       
       // Start preloading images
       preloadArenaImages();
@@ -527,45 +377,6 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
   }, [chunkSize, voxelSize, gridMode]);
   
   
-  const createLoadingPlaceholder = useCallback((position: {x: number, y: number, z: number, size: number, id: number}) => {
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
-    const material = new THREE.PointsMaterial({
-      color: 0xcccccc, // Light gray
-      size: 0.5,
-      sizeAttenuation: false
-    });
-    
-    const mesh = new THREE.Points(geometry, material);
-    mesh.position.set(position.x, position.y, position.z);
-    
-    // Create simple loading placeholder label
-    const labelDiv = document.createElement('div');
-    labelDiv.className = 'loading-placeholder';
-    labelDiv.style.cssText = `
-      width: 80px; 
-      height: 80px; 
-      background: linear-gradient(45deg, #f0f0f0, #e0e0e0); 
-      border-radius: 8px; 
-      display: flex; 
-      align-items: center; 
-      justify-content: center;
-      font-size: 12px;
-      color: #666;
-      pointer-events: none;
-      animation: pulse 1.5s infinite;
-    `;
-    labelDiv.innerHTML = '⏳';
-    
-    const label = new CSS2DObject(labelDiv);
-    label.position.set(0, 0, 0);
-    mesh.add(label);
-    
-    // Set initial opacity to 0 for fade-in animation
-    mesh.userData.opacity = 0.0;
-    
-    return mesh;
-  }, []);
   
   const createArtifact = useCallback((position: {x: number, y: number, z: number, size: number, id: number}) => {
     let mesh: THREE.Object3D;
@@ -591,56 +402,34 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
     labelDiv.style.overflow = 'hidden';
     labelDiv.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
     
-    console.log('🎯 Creating artifact with type:', artifactType);
-    
     if (artifactType === 'questions') {
-      // Handle questions artifact type
-      console.log('📝 Creating questions artifact...');
-      const questions = extractQuestionsFromContent();
+      labelDiv.style.cssText = `
+        padding: 16px;
+        background: transparent;
+        font-family: 'Magpie', sans-serif;
+        font-weight: regular;
+        font-size: 54px;
+        line-height: 1.4;
+        color: #f2f2f2;
+        text-align: center;
+        pointer-events: none;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+      `;
       
-      if (questions.length > 0) {
-        // Pick the most recent question (last one in the array)
-        const mostRecentQuestion = questions[questions.length - 1];
-        
-        // Style for question display
-        labelDiv.style.cssText = `
-          padding: 16px;
-          background: transparent;
-          font-family: 'Optima', sans-serif;
-          font-size: 54px;
-          line-height: 1.4;
-          color: #2c3e50;
-          text-align: center;
-          pointer-events: none;
-          white-space: pre-wrap;
-          word-wrap: break-word;
-        `;
-        
-        labelDiv.textContent = mostRecentQuestion;
-        
-        console.log('✨ Creating question artifact', position.id, 'with question:', mostRecentQuestion);
-      } else {
-        // Fallback if no questions found - use the preloaded question
-        labelDiv.style.cssText = `
-          padding: 16px;
-          background: transparent;
-          font-family: 'Optima', sans-serif;
-          font-weight: regular;
-          letter-spacing: -0.05em;
-          font-size: 54px;
-          line-height: 1.4;
-          color: #2c3e50;
-          text-align: center;
-          pointer-events: none;
-          white-space: pre-wrap;
-          word-wrap: break-word;
-        `;
-        labelDiv.textContent = 'A space for your biggest questions.';
-        console.log('⚠️ No questions found in content, showing preloaded question');
+      // Get compiled text content if available
+      let questionsText = 'A space for your biggest questions.';
+      if (compiledTextCache) {
+        const contentLines = Object.values(compiledTextCache);
+        if (contentLines.length > 0) {
+          // Use the compiled text content, joining multiple lines with newlines
+          questionsText = contentLines.join('\n').trim() || questionsText;
+        }
       }
+      
+      labelDiv.textContent = questionsText;
     } else {
       // Handle images artifact type (existing logic)
-      console.log('🖼️ Creating image artifact...');
       // Use preloaded images for artifacts
       if (imagesPreloadedRef.current && preloadedImagesRef.current.size > 0) {
       let blockIndex: number;
@@ -666,7 +455,6 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
         const originalWidth = preloadedImage.naturalWidth || 400;
         const originalHeight = preloadedImage.naturalHeight || 400;
         
-        console.log('Creating artifact', position.id, 'with preloaded image', blockIndex, 'Dimensions:', originalWidth, 'x', originalHeight);
         
         const aspectRatio = originalWidth / originalHeight;
         const maxSize = 120;
@@ -714,10 +502,9 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
     labelDiv.style.opacity = '0';
     labelDiv.style.transition = 'opacity 16ms ease-out';
     
-    console.log('Created artifact', position);
     
     return mesh;
-  }, [artifactType, extractQuestionsFromContent]);
+  }, [artifactType, compiledTextCache]);
 
   // Update fading artifacts opacity
   const updateFadingArtifacts = useCallback(() => {
@@ -876,7 +663,6 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
 
     // For questions: aggressively clean up if we have more than 1 artifact
     if (artifactType === 'questions' && artifactsRef.current.size > 1) {
-      console.log('🧹 Cleaning up excess question artifacts, current count:', artifactsRef.current.size);
       const artifactsToRemove: string[] = [];
       let keepFirst = true;
       
@@ -905,7 +691,6 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
         artifactsRef.current.delete(artifactId);
       });
       
-      console.log('🧹 Cleaned up', artifactsToRemove.length, 'excess question artifacts');
     }
 
     // Don't update artifacts if they're disabled
@@ -958,65 +743,12 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
       artifactsRef.current.delete(artifactId);
     });
 
-    // Show loading placeholders if blocks are loaded but images aren't preloaded yet (only for images type)
-    if (artifactType === 'images' && arenaLoadedRef.current && !imagesPreloadedRef.current) {
-      console.log('Showing loading placeholders while preloading images...');
-      
-      // Create simple placeholder artifacts
-      // For questions: only show ONE placeholder
-      const placeholderTargetCount = artifactType === 'questions' ? 1 : Math.min(ARTIFACT_COUNT, 10);
-      
-      // Hard limit for questions - never create more than 1 placeholder
-      if (artifactType === 'questions' && artifactsRef.current.size >= 1) {
-        return;
-      }
-      
-      let currentIndex = 1;
-      while (artifactsRef.current.size < placeholderTargetCount) { // Limit to target count
-        while (artifactsRef.current.has(`artifact_${currentIndex}`) && currentIndex <= ARTIFACT_COUNT) {
-          currentIndex++;
-        }
-        
-        if (currentIndex > ARTIFACT_COUNT) break;
-        
-        // Create placeholder artifact position
-        const angle = Math.random() * Math.PI * 2;
-        const radius = Math.random() * ARTIFACT_SPAWN_RADIUS;
-        const height = (Math.random() - 0.5) * ARTIFACT_SPAWN_RADIUS * 2;
-        const sphereCenterZ = camera.position.z - 15;
-        
-        const artifactPos = {
-          x: camera.position.x + Math.cos(angle) * radius,
-          y: camera.position.y + Math.sin(angle) * radius,
-          z: sphereCenterZ + height,
-          size: 3.0 + Math.random() * 2.0,
-          id: currentIndex
-        };
-        
-        // Create simple loading placeholder with fade-in
-        const placeholder = createLoadingPlaceholder(artifactPos);
-        if (placeholder && scene && !artifactsRef.current.has(`artifact_${currentIndex}`)) {
-          scene.add(placeholder);
-          
-          // Start fade-in animation for placeholder
-          fadingInArtifactsRef.current.set(`artifact_${currentIndex}`, {
-            mesh: placeholder,
-            startTime: Date.now(),
-            duration: FADE_IN_DURATION
-          });
-        }
-        
-        currentIndex++;
-      }
-      return;
-    }
     
     // Only create full artifacts if images are preloaded (for image type only)
     if (artifactType === 'images' && !imagesPreloadedRef.current) {
       return;
     }
     
-    console.log('Creating artifacts with', preloadedImagesRef.current.size, 'preloaded images available');
 
     // Replace any placeholder artifacts with real image artifacts
     const placeholdersToReplace: string[] = [];
@@ -1071,7 +803,6 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
             startTime: Date.now(),
             duration: FADE_IN_DURATION
           });
-          console.log('Replaced placeholder', artifactId, 'with real artifact');
         }
       }
     });
@@ -1141,13 +872,12 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
           duration: FADE_IN_DURATION
         });
       } else if (!artifact) {
-        console.log(`Skipping artifact ${currentIndex}: no preloaded image available`);
       }
       
       currentIndex++;
     }
     } // Close the shouldCreateArtifacts block
-  }, [createArtifact, createLoadingPlaceholder, updateFadingArtifacts, artefactsEnabled, artifactType]);
+  }, [createArtifact, updateFadingArtifacts, artefactsEnabled, artifactType]);
 
   const updateVisibleChunks = useCallback(() => {
     const camera = cameraRef.current;

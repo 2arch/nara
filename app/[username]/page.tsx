@@ -59,6 +59,7 @@ export default function UserHome() {
           artefactsEnabled={engine.artefactsEnabled}
           artifactType={engine.artifactType}
           getCompiledText={engine.getCompiledText}
+          compiledTextCache={engine.compiledTextCache}
         />
       )}
       

@@ -127,6 +127,7 @@ export interface WorldEngine {
     }>>;
     // Text compilation access
     getCompiledText: () => { [lineY: number]: string };
+    compiledTextCache: { [lineY: number]: string }; // Direct access to compiled text cache for real-time updates
     // Navigation system properties
     isNavVisible: boolean;
     setIsNavVisible: (visible: boolean) => void;
@@ -4034,6 +4035,7 @@ export function useWorldEngine({
         getCharacterStyle,
         isImageData,
         getCompiledText: () => compiledTextCache,
+        compiledTextCache: compiledTextCache, // Direct access to compiled text cache for real-time updates
         getCanvasSize: () => ({ width: window.innerWidth, height: window.innerHeight }),
         // State management functions
         saveState,
