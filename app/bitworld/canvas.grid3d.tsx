@@ -164,16 +164,34 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
   // Update questions content when compiled text changes
   useEffect(() => {
     if (artifactType === 'questions' && compiledTextCache) {
-      // Update existing question artifacts with new content
+      // Only update existing question artifacts, don't recreate them
+      const contentLines = Object.values(compiledTextCache);
+      let questionsText = 'A space for your biggest questions.';
+      if (contentLines.length > 0) {
+        // Get the latest/most recent line instead of joining all lines
+        const latestLine = contentLines[contentLines.length - 1];
+        questionsText = latestLine?.trim() || questionsText;
+      }
+      
+      // Update text content for all existing question artifacts
       artifactsRef.current.forEach((artifact) => {
         artifact.traverse((child) => {
           if (child instanceof CSS2DObject) {
-            const contentLines = Object.values(compiledTextCache);
-            let questionsText = 'A space for your biggest questions.';
-            if (contentLines.length > 0) {
-              questionsText = contentLines.join('\n').trim() || questionsText;
+            // Only update if the text has actually changed to avoid unnecessary DOM manipulation
+            if (child.element.textContent !== questionsText) {
+              child.element.textContent = questionsText;
             }
-            child.element.textContent = questionsText;
+          }
+        });
+      });
+      
+      // Also update fading-in artifacts
+      fadingInArtifactsRef.current.forEach((fadingInArtifact) => {
+        fadingInArtifact.mesh.traverse((child) => {
+          if (child instanceof CSS2DObject) {
+            if (child.element.textContent !== questionsText) {
+              child.element.textContent = questionsText;
+            }
           }
         });
       });
@@ -422,8 +440,9 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
       if (compiledTextCache) {
         const contentLines = Object.values(compiledTextCache);
         if (contentLines.length > 0) {
-          // Use the compiled text content, joining multiple lines with newlines
-          questionsText = contentLines.join('\n').trim() || questionsText;
+          // Use the latest/most recent line instead of joining all lines
+          const latestLine = contentLines[contentLines.length - 1];
+          questionsText = latestLine?.trim() || questionsText;
         }
       }
       
@@ -504,7 +523,7 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
     
     
     return mesh;
-  }, [artifactType, compiledTextCache]);
+  }, [artifactType]);
 
   // Update fading artifacts opacity
   const updateFadingArtifacts = useCallback(() => {
@@ -619,8 +638,40 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
     
     artifactsRef.current.forEach((artifact, artifactId) => {
       if (artifactType === 'questions') {
-        // Keep corona as large fixed background - don't move it
-        // The corona should stay at its original position to maintain size
+        // Make questions follow the camera position with smooth lerping
+        if (!artifact.userData.baseOffset) {
+          // Store the initial offset from camera when artifact was created
+          artifact.userData.baseOffset = {
+            x: artifact.position.x - camera.position.x,
+            y: artifact.position.y - camera.position.y,
+            z: artifact.position.z - camera.position.z
+          };
+        }
+        
+        const baseOffset = artifact.userData.baseOffset;
+        const artifactId_num = parseInt(artifactId.split('_')[1]) || 1;
+        
+        // Add subtle floating motion for questions
+        const phaseOffset = artifactId_num * 0.3;
+        const floatAmplitude = 0.1; // Very subtle motion
+        const floatSpeed = 0.4; // Slower than images
+        
+        const floatY = Math.sin(time * floatSpeed + phaseOffset) * floatAmplitude;
+        const floatZ = Math.cos(time * floatSpeed * 0.7 + phaseOffset) * floatAmplitude * 0.5;
+        
+        // Calculate target position relative to camera with floating motion
+        const targetX = camera.position.x + baseOffset.x;
+        const targetY = camera.position.y + baseOffset.y + floatY;
+        const targetZ = camera.position.z + baseOffset.z + floatZ;
+        
+        // Smooth lerp towards target position with ease-in-out
+        const lerpFactor = 0.08; // Smooth following factor (lower = more lag/smoothness)
+        
+        artifact.position.set(
+          artifact.position.x + (targetX - artifact.position.x) * lerpFactor,
+          artifact.position.y + (targetY - artifact.position.y) * lerpFactor,
+          artifact.position.z + (targetZ - artifact.position.z) * lerpFactor
+        );
         return;
       }
       
