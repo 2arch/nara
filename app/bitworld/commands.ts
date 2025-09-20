@@ -372,52 +372,81 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 backgroundColor: hexBgColor,
                 textColor: finalTextColor,
                 textBackground: finalTextBg,
+                currentTextStyle: {
+                    color: finalTextColor,
+                    background: finalTextBg
+                }
             }));
         } else if (newMode === 'transparent') {
+            const finalTextColor = textColor || '#FFFFFF'; // Default to white text for transparent background
             setModeState(prev => ({
                 ...prev,
                 backgroundMode: 'transparent',
                 backgroundImage: undefined,
-                textColor: textColor || '#FFFFFF', // Default to white text for transparent background
+                textColor: finalTextColor,
                 textBackground: textBg,
+                currentTextStyle: {
+                    color: finalTextColor,
+                    background: textBg
+                }
             }));
         } else if (newMode === 'space') {
+            const finalTextColor = textColor || '#FFFFFF'; // Default to white text for space background
             setModeState(prev => ({
                 ...prev,
                 backgroundMode: 'space',
                 backgroundImage: undefined,
-                textColor: textColor || '#FFFFFF', // Default to white text for space background
+                textColor: finalTextColor,
                 textBackground: textBg,
+                currentTextStyle: {
+                    color: finalTextColor,
+                    background: textBg
+                }
             }));
         } else if (newMode === 'image' && bgColor) {
             // bgColor is actually the image URL/data for image mode
+            const finalTextColor = textColor || '#FFFFFF'; // Default to white text on images
             setModeState(prev => ({
                 ...prev,
                 backgroundMode: 'image',
                 backgroundImage: bgColor, // Using bgColor parameter as image URL
                 backgroundVideo: undefined,
-                textColor: textColor || '#FFFFFF', // Default to white text on images
+                textColor: finalTextColor,
                 textBackground: textBg,
+                currentTextStyle: {
+                    color: finalTextColor,
+                    background: textBg
+                }
             }));
         } else if (newMode === 'video' && bgColor) {
             // bgColor is actually the video URL/data for video mode
+            const finalTextColor = textColor || '#FFFFFF'; // Default to white text on videos
             setModeState(prev => ({
                 ...prev,
                 backgroundMode: 'video',
                 backgroundImage: undefined,
                 backgroundVideo: bgColor, // Using bgColor parameter as video URL
-                textColor: textColor || '#FFFFFF', // Default to white text on videos
+                textColor: finalTextColor,
                 textBackground: textBg,
+                currentTextStyle: {
+                    color: finalTextColor,
+                    background: textBg
+                }
             }));
         } else if (newMode === 'stream') {
             // Stream mode for screen sharing
+            const finalTextColor = textColor || '#FFFFFF'; // Default to white text on stream
             setModeState(prev => ({
                 ...prev,
                 backgroundMode: 'stream',
                 backgroundImage: undefined,
                 backgroundVideo: undefined,
-                textColor: textColor || '#FFFFFF', // Default to white text on stream
+                textColor: finalTextColor,
                 textBackground: textBg,
+                currentTextStyle: {
+                    color: finalTextColor,
+                    background: textBg
+                }
             }));
         }
         return true;
