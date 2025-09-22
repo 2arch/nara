@@ -1407,66 +1407,60 @@ export function useWorldEngine({
     }, [worldData, getNormalizedSelection]); // Removed clipboardRef dependency for now
 
     // Define pasteText BEFORE handleKeyDown uses it
-    const pasteText = useCallback(async (): Promise<boolean> => { // Ensure return type is Promise<boolean>
+    const pasteText = useCallback(async (): Promise<boolean> => {
         try {
             const clipText = await navigator.clipboard.readText();
-            // Delete current selection before pasting
-            // Use a temporary variable to hold the potentially modified worldData
-            let dataAfterDelete = worldData;
+            
             const selection = getNormalizedSelection();
-            let deleted = false;
-            if (selection) {
-                let newWorldData = { ...worldData };
-                for (let y = selection.startY; y <= selection.endY; y++) {
-                    for (let x = selection.startX; x <= selection.endX; x++) {
-                        const key = `${x},${y}`;
-                        if (newWorldData[key]) {
-                            delete newWorldData[key];
-                            deleted = true;
-                        }
-                    }
-                }
-                if (deleted) {
-                    dataAfterDelete = newWorldData; // Update the data to use for pasting
-                    // Don't set state here yet, batch with paste changes
-                }
-            }
+            const pasteStartX = selection ? selection.startX : cursorPos.x;
+            const pasteStartY = selection ? selection.startY : cursorPos.y;
 
-            // Use cursor position *after* potential deletion
-            const pasteStartX = deleted && selection ? selection.startX : cursorPos.x;
-            const pasteStartY = deleted && selection ? selection.startY : cursorPos.y;
-
-            let finalWorldData = { ...dataAfterDelete }; // Start pasting onto data after deletion
             const linesToPaste = clipText.split('\n');
-            let currentY = pasteStartY;
-            let finalCursorX = pasteStartX;
-            let finalCursorY = pasteStartY;
+            const finalCursorX = pasteStartX + (linesToPaste[linesToPaste.length - 1]?.length || 0);
+            const finalCursorY = pasteStartY + linesToPaste.length - 1;
 
-            for (let i = 0; i < linesToPaste.length; i++) {
-                const line = linesToPaste[i];
-                let currentX = pasteStartX;
-                for (let j = 0; j < line.length; j++) {
-                    const char = line[j];
-                    const key = `${currentX},${currentY}`;
-                    finalWorldData[key] = char;
-                    currentX++;
-                }
-                if (i === linesToPaste.length - 1) {
-                    finalCursorX = currentX;
-                    finalCursorY = currentY;
-                }
-                currentY++;
-            }
-
-            // Batch state updates
-            setWorldData(finalWorldData);
+            // Optimistically update cursor and clear selection
             setCursorPos({ x: finalCursorX, y: finalCursorY });
-            // Clear selection after paste is complete
             setSelectionStart(null);
             setSelectionEnd(null);
 
-            return true;
+            // Apply deletion first
+            if (selection) {
+                setWorldData(prev => {
+                    const updated = { ...prev };
+                    for (let y = selection.startY; y <= selection.endY; y++) {
+                        for (let x = selection.startX; x <= selection.endX; x++) {
+                            delete updated[`${x},${y}`];
+                        }
+                    }
+                    return updated;
+                });
+            }
 
+            // Process paste in chunks
+            const processChunk = (lineIndex = 0) => {
+                const chunkSize = 50; // lines per chunk
+                const chunkEnd = Math.min(lineIndex + chunkSize, linesToPaste.length);
+                
+                const worldUpdateChunk: WorldData = {};
+                for (let i = lineIndex; i < chunkEnd; i++) {
+                    const line = linesToPaste[i];
+                    for (let j = 0; j < line.length; j++) {
+                        worldUpdateChunk[`${pasteStartX + j},${pasteStartY + i}`] = line[j];
+                    }
+                }
+
+                setWorldData(prev => ({ ...prev, ...worldUpdateChunk }));
+
+                if (chunkEnd < linesToPaste.length) {
+                    setTimeout(() => processChunk(chunkEnd), 16);
+                }
+            };
+
+            // Start chunking after a short delay to allow deletion to render
+            setTimeout(() => processChunk(0), 16);
+
+            return true;
         } catch (err) {
             console.warn('Could not read from system clipboard or paste failed:', err);
             return false;

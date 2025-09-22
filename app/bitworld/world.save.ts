@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { database } from '@/app/firebase'; // Adjust path if needed
-import { ref, set, onValue, off, DataSnapshot, get } from 'firebase/database';
+import { ref, set, onValue, off, DataSnapshot, get, onChildAdded, onChildChanged, onChildRemoved } from 'firebase/database';
 // Import functions and constants directly from @sanity/diff-match-patch
 import { makeDiff, DIFF_EQUAL } from '@sanity/diff-match-patch';
 import type { WorldData } from './world.engine'; // Adjust path if needed
@@ -53,46 +53,48 @@ export function useWorldSave(
             return;
         }
 
-        // Allow null userUid for global worlds (saves to worlds/{worldId}/data directly)
-        // if (!userUid) {
-        //     setIsLoading(false);
-        //     return;
-        // }
-
         setIsLoading(true);
         setError(null);
-        
-        const dataPath = currentStateName ? 
-            (isBlogs ? `worlds/blog/posts/${currentStateName}/data` : getWorldPath(`${currentStateName}/data`)) :
-            getWorldPath(`${worldId}/data`);
-        const settingsPath = currentStateName ? 
-            (isBlogs ? `worlds/blog/posts/${currentStateName}/settings` : getWorldPath(`${currentStateName}/settings`)) :
-            getWorldPath(`${worldId}/settings`);
-            
+
+        const dataPath = worldDataRefPath;
+        const settingsPath = settingsRefPath;
+
+        if (!dataPath) {
+            setIsLoading(false);
+            return;
+        }
+
         const dataRef = ref(database, dataPath);
         const settingsRef = ref(database, settingsPath);
 
-        const handleData = (snapshot: DataSnapshot) => {
-            // For blog posts, completely skip data handling to avoid conflicts
-            if (isBlogs) {
-                return;
-            }
-            
-            if (!autoLoadData) {
-                // Don't auto-load data, but still track it for saving purposes
-                const data = snapshot.val() as WorldData | null;
-                const initialData = data || {};
-                lastSyncedDataRef.current = { ...initialData };
-                return;
-            }
-            
-            const data = snapshot.val() as WorldData | null;
-            const initialData = data || {};
-            if (JSON.stringify(initialData) !== JSON.stringify(lastSyncedDataRef.current)) {
-                setLocalWorldData(initialData);
-                lastSyncedDataRef.current = { ...initialData };
-            }
+        const handleError = (err: Error) => {
+            console.error("Firebase: Error loading data:", err);
+            setError(`Failed to load world data: ${err.message}`);
+            setIsLoading(false);
         };
+
+        const timeoutId = setTimeout(() => {
+            if (isLoading) {
+                setIsLoading(false);
+                console.warn('Firebase: Data loading timed out.');
+            }
+        }, 5000); // 5 second timeout
+
+        if (isBlogs) {
+            setIsLoading(false);
+            clearTimeout(timeoutId);
+            const settingsUnsubscribe = onValue(settingsRef, (snapshot) => {
+                const settings = snapshot.val() as WorldSettings | null;
+                if (settings) {
+                    setLocalSettings(settings);
+                    lastSyncedSettingsRef.current = { ...settings };
+                }
+            }, handleError);
+            return () => settingsUnsubscribe();
+        }
+
+        const initialData: WorldData = {};
+        let initialDataLoaded = false;
 
         const handleSettings = (snapshot: DataSnapshot) => {
             const settings = snapshot.val() as WorldSettings | null;
@@ -102,51 +104,71 @@ export function useWorldSave(
             }
         };
 
-        const handleError = (err: Error) => {
-            console.error("Firebase: Error loading data:", err);
-            setError(`Failed to load world data: ${err.message}`);
-            setIsLoading(false);
-        };
+        const settingsUnsubscribe = onValue(settingsRef, handleSettings, handleError);
 
-        // Add a timeout to prevent infinite loading
-        const timeoutId = setTimeout(() => {
-            setIsLoading(false);
-        }, 5000); // 5 second timeout
+        const dataListeners = [
+            onChildAdded(dataRef, (snapshot) => {
+                const key = snapshot.key;
+                const value = snapshot.val();
+                if (!key) return;
 
-        // Store reference for proper cleanup
-        let unsubscribe: (() => void) | null = null;
-        
-        // Set up persistent listener with proper cleanup tracking
-        // Always listen to the specific data and settings paths, not the parent object
-        let dataUnsubscribe: (() => void) | null = null;
-        let settingsUnsubscribe: (() => void) | null = null;
-        
-        dataUnsubscribe = onValue(dataRef, (snapshot) => {
+                if (!initialDataLoaded) {
+                    initialData[key] = value;
+                } else if (autoLoadData) {
+                    setLocalWorldData(prevData => {
+                        if (prevData[key] && JSON.stringify(prevData[key]) === JSON.stringify(value)) return prevData;
+                        const newData = { ...prevData, [key]: value };
+                        if (lastSyncedDataRef.current) lastSyncedDataRef.current[key] = value;
+                        return newData;
+                    });
+                }
+            }),
+            onChildChanged(dataRef, (snapshot) => {
+                const key = snapshot.key;
+                const value = snapshot.val();
+                if (!key || !autoLoadData) return;
+
+                setLocalWorldData(prevData => {
+                    if (prevData[key] && JSON.stringify(prevData[key]) === JSON.stringify(value)) return prevData;
+                    const newData = { ...prevData, [key]: value };
+                    if (lastSyncedDataRef.current) lastSyncedDataRef.current[key] = value;
+                    return newData;
+                });
+            }),
+            onChildRemoved(dataRef, (snapshot) => {
+                const key = snapshot.key;
+                if (!key || !autoLoadData) return;
+
+                setLocalWorldData(prevData => {
+                    if (!prevData[key]) return prevData;
+                    const newData = { ...prevData };
+                    delete newData[key];
+                    if (lastSyncedDataRef.current) delete lastSyncedDataRef.current[key];
+                    return newData;
+                });
+            })
+        ];
+
+        get(dataRef).then(() => {
             clearTimeout(timeoutId);
-            handleData(snapshot);
+            if (autoLoadData) {
+                setLocalWorldData(initialData);
+                lastSyncedDataRef.current = { ...initialData };
+            } else {
+                lastSyncedDataRef.current = initialData;
+            }
+            initialDataLoaded = true;
             setIsLoading(false);
-        }, handleError);
-        
-        settingsUnsubscribe = onValue(settingsRef, (snapshot) => {
-            handleSettings(snapshot);
-        }, handleError);
-        
-        unsubscribe = () => {
-            if (dataUnsubscribe) dataUnsubscribe();
-            if (settingsUnsubscribe) settingsUnsubscribe();
-        };
+        }).catch(handleError);
 
         return () => {
-            // Proper cleanup: call the unsubscribe function returned by onValue
             clearTimeout(timeoutId);
-            if (unsubscribe) {
-                unsubscribe();
-                unsubscribe = null;
-            }
+            settingsUnsubscribe();
+            dataListeners.forEach(unsubscribe => unsubscribe());
             if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
             if (settingsSaveTimeoutRef.current) clearTimeout(settingsSaveTimeoutRef.current);
         };
-    }, [worldId, setLocalWorldData, setLocalSettings, currentStateName, userUid, autoLoadData]);
+    }, [worldId, userUid, currentStateName, autoLoadData, isBlogs, worldDataRefPath, settingsRefPath, setLocalWorldData, setLocalSettings]);
 
     // --- Save Data on Change (Debounced) ---
     useEffect(() => {

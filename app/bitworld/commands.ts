@@ -67,7 +67,7 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['summarize', 'transform', 'explain', 'label', 'mode', 'settings', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'cluster', 'frames', 'clear', 'cam', 'indent', 'bound', 'unbound', 'move', 'upload', 'artefacts'];
+const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'clear', 'cam', 'indent', 'bound', 'unbound', 'move', 'upload'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'white', 'black', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro'];
@@ -112,7 +112,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         isIndentEnabled: true, // Smart indentation enabled by default
         isMoveMode: false, // Move mode not active initially
         gridMode: 'dots', // Default grid mode
-        artefactsEnabled: true, // Artifacts enabled by default in space mode
+        artefactsEnabled: false, // Artifacts enabled by default in space mode
         artifactType: 'images', // Default to image artifacts
     });
 
