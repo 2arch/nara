@@ -142,9 +142,12 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         mode: 'nara',
         speed: 0.5,
         complexity: 1.0,
-        colorShift: 0,
-        enabled: monogramEnabled,
-        geometryType: 'octahedron'
+        colorShift: 0.5,
+        enabled: true,
+        geometryType: 'octahedron',
+        interactiveTrails: true,
+        trailIntensity: 0.5,
+        trailFadeMs: 500,
     });
     
     // === Form Layout Calculation (Dialogue.tsx pattern) ===

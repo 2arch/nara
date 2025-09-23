@@ -43,9 +43,9 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
   const labelRendererRef = useRef<CSS2DRenderer | null>(null);
   const composerRef = useRef<EffectComposer | null>(null);
   const chunksRef = useRef<Map<string, THREE.Group>>(new Map());
-  const artifactsRef = useRef<Map<string, THREE.Mesh>>(new Map());
-  const fadingArtifactsRef = useRef<Map<string, {mesh: THREE.Mesh, startTime: number, duration: number}>>(new Map());
-  const fadingInArtifactsRef = useRef<Map<string, {mesh: THREE.Mesh, startTime: number, duration: number}>>(new Map());
+  const artifactsRef = useRef<Map<string, THREE.Points>>(new Map());
+  const fadingArtifactsRef = useRef<Map<string, {mesh: THREE.Points, startTime: number, duration: number}>>(new Map());
+  const fadingInArtifactsRef = useRef<Map<string, {mesh: THREE.Points, startTime: number, duration: number}>>(new Map());
   const animationFrameRef = useRef<number | null>(null);
   const arenaBlocksRef = useRef<any[]>([]);
   const preloadedImagesRef = useRef<Map<number, HTMLImageElement>>(new Map());
@@ -396,8 +396,8 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
   
   
   
-  const createArtifact = useCallback((position: {x: number, y: number, z: number, size: number, id: number}) => {
-    let mesh: THREE.Object3D;
+  const createArtifact = useCallback((position: {x: number, y: number, z: number, size: number, id: number}): THREE.Points | null => {
+    let mesh: THREE.Points;
     
     // Use simple point geometry for all artifacts (including questions)
     const geometry = new THREE.BufferGeometry();

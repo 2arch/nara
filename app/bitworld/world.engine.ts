@@ -667,6 +667,9 @@ export function useWorldEngine({
         return selectionStart !== null && selectionEnd !== null;
     }, [selectionStart, selectionEnd]);
 
+    // === Settings System ===
+    const { settings, setSettings, updateSettings } = useWorldSettings();
+    
     // === Command System ===
     const { 
         commandState, 
@@ -699,7 +702,7 @@ export function useWorldEngine({
         cycleGridMode,
         artefactsEnabled,
         artifactType,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates, username });
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates, username, updateSettings, settings });
 
     // Generate search data when search pattern changes
     useEffect(() => {
@@ -768,9 +771,6 @@ export function useWorldEngine({
 
         setSearchData(newSearchData);
     }, [isSearchActive, searchPattern, worldData]);
-    
-    // === Settings System ===
-    const { settings, setSettings, updateSettings } = useWorldSettings();
     
     // === Ambient Text Compilation System ===
     const [compiledTextCache, setCompiledTextCache] = useState<{ [lineY: number]: string }>({});
@@ -2903,14 +2903,21 @@ export function useWorldEngine({
             if (isIndentEnabled) {
                 // Smart indentation is enabled - use current behavior
                 if (currentLineHasText) {
-                    // Line has text - use smart indentation, but fallback to leftmost nearby text block
-                    targetIndent = getSmartIndentation(dataToCheck, cursorPos);
-                    
-                    // If smart indentation returns 0, try to find leftmost text block in viewport
-                    if (targetIndent === 0) {
-                        const nearbyIndent = getViewportSmartIndentation(dataToCheck, cursorPos);
-                        if (nearbyIndent !== null) {
-                            targetIndent = nearbyIndent;
+                    // Line has text - FIRST try to use the start of current text block
+                    // This ensures we respect the complete block even if it starts outside viewport
+                    const currentBlockStart = getCurrentTextBlockStart(dataToCheck, cursorPos);
+                    if (currentBlockStart !== null) {
+                        targetIndent = currentBlockStart;
+                    } else {
+                        // Fallback to smart indentation
+                        targetIndent = getSmartIndentation(dataToCheck, cursorPos);
+                        
+                        // If smart indentation returns 0, try to find leftmost text block in viewport
+                        if (targetIndent === 0) {
+                            const nearbyIndent = getViewportSmartIndentation(dataToCheck, cursorPos);
+                            if (nearbyIndent !== null) {
+                                targetIndent = nearbyIndent;
+                            }
                         }
                     }
                     setLastEnterX(targetIndent);
@@ -3399,11 +3406,76 @@ export function useWorldEngine({
                 
                 if (isWithinBoundedRegion) {
                     if (canWrap) {
-                        // Wrap to next line within bounded region
-                        proposedCursorPos = { 
-                            x: boundedRegion.startX, 
-                            y: nextLineY 
-                        };
+                        // Simple word wrapping: scan backwards to find the last space, then move everything after it
+                        const currentLineY = cursorAfterDelete.y;
+                        let wrapPoint = boundedRegion.startX; // Default to start of line if no space found
+                        
+                        // Scan backwards from the boundary to find the last space
+                        for (let x = boundedRegion.endX; x >= boundedRegion.startX; x--) {
+                            const charKey = `${x},${currentLineY}`;
+                            const charData = dataToDeleteFrom[charKey];
+                            const char = typeof charData === 'string' ? charData : 
+                                        (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
+                            
+                            if (char === ' ') {
+                                wrapPoint = x + 1; // Start wrapping after the space
+                                break;
+                            }
+                        }
+                        
+                        // Only do word wrapping if we found a space and there's something to wrap
+                        if (wrapPoint > boundedRegion.startX && wrapPoint <= cursorAfterDelete.x) {
+                            // Collect all characters from wrap point to cursor
+                            const textToWrap: Array<{x: number, char: string, style?: any}> = [];
+                            
+                            for (let x = wrapPoint; x <= cursorAfterDelete.x; x++) {
+                                const charKey = `${x},${currentLineY}`;
+                                const charData = dataToDeleteFrom[charKey];
+                                if (charData) {
+                                    const char = typeof charData === 'string' ? charData : 
+                                               (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
+                                    const style = typeof charData === 'object' && 'style' in charData ? charData.style : undefined;
+                                    if (char) {
+                                        textToWrap.push({x, char, style});
+                                    }
+                                }
+                            }
+                            
+                            // Remove the text from current line (but keep the space)
+                            const updatedWorldData = { ...dataToDeleteFrom };
+                            for (let x = wrapPoint; x <= cursorAfterDelete.x; x++) {
+                                const charKey = `${x},${currentLineY}`;
+                                delete updatedWorldData[charKey];
+                            }
+                            
+                            // Add the text to next line
+                            let newX = boundedRegion.startX;
+                            for (const {char, style} of textToWrap) {
+                                if (char !== ' ') { // Skip spaces when wrapping
+                                    const newKey = `${newX},${nextLineY}`;
+                                    updatedWorldData[newKey] = style ? {char, style} : char;
+                                    newX++;
+                                }
+                            }
+                            
+                            // Add the current character being typed
+                            const finalKey = `${newX},${nextLineY}`;
+                            updatedWorldData[finalKey] = key;
+                            
+                            // Update world data and cursor position
+                            setWorldData(updatedWorldData);
+                            setCursorPos({ x: newX + 1, y: nextLineY });
+                            worldDataChanged = true;
+                            
+                            // Skip normal character placement since we handled it above
+                            return true;
+                        } else {
+                            // No good wrap point found - just move to next line
+                            proposedCursorPos = { 
+                                x: boundedRegion.startX, 
+                                y: nextLineY 
+                            };
+                        }
                     } else {
                         // Can't wrap within bounded region - allow typing beyond bounds
                         proposedCursorPos = { 

@@ -6,6 +6,13 @@ export interface WorldSettings {
     isDebugVisible: boolean;
     monogramOptions: MonogramOptions;
     labelProximityThreshold: number;
+    textColor?: string;
+    backgroundColor?: string;
+    customBackground?: {
+        type: 'ai-generated' | 'custom';
+        content: string; // SVG string for AI backgrounds, color/gradient for custom
+        prompt?: string; // The prompt used to generate AI background
+    };
 }
 
 export const initialSettings: WorldSettings = {
@@ -16,7 +23,10 @@ export const initialSettings: WorldSettings = {
         complexity: 1.0,
         colorShift: 0,
         enabled: false,
-        geometryType: 'octahedron'
+        geometryType: 'octahedron',
+        interactiveTrails: true,
+        trailIntensity: 0.5,
+        trailFadeMs: 500
     },
     labelProximityThreshold: 999999,
 };

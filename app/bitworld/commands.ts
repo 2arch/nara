@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Point, WorldData } from './world.engine';
 import { generateImage, generateVideo, setDialogueWithRevert } from './ai';
+import type { WorldSettings } from './settings';
 
 // --- Command System Types ---
 export interface CommandState {
@@ -64,6 +65,8 @@ interface UseCommandSystemProps {
     getAllLabels?: () => Array<{text: string, x: number, y: number, color: string}>;
     availableStates?: string[];
     username?: string;
+    updateSettings?: (settings: Partial<WorldSettings>) => void;
+    settings?: WorldSettings;
 }
 
 // --- Command System Constants ---
@@ -75,7 +78,7 @@ const NAV_COMMANDS: string[] = [];
 const CAMERA_COMMANDS = ['default', 'ripstop', 'focus'];
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates = [], username }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates = [], username, updateSettings, settings }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const [commandState, setCommandState] = useState<CommandState>({
@@ -115,6 +118,45 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         artefactsEnabled: false, // Artifacts enabled by default in space mode
         artifactType: 'images', // Default to image artifacts
     });
+
+    // Function to load saved color preferences
+    const loadColorPreferences = useCallback((settings: WorldSettings) => {
+        if (settings.backgroundColor || settings.textColor || settings.customBackground) {
+            setModeState(prev => {
+                const updates: Partial<ModeState> = {};
+                
+                if (settings.customBackground) {
+                    // Load AI-generated background
+                    if (settings.customBackground.type === 'ai-generated') {
+                        if (settings.customBackground.content.includes('video') || settings.customBackground.content.includes('.mp4')) {
+                            updates.backgroundMode = 'video';
+                            updates.backgroundVideo = settings.customBackground.content;
+                        } else {
+                            updates.backgroundMode = 'image';
+                            updates.backgroundImage = settings.customBackground.content;
+                        }
+                        updates.backgroundColor = undefined;
+                    }
+                } else if (settings.backgroundColor) {
+                    // Load solid color background
+                    updates.backgroundMode = 'color';
+                    updates.backgroundColor = settings.backgroundColor;
+                    updates.backgroundImage = undefined;
+                    updates.backgroundVideo = undefined;
+                }
+                
+                if (settings.textColor) {
+                    updates.textColor = settings.textColor;
+                    updates.currentTextStyle = {
+                        color: settings.textColor,
+                        background: prev.currentTextStyle.background
+                    };
+                }
+                
+                return { ...prev, ...updates };
+            });
+        }
+    }, []);
 
     // Utility function to match commands based on input
     const matchCommands = useCallback((input: string): string[] => {
@@ -322,7 +364,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         });
     }, []);
 
-    const switchBackgroundMode = useCallback((newMode: BackgroundMode, bgColor?: string, textColor?: string, textBg?: string): boolean => {
+    const switchBackgroundMode = useCallback((newMode: BackgroundMode, bgColor?: string, textColor?: string, textBg?: string, aiPrompt?: string): boolean => {
         if (newMode === 'color' && bgColor) {
             const colorMap: { [name: string]: string } = {
                 'white': '#FFFFFF',
@@ -377,6 +419,15 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     background: finalTextBg
                 }
             }));
+
+            // Save color preferences to settings
+            if (updateSettings) {
+                updateSettings({
+                    backgroundColor: hexBgColor,
+                    textColor: finalTextColor,
+                    customBackground: undefined // Clear any AI background when setting solid color
+                });
+            }
         } else if (newMode === 'transparent') {
             const finalTextColor = textColor || '#FFFFFF'; // Default to white text for transparent background
             setModeState(prev => ({
@@ -390,6 +441,15 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     background: textBg
                 }
             }));
+
+            // Save color preferences to settings
+            if (updateSettings) {
+                updateSettings({
+                    backgroundColor: undefined, // Transparent has no color
+                    textColor: finalTextColor,
+                    customBackground: undefined
+                });
+            }
         } else if (newMode === 'space') {
             const finalTextColor = textColor || '#FFFFFF'; // Default to white text for space background
             setModeState(prev => ({
@@ -403,6 +463,15 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     background: textBg
                 }
             }));
+
+            // Save color preferences to settings
+            if (updateSettings) {
+                updateSettings({
+                    backgroundColor: undefined, // Space mode has no solid color
+                    textColor: finalTextColor,
+                    customBackground: undefined
+                });
+            }
         } else if (newMode === 'image' && bgColor) {
             // bgColor is actually the image URL/data for image mode
             const finalTextColor = textColor || '#FFFFFF'; // Default to white text on images
@@ -418,6 +487,19 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     background: textBg
                 }
             }));
+
+            // Save AI-generated background to settings if prompt is provided
+            if (updateSettings && aiPrompt) {
+                updateSettings({
+                    backgroundColor: undefined,
+                    textColor: finalTextColor,
+                    customBackground: {
+                        type: 'ai-generated',
+                        content: bgColor,
+                        prompt: aiPrompt
+                    }
+                });
+            }
         } else if (newMode === 'video' && bgColor) {
             // bgColor is actually the video URL/data for video mode
             const finalTextColor = textColor || '#FFFFFF'; // Default to white text on videos
@@ -433,6 +515,19 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     background: textBg
                 }
             }));
+
+            // Save AI-generated video background to settings if prompt is provided
+            if (updateSettings && aiPrompt) {
+                updateSettings({
+                    backgroundColor: undefined,
+                    textColor: finalTextColor,
+                    customBackground: {
+                        type: 'ai-generated',
+                        content: bgColor,
+                        prompt: aiPrompt
+                    }
+                });
+            }
         } else if (newMode === 'stream') {
             // Stream mode for screen sharing
             const finalTextColor = textColor || '#FFFFFF'; // Default to white text on stream
@@ -448,15 +543,23 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     background: textBg
                 }
             }));
+            // Don't save stream mode to settings as it's temporary
         }
         return true;
-    }, [setDialogueText]);
+    }, [setDialogueText, updateSettings]);
 
     useEffect(() => {
         if (initialBackgroundColor && modeState.backgroundMode !== 'stream') {
             switchBackgroundMode('color', initialBackgroundColor);
         }
     }, [initialBackgroundColor]); // Removed switchBackgroundMode to avoid dependency issues
+
+    // Load color preferences from settings when they change
+    useEffect(() => {
+        if (settings) {
+            loadColorPreferences(settings);
+        }
+    }, [settings, loadColorPreferences]);
 
     // Add ephemeral text (disappears after delay)
     const addEphemeralText = useCallback((pos: Point, char: string, options?: {
@@ -908,7 +1011,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     generateImage(prompt).then((imageUrl) => {
                         if (imageUrl && (imageUrl.startsWith('data:') || imageUrl.startsWith('http'))) {
                             // Validate that we have a proper image URL/data URL
-                            switchBackgroundMode('image', imageUrl, textColorParam, textBgParam);
+                            switchBackgroundMode('image', imageUrl, textColorParam, textBgParam, prompt);
                             setDialogueText(`"${prompt}"`);
                         } else {
                             // Fallback to space background if image generation fails or returns invalid data
@@ -963,7 +1066,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     generateVideo(prompt).then((videoUrl) => {
                         if (videoUrl && (videoUrl.startsWith('data:') || videoUrl.startsWith('http'))) {
                             // Validate that we have a proper video URL/data URL
-                            switchBackgroundMode('video', videoUrl, textColorParam, textBgParam);
+                            switchBackgroundMode('video', videoUrl, textColorParam, textBgParam, prompt);
                             setDialogueText(`"${prompt}"`);
                         } else {
                             // Fallback to space background if video generation fails or returns invalid data
@@ -1135,6 +1238,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                         background: finalTextBackground
                     }
                 }));
+
+                // Save text color to settings
+                if (updateSettings) {
+                    updateSettings({
+                        textColor: finalTextColor
+                    });
+                }
                 
                 const styleMsg = finalTextBackground ? 
                     `Text style: ${finalTextColor} on ${finalTextBackground}` : 

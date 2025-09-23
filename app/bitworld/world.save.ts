@@ -12,9 +12,9 @@ const SAVE_DEBOUNCE_DELAY = 100; // 1 second
 export function useWorldSave(
     worldId: string | null,
     localWorldData: WorldData,
-    setLocalWorldData: (data: WorldData) => void,
+    setLocalWorldData: React.Dispatch<React.SetStateAction<WorldData>>,
     localSettings: WorldSettings,
-    setLocalSettings: (settings: WorldSettings) => void,
+    setLocalSettings: React.Dispatch<React.SetStateAction<WorldSettings>>,
     autoLoadData: boolean = true,
     currentStateName?: string | null,
     userUid?: string | null // Add user UID parameter
@@ -59,7 +59,7 @@ export function useWorldSave(
         const dataPath = worldDataRefPath;
         const settingsPath = settingsRefPath;
 
-        if (!dataPath) {
+        if (!dataPath || !settingsPath) {
             setIsLoading(false);
             return;
         }
@@ -115,7 +115,7 @@ export function useWorldSave(
                 if (!initialDataLoaded) {
                     initialData[key] = value;
                 } else if (autoLoadData) {
-                    setLocalWorldData(prevData => {
+                    setLocalWorldData((prevData: WorldData) => {
                         if (prevData[key] && JSON.stringify(prevData[key]) === JSON.stringify(value)) return prevData;
                         const newData = { ...prevData, [key]: value };
                         if (lastSyncedDataRef.current) lastSyncedDataRef.current[key] = value;
@@ -128,7 +128,7 @@ export function useWorldSave(
                 const value = snapshot.val();
                 if (!key || !autoLoadData) return;
 
-                setLocalWorldData(prevData => {
+                setLocalWorldData((prevData: WorldData) => {
                     if (prevData[key] && JSON.stringify(prevData[key]) === JSON.stringify(value)) return prevData;
                     const newData = { ...prevData, [key]: value };
                     if (lastSyncedDataRef.current) lastSyncedDataRef.current[key] = value;
@@ -139,7 +139,7 @@ export function useWorldSave(
                 const key = snapshot.key;
                 if (!key || !autoLoadData) return;
 
-                setLocalWorldData(prevData => {
+                setLocalWorldData((prevData: WorldData) => {
                     if (!prevData[key]) return prevData;
                     const newData = { ...prevData };
                     delete newData[key];
