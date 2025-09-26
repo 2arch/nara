@@ -1048,7 +1048,7 @@ export function useWorldEngine({
         } catch (error) {
             // For public viewing, permission errors are expected when trying to list states
             // Return empty array gracefully without logging errors for permission issues
-            if (error.message && error.message.includes('Permission denied')) {
+            if (error instanceof Error && error.message && error.message.includes('Permission denied')) {
                 return [];
             }
             logger.error('Error loading available states:', error);
@@ -1119,7 +1119,7 @@ export function useWorldEngine({
             }
         }).catch(error => {
             // For public viewing, permission errors are expected when accessing content
-            if (error.message && error.message.includes('Permission denied')) {
+            if (error instanceof Error && error.message && error.message.includes('Permission denied')) {
                 return;
             }
             logger.error('Failed to load compiled text:', error);
