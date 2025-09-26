@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { logger } from './logger';
+import { checkUserQuota, incrementUserUsage } from '../firebase';
 
 // Initialize the Google GenAI client
 const ai = new GoogleGenAI({
@@ -103,10 +104,18 @@ export function createSubtitleCycler(text: string, setDialogueText: (text: strin
 /**
  * Transform text according to given instructions
  */
-export async function transformText(text: string, instructions: string): Promise<string> {
+export async function transformText(text: string, instructions: string, userId?: string): Promise<string> {
     const abortController = createAIAbortController();
     
     try {
+        // Check user quota before proceeding
+        if (userId) {
+            const quota = await checkUserQuota(userId);
+            if (!quota.canUseAI) {
+                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`;
+            }
+        }
+
         if (abortController.signal.aborted) {
             throw new Error('AI operation was interrupted');
         }

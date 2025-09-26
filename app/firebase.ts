@@ -56,6 +56,8 @@ if (typeof window !== 'undefined') {
 }
 
 // Authentication functions
+export type MembershipTier = 'fresh' | 'pro';
+
 export interface UserProfileData {
   firstName: string;
   lastName: string;
@@ -63,7 +65,15 @@ export interface UserProfileData {
   email: string;
   uid: string;
   createdAt: string;
-  membership: string;
+  membership: MembershipTier;
+  subscriptionId?: string; // Stripe subscription ID
+  planExpiry?: string; // ISO date string
+  aiUsage?: {
+    daily: { [date: string]: number }; // YYYY-MM-DD format
+    monthly: { [month: string]: number }; // YYYY-MM format  
+    total: number;
+    lastReset?: string; // ISO date of last daily reset
+  };
 }
 
 export const signUpUser = async (email: string, password: string, firstName: string, lastName: string, username: string): Promise<{success: boolean, user?: User, error?: string}> => {
@@ -85,7 +95,13 @@ export const signUpUser = async (email: string, password: string, firstName: str
       email,
       uid: user.uid,
       createdAt: new Date().toISOString(),
-      membership: 'fresh'
+      membership: 'fresh',
+      aiUsage: {
+        daily: {},
+        monthly: {},
+        total: 0,
+        lastReset: new Date().toISOString()
+      }
     };
     
     // Store user profile in database
@@ -150,6 +166,114 @@ export const getUidByUsername = async (username: string): Promise<string | null>
   } catch (error) {
     logger.error('Error fetching UID by username:', error);
     return null;
+  }
+};
+
+// Subscription and usage management
+export const TIER_LIMITS = {
+  fresh: { daily: 5, monthly: 50 },
+  pro: { daily: -1, monthly: -1 } // -1 = unlimited
+} as const;
+
+export const getUserProfile = async (uid: string): Promise<UserProfileData | null> => {
+  try {
+    const snapshot = await get(ref(database, `users/${uid}`));
+    if (!snapshot.exists()) return null;
+    
+    const userData = snapshot.val() as UserProfileData;
+    
+    // Initialize membership if missing
+    if (!userData.membership) {
+      userData.membership = 'fresh';
+      // Update the database with the initialized membership
+      await set(ref(database, `users/${uid}/membership`), 'fresh');
+    }
+    
+    // Initialize aiUsage if missing
+    if (!userData.aiUsage) {
+      userData.aiUsage = {
+        daily: {},
+        monthly: {},
+        total: 0,
+        lastReset: new Date().toISOString()
+      };
+      // Update the database with the initialized aiUsage
+      await set(ref(database, `users/${uid}/aiUsage`), userData.aiUsage);
+    }
+    
+    return userData;
+  } catch (error) {
+    logger.error('Error fetching user profile:', error);
+    return null;
+  }
+};
+
+export const checkUserQuota = async (uid: string): Promise<{ canUseAI: boolean, dailyUsed: number, dailyLimit: number, tier: MembershipTier }> => {
+  try {
+    const profile = await getUserProfile(uid);
+    if (!profile) {
+      return { canUseAI: false, dailyUsed: 0, dailyLimit: 0, tier: 'fresh' };
+    }
+
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const dailyUsed = profile.aiUsage?.daily[today] || 0;
+    const tier = profile.membership || 'fresh'; // Default to 'fresh' if somehow still missing
+    const dailyLimit = TIER_LIMITS[tier].daily;
+    
+    // Unlimited tier (-1) always allows usage
+    const canUseAI = dailyLimit === -1 || dailyUsed < dailyLimit;
+    
+    return { canUseAI, dailyUsed, dailyLimit, tier };
+  } catch (error) {
+    logger.error('Error checking user quota:', error);
+    return { canUseAI: false, dailyUsed: 0, dailyLimit: 0, tier: 'fresh' };
+  }
+};
+
+export const upgradeUserToPro = async (uid: string): Promise<boolean> => {
+  try {
+    await set(ref(database, `users/${uid}/membership`), 'pro');
+    console.log(`User ${uid} upgraded to pro`);
+    return true;
+  } catch (error) {
+    console.error('Error upgrading user to pro:', error);
+    return false;
+  }
+};
+
+export const incrementUserUsage = async (uid: string): Promise<boolean> => {
+  try {
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const currentMonth = new Date().toISOString().substring(0, 7); // YYYY-MM
+    
+    const userRef = ref(database, `users/${uid}`);
+    const snapshot = await get(userRef);
+    
+    if (!snapshot.exists()) return false;
+    
+    const userData = snapshot.val() as UserProfileData;
+    const currentUsage = userData.aiUsage || { daily: {}, monthly: {}, total: 0 };
+    
+    // Increment counters
+    const newUsage = {
+      ...currentUsage,
+      daily: {
+        ...currentUsage.daily,
+        [today]: (currentUsage.daily[today] || 0) + 1
+      },
+      monthly: {
+        ...currentUsage.monthly,
+        [currentMonth]: (currentUsage.monthly[currentMonth] || 0) + 1
+      },
+      total: currentUsage.total + 1
+    };
+    
+    // Update in database
+    await set(ref(database, `users/${uid}/aiUsage`), newUsage);
+    return true;
+  } catch (error) {
+    logger.error('Error incrementing user usage:', error);
+    return false;
   }
 };
 

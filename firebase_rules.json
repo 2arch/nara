@@ -6,7 +6,10 @@
       ".write": false,
       "$userId": {
         ".read": "auth != null && auth.uid == $userId",
-        ".write": "auth != null && auth.uid == $userId"
+        ".write": "auth != null && auth.uid == $userId",
+        "membership": {
+          ".write": true
+        }
       }
     },
 

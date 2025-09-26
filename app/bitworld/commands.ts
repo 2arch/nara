@@ -70,7 +70,7 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'clear', 'cam', 'indent', 'bound', 'unbound', 'move', 'upload'];
+const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'clear', 'cam', 'indent', 'bound', 'unbound', 'move', 'upload', 'pro'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'white', 'black', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro'];
@@ -1701,6 +1701,56 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             
             const newState = !modeState.isMoveMode;
             setDialogueWithRevert(newState ? "Move mode enabled - hover over text blocks to drag them. Press Escape to exit." : "Move mode disabled", setDialogueText);
+            
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+            
+            return null;
+        }
+
+        if (commandToExecute.startsWith('pro')) {
+            // Direct redirect to Stripe checkout
+            setDialogueText("Redirecting to checkout...");
+            
+            // Get current user and create checkout session
+            import('firebase/auth').then(({ onAuthStateChanged }) => {
+                import('../firebase').then(({ auth }) => {
+                    onAuthStateChanged(auth, (user) => {
+                        if (user) {
+                            fetch('/api/stripe/checkout', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    plan: 'pro',
+                                    interval: 'monthly',
+                                    userId: user.uid,
+                                }),
+                            })
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data.url) {
+                                    window.location.href = data.url;
+                                } else {
+                                    setDialogueText('Checkout failed. Please try again.');
+                                }
+                            })
+                            .catch(() => {
+                                setDialogueText('Checkout failed. Please try again.');
+                            });
+                        } else {
+                            setDialogueText('Please sign in first.');
+                        }
+                    });
+                });
+            });
             
             // Clear command mode
             setCommandState({
