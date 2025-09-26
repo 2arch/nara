@@ -4,13 +4,15 @@ import { useRouter, useParams } from 'next/navigation';
 import { useWorldEngine } from '../../bitworld/world.engine';
 import { BitCanvas } from '../../bitworld/bit.canvas';
 import Grid3DBackground from '../../bitworld/canvas.grid3d';
-import { auth } from '../../firebase';
+import { auth, getUidByUsername } from '../../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 
 export default function UserState() {
   const [cursorAlternate, setCursorAlternate] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [targetUserUid, setTargetUserUid] = useState<string | null>(null);
+  const [uidLookupLoading, setUidLookupLoading] = useState(true);
   const router = useRouter();
   const params = useParams();
   const username = decodeURIComponent(params.username as string).replace('@', '');
@@ -26,11 +28,31 @@ export default function UserState() {
     
     return () => unsubscribe();
   }, []);
+
+  // Look up the target user's UID from their username
+  useEffect(() => {
+    const lookupUid = async () => {
+      try {
+        const uid = await getUidByUsername(username);
+        setTargetUserUid(uid);
+      } catch (error) {
+        setTargetUserUid(null);
+      } finally {
+        setUidLookupLoading(false);
+      }
+    };
+
+    if (username) {
+      lookupUid();
+    } else {
+      setUidLookupLoading(false);
+    }
+  }, [username]);
   
   const engine = useWorldEngine({ 
     worldId: stateName, 
     // initialBackgroundColor: '#000',
-    userUid: user?.uid || null,
+    userUid: targetUserUid, // Use the target user's UID, not the authenticated user's UID
     username: username,
     initialStateName: stateName
   });
@@ -43,10 +65,18 @@ export default function UserState() {
     return () => clearInterval(interval);
   }, []);
 
-  if (authLoading || !user || engine.isLoadingWorld) {
+  if (authLoading || uidLookupLoading || engine.isLoadingWorld) {
     return (
       <div className="w-screen h-screen flex items-center justify-center" style={{}}>
         <div className="text-black">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!targetUserUid) {
+    return (
+      <div className="w-screen h-screen flex items-center justify-center" style={{}}>
+        <div className="text-black">User not found</div>
       </div>
     );
   }

@@ -3,6 +3,7 @@ import React, { useRef, useEffect, useCallback, useState } from 'react';
 import type { WorldEngine } from './world.engine';
 import { useMonogramSystem } from './monogram';
 import { signUpUser, signInUser, checkUsernameAvailability, getUsernameByUid } from '../firebase';
+import { logger } from './logger';
 
 // --- Constants ---
 const CURSOR_COLOR_PRIMARY = '#0066FF';
@@ -95,7 +96,7 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
                 setSubmitError(result.error || 'Failed to create account');
             }
         } catch (error) {
-            console.error('Signup error:', error);
+            logger.error('Signup error:', error);
             setSubmitError('An unexpected error occurred');
         } finally {
             setIsSubmitting(false);
@@ -130,7 +131,7 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
                 setSubmitError(result.error || 'Failed to sign in');
             }
         } catch (error) {
-            console.error('Login error:', error);
+            logger.error('Login error:', error);
             setSubmitError('An unexpected error occurred');
         } finally {
             setIsSubmitting(false);

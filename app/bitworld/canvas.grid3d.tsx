@@ -7,6 +7,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass';
 import { SepiaShader, CoronaShader } from './shaders';
+import { logger } from './logger';
 
 export type GridMode = 'dots' | 'lines';
 export type ArtifactType = 'images' | 'questions';
@@ -298,7 +299,7 @@ const Grid3DBackground: React.FC<Grid3DBackgroundProps> = ({
       // Start preloading images
       preloadArenaImages();
     } catch (error) {
-      console.error('Failed to fetch Arena blocks:', error);
+      logger.error('Failed to fetch Arena blocks:', error);
       arenaBlocksRef.current = [];
       arenaLoadedRef.current = true; // Mark as loaded even if failed to prevent infinite retries
     } finally {

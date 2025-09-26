@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { logger } from './logger';
 
 // Initialize the Google GenAI client
 const ai = new GoogleGenAI({
@@ -134,10 +135,10 @@ Output only the result.`,
         return (response as any).text?.trim() || text;
     } catch (error) {
         if (error instanceof Error && error.message === 'AI operation was interrupted') {
-            console.log('AI transform operation was interrupted by user');
+            logger.debug('AI transform operation was interrupted by user');
             return '[Interrupted]';
         }
-        console.error('Error transforming text:', error);
+        logger.error('Error transforming text:', error);
         return `Could not transform text`;
     }
 }
@@ -181,10 +182,10 @@ export async function explainText(text: string, analysisType: string = 'analysis
         return (response as any).text?.trim() || `Could not analyze the text`;
     } catch (error) {
         if (error instanceof Error && error.message === 'AI operation was interrupted') {
-            console.log('AI explain operation was interrupted by user');
+            logger.debug('AI explain operation was interrupted by user');
             return '[Interrupted]';
         }
-        console.error('Error explaining text:', error);
+        logger.error('Error explaining text:', error);
         return `Could not explain text`;
     }
 }
@@ -228,10 +229,10 @@ export async function summarizeText(text: string, focus?: string): Promise<strin
         return (response as any).text?.trim() || `Could not summarize the text`;
     } catch (error) {
         if (error instanceof Error && error.message === 'AI operation was interrupted') {
-            console.log('AI summarize operation was interrupted by user');
+            logger.debug('AI summarize operation was interrupted by user');
             return '[Interrupted]';
         }
-        console.error('Error summarizing text:', error);
+        logger.error('Error summarizing text:', error);
         return `Could not summarize text`;
     }
 }
@@ -348,7 +349,7 @@ export async function chatWithAI(message: string, useCache: boolean = true): Pro
                 if (error instanceof Error && error.message === 'AI operation was interrupted') {
                     throw error;
                 }
-                console.error('Error using world context cache, falling back:', error);
+                logger.error('Error using world context cache, falling back:', error);
                 // Fall back to non-cached request
                 useCache = false;
             }
@@ -396,10 +397,10 @@ Start with a provocative question. Maximum 2 sentences total.`,
         return aiResponse;
     } catch (error) {
         if (error instanceof Error && error.message === 'AI operation was interrupted') {
-            console.log('AI chat operation was interrupted by user');
+            logger.debug('AI chat operation was interrupted by user');
             return '[Interrupted]';
         }
-        console.error('Error in chat:', error);
+        logger.error('Error in chat:', error);
         return 'Sorry, I encountered an error. Could you try again?';
     }
 }
@@ -475,7 +476,7 @@ This context represents the current state of the canvas/world that the user is w
 
         return currentCachedContent;
     } catch (error) {
-        console.error('Error creating world context cache:', error);
+        logger.error('Error creating world context cache:', error);
         return null;
     }
 }
@@ -488,7 +489,7 @@ export async function clearWorldContextCache(): Promise<void> {
         try {
             await ai.caches.delete({ name: currentCachedContent });
         } catch (error) {
-            console.error('Error deleting cache:', error);
+            logger.error('Error deleting cache:', error);
         }
         currentCachedContent = null;
         cacheExpiration = null;
@@ -525,10 +526,10 @@ export async function generateImage(prompt: string): Promise<string | null> {
             return dataUrl;
         }
 
-        console.warn('No image data received from generation');
+        logger.warn('No image data received from generation');
         return null;
     } catch (error) {
-        console.error('Error generating image:', error);
+        logger.error('Error generating image:', error);
         return null;
     }
 }
@@ -560,7 +561,7 @@ export async function generateVideo(prompt: string): Promise<string | null> {
                     operation: operation
                 });
             } catch (pollError) {
-                console.error(`Error polling operation (attempt ${pollCount}):`, pollError);
+                logger.error(`Error polling operation (attempt ${pollCount}):`, pollError);
                 // If the operation is not responding properly, we might have a stale operation
                 // Continue with the existing operation object
             }
@@ -568,7 +569,7 @@ export async function generateVideo(prompt: string): Promise<string | null> {
         }
         
         if (pollCount >= maxPolls) {
-            console.error('Video generation timed out after 5 minutes');
+            logger.error('Video generation timed out after 5 minutes');
             return null;
         }
 
@@ -591,7 +592,7 @@ export async function generateVideo(prompt: string): Promise<string | null> {
                 // Fetch the video from the URI
                 const response = await fetch(generatedVideo.video.uri);
                 if (!response.ok) {
-                    console.error('Failed to fetch video from URI:', response.status, response.statusText);
+                    logger.error('Failed to fetch video from URI:', response.status, response.statusText);
                     return null;
                 }
                 
@@ -606,13 +607,13 @@ export async function generateVideo(prompt: string): Promise<string | null> {
                         resolve(dataUrl);
                     };
                     reader.onerror = () => {
-                        console.error('Failed to convert video blob to data URL');
+                        logger.error('Failed to convert video blob to data URL');
                         resolve(null);
                     };
                     reader.readAsDataURL(blob);
                 });
             } catch (fetchError) {
-                console.error('Error fetching video from URI:', fetchError);
+                logger.error('Error fetching video from URI:', fetchError);
                 // As a fallback, just return the URI directly
                 return generatedVideo.video.uri;
             }
@@ -620,16 +621,16 @@ export async function generateVideo(prompt: string): Promise<string | null> {
 
         // Check for RAI (Responsible AI) filtering
         if (generatedVideo && 'raiReason' in generatedVideo) {
-            console.warn('Video generation blocked by RAI:', (generatedVideo as any).raiReason);
+            logger.warn('Video generation blocked by RAI:', (generatedVideo as any).raiReason);
         }
 
-        console.warn('No video data received from generation. Full response structure:', JSON.stringify(operation, null, 2));
+        logger.warn('No video data received from generation. Full response structure:', JSON.stringify(operation, null, 2));
         return null;
     } catch (error) {
-        console.error('Error generating video:', error);
+        logger.error('Error generating video:', error);
         // Log more details about the error
         if (error instanceof Error) {
-            console.error('Error details:', {
+            logger.error('Error details:', {
                 message: error.message,
                 stack: error.stack,
                 name: error.name
@@ -677,7 +678,7 @@ Respond with ONLY the label, no explanation.`,
         
         return null;
     } catch (error) {
-        console.error('Error generating cluster label:', error);
+        logger.error('Error generating cluster label:', error);
         return null;
     }
 }

@@ -9,6 +9,7 @@ import { database, auth } from '@/app/firebase';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 import { transformText, explainText, summarizeText, createSubtitleCycler, chatWithAI, clearChatHistory, setDialogueWithRevert, updateWorldContext, abortCurrentAI, isAIActive } from './ai';
+import { logger } from './logger';
 import { useAutoDialogue } from './dialogue';
 import { get } from 'firebase/database';
 
@@ -489,8 +490,8 @@ export function useWorldEngine({
                     undefined,
                     showAllLevels
                 );
-                console.log('Generated hierarchical frames:', hierarchicalSystem.activeFrames.length);
-                console.log('Levels:', Object.fromEntries(hierarchicalSystem.levels));
+                logger.debug('Generated hierarchical frames:', hierarchicalSystem.activeFrames.length);
+                logger.debug('Levels:', Object.fromEntries(hierarchicalSystem.levels));
                 
                 setHierarchicalFrames(hierarchicalSystem);
                 
@@ -502,13 +503,13 @@ export function useWorldEngine({
             } else {
                 // Generate simple bounding frames around text clusters
                 const frames = generateTextBlockFrames(worldData);
-                console.log('Generated simple frames:', frames.length);
+                logger.debug('Generated simple frames:', frames.length);
                 
                 setTextFrames(frames);
                 setHierarchicalFrames(null);
             }
         } catch (error) {
-            console.error('Error updating text frames:', error);
+            logger.error('Error updating text frames:', error);
         }
     }, [worldData, useHierarchicalFrames, zoomLevel, hierarchicalConfig, showAllLevels, getViewportCenter]);
 
@@ -528,7 +529,7 @@ export function useWorldEngine({
             if (useHierarchicalFrames && hierarchicalFrames) {
                 // Use L2 frames directly - create synthetic clusters from blue frame bounding boxes
                 const l2Frames = hierarchicalFrames.levels.get(HierarchyLevel.GROUPED) || [];
-                console.log('Found L2 frames:', l2Frames.length);
+                logger.debug('Found L2 frames:', l2Frames.length);
                 
                 // Create synthetic clusters directly from L2 frame bounding boxes (filter out invalid ones)
                 clustersToLabel = l2Frames
@@ -536,7 +537,7 @@ export function useWorldEngine({
                         const bbox = frame.boundingBox;
                         const isValid = !isNaN(bbox.minX) && !isNaN(bbox.maxX) && !isNaN(bbox.minY) && !isNaN(bbox.maxY);
                         if (!isValid) {
-                            console.log('Filtering out invalid L2 frame:', frame.id, bbox);
+                            logger.debug('Filtering out invalid L2 frame:', frame.id, bbox);
                         }
                         return isValid;
                     })
@@ -551,10 +552,10 @@ export function useWorldEngine({
                         centroid: frame.center,
                         leftMargin: frame.boundingBox.minX
                     }));
-                console.log('Using synthetic L2 clusters from blue frames:', clustersToLabel.length);
+                logger.debug('Using synthetic L2 clusters from blue frames:', clustersToLabel.length);
             } else {
                 // Fallback: generate frames first to get clusters
-                console.log('No hierarchical frames available, generating them first...');
+                logger.debug('No hierarchical frames available, generating them first...');
                 await updateTextFrames();
                 
                 if (hierarchicalFrames) {
@@ -564,7 +565,7 @@ export function useWorldEngine({
                             const bbox = frame.boundingBox;
                             const isValid = !isNaN(bbox.minX) && !isNaN(bbox.maxX) && !isNaN(bbox.minY) && !isNaN(bbox.maxY);
                             if (!isValid) {
-                                console.log('Filtering out invalid L2 frame:', frame.id, bbox);
+                                logger.debug('Filtering out invalid L2 frame:', frame.id, bbox);
                             }
                             return isValid;
                         })
@@ -579,16 +580,16 @@ export function useWorldEngine({
                             centroid: frame.center,
                             leftMargin: frame.boundingBox.minX
                         }));
-                    console.log('Generated synthetic L2 clusters from blue frames:', clustersToLabel.length);
+                    logger.debug('Generated synthetic L2 clusters from blue frames:', clustersToLabel.length);
                 } else {
-                    console.log('Failed to generate hierarchical frames, skipping cluster labels');
+                    logger.debug('Failed to generate hierarchical frames, skipping cluster labels');
                     return;
                 }
             }
             
             // Debug L2 cluster properties
             clustersToLabel.forEach((cluster, i) => {
-                console.log(`L2 cluster ${i}:`, {
+                logger.debug(`L2 cluster ${i}:`, {
                     id: cluster.id,
                     blocks: cluster.blocks.length,
                     density: cluster.density,
@@ -598,11 +599,11 @@ export function useWorldEngine({
             });
             
             // Skip filtering - use all valid L2 clusters directly for labeling
-            console.log('Using all L2 clusters directly for labeling:', clustersToLabel.length);
+            logger.debug('Using all L2 clusters directly for labeling:', clustersToLabel.length);
             
             // Generate AI labels for L2 clusters
             const aiLabels = await generateClusterLabels(clustersToLabel, worldData);
-            console.log('Generated AI labels for L2:', aiLabels.length);
+            logger.debug('Generated AI labels for L2:', aiLabels.length);
             
             // Convert to simplified format for rendering
             const simplifiedLabels = aiLabels.map(label => ({
@@ -613,7 +614,7 @@ export function useWorldEngine({
                 boundingBox: label.boundingBox
             }));
             
-            console.log('Final L2 cluster labels:', simplifiedLabels);
+            logger.debug('Final L2 cluster labels:', simplifiedLabels);
             setClusterLabels(simplifiedLabels);
             
             // Save cluster regions to Firebase if we have a current state
@@ -626,14 +627,14 @@ export function useWorldEngine({
                         clustersVisible: true // Set to true since we just generated
                     };
                     await set(regionsRef, regionsData);
-                    console.log('Cluster regions saved to Firebase');
+                    logger.debug('Cluster regions saved to Firebase');
                 } catch (error) {
-                    console.error('Failed to save cluster regions:', error);
+                    logger.error('Failed to save cluster regions:', error);
                 }
             }
             
         } catch (error) {
-            console.error('Error updating cluster labels:', error);
+            logger.error('Error updating cluster labels:', error);
             // Don't clear existing labels on error, just log it
         }
     }, [worldData, currentStateName, userUid, getUserPath, useHierarchicalFrames, hierarchicalFrames, updateTextFrames]);
@@ -919,7 +920,7 @@ export function useWorldEngine({
                         setCompiledTextCache(compiledContentOnly);
                     })
                     .catch(error => {
-                        console.error('Failed to sync compiled text:', error);
+                        logger.error('Failed to sync compiled text:', error);
                     });
             }
         }, 300); // 300ms debounce
@@ -964,7 +965,7 @@ export function useWorldEngine({
             setCurrentStateName(stateName); // Track that we're now in this state
             return true;
         } catch (error) {
-            console.error('Error saving state:', error);
+            logger.error('Error saving state:', error);
             return false;
         }
     }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel, clusterLabels, clustersVisible, getUserPath, userUid]);
@@ -1011,7 +1012,7 @@ export function useWorldEngine({
             setCurrentStateName(stateName); // Track that we're now in this state
             return true;
         } catch (error) {
-            console.error('Error loading state:', error);
+            logger.error('Error loading state:', error);
             return false;
         }
     }, [worldId, setSettings, getUserPath, userUid]);
@@ -1045,8 +1046,12 @@ export function useWorldEngine({
             }
             return [];
         } catch (error) {
-            console.error('Error loading available states:', error);
-            console.error('This might be due to Firebase connection limits. Try refreshing the page.');
+            // For public viewing, permission errors are expected when trying to list states
+            // Return empty array gracefully without logging errors for permission issues
+            if (error.message && error.message.includes('Permission denied')) {
+                return [];
+            }
+            logger.error('Error loading available states:', error);
             return [];
         }
     }, [userUid, worldId]);
@@ -1065,7 +1070,7 @@ export function useWorldEngine({
             
             return true;
         } catch (error) {
-            console.error('Error deleting state:', error);
+            logger.error('Error deleting state:', error);
             return false;
         }
     }, [worldId, currentStateName, getUserPath, userUid]);
@@ -1074,12 +1079,12 @@ export function useWorldEngine({
         if (!worldId || !userUid) return false;
         
         try {
-            // Update metadata for the state
-            const metadataRef = ref(database, getUserPath(`${stateName}/metadata`));
-            await set(metadataRef, { public: isPublic });
+            // Set the public flag at the root level of the state (not in metadata)
+            const publicRef = ref(database, getUserPath(`${stateName}/public`));
+            await set(publicRef, isPublic);
             return true;
         } catch (error) {
-            console.error('Error updating state publish status:', error);
+            logger.error('Error updating state publish status:', error);
             return false;
         }
     }, [worldId, getUserPath, userUid]);
@@ -1113,7 +1118,11 @@ export function useWorldEngine({
                 setCompiledTextCache(compiledText);
             }
         }).catch(error => {
-            console.error('Failed to load compiled text:', error);
+            // For public viewing, permission errors are expected when accessing content
+            if (error.message && error.message.includes('Permission denied')) {
+                return;
+            }
+            logger.error('Failed to load compiled text:', error);
         });
     }, [worldId, currentStateName, getUserPath, userUid]);
 
@@ -1145,7 +1154,7 @@ export function useWorldEngine({
             const updatedSettings = { ...settings, ...newSettings };
             await set(settingsRef, updatedSettings);
         } catch (error) {
-            console.error('Failed to save settings to Firebase:', error);
+            logger.error('Failed to save settings to Firebase:', error);
         }
     }, [worldId, settings, getUserPath, userUid]);
     
@@ -1400,7 +1409,7 @@ export function useWorldEngine({
         if (copiedText.length > 0 || (selectionWidth > 0 && selectionHeight > 0)) { // Copy even if selection is empty spaces
             // clipboardRef.current = { text: copiedText, width: selectionWidth, height: selectionHeight }; // Assuming clipboardRef exists
             // Use system clipboard as well
-            navigator.clipboard.writeText(copiedText).catch(err => console.warn('Could not copy to system clipboard:', err));
+            navigator.clipboard.writeText(copiedText).catch(err => logger.warn('Could not copy to system clipboard:', err));
             return true;
         }
         return false;
@@ -1462,7 +1471,7 @@ export function useWorldEngine({
 
             return true;
         } catch (err) {
-            console.warn('Could not read from system clipboard or paste failed:', err);
+            logger.warn('Could not read from system clipboard or paste failed:', err);
             return false;
         }
     }, [worldData, cursorPos, getNormalizedSelection]); // Removed deleteSelectedCharacters dependency, logic inlined
@@ -1657,7 +1666,7 @@ export function useWorldEngine({
                         router.push('/');
                     }).catch((error) => {
                         // An error happened
-                        console.error('Sign out error:', error);
+                        logger.error('Sign out error:', error);
                         setDialogueWithRevert("Failed to sign out", setDialogueText);
                     });
                 } else if (exec.command === 'publish') {
@@ -1928,8 +1937,8 @@ export function useWorldEngine({
                             }
                         }
                         
-                        console.log('Using color:', color);
-                        console.log('Using height:', height);
+                        logger.debug('Using color:', color);
+                        logger.debug('Using height:', height);
                         
                         // Calculate maxY based on height
                         // Height represents total rows from startY, not additional rows from endY
@@ -1957,7 +1966,7 @@ export function useWorldEngine({
                             
                             newWorldData[boundKey] = JSON.stringify(boundData);
                             setWorldData(newWorldData);
-                            console.log('Created merged bound:', boundData);
+                            logger.debug('Created merged bound:', boundData);
                             
                             const mergeMsg = enclosedBounds.length > 1 ? 
                                 `Merged ${enclosedBounds.length} bounds` : 
@@ -1975,13 +1984,13 @@ export function useWorldEngine({
                                 maxY: maxY, // New field: maximum Y where this bound has effect
                                 color: color
                             };
-                            console.log('boundKey:', boundKey);
-                            console.log('boundData:', boundData);
+                            logger.debug('boundKey:', boundKey);
+                            logger.debug('boundData:', boundData);
                             
                             let newWorldData = { ...worldData };
                             newWorldData[boundKey] = JSON.stringify(boundData);
                             
-                            console.log('Setting worldData with new bound region');
+                            logger.debug('Setting worldData with new bound region');
                             setWorldData(newWorldData);
                             
                             const heightMsg = height !== null ? ` (height: ${height} rows)` : ' (infinite height)';
@@ -1989,12 +1998,12 @@ export function useWorldEngine({
                         }
                         
                         // Clear the selection after creating/updating the bound
-                        console.log('Clearing selection');
+                        logger.debug('Clearing selection');
                         setSelectionStart(null);
                         setSelectionEnd(null);
                     } else {
                         // No selection - check if cursor is in an existing bound to update it
-                        console.log('No selection found - checking for existing bound at cursor');
+                        logger.debug('No selection found - checking for existing bound at cursor');
                         const cursorX = cursorPos.x;
                         const cursorY = cursorPos.y;
                         let foundBoundKey: string | null = null;
@@ -2028,7 +2037,7 @@ export function useWorldEngine({
                         
                         if (foundBoundKey && foundBoundData) {
                             // Update existing bound
-                            console.log('Found existing bound to update:', foundBoundKey, foundBoundData);
+                            logger.debug('Found existing bound to update:', foundBoundKey, foundBoundData);
                             
                             // Parse arguments for update
                             let newColor = foundBoundData.color; // Keep existing color by default
@@ -2076,7 +2085,7 @@ export function useWorldEngine({
                             const heightMsg = newHeight !== null ? ` (new height: ${newHeight} rows)` : '';
                             setDialogueWithRevert(`Bounded region updated - color: ${newColor}${heightMsg}`, setDialogueText);
                         } else {
-                            console.log('No bound found at cursor position');
+                            logger.debug('No bound found at cursor position');
                             setDialogueWithRevert(`No region selected and no bound at cursor. Select an area first, then use /bound`, setDialogueText);
                         }
                     }
@@ -2087,11 +2096,15 @@ export function useWorldEngine({
                     let foundBound = false;
                     let newWorldData = { ...worldData };
                     
+                    logger.debug('Unbound command - cursor position:', cursorX, cursorY);
+                    logger.debug('Looking for bounds in worldData...');
+                    
                     // Look through all bound_ entries to find one that contains the cursor
                     for (const key in worldData) {
                         if (key.startsWith('bound_')) {
                             try {
                                 const boundData = JSON.parse(worldData[key] as string);
+                                logger.debug('Checking bound:', key, boundData);
                                 
                                 // Check if cursor is within the bounds of this region (considering maxY)
                                 const withinOriginalBounds = cursorX >= boundData.startX && cursorX <= boundData.endX &&
@@ -2102,13 +2115,17 @@ export function useWorldEngine({
                                                               cursorX >= boundData.startX && cursorX <= boundData.endX &&
                                                               (boundData.maxY === null || boundData.maxY === undefined || cursorY <= boundData.maxY);
                                 
+                                logger.debug('Within original bounds:', withinOriginalBounds);
+                                logger.debug('Within column constraint:', withinColumnConstraint);
+                                
                                 if (withinOriginalBounds || withinColumnConstraint) {
                                     // Remove this bound
                                     delete newWorldData[key];
                                     foundBound = true;
-                                    console.log('Removing bound:', key, boundData);
+                                    logger.debug('Removing bound:', key, boundData);
                                 }
                             } catch (e) {
+                                logger.error('Error parsing bound data:', key, e);
                                 // Skip invalid bound data
                             }
                         }
@@ -2118,6 +2135,7 @@ export function useWorldEngine({
                         setWorldData(newWorldData);
                         setDialogueWithRevert(`Bounded region removed`, setDialogueText);
                     } else {
+                        logger.debug('No bound found at cursor position');
                         setDialogueWithRevert(`No bounded region found at cursor position`, setDialogueText);
                     }
                 } else if (exec.command === 'upload') {
@@ -2182,7 +2200,7 @@ export function useWorldEngine({
                             };
                             reader.readAsDataURL(file);
                         } catch (error) {
-                            console.error('Error uploading image:', error);
+                            logger.error('Error uploading image:', error);
                             setDialogueWithRevert("Error uploading image", setDialogueText);
                         } finally {
                             document.body.removeChild(fileInput);
@@ -2600,22 +2618,22 @@ export function useWorldEngine({
                                 endY: selection.endY,
                                 color: color
                             };
-                            console.log('boundKey:', boundKey);
-                            console.log('boundData:', boundData);
+                            logger.debug('boundKey:', boundKey);
+                            logger.debug('boundData:', boundData);
                             
                             let newWorldData = { ...worldData };
                             newWorldData[boundKey] = JSON.stringify(boundData);
                             
-                            console.log('Setting worldData with new bound region');
+                            logger.debug('Setting worldData with new bound region');
                             setWorldData(newWorldData);
                             setDialogueWithRevert(`Bounded region created`, setDialogueText);
                             
                             // Clear the selection after creating the bound
-                            console.log('Clearing selection');
+                            logger.debug('Clearing selection');
                             setSelectionStart(null);
                             setSelectionEnd(null);
                         } else {
-                            console.log('No selection found!');
+                            logger.debug('No selection found!');
                             setDialogueWithRevert(`No region selected. Select an area first by clicking and dragging, then use /bound`, setDialogueText);
                         }
                     }
@@ -2794,7 +2812,7 @@ export function useWorldEngine({
                     }
                     setWorldData(newWorldData);
                 }).catch((error) => {
-                    console.error('Error in context-aware chat:', error);
+                    logger.error('Error in context-aware chat:', error);
                     setDialogueText("Could not process message");
                 });
                 
@@ -2827,10 +2845,11 @@ export function useWorldEngine({
                 const viewportMaxX = Math.ceil(viewOffset.x + viewportCharWidth);
                 
                 let bestIndent: number | null = null;
-                const maxDistance = 10; // Only consider blocks within 10 characters of cursor
+                // Adaptive max distance based on viewport width - wider viewport allows for larger search radius
+                const maxDistance = Math.min(Math.floor(viewportCharWidth / 4), 20);
                 
-                console.log('Checking viewport bounds:', { viewportMinY, viewportMaxY, viewportMinX, viewportMaxX });
-                console.log('Cursor position:', cursorPos);
+                logger.debug('Checking viewport bounds:', { viewportMinY, viewportMaxY, viewportMinX, viewportMaxX });
+                logger.debug('Cursor position:', cursorPos);
                 
                 // Only check lines that are visible in viewport
                 for (let checkY = viewportMinY; checkY <= viewportMaxY; checkY++) {
@@ -2839,23 +2858,36 @@ export function useWorldEngine({
                     if (lineChars.length === 0) continue;
                     
                     const blocks = detectTextBlocks(lineChars);
-                    console.log(`Line ${checkY} has ${blocks.length} text blocks`);
+                    logger.debug(`Line ${checkY} has ${blocks.length} text blocks`);
                     
-                    // Find blocks that are within reasonable distance (ignore viewport X bounds for now)
+                    // Find blocks that are within reasonable distance AND visible in viewport
                     for (const block of blocks) {
+                        // Check if block start is within viewport X bounds
+                        if (block.start < viewportMinX || block.start > viewportMaxX) {
+                            logger.debug(`Block at ${block.start}: outside viewport X bounds, skipping`);
+                            continue;
+                        }
+                        
                         const distance = Math.abs(block.start - cursorPos.x);
                         
-                        console.log(`Block at ${block.start}: distance=${distance}`);
+                        logger.debug(`Block at ${block.start}: distance=${distance}, within viewport`);
                         
                         if (distance <= maxDistance) {
-                            if (bestIndent === null || block.start < bestIndent) {
+                            // Prefer blocks that are closer to current cursor position
+                            if (bestIndent === null) {
                                 bestIndent = block.start;
+                            } else {
+                                // Choose the block that's closer to cursor's current X
+                                const currentBestDistance = Math.abs(bestIndent - cursorPos.x);
+                                if (distance < currentBestDistance) {
+                                    bestIndent = block.start;
+                                }
                             }
                         }
                     }
                 }
                 
-                console.log('Final bestIndent (close and visible only):', bestIndent);
+                logger.debug('Final bestIndent (close and visible only):', bestIndent);
                 return bestIndent;
             };
 
@@ -2923,7 +2955,29 @@ export function useWorldEngine({
                     setLastEnterX(targetIndent);
                 } else if (lastEnterX !== null) {
                     // Empty line and we have a previous Enter X position - use it
-                    targetIndent = lastEnterX;
+                    // But check if it's still within viewport
+                    const { width: effectiveCharWidth } = getEffectiveCharDims(zoomLevel);
+                    if (effectiveCharWidth > 0 && typeof window !== 'undefined') {
+                        const viewportCharWidth = window.innerWidth / effectiveCharWidth;
+                        const viewportMinX = Math.floor(viewOffset.x);
+                        const viewportMaxX = Math.ceil(viewOffset.x + viewportCharWidth);
+                        
+                        if (lastEnterX >= viewportMinX && lastEnterX <= viewportMaxX) {
+                            targetIndent = lastEnterX;
+                        } else {
+                            // lastEnterX is outside viewport, try to find a visible text block instead
+                            const nearbyIndent = getViewportSmartIndentation(dataToCheck, cursorPos);
+                            if (nearbyIndent !== null) {
+                                targetIndent = nearbyIndent;
+                                setLastEnterX(nearbyIndent);
+                            } else {
+                                targetIndent = cursorPos.x;
+                                setLastEnterX(cursorPos.x);
+                            }
+                        }
+                    } else {
+                        targetIndent = lastEnterX;
+                    }
                 } else {
                     // Empty line, no previous Enter position - check for nearby text blocks
                     const nearbyIndent = getViewportSmartIndentation(dataToCheck, cursorPos); // Find leftmost text block in viewport
@@ -2966,19 +3020,19 @@ export function useWorldEngine({
                 const viewportMinX = Math.floor(viewOffset.x);
                 const viewportMaxX = Math.ceil(viewOffset.x + viewportCharWidth);
                 
-                console.log('Viewport X bounds:', { viewportMinX, viewportMaxX });
-                console.log('Proposed targetIndent:', targetIndent);
-                console.log('Current cursor X:', cursorPos.x);
+                logger.debug('Viewport X bounds:', { viewportMinX, viewportMaxX });
+                logger.debug('Proposed targetIndent:', targetIndent);
+                logger.debug('Current cursor X:', cursorPos.x);
                 
                 // If targetIndent would put cursor outside viewport, use current column instead
                 if (targetIndent < viewportMinX || targetIndent > viewportMaxX) {
-                    console.log('Target indent is outside viewport, using current column');
+                    logger.debug('Target indent is outside viewport, using current column');
                     targetIndent = cursorPos.x;
                     setLastEnterX(targetIndent);
                 }
             }
             
-            console.log('Final targetIndent after viewport check:', targetIndent);
+            logger.debug('Final targetIndent after viewport check:', targetIndent);
             
             nextCursorPos.y = cursorPos.y + 1;
             nextCursorPos.x = targetIndent;
@@ -3215,14 +3269,53 @@ export function useWorldEngine({
                     nextCursorPos.x = parseInt(lxStr, 10);
                     nextCursorPos.y = parseInt(lyStr, 10);
                 } else {
-                    // Delete one character to the left
-                    const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
-                    if (worldData[deleteKey]) {
-                        nextWorldData = { ...worldData }; // Create copy before modifying
-                        delete nextWorldData[deleteKey]; // Remove char from world
+                    // Check if we're at the beginning of a line (need to merge with previous line)
+                    const currentLineChars = extractLineCharacters(worldData, cursorPos.y);
+                    const isAtLineStart = cursorPos.x === 0 || 
+                        (currentLineChars.length > 0 && cursorPos.x <= currentLineChars[0].x);
+                    
+                    if (isAtLineStart && cursorPos.y > 0) {
+                        // Find the last character position on the previous line
+                        const prevLineChars = extractLineCharacters(worldData, cursorPos.y - 1);
+                        let targetX = 0; // Default to start of line if no characters
+                        
+                        if (prevLineChars.length > 0) {
+                            // Find rightmost character on previous line
+                            targetX = Math.max(...prevLineChars.map(c => c.x)) + 1;
+                        }
+                        
+                        // Collect all text from current line to move it
+                        nextWorldData = { ...worldData };
+                        const currentLineData = currentLineChars.map(c => ({ 
+                            char: c.char, 
+                            originalKey: `${c.x},${cursorPos.y}` 
+                        }));
+                        
+                        // Remove all characters from current line
+                        for (const charData of currentLineData) {
+                            delete nextWorldData[charData.originalKey];
+                        }
+                        
+                        // Add characters to previous line starting from targetX
+                        for (let i = 0; i < currentLineData.length; i++) {
+                            const newKey = `${targetX + i},${cursorPos.y - 1}`;
+                            nextWorldData[newKey] = currentLineData[i].char;
+                        }
+                        
+                        // Move cursor to the junction point
+                        nextCursorPos.x = targetX;
+                        nextCursorPos.y = cursorPos.y - 1;
                         worldDataChanged = true;
+                    } else {
+                        // Delete one character to the left
+                        const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
+                        if (worldData[deleteKey]) {
+                            nextWorldData = { ...worldData }; // Create copy before modifying
+                            delete nextWorldData[deleteKey]; // Remove char from world
+                            worldDataChanged = true;
+                        }
+                        nextCursorPos.x -= 1; // Move cursor left regardless
                     }
-                    nextCursorPos.x -= 1; // Move cursor left regardless
                 }
             }
             moved = true; // Cursor position changed or selection was deleted
@@ -3242,7 +3335,7 @@ export function useWorldEngine({
             }
             
             if (bounds.length === 0) {
-                console.log('No bounds found');
+                logger.debug('No bounds found');
             } else {
                 // Sort bounds by their position for consistent cycling
                 bounds.sort((a, b) => {
@@ -3818,7 +3911,7 @@ export function useWorldEngine({
     const moveImage = useCallback((imageKey: string, deltaX: number, deltaY: number): void => {
         const imageData = worldData[imageKey];
         if (!imageData || !isImageData(imageData)) {
-            console.error('Invalid image key or data:', imageKey);
+            logger.error('Invalid image key or data:', imageKey);
             return;
         }
         
@@ -3845,7 +3938,7 @@ export function useWorldEngine({
 
     const deleteImage = useCallback((imageKey: string): void => {
         if (!worldData[imageKey]) {
-            console.error('Image key not found:', imageKey);
+            logger.error('Image key not found:', imageKey);
             return;
         }
         

@@ -1,50 +1,60 @@
-  {
-    "rules": {
-      "users": {
-        ".indexOn": ["username"],
+{
+  "rules": {
+    "users": {
+      ".indexOn": ["username"],
+      ".read": true,
+      ".write": false,
+      "$userId": {
+        ".read": "auth != null && auth.uid == $userId",
+        ".write": "auth != null && auth.uid == $userId"
+      }
+    },
+
+    "worlds": {
+      ".indexOn": ["public"],
+      
+      "blog": {
         ".read": true,
-        ".write": false,
-        "$userId": {
-          ".read": "auth != null && auth.uid == $userId",
-          ".write": "auth != null && auth.uid == $userId"
-        }
+        ".write": "auth != null"
       },
 
-      "worlds": {
-        "blog": {
-          ".read": true,
-          ".write": "auth != null"
-        },
+      "home": {
+        ".read": true,
+        ".write": "auth != null"
+      },
 
-        "home": {
-          ".read": true,
-          ".write": "auth != null"
-        },
+      "homeWorld": {
+        ".read": true,
+        ".write": "auth != null"
+      },
 
-        "homeWorld": {
-          ".read": true,
-          ".write": "auth != null"
-        },
-
-        "$userId": {
-          ".read": "auth != null && auth.uid == $userId",
+      "$userId": {
+        ".read": "auth != null && auth.uid == $userId",
+        ".write": "auth != null && auth.uid == $userId",
+        
+        "$stateName": {
+          ".indexOn": ["public"],
+          
+          // Anyone can read if public is true, owner can always read
+          ".read": "data.child('public').val() == true || (auth != null && auth.uid == $userId)",
           ".write": "auth != null && auth.uid == $userId",
-
-          "$stateName": {
-            ".read": "auth != null && (auth.uid == $userId || data.child('public').val() == true)",
-            ".write": "auth != null && auth.uid == $userId",
-            
-            "data": {
-              ".read": "auth != null && (auth.uid == $userId || root.child('worlds').child($userId).child($stateName).child('public').val() == true)",
-              ".write": "auth != null && auth.uid == $userId"
-            },
-            
-            "settings": {
-              ".read": "auth != null && (auth.uid == $userId || root.child('worlds').child($userId).child($stateName).child('public').val() == true)",
-              ".write": "auth != null && auth.uid == $userId"
-            }
+          
+          "data": {
+            ".read": "root.child('worlds').child($userId).child($stateName).child('public').val() == true || (auth != null && auth.uid == $userId)",
+            ".write": "auth != null && auth.uid == $userId"
+          },
+          
+          "settings": {
+            ".read": "root.child('worlds').child($userId).child($stateName).child('public').val() == true || (auth != null && auth.uid == $userId)",
+            ".write": "auth != null && auth.uid == $userId"
+          },
+          
+          "public": {
+            ".read": true,
+            ".write": "auth != null && auth.uid == $userId"
           }
         }
       }
     }
   }
+}

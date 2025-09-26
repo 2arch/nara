@@ -99,3 +99,130 @@ Import trace for requested module:
  GET /@jun/los-angeles 200 in 1811ms
  ✓ Compiled in 1372ms (933 modules)
  GET /@jun/los-angeles 200 in 216ms
+ ✓ Compiled in 2.9s (933 modules)
+ ✓ Compiled in 1935ms (933 modules)
+ ⨯ [Error: Invariant: missing bootstrap script. This is a bug in Next.js] {
+  page: '/'
+}
+ ○ Compiling /_not-found ...
+ ✓ Compiled /_not-found in 6.3s (1248 modules)
+ GET /@jun 404 in 6998ms
+ GET / 500 in 9413ms
+ GET /@jun 200 in 798ms
+ GET /_next/static/chunks/app/%5Busername%5D/page.js 200 in 104ms
+ ⨯ Failed to generate static paths for /[username]:
+Error: Cannot find module './vendor-chunks/three.js'
+Require stack:
+- /Users/jun/nara/.next/server/webpack-runtime.js
+- /Users/jun/nara/.next/server/app/[username]/page.js
+- /Users/jun/nara/node_modules/next/dist/server/require.js
+- /Users/jun/nara/node_modules/next/dist/server/load-components.js
+- /Users/jun/nara/node_modules/next/dist/build/utils.js
+- /Users/jun/nara/node_modules/next/dist/server/dev/static-paths-worker.js
+- /Users/jun/nara/node_modules/next/dist/compiled/jest-worker/processChild.js
+    at __webpack_require__.f.require (.next/server/webpack-runtime.js:198:28)
+    at <unknown> (.next/server/webpack-runtime.js:111:40)
+    at Array.reduce (<anonymous>)
+    at __webpack_require__.e (.next/server/webpack-runtime.js:110:67) {
+  type: 'Error',
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [Array]
+}
+ ⨯ Failed to generate static paths for /[username]/[...slug]:
+Error: Cannot find module './vendor-chunks/three.js'
+Require stack:
+- /Users/jun/nara/.next/server/webpack-runtime.js
+- /Users/jun/nara/.next/server/app/[username]/[...slug]/page.js
+- /Users/jun/nara/node_modules/next/dist/server/require.js
+- /Users/jun/nara/node_modules/next/dist/server/load-components.js
+- /Users/jun/nara/node_modules/next/dist/build/utils.js
+- /Users/jun/nara/node_modules/next/dist/server/dev/static-paths-worker.js
+- /Users/jun/nara/node_modules/next/dist/compiled/jest-worker/processChild.js
+    at __webpack_require__.f.require (.next/server/webpack-runtime.js:198:28)
+    at <unknown> (.next/server/webpack-runtime.js:111:40)
+    at Array.reduce (<anonymous>)
+    at __webpack_require__.e (.next/server/webpack-runtime.js:110:67) {
+  type: 'Error',
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [Array]
+}
+ ⨯ Error: Cannot find module './vendor-chunks/three.js'
+Require stack:
+- /Users/jun/nara/.next/server/webpack-runtime.js
+- /Users/jun/nara/.next/server/app/[username]/page.js
+- /Users/jun/nara/node_modules/next/dist/server/require.js
+- /Users/jun/nara/node_modules/next/dist/server/load-components.js
+- /Users/jun/nara/node_modules/next/dist/build/utils.js
+- /Users/jun/nara/node_modules/next/dist/server/dev/static-paths-worker.js
+- /Users/jun/nara/node_modules/next/dist/compiled/jest-worker/processChild.js
+    at __webpack_require__.f.require (.next/server/webpack-runtime.js:198:28)
+    at <unknown> (.next/server/webpack-runtime.js:111:40)
+    at Array.reduce (<anonymous>)
+    at __webpack_require__.e (.next/server/webpack-runtime.js:110:67) {
+  type: 'Error',
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [Array],
+  page: '/@jun'
+}
+ GET /@jun 500 in 1202ms
+ ⨯ Error: Cannot find module './vendor-chunks/three.js'
+Require stack:
+- /Users/jun/nara/.next/server/webpack-runtime.js
+- /Users/jun/nara/.next/server/app/[username]/page.js
+- /Users/jun/nara/node_modules/next/dist/server/require.js
+- /Users/jun/nara/node_modules/next/dist/server/load-components.js
+- /Users/jun/nara/node_modules/next/dist/build/utils.js
+- /Users/jun/nara/node_modules/next/dist/server/dev/static-paths-worker.js
+- /Users/jun/nara/node_modules/next/dist/compiled/jest-worker/processChild.js
+    at __webpack_require__.f.require (.next/server/webpack-runtime.js:198:28)
+    at <unknown> (.next/server/webpack-runtime.js:111:40)
+    at Array.reduce (<anonymous>)
+    at __webpack_require__.e (.next/server/webpack-runtime.js:110:67) {
+  type: 'Error',
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [Array],
+  page: '/favicon.ico'
+}
+ GET /favicon.ico 500 in 1097ms
+ ✓ Compiled in 2.4s (1262 modules)
+ ✓ Compiled in 2s (1262 modules)
+ ✓ Compiled in 2.4s (1262 modules)
+ ✓ Compiled in 1433ms (1262 modules)
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, rename '/Users/jun/nara/.next/cache/webpack/client-development/14.pack.gz_' -> '/Users/jun/nara/.next/cache/webpack/client-development/14.pack.gz'
+ ✓ Compiled in 316ms (611 modules)
+ ✓ Compiled in 1438ms (1264 modules)
+ ✓ Compiled in 1147ms (1264 modules)
+ ✓ Compiled in 3.6s (1264 modules)
+ ✓ Compiled in 931ms (1264 modules)
+ ✓ Compiled in 1119ms (1264 modules)
+ ✓ Compiled in 1125ms (1264 modules)
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: invalid stored block lengths
+   Reload env: .env
+ ✓ Compiled in 1003ms (1246 modules)
+ ✓ Compiled in 668ms (1264 modules)
+ ✓ Compiled in 802ms (1264 modules)
+ ✓ Compiled in 518ms (612 modules)
+ ✓ Compiled in 245ms (612 modules)
+ ✓ Compiled in 492ms (612 modules)
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, rename '/Users/jun/nara/.next/cache/webpack/client-development/1.pack.gz_' -> '/Users/jun/nara/.next/cache/webpack/client-development/1.pack.gz'
+ ✓ Compiled in 289ms (612 modules)
+ ✓ Compiled in 1288ms (1264 modules)
+ ✓ Compiled in 655ms (1264 modules)
+ ✓ Compiled in 775ms (1264 modules)
+ ✓ Compiled in 920ms (1264 modules)
+ ✓ Compiled in 711ms (1264 modules)
+ ✓ Compiled in 1510ms (1264 modules)
+ ✓ Compiled in 690ms (1264 modules)
+ ✓ Compiled in 766ms (1264 modules)
+ ✓ Compiled in 614ms (1264 modules)
+ ✓ Compiled in 1075ms (1264 modules)
+ ✓ Compiled in 942ms (1264 modules)
+ ✓ Compiled in 885ms (1264 modules)
+ ✓ Compiled in 1949ms (1264 modules)
+ ✓ Compiled in 1288ms (1264 modules)
+ ✓ Compiled in 691ms (1264 modules)
+ GET / 200 in 498ms
+ ✓ Compiled in 300ms (612 modules)
+ ✓ Compiled in 221ms (612 modules)
+ ✓ Compiled in 175ms (612 modules)
+ ✓ Compiled in 143ms (612 modules)

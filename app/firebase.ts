@@ -2,6 +2,7 @@
 import { initializeApp } from "firebase/app";
 import { getDatabase, connectDatabaseEmulator, ref, onValue, set, get, query, orderByChild, equalTo } from "firebase/database";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, User } from "firebase/auth";
+import { logger } from './bitworld/logger';
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
 
@@ -92,7 +93,7 @@ export const signUpUser = async (email: string, password: string, firstName: str
     
     return { success: true, user };
   } catch (error: any) {
-    console.error('Signup error:', error);
+    logger.error('Signup error:', error);
     return { 
       success: false, 
       error: error.message || 'Failed to create account' 
@@ -105,7 +106,7 @@ export const signInUser = async (email: string, password: string): Promise<{succ
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     return { success: true, user: userCredential.user };
   } catch (error: any) {
-    console.error('Signin error:', error);
+    logger.error('Signin error:', error);
     return { 
       success: false, 
       error: error.message || 'Failed to sign in' 
@@ -119,7 +120,7 @@ export const checkUsernameAvailability = async (username: string): Promise<boole
     const snapshot = await get(usersQuery);
     return !snapshot.exists(); // Available if no user has this username
   } catch (error) {
-    console.error('Error checking username availability:', error);
+    logger.error('Error checking username availability:', error);
     return false; // Assume not available on error
   }
 };
@@ -129,7 +130,25 @@ export const getUsernameByUid = async (uid: string): Promise<string | null> => {
     const snapshot = await get(ref(database, `users/${uid}/username`));
     return snapshot.exists() ? snapshot.val() : null;
   } catch (error) {
-    console.error('Error fetching username:', error);
+    logger.error('Error fetching username:', error);
+    return null;
+  }
+};
+
+export const getUidByUsername = async (username: string): Promise<string | null> => {
+  try {
+    const usersQuery = query(ref(database, 'users'), orderByChild('username'), equalTo(username));
+    const snapshot = await get(usersQuery);
+    
+    if (snapshot.exists()) {
+      // Get the first (and should be only) match
+      const userData = snapshot.val();
+      const uid = Object.keys(userData)[0];
+      return uid;
+    }
+    return null;
+  } catch (error) {
+    logger.error('Error fetching UID by username:', error);
     return null;
   }
 };

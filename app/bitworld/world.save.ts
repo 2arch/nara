@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { logger } from './logger';
 import { database } from '@/app/firebase'; // Adjust path if needed
 import { ref, set, onValue, off, DataSnapshot, get, onChildAdded, onChildChanged, onChildRemoved } from 'firebase/database';
 // Import functions and constants directly from @sanity/diff-match-patch
@@ -49,7 +50,13 @@ export function useWorldSave(
     useEffect(() => {
         if (!worldId) {
             setIsLoading(false);
-            console.warn('useWorldSave: No worldId provided, persistence disabled.');
+            logger.warn('useWorldSave: No worldId provided, persistence disabled.');
+            return;
+        }
+
+        // For user-specific worlds, wait for authentication
+        if (!userUid && worldId !== 'blog' && worldId !== 'homeWorld') {
+            setIsLoading(false);
             return;
         }
 
@@ -68,7 +75,12 @@ export function useWorldSave(
         const settingsRef = ref(database, settingsPath);
 
         const handleError = (err: Error) => {
-            console.error("Firebase: Error loading data:", err);
+            // For public viewing, permission errors are expected and should not be logged as errors
+            if (err.message && err.message.includes('Permission denied')) {
+                setIsLoading(false);
+                return;
+            }
+            logger.error("Firebase: Error loading data:", err);
             setError(`Failed to load world data: ${err.message}`);
             setIsLoading(false);
         };
@@ -76,7 +88,7 @@ export function useWorldSave(
         const timeoutId = setTimeout(() => {
             if (isLoading) {
                 setIsLoading(false);
-                console.warn('Firebase: Data loading timed out.');
+                logger.warn('Firebase: Data loading timed out.');
             }
         }, 5000); // 5 second timeout
 
@@ -217,7 +229,7 @@ export function useWorldSave(
                 await set(dbRef, localWorldData);
                 lastSyncedDataRef.current = { ...localWorldData };
             } catch (err: any) {
-                console.error("Firebase: Error saving data:", err);
+                logger.error("Firebase: Error saving data:", err);
                 setError(`Failed to save world data: ${err.message}`);
             } finally {
                 setIsSaving(false);
@@ -256,7 +268,7 @@ export function useWorldSave(
                 await set(dbRef, localSettings);
                 lastSyncedSettingsRef.current = { ...localSettings };
             } catch (err: any) {
-                console.error("Firebase: Error saving settings:", err);
+                logger.error("Firebase: Error saving settings:", err);
                 setError(`Failed to save settings: ${err.message}`);
             } finally {
                 setIsSaving(false);
