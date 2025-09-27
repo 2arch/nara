@@ -3042,7 +3042,7 @@ export function useWorldEngine({
             logger.debug('Final targetIndent after viewport check:', targetIndent);
             
             nextCursorPos.y = cursorPos.y + 1;
-            nextCursorPos.x = targetIndent;
+            nextCursorPos.x = targetIndent !== undefined && targetIndent !== null ? targetIndent : cursorPos.x;            
             moved = true;
         } else if (key === 'ArrowUp') {
             if (isMod) {
