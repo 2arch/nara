@@ -38,7 +38,6 @@
         "$stateName": {
           ".indexOn": ["public"],
           
-          // Anyone can read if public is true, owner can always read
           ".read": "data.child('public').val() == true || (auth != null && auth.uid == $userId)",
           ".write": "auth != null && auth.uid == $userId",
           

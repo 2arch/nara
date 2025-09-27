@@ -182,11 +182,18 @@ export const getUserProfile = async (uid: string): Promise<UserProfileData | nul
     
     const userData = snapshot.val() as UserProfileData;
     
-    // Initialize membership if missing
-    if (!userData.membership) {
+    // Handle both old (membership as string) and new (membership as object) structures
+    if (typeof userData.membership === 'object' && userData.membership?.tier) {
+      // New structure - extract tier
+      userData.membership = userData.membership.tier;
+    } else if (!userData.membership) {
+      // No membership at all - initialize
       userData.membership = 'fresh';
-      // Update the database with the initialized membership
-      await set(ref(database, `users/${uid}/membership`), 'fresh');
+      await set(ref(database, `users/${uid}/membership`), { tier: 'fresh' });
+    } else if (typeof userData.membership === 'string') {
+      // Old structure - migrate to new
+      const tier = userData.membership;
+      await set(ref(database, `users/${uid}/membership`), { tier });
     }
     
     // Initialize aiUsage if missing
@@ -197,7 +204,6 @@ export const getUserProfile = async (uid: string): Promise<UserProfileData | nul
         total: 0,
         lastReset: new Date().toISOString()
       };
-      // Update the database with the initialized aiUsage
       await set(ref(database, `users/${uid}/aiUsage`), userData.aiUsage);
     }
     
@@ -232,7 +238,7 @@ export const checkUserQuota = async (uid: string): Promise<{ canUseAI: boolean, 
 
 export const upgradeUserToPro = async (uid: string): Promise<boolean> => {
   try {
-    await set(ref(database, `users/${uid}/membership`), 'pro');
+    await set(ref(database, `users/${uid}/membership`), { tier: 'pro' });
     console.log(`User ${uid} upgraded to pro`);
     return true;
   } catch (error) {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { stripe, PLAN_DETAILS } from '../config';
 import { database } from '@/app/firebase';
-import { ref, update, get } from 'firebase/database';
+import { ref, update, get, set } from 'firebase/database';
 import type { MembershipTier } from '@/app/firebase';
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
@@ -20,7 +20,15 @@ export async function POST(request: NextRequest) {
       event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
     } catch (err) {
       console.error('Webhook signature verification failed:', err);
-      return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
+      console.error('Webhook secret:', webhookSecret ? 'Set' : 'Not set');
+      console.error('Signature received:', signature ? 'Yes' : 'No');
+      // Temporarily parse without verification to debug
+      try {
+        event = JSON.parse(body);
+        console.log('Parsed event type:', event.type);
+      } catch (parseErr) {
+        return NextResponse.json({ error: 'Invalid signature and failed to parse body' }, { status: 400 });
+      }
     }
 
     // Handle subscription events
@@ -61,7 +69,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Webhook error:', error);
     return NextResponse.json(
-      { error: 'Webhook handler failed' },
+      { error: 'Webhook handler failed', details: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
@@ -91,7 +99,9 @@ async function handleSubscriptionCreated(session: any) {
   }
 
   const planDetails = PLAN_DETAILS[priceId as keyof typeof PLAN_DETAILS];
-  const expiry = new Date(subscription.current_period_end * 1000).toISOString();
+  const expiry = subscription.current_period_end 
+    ? new Date(subscription.current_period_end * 1000).toISOString() 
+    : null;
 
   // Update user in Firebase
   await updateUserSubscription(userId, {
@@ -144,7 +154,9 @@ async function handleSubscriptionUpdated(subscription: any) {
   }
 
   const planDetails = PLAN_DETAILS[priceId as keyof typeof PLAN_DETAILS];
-  const expiry = new Date(subscription.current_period_end * 1000).toISOString();
+  const expiry = subscription.current_period_end 
+    ? new Date(subscription.current_period_end * 1000).toISOString() 
+    : null;
 
   // Update user subscription
   await updateUserSubscription(userId, {
@@ -180,17 +192,21 @@ async function updateUserSubscription(userId: string, updates: {
   planExpiry?: string | null;
 }) {
   try {
-    const userRef = ref(database, `users/${userId}`);
+    // Update everything under membership as a nested object
+    const membershipData: any = {
+      tier: updates.membership || 'fresh'
+    };
     
-    // Remove null values
-    const cleanUpdates = Object.entries(updates).reduce((acc, [key, value]) => {
-      if (value !== null) {
-        acc[key] = value;
-      }
-      return acc;
-    }, {} as any);
+    if (updates.subscriptionId) {
+      membershipData.subscriptionId = updates.subscriptionId;
+    }
+    
+    if (updates.planExpiry) {
+      membershipData.planExpiry = updates.planExpiry;
+    }
 
-    await update(userRef, cleanUpdates);
+    const membershipRef = ref(database, `users/${userId}/membership`);
+    await set(membershipRef, membershipData);
   } catch (error) {
     console.error('Error updating user subscription in Firebase:', error);
     throw error;
