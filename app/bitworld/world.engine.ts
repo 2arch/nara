@@ -1151,7 +1151,14 @@ export function useWorldEngine({
         
         try {
             const settingsRef = ref(database, getUserPath(`${worldId}/settings`));
-            const updatedSettings = { ...settings, ...newSettings };
+            // Merge settings and filter out undefined values to prevent Firebase errors
+            const merged = { ...settings, ...newSettings };
+            const updatedSettings = Object.entries(merged).reduce((acc, [key, value]) => {
+                if (value !== undefined) {
+                    (acc as any)[key] = value;
+                }
+                return acc;
+            }, {} as WorldSettings);
             await set(settingsRef, updatedSettings);
         } catch (error) {
             logger.error('Failed to save settings to Firebase:', error);

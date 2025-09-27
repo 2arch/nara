@@ -37,7 +37,6 @@
         
         "$stateName": {
           ".indexOn": ["public"],
-          
           ".read": "data.child('public').val() == true || (auth != null && auth.uid == $userId)",
           ".write": "auth != null && auth.uid == $userId",
           

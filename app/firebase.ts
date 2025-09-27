@@ -183,9 +183,9 @@ export const getUserProfile = async (uid: string): Promise<UserProfileData | nul
     const userData = snapshot.val() as UserProfileData;
     
     // Handle both old (membership as string) and new (membership as object) structures
-    if (typeof userData.membership === 'object' && userData.membership?.tier) {
+    if (typeof userData.membership === 'object' && userData.membership && 'tier' in userData.membership) {
       // New structure - extract tier
-      userData.membership = userData.membership.tier;
+      userData.membership = (userData.membership as any).tier;
     } else if (!userData.membership) {
       // No membership at all - initialize
       userData.membership = 'fresh';
