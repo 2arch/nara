@@ -1113,7 +1113,30 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     // Check if mouse is hovering over this command line
                     const isHovered = mouseWorldPos && Math.floor(mouseWorldPos.y) === worldY && worldY > engine.commandState.commandStartPos.y;
 
-                    // Draw background for command data using text color with varying opacity
+                    // Get command text and check if it's a color command
+                    const suggestionIndex = worldY - engine.commandState.commandStartPos.y - 1;
+                    let highlightColor: string | null = null;
+
+                    if (suggestionIndex >= 0 && suggestionIndex < engine.commandState.matchedCommands.length) {
+                        const commandText = engine.commandState.matchedCommands[suggestionIndex];
+
+                        // Extract color from bg/text commands
+                        if (commandText.startsWith('bg ')) {
+                            const parts = commandText.split(' ');
+                            const colorArg = parts[1];
+                            if (colorArg && !['clear', 'live', 'web'].includes(colorArg)) {
+                                highlightColor = COLOR_MAP[colorArg.toLowerCase()] || (colorArg.startsWith('#') ? colorArg : null);
+                            }
+                        } else if (commandText.startsWith('text ')) {
+                            const parts = commandText.split(' ');
+                            const colorArg = parts[parts[1] === '--g' ? 2 : 1];
+                            if (colorArg && colorArg !== '--g') {
+                                highlightColor = COLOR_MAP[colorArg.toLowerCase()] || (colorArg.startsWith('#') ? colorArg : null);
+                            }
+                        }
+                    }
+
+                    // Draw background for command data
                     if (worldY === engine.commandState.commandStartPos.y) {
                         // Command line (typed command) - use text color at full opacity
                         ctx.fillStyle = engine.textColor;
@@ -1121,25 +1144,46 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         // Text uses background color
                         ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
                     } else if (isHovered) {
-                        // Hovered suggestion - use text color at 90% opacity (brighter than selected)
-                        const hex = engine.textColor.replace('#', '');
-                        const r = parseInt(hex.substring(0, 2), 16);
-                        const g = parseInt(hex.substring(2, 4), 16);
-                        const b = parseInt(hex.substring(4, 6), 16);
-                        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.9)`;
-                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                        // Text uses background color
-                        ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                        // Hovered suggestion - use swatch color if available, otherwise text color
+                        if (highlightColor) {
+                            ctx.fillStyle = highlightColor;
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            // Text uses contrasting color (white or black based on luminance)
+                            const hex = highlightColor.replace('#', '');
+                            const r = parseInt(hex.substring(0, 2), 16);
+                            const g = parseInt(hex.substring(2, 4), 16);
+                            const b = parseInt(hex.substring(4, 6), 16);
+                            const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+                            ctx.fillStyle = luminance > 0.5 ? '#000000' : '#FFFFFF';
+                        } else {
+                            const hex = engine.textColor.replace('#', '');
+                            const r = parseInt(hex.substring(0, 2), 16);
+                            const g = parseInt(hex.substring(2, 4), 16);
+                            const b = parseInt(hex.substring(4, 6), 16);
+                            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.9)`;
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                        }
                     } else if (engine.commandState.isActive && worldY === engine.commandState.commandStartPos.y + 1 + engine.commandState.selectedIndex) {
-                        // Selected suggestion - use text color at 80% opacity
-                        const hex = engine.textColor.replace('#', '');
-                        const r = parseInt(hex.substring(0, 2), 16);
-                        const g = parseInt(hex.substring(2, 4), 16);
-                        const b = parseInt(hex.substring(4, 6), 16);
-                        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.8)`;
-                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                        // Text uses background color
-                        ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                        // Selected suggestion - use swatch color at 80% opacity if available
+                        if (highlightColor) {
+                            const hex = highlightColor.replace('#', '');
+                            const r = parseInt(hex.substring(0, 2), 16);
+                            const g = parseInt(hex.substring(2, 4), 16);
+                            const b = parseInt(hex.substring(4, 6), 16);
+                            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.8)`;
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+                            ctx.fillStyle = luminance > 0.5 ? '#000000' : '#FFFFFF';
+                        } else {
+                            const hex = engine.textColor.replace('#', '');
+                            const r = parseInt(hex.substring(0, 2), 16);
+                            const g = parseInt(hex.substring(2, 4), 16);
+                            const b = parseInt(hex.substring(4, 6), 16);
+                            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.8)`;
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                        }
                     } else {
                         // Other suggestions - use text color at 60% opacity
                         const hex = engine.textColor.replace('#', '');

@@ -73,8 +73,8 @@ interface UseCommandSystemProps {
 // --- Command System Constants ---
 const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'clear', 'cam', 'indent', 'bound', 'unbound', 'move', 'upload', 'pro', 'spawn'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
-const BG_COMMANDS = ['clear', 'live', 'white', 'black', 'web'];
-const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro'];
+const BG_COMMANDS = ['clear', 'live', 'web'];
+const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro', 'Neureal'];
 const NAV_COMMANDS: string[] = [];
 const CAMERA_COMMANDS = ['default', 'focus'];
 
@@ -82,15 +82,10 @@ const CAMERA_COMMANDS = ['default', 'focus'];
 export const COLOR_MAP: { [name: string]: string } = {
     'white': '#FFFFFF',
     'black': '#000000',
-    'red': '#FF0000',
-    'green': '#00FF00',
-    'blue': '#0000FF',
-    'yellow': '#FFFF00',
-    'purple': '#800080',
+    'sulfur': '#F0FF6A',
+    'talk': '#69AED6',
     'orange': '#FFA500',
-    'pink': '#FFC0CB',
-    'cyan': '#00FFFF',
-    'magenta': '#FF00FF'
+    'ochre': '#FFC0CB',
 };
 
 // --- Command System Hook ---
@@ -196,17 +191,23 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             const parts = input.toLowerCase().split(' ');
             if (parts.length > 1) {
                 const bgInput = parts[1];
-                const suggestions = BG_COMMANDS
+                // Combine BG_COMMANDS with color names from COLOR_MAP
+                const colorNames = Object.keys(COLOR_MAP);
+                const allOptions = [...BG_COMMANDS, ...colorNames];
+                const suggestions = allOptions
                     .filter(bg => bg.startsWith(bgInput))
                     .map(bg => `bg ${bg}`);
-                
+
                 const currentCommand = `bg ${bgInput}`;
                 if (bgInput.length > 0 && !suggestions.some(s => s === currentCommand)) {
                      return [currentCommand, ...suggestions];
                 }
                 return suggestions;
             }
-            return BG_COMMANDS.map(bg => `bg ${bg}`);
+            // Show all BG_COMMANDS plus all color names
+            const colorNames = Object.keys(COLOR_MAP);
+            const allOptions = [...BG_COMMANDS, ...colorNames];
+            return allOptions.map(bg => `bg ${bg}`);
         }
 
         if (lowerInput === 'font') {
@@ -342,22 +343,33 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             const parts = input.split(' ');
 
             if (parts.length > 1) {
-                const secondArg = parts[1];
+                const secondArg = parts[1].toLowerCase();
 
                 // Handle --g flag for global color update
                 if (secondArg === '--g') {
                     if (parts.length > 2) {
-                        // User is typing the color
-                        return [input];
+                        // User is typing the color after --g
+                        const colorInput = parts[2].toLowerCase();
+                        const colorNames = Object.keys(COLOR_MAP);
+                        const suggestions = colorNames
+                            .filter(color => color.startsWith(colorInput))
+                            .map(color => `text --g ${color}`);
+                        return suggestions.length > 0 ? suggestions : [input];
                     }
-                    // Just typed --g, show example
-                    return ['text --g <color>', 'text --g white', 'text --g black'];
+                    // Just typed --g, show all color options
+                    const colorNames = Object.keys(COLOR_MAP);
+                    return colorNames.map(color => `text --g ${color}`);
                 } else {
-                    // Regular text command - show as typed
-                    return [input];
+                    // Regular text command - show color suggestions
+                    const colorNames = Object.keys(COLOR_MAP);
+                    const suggestions = colorNames
+                        .filter(color => color.startsWith(secondArg))
+                        .map(color => `text ${color}`);
+                    return suggestions.length > 0 ? suggestions : [input];
                 }
             }
-            return ['text', 'text --g', 'text red', 'text white black'];
+            // Show --g option and color examples
+            return ['text --g', ...Object.keys(COLOR_MAP).map(color => `text ${color}`)];
         }
 
         if (lowerInput === 'bound') {
