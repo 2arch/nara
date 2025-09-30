@@ -249,12 +249,12 @@ export function useDialogue() {
         ctx.restore();
     }, [calculateDebugLayout]);
 
-    const formatTableOfContents = useCallback((labels: Array<{text: string, x: number, y: number, color: string}>, maxWidth: number, originPosition: {x: number, y: number}, uniqueColors: string[], activeFilters: Set<string>, sortMode: string, availableStates: string[] = [], username?: string, navMode: 'labels' | 'states' = 'labels', getStatePublishStatus?: (state: string) => boolean): string => {
+    const formatTableOfContents = useCallback((labels: Array<{text: string, x: number, y: number, color: string}>, maxWidth: number, originPosition: {x: number, y: number}, uniqueColors: string[], activeFilters: Set<string>, sortMode: string, availableStates: string[] = [], username?: string, navMode: 'labels' | 'states' | 'bounds' = 'labels', getStatePublishStatus?: (state: string) => boolean, bounds: Array<{startX: number, endX: number, startY: number, endY: number, color: string, title?: string}> = []): string => {
         const availableWidth = maxWidth - NAV_MARGIN_CHARS * 2;
         
         // Line 0: "index" with current position coordinates and mode indicator
         const currentPosCoordinates = `(${Math.round(originPosition.x)},${Math.round(originPosition.y)})`;
-        const modeIndicator = navMode === 'labels' ? 'labels' : 'states';
+        const modeIndicator = navMode === 'labels' ? 'labels' : navMode === 'states' ? 'states' : 'bounds';
         const indexSpaceWidth = availableWidth - 'index'.length - currentPosCoordinates.length;
         let indexLine = `index ${modeIndicator}`;
         if (indexSpaceWidth > 0) {
@@ -347,22 +347,22 @@ export function useDialogue() {
                 }
                 lines.push(''); // Add blank line between entries
             }
-        } else {
+        } else if (navMode === 'states') {
             // Show states only
             if (availableStates.length === 0) {
                 lines.push('No states found.');
                 return lines.join('\n');
             }
-            
+
             // Add each state with buttons
             availableStates.forEach((state, index) => {
                 const isPublished = getStatePublishStatus ? getStatePublishStatus(state) : false;
                 const publishButton = isPublished ? '[unpublish]' : '[publish]';
                 const navigateButton = '[navigate]';
                 const buttonsWidth = publishButton.length + 1 + navigateButton.length; // +1 for space
-                
+
                 const dotsWidth = availableWidth - state.length - buttonsWidth;
-                
+
                 if (dotsWidth > 0) {
                     const dots = '+'.repeat(dotsWidth);
                     lines.push(`${state}${dots}${publishButton} ${navigateButton}`);
@@ -371,8 +371,50 @@ export function useDialogue() {
                 }
                 lines.push(''); // Add blank line between entries
             });
+        } else if (navMode === 'bounds') {
+            // Show bounds only
+            if (bounds.length === 0) {
+                lines.push('No bounds found.');
+                return lines.join('\n');
+            }
+
+            // Find the longest coordinate string to ensure consistent alignment
+            let maxCoordLength = 0;
+            for (const bound of bounds) {
+                const boundCenterX = Math.floor((bound.startX + bound.endX) / 2);
+                const coordinates = `(${boundCenterX},${bound.startY})`;
+                maxCoordLength = Math.max(maxCoordLength, coordinates.length);
+            }
+
+            // Add each bound with its center coordinates
+            bounds.forEach((bound, index) => {
+                const boundCenterX = Math.floor((bound.startX + bound.endX) / 2);
+                const boundWidth = bound.endX - bound.startX + 1;
+                // Use title if available, otherwise default to bound[width]
+                const boundLabel = bound.title || `bound[${boundWidth}]`;
+                const coordinates = `(${boundCenterX},${bound.startY})`;
+                const paddedCoordinates = coordinates.padStart(maxCoordLength, ' ');
+
+                const dotsWidth = availableWidth - boundLabel.length - maxCoordLength;
+
+                if (dotsWidth > 0) {
+                    const dots = '+'.repeat(dotsWidth);
+                    lines.push(`${boundLabel}${dots}${paddedCoordinates}`);
+                } else {
+                    // If text is too long, truncate it
+                    const maxTextWidth = availableWidth - maxCoordLength - 3;
+                    if (maxTextWidth > 0) {
+                        const truncatedText = boundLabel.substring(0, maxTextWidth);
+                        const dots = '...';
+                        lines.push(`${truncatedText}${dots}${paddedCoordinates}`);
+                    } else {
+                        lines.push(`${boundLabel.substring(0, availableWidth)}`);
+                    }
+                }
+                lines.push(''); // Add blank line between entries
+            });
         }
-        
+
         return lines.join('\n');
     }, []);
 
@@ -400,10 +442,10 @@ export function useDialogue() {
         };
     }, []);
 
-    const renderNavDialogue = useCallback((props: DialogueProps & { 
-        labels: Array<{text: string, x: number, y: number, color: string}>, 
-        originPosition: {x: number, y: number}, 
-        uniqueColors: string[], 
+    const renderNavDialogue = useCallback((props: DialogueProps & {
+        labels: Array<{text: string, x: number, y: number, color: string}>,
+        originPosition: {x: number, y: number},
+        uniqueColors: string[],
         activeFilters: Set<string>,
         sortMode: string,
         onCoordinateClick?: (x: number, y: number) => void,
@@ -412,13 +454,14 @@ export function useDialogue() {
         availableStates?: string[],
         username?: string,
         onStateClick?: (state: string) => void,
-        navMode?: 'labels' | 'states',
+        navMode?: 'labels' | 'states' | 'bounds',
         onIndexClick?: () => void,
         onPublishClick?: (state: string) => void,
         onNavigateClick?: (state: string) => void,
-        getStatePublishStatus?: (state: string) => boolean
+        getStatePublishStatus?: (state: string) => boolean,
+        bounds?: Array<{startX: number, endX: number, startY: number, endY: number, color: string, title?: string}>
     }) => {
-        const { canvasWidth, canvasHeight, ctx, labels, originPosition, uniqueColors, activeFilters, sortMode, onCoordinateClick, onColorFilterClick, onSortModeClick, availableStates = [], username, onStateClick, navMode = 'labels', onIndexClick, onPublishClick, onNavigateClick, getStatePublishStatus } = props;
+        const { canvasWidth, canvasHeight, ctx, labels, originPosition, uniqueColors, activeFilters, sortMode, onCoordinateClick, onColorFilterClick, onSortModeClick, availableStates = [], username, onStateClick, navMode = 'labels', onIndexClick, onPublishClick, onNavigateClick, getStatePublishStatus, bounds = [] } = props;
         
         // Use fixed dimensions for nav text
         const charHeight = DIALOGUE_FONT_SIZE;
@@ -427,7 +470,7 @@ export function useDialogue() {
 
         // Calculate max width for table of contents formatting
         const maxWidthChars = Math.floor(canvasWidth / charWidth) - (NAV_MARGIN_CHARS * 2);
-        const navText = formatTableOfContents(labels, maxWidthChars, originPosition, uniqueColors, activeFilters, sortMode, availableStates, username, navMode, getStatePublishStatus);
+        const navText = formatTableOfContents(labels, maxWidthChars, originPosition, uniqueColors, activeFilters, sortMode, availableStates, username, navMode, getStatePublishStatus, bounds);
         const navLayout = calculateNavLayout(canvasWidth, canvasHeight, charWidth, charHeight, navText);
         
         ctx.save();
@@ -560,7 +603,7 @@ export function useDialogue() {
                         const x = parseInt(coordMatch[1], 10);
                         const y = parseInt(coordMatch[2], 10);
                         const coordWidth = coordMatch[0].length * charWidth;
-                        
+
                         if (navMode === 'labels' && labelIndex < labels.length) {
                             // This is a regular label coordinate
                             const label = labels[labelIndex];
@@ -575,6 +618,23 @@ export function useDialogue() {
                                 },
                                 labelX: label.x,
                                 labelY: label.y
+                            });
+                            labelIndex++;
+                        } else if (navMode === 'bounds' && labelIndex < bounds.length) {
+                            // This is a bound coordinate (center of bound)
+                            const bound = bounds[labelIndex];
+                            const boundCenterX = Math.floor((bound.startX + bound.endX) / 2);
+                            coordinateRegions.push({
+                                x: boundCenterX,
+                                y: bound.startY,
+                                rect: {
+                                    x: coordScreenX,
+                                    y: screenY,
+                                    width: coordWidth,
+                                    height: charHeight
+                                },
+                                labelX: boundCenterX,
+                                labelY: bound.startY
                             });
                             labelIndex++;
                         }

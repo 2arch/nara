@@ -29,7 +29,7 @@ export interface CommandExecution {
 // --- Mode System Types ---
 export type CanvasMode = 'default' | 'air' | 'chat';
 export type BackgroundMode = 'transparent' | 'color' | 'image' | 'video' | 'space' | 'stream';
-export type CameraMode = 'default' | 'ripstop' | 'focus';
+export type CameraMode = 'default' | 'focus';
 
 export type GridMode = 'dots' | 'lines';
 export type ArtifactType = 'images' | 'questions';
@@ -63,6 +63,7 @@ interface UseCommandSystemProps {
     setDialogueText: (text: string) => void;
     initialBackgroundColor?: string;
     getAllLabels?: () => Array<{text: string, x: number, y: number, color: string}>;
+    getAllBounds?: () => Array<{startX: number, endX: number, startY: number, endY: number, color: string, title?: string}>;
     availableStates?: string[];
     username?: string;
     updateSettings?: (settings: Partial<WorldSettings>) => void;
@@ -70,15 +71,15 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'clear', 'cam', 'indent', 'bound', 'unbound', 'move', 'upload', 'pro'];
+const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'clear', 'cam', 'indent', 'bound', 'unbound', 'move', 'upload', 'pro', 'spawn'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'white', 'black', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro'];
 const NAV_COMMANDS: string[] = [];
-const CAMERA_COMMANDS = ['default', 'ripstop', 'focus'];
+const CAMERA_COMMANDS = ['default', 'focus'];
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates = [], username, updateSettings, settings }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, updateSettings, settings }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const [commandState, setCommandState] = useState<CommandState>({
@@ -111,7 +112,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         },
         searchPattern: '', // No search pattern initially
         isSearchActive: false, // Search not active initially
-        cameraMode: 'default', // Default camera mode (no intervention)
+        cameraMode: 'default', // Default camera mode (ripstop behavior)
         isIndentEnabled: true, // Smart indentation enabled by default
         isMoveMode: false, // Move mode not active initially
         gridMode: 'dots', // Default grid mode
@@ -213,21 +214,37 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         if (lowerInput === 'nav') {
             const parts = input.toLowerCase().split(' ');
             const labels = getAllLabels ? getAllLabels() : [];
+            const bounds = getAllBounds ? getAllBounds() : [];
+
+            // Get label names
             const labelNames = labels.map(label => label.text.toLowerCase());
-            
+
+            // Get bound titles (fallback to bound[width] if no title)
+            const boundNames = bounds.map(bound => {
+                if (bound.title) {
+                    return bound.title.toLowerCase();
+                } else {
+                    const width = bound.endX - bound.startX + 1;
+                    return `bound[${width}]`;
+                }
+            });
+
+            // Combine both labels and bounds
+            const allTargets = [...labelNames, ...boundNames];
+
             if (parts.length > 1) {
                 const navInput = parts[1];
-                const suggestions = labelNames
-                    .filter(label => label.startsWith(navInput))
-                    .map(label => `nav ${label}`);
-                
+                const suggestions = allTargets
+                    .filter(target => target.startsWith(navInput))
+                    .map(target => `nav ${target}`);
+
                 const currentCommand = `nav ${navInput}`;
                 if (navInput.length > 0 && !suggestions.some(s => s === currentCommand)) {
                      return [currentCommand, ...suggestions];
                 }
                 return suggestions;
             }
-            return labelNames.length > 0 ? labelNames.map(label => `nav ${label}`) : ['nav'];
+            return allTargets.length > 0 ? allTargets.map(target => `nav ${target}`) : ['nav'];
         }
 
         if (lowerInput === 'search') {
@@ -306,6 +323,28 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return ['label', 'label --distance', "label 'text with spaces'"];
         }
 
+        if (lowerInput === 'text') {
+            const parts = input.split(' ');
+
+            if (parts.length > 1) {
+                const secondArg = parts[1];
+
+                // Handle --g flag for global color update
+                if (secondArg === '--g') {
+                    if (parts.length > 2) {
+                        // User is typing the color
+                        return [input];
+                    }
+                    // Just typed --g, show example
+                    return ['text --g <color>', 'text --g white', 'text --g black'];
+                } else {
+                    // Regular text command - show as typed
+                    return [input];
+                }
+            }
+            return ['text', 'text --g', 'text red', 'text white black'];
+        }
+
         if (lowerInput === 'bound') {
             const parts = input.split(' ');
             
@@ -348,7 +387,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         }
         
         return AVAILABLE_COMMANDS.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
-    }, [getAllLabels, availableStates]);
+    }, [getAllLabels, getAllBounds, availableStates]);
 
     // Mode switching functionality
     const switchMode = useCallback((newMode: CanvasMode) => {
@@ -1164,9 +1203,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
 
         if (commandToExecute.startsWith('text')) {
             const inputParts = commandState.input.trim().split(/\s+/);
-            const colorArg = inputParts.length > 1 ? inputParts[1] : undefined;
-            const backgroundArg = inputParts.length > 2 ? inputParts[2] : undefined;
-            
+            const firstArg = inputParts.length > 1 ? inputParts[1] : undefined;
+
+            // Check if --g flag is present for global update
+            const isGlobal = firstArg === '--g';
+            const colorArg = isGlobal ? (inputParts.length > 2 ? inputParts[2] : undefined) : firstArg;
+            const backgroundArg = isGlobal ? (inputParts.length > 3 ? inputParts[3] : undefined) : (inputParts.length > 2 ? inputParts[2] : undefined);
+
             if (colorArg) {
                 // Validate color format (hex code or named colors)
                 const colorMap: { [name: string]: string } = {
@@ -1230,26 +1273,44 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     }
                 }
                 
-                // Update the persistent text style
-                setModeState(prev => ({
-                    ...prev,
-                    currentTextStyle: {
-                        color: finalTextColor,
-                        background: finalTextBackground
-                    }
-                }));
+                if (isGlobal) {
+                    // Update global text color (affects all text)
+                    setModeState(prev => ({
+                        ...prev,
+                        textColor: finalTextColor,
+                        textBackground: finalTextBackground,
+                        currentTextStyle: {
+                            color: finalTextColor,
+                            background: finalTextBackground
+                        }
+                    }));
 
-                // Save text color to settings
-                if (updateSettings) {
-                    updateSettings({
-                        textColor: finalTextColor
-                    });
+                    // Save to settings
+                    if (updateSettings) {
+                        updateSettings({
+                            textColor: finalTextColor
+                        });
+                    }
+
+                    const styleMsg = finalTextBackground ?
+                        `Global text: ${finalTextColor} on ${finalTextBackground}` :
+                        `Global text color: ${finalTextColor}`;
+                    setDialogueText(styleMsg);
+                } else {
+                    // Update the persistent text style for individual character styling only
+                    setModeState(prev => ({
+                        ...prev,
+                        currentTextStyle: {
+                            color: finalTextColor,
+                            background: finalTextBackground
+                        }
+                    }));
+
+                    const styleMsg = finalTextBackground ?
+                        `Text style: ${finalTextColor} on ${finalTextBackground}` :
+                        `Text color: ${finalTextColor}`;
+                    setDialogueText(styleMsg);
                 }
-                
-                const styleMsg = finalTextBackground ? 
-                    `Text style: ${finalTextColor} on ${finalTextBackground}` : 
-                    `Text color: ${finalTextColor}`;
-                setDialogueText(styleMsg);
             } else {
                 // Reset to default text style
                 setModeState(prev => ({
@@ -1327,28 +1388,53 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 hasNavigated: false
             });
             setCommandData({});
-            
+
             // Use the command to execute instead of the typed input
-            // Extract label name from command (format: "nav labelname")
+            // Extract target name from command (format: "nav targetname")
             const commandParts = commandToExecute.split(' ');
-            const labelQuery = commandParts.slice(1).join(' ');
-            
-            if (labelQuery && getAllLabels) {
-                const labels = getAllLabels();
-                // Find the label that matches the selected command (case insensitive)
-                const targetLabel = labels.find(label => 
-                    label.text.toLowerCase() === labelQuery.toLowerCase()
-                );
-                
-                if (targetLabel) {
-                    return { 
-                        command: 'nav', 
-                        args: [targetLabel.x.toString(), targetLabel.y.toString()], 
-                        commandStartPos: commandState.commandStartPos 
-                    };
+            const targetQuery = commandParts.slice(1).join(' ');
+
+            if (targetQuery) {
+                // Try to find a matching label first
+                if (getAllLabels) {
+                    const labels = getAllLabels();
+                    const targetLabel = labels.find(label =>
+                        label.text.toLowerCase() === targetQuery.toLowerCase()
+                    );
+
+                    if (targetLabel) {
+                        return {
+                            command: 'nav',
+                            args: [targetLabel.x.toString(), targetLabel.y.toString()],
+                            commandStartPos: commandState.commandStartPos
+                        };
+                    }
+                }
+
+                // If no label found, try to find a matching bound
+                if (getAllBounds) {
+                    const bounds = getAllBounds();
+                    const targetBound = bounds.find(bound => {
+                        if (bound.title) {
+                            return bound.title.toLowerCase() === targetQuery.toLowerCase();
+                        } else {
+                            const width = bound.endX - bound.startX + 1;
+                            return `bound[${width}]` === targetQuery.toLowerCase();
+                        }
+                    });
+
+                    if (targetBound) {
+                        // Navigate to center of bound
+                        const boundCenterX = Math.floor((targetBound.startX + targetBound.endX) / 2);
+                        return {
+                            command: 'nav',
+                            args: [boundCenterX.toString(), targetBound.startY.toString()],
+                            commandStartPos: commandState.commandStartPos
+                        };
+                    }
                 }
             }
-            
+
             return { command: 'nav', args: [], commandStartPos: commandState.commandStartPos };
         }
 
@@ -1719,7 +1805,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         if (commandToExecute.startsWith('pro')) {
             // Direct redirect to Stripe checkout
             setDialogueText("Redirecting to checkout...");
-            
+
             // Get current user and create checkout session
             import('firebase/auth').then(({ onAuthStateChanged }) => {
                 import('../firebase').then(({ auth }) => {
@@ -1751,7 +1837,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     });
                 });
             });
-            
+
             // Clear command mode
             setCommandState({
                 isActive: false,
@@ -1762,8 +1848,28 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 hasNavigated: false
             });
             setCommandData({});
-            
+
             return null;
+        }
+
+        if (commandToExecute.startsWith('spawn')) {
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            // Return command execution for world engine to handle spawn point setting
+            return {
+                command: 'spawn',
+                args: [],
+                commandStartPos: commandState.commandStartPos
+            };
         }
 
         if (commandToExecute.startsWith('artefacts')) {

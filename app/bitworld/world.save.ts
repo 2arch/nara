@@ -226,7 +226,27 @@ export function useWorldSave(
             const dbRef = ref(database, worldDataRefPath);
 
             try {
-                await set(dbRef, localWorldData);
+                // Clean world data - remove undefined values recursively
+                const cleanObject = (obj: any): any => {
+                    if (obj === null || typeof obj !== 'object') {
+                        return obj;
+                    }
+                    
+                    if (Array.isArray(obj)) {
+                        return obj.map(cleanObject);
+                    }
+                    
+                    return Object.entries(obj).reduce((acc, [key, value]) => {
+                        if (value !== undefined) {
+                            acc[key] = typeof value === 'object' ? cleanObject(value) : value;
+                        }
+                        return acc;
+                    }, {} as any);
+                };
+                
+                const cleanWorldData = cleanObject(localWorldData);
+                
+                await set(dbRef, cleanWorldData);
                 lastSyncedDataRef.current = { ...localWorldData };
             } catch (err: any) {
                 logger.error("Firebase: Error saving data:", err);
@@ -265,7 +285,27 @@ export function useWorldSave(
             const dbRef = ref(database, settingsRefPath);
 
             try {
-                await set(dbRef, localSettings);
+                // Clean settings object - remove undefined values recursively
+                const cleanObject = (obj: any): any => {
+                    if (obj === null || typeof obj !== 'object') {
+                        return obj;
+                    }
+                    
+                    if (Array.isArray(obj)) {
+                        return obj.map(cleanObject);
+                    }
+                    
+                    return Object.entries(obj).reduce((acc, [key, value]) => {
+                        if (value !== undefined) {
+                            acc[key] = typeof value === 'object' ? cleanObject(value) : value;
+                        }
+                        return acc;
+                    }, {} as any);
+                };
+                
+                const cleanSettings = cleanObject(localSettings);
+                
+                await set(dbRef, cleanSettings);
                 lastSyncedSettingsRef.current = { ...localSettings };
             } catch (err: any) {
                 logger.error("Firebase: Error saving settings:", err);

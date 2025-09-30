@@ -849,10 +849,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     const isFiniteHeight = (maxY !== null && maxY !== undefined);
                     
                     // Always render just bars, never full fill
-                    // For infinite bounds: only top bar (black if focused, gray if not)
-                    // For finite bounds: top bar (black if focused, gray if not) + bottom bar (gray)
+                    // Use text color for bounds bars (programmatic - matches current theme)
                     const isFocused = engine.focusedBoundKey === key;
-                    const topBarColor = isFocused ? '#000000' : '#B0B0B0'; // Black if focused, heather gray if not
+
+                    // Use the engine's text color with higher opacity when focused
+                    const baseColor = engine.textColor;
+                    const topBarColor = isFocused ? baseColor : `${baseColor}99`; // Full opacity if focused, 60% if not
                     
                     for (let x = startX; x <= endX; x++) {
                         // Always render top bar 
@@ -868,9 +870,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         // Only render bottom bar if this is a finite height bound
                         if (isFiniteHeight && x >= startWorldX - 5 && x <= endWorldX + 5 && renderEndY >= startWorldY - 5 && renderEndY <= endWorldY + 5) {
                             const bottomScreenPos = engine.worldToScreen(x, renderEndY, currentZoom, currentOffset);
-                            if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth && 
+                            if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
                                 bottomScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
-                                ctx.fillStyle = '#B0B0B0'; // Heather gray for bottom bar
+                                ctx.fillStyle = `${baseColor}99`; // Same as unfocused - 60% opacity
                                 ctx.fillRect(bottomScreenPos.x, bottomScreenPos.y, effectiveCharWidth, effectiveCharHeight);
                             }
                         }
@@ -1323,6 +1325,96 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Waypoint Arrows for Off-Screen Bounds ===
+        if (!engine.isNavVisible) {
+            for (const key in engine.worldData) {
+                if (key.startsWith('bound_')) {
+                    try {
+                        const boundData = JSON.parse(engine.worldData[key] as string);
+                        const { startX, endX, startY, endY, maxY } = boundData;
+
+                        // Use the center of the top bar as reference point
+                        const boundCenterX = Math.floor((startX + endX) / 2);
+                        const boundY = startY;
+
+                        // Check if bound is visible in viewport
+                        const isVisible = startX <= viewBounds.maxX && endX >= viewBounds.minX &&
+                                        startY >= viewBounds.minY && startY <= viewBounds.maxY;
+
+                        if (!isVisible) {
+                            // Calculate distance from viewport center to bound
+                            const viewportCenter = engine.getViewportCenter();
+                            const deltaX = boundCenterX - viewportCenter.x;
+                            const deltaY = boundY - viewportCenter.y;
+                            const distance = Math.round(Math.sqrt(deltaX * deltaX + deltaY * deltaY));
+
+                            // Only show waypoint arrow if within proximity threshold
+                            if (distance <= engine.settings.labelProximityThreshold) {
+                                const boundScreenPos = engine.worldToScreen(boundCenterX, boundY, currentZoom, currentOffset);
+                                const intersection = getViewportEdgeIntersection(
+                                    viewportCenterScreen.x, viewportCenterScreen.y,
+                                    boundScreenPos.x, boundScreenPos.y,
+                                    cssWidth, cssHeight
+                                );
+
+                                if (intersection) {
+                                    const edgeBuffer = ARROW_MARGIN;
+                                    let adjustedX = intersection.x;
+                                    let adjustedY = intersection.y;
+
+                                    adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
+                                    adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
+
+                                    // Use text color for arrow (programmatic - matches current theme)
+                                    const isFocused = engine.focusedBoundKey === key;
+                                    const arrowColor = isFocused ? engine.textColor : `${engine.textColor}CC`;
+
+                                    drawArrow(ctx, adjustedX, adjustedY, intersection.angle, arrowColor);
+
+                                    // Draw bound identifier text next to arrow
+                                    const boundWidth = endX - startX + 1;
+                                    // Use title from boundData if available, otherwise default to bound[width]
+                                    const boundLabel = boundData.title || `bound[${boundWidth}]`;
+
+                                    ctx.fillStyle = arrowColor;
+                                    ctx.font = `${effectiveFontSize}px ${fontFamily}`;
+                                    const textOffset = ARROW_SIZE * 1.5;
+
+                                    let textX = adjustedX - Math.cos(intersection.angle) * textOffset;
+                                    let textY = adjustedY - Math.sin(intersection.angle) * textOffset;
+
+                                    // Adjust alignment to keep text inside the screen bounds
+                                    if (Math.abs(intersection.angle) < Math.PI / 2) {
+                                        ctx.textAlign = 'right';
+                                    } else {
+                                        ctx.textAlign = 'left';
+                                    }
+
+                                    if (intersection.angle > Math.PI / 4 && intersection.angle < 3 * Math.PI / 4) {
+                                        ctx.textBaseline = 'bottom';
+                                    } else if (intersection.angle < -Math.PI / 4 && intersection.angle > -3 * Math.PI / 4) {
+                                        ctx.textBaseline = 'top';
+                                    } else {
+                                        ctx.textBaseline = 'middle';
+                                    }
+
+                                    // Add distance indicator only if proximity threshold is not disabled
+                                    const distanceText = engine.settings.labelProximityThreshold >= 999999 ? '' : ` [${distance}]`;
+                                    ctx.fillText(boundLabel + distanceText, textX, textY);
+
+                                    // Reset to defaults
+                                    ctx.textAlign = 'left';
+                                    ctx.textBaseline = 'top';
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Skip invalid bound data
+                    }
+                }
+            }
+        }
+
         // === Render Blocks ===
         for (const key in engine.worldData) {
             if (key.startsWith('block_')) {
@@ -1752,7 +1844,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 onIndexClick: handleIndexClick,
                 onPublishClick: handlePublishClick,
                 onNavigateClick: handleNavigateClick,
-                getStatePublishStatus: getStatePublishStatus
+                getStatePublishStatus: getStatePublishStatus,
+                bounds: engine.getAllBounds()
             });
         }
 

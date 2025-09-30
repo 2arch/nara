@@ -13,6 +13,10 @@ export interface WorldSettings {
         content: string; // SVG string for AI backgrounds, color/gradient for custom
         prompt?: string; // The prompt used to generate AI background
     };
+    spawnPoint?: {
+        x: number;
+        y: number;
+    };
 }
 
 export const initialSettings: WorldSettings = {

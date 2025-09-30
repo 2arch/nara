@@ -135,10 +135,10 @@ export interface WorldEngine {
     navOriginPosition: Point;
     navColorFilters: Set<string>;
     navSortMode: 'chronological' | 'closest' | 'farthest';
-    navMode: 'labels' | 'states';
+    navMode: 'labels' | 'states' | 'bounds';
     toggleNavMode: () => void;
     getAllLabels: () => Array<{text: string, x: number, y: number, color: string}>;
-    getAllBounds: () => Array<{startX: number, endX: number, startY: number, endY: number, color: string}>;
+    getAllBounds: () => Array<{startX: number, endX: number, startY: number, endY: number, color: string, title?: string}>;
     getSortedLabels: (sortMode: 'chronological' | 'closest' | 'farthest', originPos: Point) => Array<{text: string, x: number, y: number, color: string}>;
     getUniqueColors: () => string[];
     toggleColorFilter: (color: string) => void;
@@ -403,19 +403,20 @@ export function useWorldEngine({
     }, [worldData]);
 
     const getAllBounds = useCallback(() => {
-        const bounds: Array<{startX: number, endX: number, startY: number, endY: number, color: string}> = [];
+        const bounds: Array<{startX: number, endX: number, startY: number, endY: number, color: string, title?: string}> = [];
         for (const key in worldData) {
             if (key.startsWith('bound_')) {
                 try {
                     const boundData = JSON.parse(worldData[key] as string);
-                    if (boundData.startX !== undefined && boundData.endX !== undefined && 
+                    if (boundData.startX !== undefined && boundData.endX !== undefined &&
                         boundData.startY !== undefined && boundData.endY !== undefined) {
                         bounds.push({
                             startX: boundData.startX,
                             endX: boundData.endX,
                             startY: boundData.startY,
                             endY: boundData.endY,
-                            color: boundData.color || '#FFFF00'
+                            color: boundData.color || '#FFFF00',
+                            title: boundData.title
                         });
                     }
                 } catch (e) {
@@ -703,7 +704,7 @@ export function useWorldEngine({
         cycleGridMode,
         artefactsEnabled,
         artifactType,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, availableStates, username, updateSettings, settings });
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, updateSettings, settings });
 
     // Generate search data when search pattern changes
     useEffect(() => {
@@ -1139,10 +1140,14 @@ export function useWorldEngine({
     // Sort modes: chronological -> closest -> farthest
     type NavSortMode = 'chronological' | 'closest' | 'farthest';
     const [navSortMode, setNavSortMode] = useState<NavSortMode>('chronological');
-    const [navMode, setNavMode] = useState<'labels' | 'states'>('labels');
+    const [navMode, setNavMode] = useState<'labels' | 'states' | 'bounds'>('labels');
 
     const toggleNavMode = useCallback(() => {
-        setNavMode(prev => prev === 'labels' ? 'states' : 'labels');
+        setNavMode(prev => {
+            if (prev === 'labels') return 'states';
+            if (prev === 'states') return 'bounds';
+            return 'labels';
+        });
     }, []);
 
     // === Immediate Settings Save Function ===
@@ -1679,7 +1684,7 @@ export function useWorldEngine({
                 } else if (exec.command === 'publish') {
                     // Publish current state
                     if (currentStateName) {
-                        setDialogueText("Publishing state...");
+                        setDialogueWithRevert("Publishing state...", setDialogueText);
                         publishState(currentStateName, true).then((success) => {
                             if (success) {
                                 setDialogueWithRevert(`State "${currentStateName}" published successfully`, setDialogueText);
@@ -1693,7 +1698,7 @@ export function useWorldEngine({
                 } else if (exec.command === 'unpublish') {
                     // Unpublish current state
                     if (currentStateName) {
-                        setDialogueText("Unpublishing state...");
+                        setDialogueWithRevert("Unpublishing state...", setDialogueText);
                         publishState(currentStateName, false).then((success) => {
                             if (success) {
                                 setDialogueWithRevert(`State "${currentStateName}" unpublished successfully`, setDialogueText);
@@ -1819,11 +1824,8 @@ export function useWorldEngine({
                         case 'focus':
                             modeText = 'Camera focus mode: cursor will stay centered';
                             break;
-                        case 'ripstop':
-                            modeText = 'Camera ripstop mode: cursor will stay in view';
-                            break;
                         default:
-                            modeText = 'Camera default mode: no automatic tracking';
+                            modeText = 'Camera default mode: cursor will stay in view';
                     }
                     setDialogueWithRevert(modeText, setDialogueText);
                 } else if (exec.command === 'bound') {
@@ -1960,6 +1962,20 @@ export function useWorldEngine({
                                 delete newWorldData[key];
                             }
                             
+                            // Extract title from topbar (characters on startY row within bound)
+                            let title = '';
+                            for (let x = selection.startX; x <= selection.endX; x++) {
+                                const key = `${x},${selection.startY}`;
+                                const charData = newWorldData[key];
+                                if (charData && !isImageData(charData)) {
+                                    const char = getCharacter(charData);
+                                    if (char && char.trim()) {
+                                        title += char;
+                                    }
+                                }
+                            }
+                            title = title.trim();
+
                             // Create merged bound with new dimensions
                             const boundKey = `bound_${selection.startX},${selection.startY}`;
                             const boundData = {
@@ -1968,7 +1984,8 @@ export function useWorldEngine({
                                 startY: selection.startY,
                                 endY: selection.endY,
                                 maxY: maxY, // Use new height if specified
-                                color: color // Use new color
+                                color: color, // Use new color
+                                title: title || undefined // Only include title if non-empty
                             };
                             
                             newWorldData[boundKey] = JSON.stringify(boundData);
@@ -1981,6 +1998,20 @@ export function useWorldEngine({
                             const heightMsg = height !== null ? ` (height: ${height} rows)` : ' (infinite height)';
                             setDialogueWithRevert(`${mergeMsg}${heightMsg}`, setDialogueText);
                         } else {
+                            // Extract title from topbar (characters on startY row within bound)
+                            let title = '';
+                            for (let x = selection.startX; x <= selection.endX; x++) {
+                                const key = `${x},${selection.startY}`;
+                                const charData = worldData[key];
+                                if (charData && !isImageData(charData)) {
+                                    const char = getCharacter(charData);
+                                    if (char && char.trim()) {
+                                        title += char;
+                                    }
+                                }
+                            }
+                            title = title.trim();
+
                             // Store bounded region as a single entry like labels
                             const boundKey = `bound_${selection.startX},${selection.startY}`;
                             const boundData = {
@@ -1989,11 +2020,12 @@ export function useWorldEngine({
                                 startY: selection.startY,
                                 endY: selection.endY,
                                 maxY: maxY, // New field: maximum Y where this bound has effect
-                                color: color
+                                color: color,
+                                title: title || undefined // Only include title if non-empty
                             };
                             logger.debug('boundKey:', boundKey);
                             logger.debug('boundData:', boundData);
-                            
+
                             let newWorldData = { ...worldData };
                             newWorldData[boundKey] = JSON.stringify(boundData);
                             
@@ -2164,7 +2196,7 @@ export function useWorldEngine({
                         if (!file) return;
                         
                         try {
-                            setDialogueText("Processing image...");
+                            setDialogueWithRevert("Processing image...", setDialogueText);
                             
                             // Convert file to data URL
                             const reader = new FileReader();
@@ -2252,12 +2284,12 @@ export function useWorldEngine({
                     const saveStateName = (statePrompt.inputBuffer || '').trim();
                     if (saveStateName) {
                         const loadStateName = statePrompt.loadStateName!;
-                        setDialogueText("Saving current work...");
+                        setDialogueWithRevert("Saving current work...", setDialogueText);
                         saveState(saveStateName).then((success) => {
                             if (success) {
                                 loadAvailableStates().then(setAvailableStates);
                                 // Now load the requested state
-                                setDialogueText("Loading requested state...");
+                                setDialogueWithRevert("Loading requested state...", setDialogueText);
                                 loadState(loadStateName).then((loadSuccess) => {
                                     if (loadSuccess) {
                                         setDialogueWithRevert(`Current work saved as "${saveStateName}", "${loadStateName}" loaded successfully`, setDialogueText);
@@ -2294,7 +2326,7 @@ export function useWorldEngine({
             } else if (statePrompt.type === 'load_confirm') {
                 if (key.toLowerCase() === 'y') {
                     const stateName = statePrompt.stateName!;
-                    setDialogueText("Loading state...");
+                    setDialogueWithRevert("Loading state...", setDialogueText);
                     loadState(stateName).then((success) => {
                         if (success) {
                             setDialogueWithRevert(`State "${stateName}" loaded successfully`, setDialogueText);
@@ -2312,7 +2344,7 @@ export function useWorldEngine({
             } else if (statePrompt.type === 'delete_confirm') {
                 if (key.toLowerCase() === 'y') {
                     const stateName = statePrompt.stateName!;
-                    setDialogueText("Deleting state...");
+                    setDialogueWithRevert("Deleting state...", setDialogueText);
                     deleteState(stateName).then((success) => {
                         if (success) {
                             loadAvailableStates().then(setAvailableStates);
@@ -2355,7 +2387,7 @@ export function useWorldEngine({
                     // Cmd+Enter (or Ctrl+Enter): Send chat message and write response directly to canvas
                     if (chatMode.currentInput.trim() && !chatMode.isProcessing) {
                         setChatMode(prev => ({ ...prev, isProcessing: true }));
-                        setDialogueText("Processing...");
+                        setDialogueWithRevert("Processing...", setDialogueText);
                         
                         chatWithAI(chatMode.currentInput.trim()).then((response) => {
                             // Show response in dialogue system
@@ -2443,7 +2475,7 @@ export function useWorldEngine({
                     // Regular Enter: Send chat message and show ephemeral response
                     if (chatMode.currentInput.trim() && !chatMode.isProcessing) {
                         setChatMode(prev => ({ ...prev, isProcessing: true }));
-                        setDialogueText("Processing...");
+                        setDialogueWithRevert("Processing...", setDialogueText);
                         
                         chatWithAI(chatMode.currentInput.trim()).then((response) => {
                             // Show response in dialogue system (subtitle-style)
@@ -2581,7 +2613,7 @@ export function useWorldEngine({
                         const instructions = exec.args.slice(1).join(' ');
                         
                         if (selectedText && instructions) {
-                            setDialogueText("Processing transformation...");
+                            setDialogueWithRevert("Processing transformation...", setDialogueText);
                             transformText(selectedText, instructions).then((result) => {
                                 createSubtitleCycler(result, setDialogueText);
                             }).catch(() => {
@@ -2592,7 +2624,7 @@ export function useWorldEngine({
                         const selectedText = exec.args[0];
                         const instructions = exec.args.length > 1 ? exec.args.slice(1).join(' ') : 'analysis';
                         
-                        setDialogueText("Processing explanation...");
+                        setDialogueWithRevert("Processing explanation...", setDialogueText);
                         explainText(selectedText, instructions).then((result) => {
                             createSubtitleCycler(result, setDialogueText);
                         }).catch(() => {
@@ -2602,7 +2634,7 @@ export function useWorldEngine({
                         const selectedText = exec.args[0];
                         const focus = exec.args.length > 1 ? exec.args.slice(1).join(' ') : undefined;
                         
-                        setDialogueText("Processing summary...");
+                        setDialogueWithRevert("Processing summary...", setDialogueText);
                         summarizeText(selectedText, focus).then((result) => {
                             createSubtitleCycler(result, setDialogueText);
                         }).catch(() => {
@@ -2615,7 +2647,21 @@ export function useWorldEngine({
                         
                         if (selection) {
                             const color = exec.args.length > 0 ? exec.args[0] : '#FFFF00'; // Default yellow background
-                            
+
+                            // Extract title from topbar (characters on startY row within bound)
+                            let title = '';
+                            for (let x = selection.startX; x <= selection.endX; x++) {
+                                const key = `${x},${selection.startY}`;
+                                const charData = worldData[key];
+                                if (charData && !isImageData(charData)) {
+                                    const char = getCharacter(charData);
+                                    if (char && char.trim()) {
+                                        title += char;
+                                    }
+                                }
+                            }
+                            title = title.trim();
+
                             // Store bounded region as a single entry like labels
                             const boundKey = `bound_${selection.startX},${selection.startY}`;
                             const boundData = {
@@ -2623,11 +2669,12 @@ export function useWorldEngine({
                                 endX: selection.endX,
                                 startY: selection.startY,
                                 endY: selection.endY,
-                                color: color
+                                color: color,
+                                title: title || undefined // Only include title if non-empty
                             };
                             logger.debug('boundKey:', boundKey);
                             logger.debug('boundData:', boundData);
-                            
+
                             let newWorldData = { ...worldData };
                             newWorldData[boundKey] = JSON.stringify(boundData);
                             
@@ -2731,14 +2778,14 @@ export function useWorldEngine({
                     }
                 } else {
                     // No text on line
-                    setDialogueText("No text found to send to AI");
+                    setDialogueWithRevert("No text found to send to AI", setDialogueText);
                     return false;
                 }
             }
             
             // Send to AI if we have text
             if (textToSend.trim()) {
-                setDialogueText("Processing...");
+                setDialogueWithRevert("Processing...", setDialogueText);
                 
                 // First update the cached context with current world state
                 const currentLabels = getAllLabels();
@@ -2820,13 +2867,13 @@ export function useWorldEngine({
                     setWorldData(newWorldData);
                 }).catch((error) => {
                     logger.error('Error in context-aware chat:', error);
-                    setDialogueText("Could not process message");
+                    setDialogueWithRevert("Could not process message", setDialogueText);
                 });
                 
                 // Clear selection after sending
                 clearSelectionState();
             } else {
-                setDialogueText("No text to send - select text or place cursor on a line with content");
+                setDialogueWithRevert("No text to send - select text or place cursor on a line with content", setDialogueText);
             }
             return true;
         }
@@ -3031,11 +3078,12 @@ export function useWorldEngine({
                 logger.debug('Proposed targetIndent:', targetIndent);
                 logger.debug('Current cursor X:', cursorPos.x);
                 
-                // If targetIndent would put cursor outside viewport, use current column instead
+                // If targetIndent would put cursor outside viewport, keep the targetIndent
+                // but don't fall back to current position - maintain the text block alignment
                 if (targetIndent < viewportMinX || targetIndent > viewportMaxX) {
-                    logger.debug('Target indent is outside viewport, using current column');
-                    targetIndent = cursorPos.x;
-                    setLastEnterX(targetIndent);
+                    logger.debug('Target indent is outside viewport, but maintaining it for text block alignment');
+                    // Keep targetIndent as is - don't change it
+                    // This ensures text blocks maintain their indentation even when starting outside viewport
                 }
             }
             
@@ -3672,8 +3720,8 @@ export function useWorldEngine({
                     const viewportCharWidth = window.innerWidth / effectiveCharWidth;
                     const viewportCharHeight = window.innerHeight / effectiveCharHeight;
                     
-                    if (cameraMode === 'ripstop') {
-                        // Ripstop mode: Keep cursor in view
+                    if (cameraMode === 'default') {
+                        // Default mode: Keep cursor in view (was ripstop behavior)
                         // Check if cursor is outside current viewport bounds
                         const cursorOutsideLeft = nextCursorPos.x < viewOffset.x;
                         const cursorOutsideRight = nextCursorPos.x >= viewOffset.x + viewportCharWidth;
