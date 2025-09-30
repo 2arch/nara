@@ -6,6 +6,7 @@ import { useDialogue, useDebugDialogue } from './dialogue';
 import { useMonogramSystem } from './monogram';
 import { useControllerSystem, createMonogramController, createCameraController, createGridController } from './controllers';
 import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchicalFrames, HierarchicalFrame, HierarchyLevel } from './bit.blocks';
+import { COLOR_MAP } from './commands';
 
 // --- Constants --- (Copied and relevant ones kept)
 const GRID_COLOR = '#F2F2F233';
@@ -1109,10 +1110,23 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const char = typeof charData === 'string' ? charData : charData.char;
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                    // Check if mouse is hovering over this command line
+                    const isHovered = mouseWorldPos && Math.floor(mouseWorldPos.y) === worldY && worldY > engine.commandState.commandStartPos.y;
+
                     // Draw background for command data using text color with varying opacity
                     if (worldY === engine.commandState.commandStartPos.y) {
                         // Command line (typed command) - use text color at full opacity
                         ctx.fillStyle = engine.textColor;
+                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        // Text uses background color
+                        ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                    } else if (isHovered) {
+                        // Hovered suggestion - use text color at 90% opacity (brighter than selected)
+                        const hex = engine.textColor.replace('#', '');
+                        const r = parseInt(hex.substring(0, 2), 16);
+                        const g = parseInt(hex.substring(2, 4), 16);
+                        const b = parseInt(hex.substring(4, 6), 16);
+                        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.9)`;
                         ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
                         // Text uses background color
                         ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
@@ -1145,6 +1159,48 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     // Draw text (only if not a space)
                     if (char && char.trim() !== '') {
                         ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                    }
+
+                    // Draw color swatch for color-related commands (only on first character of suggestion line)
+                    if (worldX === engine.commandState.commandStartPos.x && worldY > engine.commandState.commandStartPos.y) {
+                        // Get the full command text for this line
+                        const suggestionIndex = worldY - engine.commandState.commandStartPos.y - 1;
+                        if (suggestionIndex >= 0 && suggestionIndex < engine.commandState.matchedCommands.length) {
+                            const commandText = engine.commandState.matchedCommands[suggestionIndex];
+
+
+                            let swatchColor: string | null = null;
+
+                            // Check if this is a bg command with a color
+                            if (commandText.startsWith('bg ')) {
+                                const parts = commandText.split(' ');
+                                const colorArg = parts[1];
+
+                                // Skip 'clear', 'live', 'web'
+                                if (colorArg && !['clear', 'live', 'web'].includes(colorArg)) {
+                                    swatchColor = COLOR_MAP[colorArg.toLowerCase()] || (colorArg.startsWith('#') ? colorArg : null);
+                                }
+                            }
+                            // Check if this is a text command with a color
+                            else if (commandText.startsWith('text ')) {
+                                const parts = commandText.split(' ');
+                                const colorArg = parts[1];
+
+                                // Skip flags and non-color arguments
+                                if (colorArg && colorArg !== '--g') {
+                                    swatchColor = COLOR_MAP[colorArg.toLowerCase()] || (colorArg.startsWith('#') ? colorArg : null);
+                                }
+                            }
+
+                            if (swatchColor) {
+                                // Draw full-sized color cell to the left of the command
+                                const cellX = screenPos.x - effectiveCharWidth;
+                                const cellY = screenPos.y;
+
+                                ctx.fillStyle = swatchColor;
+                                ctx.fillRect(cellX, cellY, effectiveCharWidth, effectiveCharHeight);
+                            }
+                        }
                     }
                 }
             }

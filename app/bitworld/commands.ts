@@ -78,6 +78,21 @@ const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro'];
 const NAV_COMMANDS: string[] = [];
 const CAMERA_COMMANDS = ['default', 'focus'];
 
+// Standardized color mapping used throughout the application
+export const COLOR_MAP: { [name: string]: string } = {
+    'white': '#FFFFFF',
+    'black': '#000000',
+    'red': '#FF0000',
+    'green': '#00FF00',
+    'blue': '#0000FF',
+    'yellow': '#FFFF00',
+    'purple': '#800080',
+    'orange': '#FFA500',
+    'pink': '#FFC0CB',
+    'cyan': '#00FFFF',
+    'magenta': '#FF00FF'
+};
+
 // --- Command System Hook ---
 export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, updateSettings, settings }: UseCommandSystemProps) {
     const router = useRouter();
@@ -405,11 +420,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
 
     const switchBackgroundMode = useCallback((newMode: BackgroundMode, bgColor?: string, textColor?: string, textBg?: string, aiPrompt?: string): boolean => {
         if (newMode === 'color' && bgColor) {
-            const colorMap: { [name: string]: string } = {
-                'white': '#FFFFFF',
-                'black': '#000000',
-            };
-            const hexBgColor = (colorMap[bgColor.toLowerCase()] || bgColor).toUpperCase();
+            const hexBgColor = (COLOR_MAP[bgColor.toLowerCase()] || bgColor).toUpperCase();
 
             if (!/^#[0-9A-F]{6}$/i.test(hexBgColor)) {
                 setDialogueText(`Invalid background color: ${bgColor}. Please use a name (e.g., white) or hex code (e.g., #1a1a1a).`);
@@ -420,7 +431,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             
             if (textColor) {
                 // User specified text color - validate it
-                const hexTextColor = (colorMap[textColor.toLowerCase()] || textColor).toUpperCase();
+                const hexTextColor = (COLOR_MAP[textColor.toLowerCase()] || textColor).toUpperCase();
                 if (!/^#[0-9A-F]{6}$/i.test(hexTextColor)) {
                     setDialogueText(`Invalid text color: ${textColor}. Please use a name (e.g., white) or hex code (e.g., #1a1a1a).`);
                     return false;
@@ -439,7 +450,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             let finalTextBg: string | undefined;
             if (textBg) {
                 // User specified text background - validate it
-                const hexTextBg = (colorMap[textBg.toLowerCase()] || textBg).toUpperCase();
+                const hexTextBg = (COLOR_MAP[textBg.toLowerCase()] || textBg).toUpperCase();
                 if (!/^#[0-9A-F]{6}$/i.test(hexTextBg)) {
                     setDialogueText(`Invalid text background: ${textBg}. Please use a name (e.g., white) or hex code (e.g., #1a1a1a).`);
                     return false;
@@ -1135,17 +1146,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                         backgroundStreamRef.current = stream;
                         
                         // Validate and set text color
-                        const colorMap: { [name: string]: string } = {
-                            'white': '#FFFFFF',
-                            'black': '#000000',
-                        };
-                        const hexTextColor = (colorMap[textColorArg.toLowerCase()] || textColorArg).toUpperCase();
+                        const hexTextColor = (COLOR_MAP[textColorArg.toLowerCase()] || textColorArg).toUpperCase();
                         const validTextColor = /^#[0-9A-F]{6}$/i.test(hexTextColor) ? hexTextColor : '#FFFFFF';
                         
                         // Validate text background if provided
                         let validTextBg: string | undefined;
                         if (textBgArg) {
-                            const hexTextBg = (colorMap[textBgArg.toLowerCase()] || textBgArg).toUpperCase();
+                            const hexTextBg = (COLOR_MAP[textBgArg.toLowerCase()] || textBgArg).toUpperCase();
                             validTextBg = /^#[0-9A-F]{6}$/i.test(hexTextBg) ? hexTextBg : undefined;
                         }
                         
@@ -1212,26 +1219,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
 
             if (colorArg) {
                 // Validate color format (hex code or named colors)
-                const colorMap: { [name: string]: string } = {
-                    'black': '#000000',
-                    'white': '#FFFFFF',
-                    'red': '#FF0000',
-                    'green': '#00FF00',
-                    'blue': '#0000FF',
-                    'yellow': '#FFFF00',
-                    'purple': '#800080',
-                    'orange': '#FFA500',
-                    'pink': '#FFC0CB',
-                    'cyan': '#00FFFF',
-                    'magenta': '#FF00FF'
-                };
-                
                 let finalTextColor: string;
                 if (colorArg.toLowerCase() === 'default') {
                     // Reset to default text color
                     finalTextColor = modeState.textColor; // Use current global text color
                 } else {
-                    const hexColor = (colorMap[colorArg.toLowerCase()] || colorArg).toUpperCase();
+                    const hexColor = (COLOR_MAP[colorArg.toLowerCase()] || colorArg).toUpperCase();
                     if (!/^#[0-9A-F]{6}$/i.test(hexColor)) {
                         setDialogueText(`Invalid color: ${colorArg}. Use hex code (e.g., #FF0000) or name (e.g., red, blue).`);
                         // Clear command mode
@@ -1254,7 +1247,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     if (backgroundArg.toLowerCase() === 'none') {
                         finalTextBackground = undefined;
                     } else {
-                        const hexBackground = (colorMap[backgroundArg.toLowerCase()] || backgroundArg).toUpperCase();
+                        const hexBackground = (COLOR_MAP[backgroundArg.toLowerCase()] || backgroundArg).toUpperCase();
                         if (!/^#[0-9A-F]{6}$/i.test(hexBackground)) {
                             setDialogueText(`Invalid background color: ${backgroundArg}. Use hex code or name.`);
                             // Clear command mode
