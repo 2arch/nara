@@ -52,6 +52,11 @@ html, body {
   color: var(--foreground);
   font-family: 'IBM Plex Mono', Arial, Helvetica, sans-serif;
   overscroll-behavior: none; /* Disables pull-to-refresh/bounce effect */
+  cursor: none; /* Hide system cursor */
+}
+
+*, *::before, *::after {
+  cursor: none !important; /* Hide cursor for all elements */
 }
 
 /* Hide scrollbar for Chrome, Safari and Opera */

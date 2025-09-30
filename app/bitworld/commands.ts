@@ -83,7 +83,7 @@ export const COLOR_MAP: { [name: string]: string } = {
     'white': '#FFFFFF',
     'black': '#000000',
     'sulfur': '#F0FF6A',
-    'talk': '#69AED6',
+    'chalk': '#69AED6',
     'orange': '#FFA500',
     'ochre': '#FFC0CB',
 };

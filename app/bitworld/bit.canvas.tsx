@@ -10,8 +10,6 @@ import { COLOR_MAP } from './commands';
 
 // --- Constants --- (Copied and relevant ones kept)
 const GRID_COLOR = '#F2F2F233';
-const CURSOR_COLOR_PRIMARY = '#D3D3D355';
-const CURSOR_COLOR_SECONDARY = '#B8B8B855';
 const CURSOR_COLOR_SAVE = '#F2F2F2'; // Green color for saving state
 const CURSOR_COLOR_ERROR = '#FF0000'; // Red color for error state
 const CURSOR_TEXT_COLOR = '#FFFFFF';
@@ -471,24 +469,26 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         
         if (isWithinImage) {
             if (shiftPressed) {
-                // When shift is pressed, draw gray border around the entire image
+                // When shift is pressed, draw border around the entire image
                 const topLeftScreen = engine.worldToScreen(imageAtPosition.startX, imageAtPosition.startY, currentZoom, currentOffset);
                 const bottomRightScreen = engine.worldToScreen(imageAtPosition.endX + 1, imageAtPosition.endY + 1, currentZoom, currentOffset);
-                
-                ctx.strokeStyle = 'rgba(211, 211, 211, 0.7)'; // Light gray border matching cursor preview
-                ctx.lineWidth = 2;
+
+                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.7)`; // Border matching text accent color
+                const lineWidth = 2;
+                ctx.lineWidth = lineWidth;
+                const halfWidth = lineWidth / 2;
                 ctx.strokeRect(
-                    topLeftScreen.x, 
-                    topLeftScreen.y, 
-                    bottomRightScreen.x - topLeftScreen.x, 
-                    bottomRightScreen.y - topLeftScreen.y
+                    topLeftScreen.x + halfWidth,
+                    topLeftScreen.y + halfWidth,
+                    bottomRightScreen.x - topLeftScreen.x - lineWidth,
+                    bottomRightScreen.y - topLeftScreen.y - lineWidth
                 );
             }
-            // For normal hover over images: no visual feedback (no gray overlay, no border)
+            // For normal hover over images: no visual feedback (no overlay, no border)
         } else if (hasDirectText || isWithinTextBlock) {
-            
-            // Draw heather gray overlay for the entire text block
-            ctx.fillStyle = 'rgba(176, 176, 176, 0.3)'; // Heather gray overlay
+
+            // Draw overlay for the entire text block using text accent color
+            ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
             
             for (const blockPos of textBlock) {
                 const blockScreenPos = engine.worldToScreen(blockPos.x, blockPos.y, currentZoom, currentOffset);
@@ -501,45 +501,53 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
             
             if (shiftPressed) {
-                // When shift is pressed, draw gray border around the entire text block
+                // When shift is pressed, draw border around the entire text block
                 const minX = Math.min(...textBlock.map(p => p.x));
                 const maxX = Math.max(...textBlock.map(p => p.x));
                 const minY = Math.min(...textBlock.map(p => p.y));
                 const maxY = Math.max(...textBlock.map(p => p.y));
-                
+
                 const topLeftScreen = engine.worldToScreen(minX, minY, currentZoom, currentOffset);
                 const bottomRightScreen = engine.worldToScreen(maxX + 1, maxY + 1, currentZoom, currentOffset);
-                
-                ctx.strokeStyle = 'rgba(211, 211, 211, 0.7)'; // Light gray border matching cursor preview
-                ctx.lineWidth = 2;
+
+                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.7)`; // Border matching text accent color
+                const lineWidth = 2;
+                ctx.lineWidth = lineWidth;
+                const halfWidth = lineWidth / 2;
                 ctx.strokeRect(
-                    topLeftScreen.x, 
-                    topLeftScreen.y, 
-                    bottomRightScreen.x - topLeftScreen.x, 
-                    bottomRightScreen.y - topLeftScreen.y
+                    topLeftScreen.x + halfWidth,
+                    topLeftScreen.y + halfWidth,
+                    bottomRightScreen.x - topLeftScreen.x - lineWidth,
+                    bottomRightScreen.y - topLeftScreen.y - lineWidth
                 );
             } else {
                 // Draw outline around the hovered cell
-                ctx.strokeStyle = 'rgba(176, 176, 176, 0.8)';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
+                const lineWidth = 2;
+                ctx.lineWidth = lineWidth;
+                const halfWidth = lineWidth / 2;
+                ctx.strokeRect(screenPos.x + halfWidth, screenPos.y + halfWidth, effectiveCharWidth - lineWidth, effectiveCharHeight - lineWidth);
             }
         } else {
             if (shiftPressed) {
-                // When shift is pressed over empty cell, draw gray border
-                ctx.strokeStyle = 'rgba(211, 211, 211, 0.7)'; // Light gray matching cursor preview
-                ctx.lineWidth = 2;
-                ctx.strokeRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                
-                ctx.fillStyle = 'rgba(211, 211, 211, 0.2)'; // Match preview cursor fill
+                // When shift is pressed over empty cell, draw border
+                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.7)`; // Border matching text accent color
+                const lineWidth = 2;
+                ctx.lineWidth = lineWidth;
+                const halfWidth = lineWidth / 2;
+                ctx.strokeRect(screenPos.x + halfWidth, screenPos.y + halfWidth, effectiveCharWidth - lineWidth, effectiveCharHeight - lineWidth);
+
+                ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.2)`; // Fill matching text accent color
                 ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
             } else {
-                // Regular light gray preview for empty cells
-                ctx.strokeStyle = 'rgba(211, 211, 211, 0.7)';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                
-                ctx.fillStyle = 'rgba(211, 211, 211, 0.2)';
+                // Regular preview for empty cells
+                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.7)`;
+                const lineWidth = 2;
+                ctx.lineWidth = lineWidth;
+                const halfWidth = lineWidth / 2;
+                ctx.strokeRect(screenPos.x + halfWidth, screenPos.y + halfWidth, effectiveCharWidth - lineWidth, effectiveCharHeight - lineWidth);
+
+                ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.2)`;
                 ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
             }
         }
@@ -1792,8 +1800,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const minY = Math.min(start.y, end.y);
             const maxY = Math.max(start.y, end.y);
             
-            // Use light transparent version of cursor primary color
-            const selectionColor = `rgba(${hexToRgb(CURSOR_COLOR_PRIMARY)}, 0.3)`;
+            // Use light transparent version of text accent color
+            const selectionColor = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
             ctx.fillStyle = selectionColor;
             
             // Fill each cell in the selection area
@@ -1818,14 +1826,16 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const topLeftScreen = engine.worldToScreen(selectedImageData.startX, selectedImageData.startY, currentZoom, currentOffset);
                 const bottomRightScreen = engine.worldToScreen(selectedImageData.endX + 1, selectedImageData.endY + 1, currentZoom, currentOffset);
                 
-                // Use the same color as text selection border
-                ctx.strokeStyle = `rgba(${hexToRgb(CURSOR_COLOR_PRIMARY)}, 0.8)`;
-                ctx.lineWidth = 3; // Slightly thicker to indicate selection
+                // Use text accent color for selection border
+                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
+                const lineWidth = 3; // Slightly thicker to indicate selection
+                ctx.lineWidth = lineWidth;
+                const halfWidth = lineWidth / 2;
                 ctx.strokeRect(
-                    topLeftScreen.x, 
-                    topLeftScreen.y, 
-                    bottomRightScreen.x - topLeftScreen.x, 
-                    bottomRightScreen.y - topLeftScreen.y
+                    topLeftScreen.x + halfWidth,
+                    topLeftScreen.y + halfWidth,
+                    bottomRightScreen.x - topLeftScreen.x - lineWidth,
+                    bottomRightScreen.y - topLeftScreen.y - lineWidth
                 );
             }
         }
@@ -1848,8 +1858,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const imageAtPosition = findImageAtPosition(shiftDragStartPos);
                 
                 if (imageAtPosition) {
-                    // Draw blue preview for image destination
-                    ctx.fillStyle = 'rgba(0, 100, 255, 0.3)'; // Blue with transparency
+                    // Draw preview for image destination
+                    ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.3)`; // Preview matching text accent color
                     
                     // Create all positions within the image bounds at the new location
                     for (let y = imageAtPosition.startY; y <= imageAtPosition.endY; y++) {
@@ -1868,10 +1878,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 } else {
                     // If no image, check for text block at start position
                     const textBlock = findTextBlock(shiftDragStartPos, engine.worldData, engine);
-                    
+
                     if (textBlock.length > 0) {
-                        // Draw blue preview rectangles for each destination position
-                        ctx.fillStyle = 'rgba(0, 100, 255, 0.3)'; // Blue with transparency
+                        // Draw preview rectangles for each destination position
+                        ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.3)`; // Preview matching text accent color
                         
                         for (const pos of textBlock) {
                             const destX = pos.x + distanceX;
@@ -1923,14 +1933,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     trailScreenPos.y >= -effectiveCharHeight && 
                     trailScreenPos.y <= cssHeight) {
                     
-                    // Draw faded cursor rectangle
-                    const baseColor = cursorColorAlternate ? 
-                        CURSOR_COLOR_SECONDARY : CURSOR_COLOR_PRIMARY;
-                    ctx.fillStyle = `rgba(${hexToRgb(baseColor)}, ${opacity})`;
+                    // Draw faded cursor rectangle using text accent color
+                    ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, ${opacity})`;
                     ctx.fillRect(
-                        trailScreenPos.x, 
-                        trailScreenPos.y, 
-                        effectiveCharWidth, 
+                        trailScreenPos.x,
+                        trailScreenPos.y,
+                        effectiveCharWidth,
                         effectiveCharHeight
                     );
                 }
@@ -1948,7 +1956,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     } else if (engine.isSavingWorld) {
                         ctx.fillStyle = CURSOR_COLOR_SAVE;
                     } else {
-                        ctx.fillStyle = cursorColorAlternate ? CURSOR_COLOR_SECONDARY : CURSOR_COLOR_PRIMARY;
+                        ctx.fillStyle = engine.textColor;
                     }
                     
                     ctx.fillRect(cursorScreenPos.x, cursorScreenPos.y, effectiveCharWidth, effectiveCharHeight);
