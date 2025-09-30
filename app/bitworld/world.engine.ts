@@ -1193,6 +1193,42 @@ export function useWorldEngine({
         userUid
     ); // Only enable when userUid is available
 
+    // === Apply spawn point when settings load ===
+    const hasAppliedSpawnRef = useRef(false);
+    useEffect(() => {
+        // Only apply spawn point once when settings first load
+        if (!hasAppliedSpawnRef.current && settings.spawnPoint && !isLoadingWorld) {
+            const spawnX = settings.spawnPoint.x;
+            const spawnY = settings.spawnPoint.y;
+
+            // Center the spawn point in viewport by calculating offset
+            // Get effective character dimensions
+            const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
+
+            if (effectiveCharWidth > 0 && effectiveCharHeight > 0 && typeof window !== 'undefined') {
+                const viewportWidth = window.innerWidth;
+                const viewportHeight = window.innerHeight;
+
+                // Calculate how many characters fit in viewport
+                const charsInViewportWidth = viewportWidth / effectiveCharWidth;
+                const charsInViewportHeight = viewportHeight / effectiveCharHeight;
+
+                // Center spawn point by offsetting half the viewport
+                const centeredOffsetX = spawnX - (charsInViewportWidth / 2);
+                const centeredOffsetY = spawnY - (charsInViewportHeight / 2);
+
+                setCursorPos({ x: spawnX, y: spawnY });
+                setViewOffset({ x: centeredOffsetX, y: centeredOffsetY });
+            } else {
+                // Fallback if dimensions aren't available
+                setCursorPos({ x: spawnX, y: spawnY });
+                setViewOffset({ x: spawnX, y: spawnY });
+            }
+
+            hasAppliedSpawnRef.current = true;
+        }
+    }, [settings.spawnPoint, isLoadingWorld, zoomLevel, getEffectiveCharDims]);
+
     // === Refs === (Keep refs for things not directly tied to re-renders or persistence)
     const charSizeCacheRef = useRef<{ [key: number]: { width: number; height: number; fontSize: number } }>({});
 
@@ -1801,6 +1837,17 @@ export function useWorldEngine({
                         }
                     } else {
                         setDialogueWithRevert("Usage: /frames [on|off|toggle|hierarchical|config|levels] - Control frame generation and display", setDialogueText);
+                    }
+                } else if (exec.command === 'spawn') {
+                    // Set spawn point at current cursor position
+                    const spawnPoint = { x: cursorPos.x, y: cursorPos.y };
+
+                    // Update settings with spawn point
+                    if (updateSettings) {
+                        updateSettings({ spawnPoint });
+                        setDialogueWithRevert(`Spawn point set at (${spawnPoint.x}, ${spawnPoint.y})`, setDialogueText);
+                    } else {
+                        setDialogueWithRevert("Failed to set spawn point", setDialogueText);
                     }
                 } else if (exec.command === 'clear') {
                     // Clear the entire canvas

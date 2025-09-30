@@ -10,7 +10,7 @@ interface MonogramTrailPosition {
 }
 
 // --- Monogram Pattern Types ---
-export type MonogramMode = 'plasma' | 'perlin' | 'nara' | 'geometry3d';
+export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'geometry3d';
 
 // 3D Geometry System - Extensible foundation for any 3D format
 export interface Vertex3D {
@@ -69,7 +69,7 @@ const useMonogramSystem = (
 ) => {
     const [options, setOptions] = useState<MonogramOptions>(
         initialOptions || {
-            mode: 'plasma',
+            mode: 'clear',
             speed: 0.5, // Slower default speed
             complexity: 1.0,
             colorShift: 0,
@@ -174,26 +174,34 @@ const useMonogramSystem = (
     // Character sets for different intensities
     const getCharForIntensity = useCallback((intensity: number, mode: MonogramMode): string => {
         const chars = {
-            plasma: [' ', '░', '▒', '▓', '█'],
-            perlin: [' ', '-', '─', '═', '╫'],
+            clear: [' ', '░', '▒', '▓', '█'], // Only used for trail effects
+            perlin: [' ', '░', '▒', '▓', '█'],
             nara: ['░', '▒', '▓', '█'], // Back to varied blocks for texture
             geometry3d: [' ', '░', '▒', '▓', '█'], // Standard block progression for 3D
         };
-        
-        const charSet = chars[mode] || chars.plasma;
+
+        const charSet = chars[mode] || chars.perlin;
         const index = Math.floor(intensity * (charSet.length - 1));
         return charSet[Math.min(index, charSet.length - 1)];
     }, []);
 
     // Get color from palette based on value
-    const getColorFromPalette = useCallback((value: number, mode: MonogramMode): string => {
+    const getColorFromPalette = useCallback((value: number, mode: MonogramMode, accentColor: string): string => {
         if (mode === 'nara') {
-            // Pure black for NARA mode
-            return 'black';
+            // Use accent color for NARA mode
+            return accentColor;
         }
-        // Monochromatic scheme for other modes
-        const lightness = 50 + (value % 1) * 50;
-        return `hsl(0, 0%, ${lightness}%)`;
+
+        // For other modes, use accent color with varying opacity
+        const opacity = 0.5 + (value % 1) * 0.5; // 50-100% opacity
+
+        // Parse hex color and add alpha
+        const hex = accentColor.replace('#', '');
+        const r = parseInt(hex.substring(0, 2), 16);
+        const g = parseInt(hex.substring(2, 4), 16);
+        const b = parseInt(hex.substring(4, 6), 16);
+
+        return `rgba(${r}, ${g}, ${b}, ${opacity})`;
     }, []);
 
     // Plasma effect
@@ -829,13 +837,13 @@ const useMonogramSystem = (
         endY: number
     }): number => {
         switch (mode) {
-            case 'plasma': return calculatePlasma(x, y, time);
+            case 'clear': return 0; // No background pattern, only trails
             case 'perlin': return calculatePerlin(x, y, time);
             case 'nara': return calculateNara(x, y, time, viewportBounds);
             case 'geometry3d': return calculate3DGeometry(x, y, time, viewportBounds);
-            default: return calculatePlasma(x, y, time);
+            default: return calculatePerlin(x, y, time);
         }
-    }, [calculatePlasma, calculatePerlin, calculateNara, calculate3DGeometry]);
+    }, [calculatePerlin, calculateNara, calculate3DGeometry]);
 
     // Calculate comet trail effect at a specific position
     const calculateTrailEffect = useCallback((x: number, y: number): number => {
@@ -895,12 +903,14 @@ const useMonogramSystem = (
         startWorldX: number,
         startWorldY: number,
         endWorldX: number,
-        endWorldY: number
+        endWorldY: number,
+        textColor?: string
     ): MonogramPattern => {
         if (!options.enabled) return {};
 
         const pattern: MonogramPattern = {};
         const time = timeRef.current;
+        const accentColor = textColor || '#000000'; // Default to black if not provided
         
         // For NARA and 3D geometry modes, use finer sampling for better quality
         const step = (options.mode === 'nara' || options.mode === 'geometry3d') ? 1 : Math.max(1, Math.floor(3 - options.complexity * 2));
@@ -939,18 +949,20 @@ const useMonogramSystem = (
                 
                 let color: string;
                 if (trailEffect > 0.1) {
-                    // Monochromatic trail - brighter intensity for trail areas
-                    const trailBrightness = 20 + trailEffect * 60; // 20-80% brightness range
-                    color = `hsl(0, 0%, ${trailBrightness}%)`;
-                } else if (options.mode === 'nara') {
-                    // Pure black for NARA mode for maximum visibility
-                    color = 'black';
-                } else if (options.mode === 'geometry3d') {
-                    // Monochromatic like NARA mode
-                    color = 'black';
+                    // Use text color for trail with varying opacity
+                    const alpha = (20 + trailEffect * 60) / 100; // 0.2 to 0.8 opacity
+                    // Parse hex color and add alpha
+                    const hex = accentColor.replace('#', '');
+                    const r = parseInt(hex.substring(0, 2), 16);
+                    const g = parseInt(hex.substring(2, 4), 16);
+                    const b = parseInt(hex.substring(4, 6), 16);
+                    color = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+                } else if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'clear') {
+                    // Use text color for all monochromatic modes
+                    color = accentColor;
                 } else {
                     const colorValue = rawValue * Math.PI + time * 0.5;
-                    color = getColorFromPalette(colorValue, options.mode);
+                    color = getColorFromPalette(colorValue, options.mode, accentColor);
                 }
                 
                 // For NARA and geometry3d modes, only set the exact position to avoid grid artifacts
@@ -980,9 +992,9 @@ const useMonogramSystem = (
         return pattern;
     }, [options, calculatePattern, getCharForIntensity, getColorFromPalette]);
 
-    // Cycle to next mode
+    // Cycle to next mode (only clear and perlin are available)
     const cycleMode = useCallback(() => {
-        const modes: MonogramMode[] = ['plasma', 'perlin', 'nara', 'geometry3d'];
+        const modes: MonogramMode[] = ['clear', 'perlin'];
         setOptions(prev => {
             const currentIndex = modes.indexOf(prev.mode);
             const nextIndex = (currentIndex + 1) % modes.length;

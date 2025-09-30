@@ -17,6 +17,9 @@ export interface WorldSettings {
         x: number;
         y: number;
     };
+    // Persisted monogram state
+    monogramMode?: import('./monogram').MonogramMode;
+    monogramEnabled?: boolean;
 }
 
 export const initialSettings: WorldSettings = {

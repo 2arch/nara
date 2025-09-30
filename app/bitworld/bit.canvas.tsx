@@ -95,8 +95,27 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Debug dialogue system
     const { debugText } = useDebugDialogue(engine);
     
-    // Monogram system for psychedelic patterns
-    const monogramSystem = useMonogramSystem();
+    // Monogram system for psychedelic patterns - load from settings and sync changes
+    const monogramSystem = useMonogramSystem(
+        {
+            mode: engine.settings.monogramMode || 'clear',
+            speed: 0.5,
+            complexity: 1.0,
+            colorShift: 0,
+            enabled: engine.settings.monogramEnabled || false,
+            geometryType: 'octahedron',
+            interactiveTrails: true,
+            trailIntensity: 1.0,
+            trailFadeMs: 2000
+        },
+        (options) => {
+            // Save monogram mode and enabled state to settings when changed
+            engine.updateSettings({
+                monogramMode: options.mode,
+                monogramEnabled: options.enabled
+            });
+        }
+    );
 
 
     // Controller system for handling keyboard inputs
@@ -282,7 +301,7 @@ Camera & Viewport Controls:
   Ctrl+H: Reset zoom level` : '';
     
     // Monogram controls text - only show if debug is visible
-    const monogramControlsText = engine.settings.isDebugVisible ? `Psychedelic Pattern Controls:
+    const monogramControlsText = engine.settings.isDebugVisible ? `Monogram Controls:
   Ctrl+M: Toggle monogram on/off
   Ctrl+N: Cycle pattern mode
   Ctrl+=: Increase animation speed
@@ -380,15 +399,20 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     const updateBoundsIndex = useCallback(() => {
         // Create a spatial index of all bound top bars for O(1) lookup
         const boundsIndex = new Map<string, {isFocused: boolean, textColor: string}>();
-        
+
+        // Bound title text should match the background color (creating cutout effect)
+        // The bound bar accent is the inverse of background (via engine.textColor)
+        // So the text on the bound bar should be the same as the background
+        const bgColor = engine.backgroundColor || '#FFFFFF';
+        const textColor = bgColor; // Text matches background for cutout effect
+
         for (const boundKey in engine.worldData) {
             if (boundKey.startsWith('bound_')) {
                 try {
                     const boundData = JSON.parse(engine.worldData[boundKey] as string);
                     const { startX, endX, startY } = boundData;
                     const isFocused = engine.focusedBoundKey === boundKey;
-                    const textColor = '#FFFFFF'; // Always white
-                    
+
                     // Index every position on the top bar
                     for (let x = startX; x <= endX; x++) {
                         const key = `${x},${startY}`;
@@ -399,9 +423,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
             }
         }
-        
+
         boundsIndexRef.current = boundsIndex;
-    }, [engine.worldData, engine.focusedBoundKey]);
+    }, [engine.worldData, engine.focusedBoundKey, engine.backgroundColor]);
     // Helper function to find image at a specific position
     
     const findImageAtPosition = useCallback((pos: Point): any => {
@@ -763,7 +787,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         // === Render Monogram Patterns ===
         if (monogramEnabled) {
             const monogramPattern = monogramSystem.generateMonogramPattern(
-                startWorldX, startWorldY, endWorldX, endWorldY
+                startWorldX, startWorldY, endWorldX, endWorldY, engine.textColor
             );
             
             for (const key in monogramPattern) {
@@ -1085,24 +1109,39 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const char = typeof charData === 'string' ? charData : charData.char;
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-                    // Draw background for command data
+                    // Draw background for command data using text color with varying opacity
                     if (worldY === engine.commandState.commandStartPos.y) {
-                        // Heather gray background for command line (typed command)
-                        ctx.fillStyle = '#8B9AAF';
+                        // Command line (typed command) - use text color at full opacity
+                        ctx.fillStyle = engine.textColor;
                         ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                        ctx.fillStyle = '#FFFFFF';
+                        // Text uses background color
+                        ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
                     } else if (engine.commandState.isActive && worldY === engine.commandState.commandStartPos.y + 1 + engine.commandState.selectedIndex) {
-                        // Light heather gray background for selected suggestion
-                        ctx.fillStyle = '#C2C9D6';
+                        // Selected suggestion - use text color at 80% opacity
+                        const hex = engine.textColor.replace('#', '');
+                        const r = parseInt(hex.substring(0, 2), 16);
+                        const g = parseInt(hex.substring(2, 4), 16);
+                        const b = parseInt(hex.substring(4, 6), 16);
+                        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.8)`;
                         ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                        ctx.fillStyle = '#2C3E50';
+                        // Text uses background color
+                        ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
                     } else {
-                        // Muted gray background for other suggestions
-                        ctx.fillStyle = '#6B7280';
+                        // Other suggestions - use text color at 60% opacity
+                        const hex = engine.textColor.replace('#', '');
+                        const r = parseInt(hex.substring(0, 2), 16);
+                        const g = parseInt(hex.substring(2, 4), 16);
+                        const b = parseInt(hex.substring(4, 6), 16);
+                        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.6)`;
                         ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                        ctx.fillStyle = '#D1D5DB';
+                        // Text uses background color at higher opacity for readability
+                        const bgHex = (engine.backgroundColor || '#FFFFFF').replace('#', '');
+                        const bgR = parseInt(bgHex.substring(0, 2), 16);
+                        const bgG = parseInt(bgHex.substring(2, 4), 16);
+                        const bgB = parseInt(bgHex.substring(4, 6), 16);
+                        ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
                     }
-                    
+
                     // Draw text (only if not a space)
                     if (char && char.trim() !== '') {
                         ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
