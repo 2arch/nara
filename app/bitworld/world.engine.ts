@@ -138,7 +138,6 @@ export interface WorldEngine {
         isActive: boolean;
         currentInputType: import('./host.flows').InputType | null;
     }>>;
-    hostData: { text: string; color?: string; centerPos: Point } | null;
     setHostData: React.Dispatch<React.SetStateAction<{ text: string; color?: string; centerPos: Point } | null>>;
     // Ephemeral text rendering for host dialogue
     addInstantAIResponse: (startPos: Point, text: string, options?: {
@@ -1315,6 +1314,65 @@ export function useWorldEngine({
     const isImageData = useCallback((data: string | StyledCharacter | ImageData): data is ImageData => {
         return typeof data === 'object' && 'type' in data && data.type === 'image';
     }, []);
+
+    // === Camera Tracking ===
+    const updateCameraTracking = useCallback((nextCursorPos: Point) => {
+        if (typeof window !== 'undefined') {
+            const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
+            if (effectiveCharWidth > 0 && effectiveCharHeight > 0) {
+                const viewportCharWidth = window.innerWidth / effectiveCharWidth;
+                const viewportCharHeight = window.innerHeight / effectiveCharHeight;
+
+                if (cameraMode === 'default') {
+                    // Default mode: Keep cursor in view (was ripstop behavior)
+                    // Check if cursor is outside current viewport bounds
+                    const cursorOutsideLeft = nextCursorPos.x < viewOffset.x;
+                    const cursorOutsideRight = nextCursorPos.x >= viewOffset.x + viewportCharWidth;
+                    const cursorOutsideTop = nextCursorPos.y < viewOffset.y;
+                    const cursorOutsideBottom = nextCursorPos.y >= viewOffset.y + viewportCharHeight;
+
+                    let newViewOffset = { ...viewOffset };
+
+                    // Adjust view to keep cursor in bounds
+                    if (cursorOutsideLeft) {
+                        newViewOffset.x = nextCursorPos.x;
+                    } else if (cursorOutsideRight) {
+                        newViewOffset.x = nextCursorPos.x - viewportCharWidth + 1;
+                    }
+
+                    if (cursorOutsideTop) {
+                        newViewOffset.y = nextCursorPos.y;
+                    } else if (cursorOutsideBottom) {
+                        newViewOffset.y = nextCursorPos.y - viewportCharHeight + 1;
+                    }
+
+                    // Update view offset if needed
+                    if (newViewOffset.x !== viewOffset.x || newViewOffset.y !== viewOffset.y) {
+                        setViewOffset(newViewOffset);
+                    }
+                } else if (cameraMode === 'focus') {
+                    // Focus mode: Center cursor in viewport
+                    const centerX = nextCursorPos.x - viewportCharWidth / 2;
+                    const centerY = nextCursorPos.y - viewportCharHeight / 2;
+
+                    setViewOffset({ x: centerX, y: centerY });
+                }
+            }
+        }
+    }, [cameraMode, viewOffset, zoomLevel, getEffectiveCharDims]);
+
+    // Track cursor position changes for camera updates in chat/command modes
+    const prevCursorPosRef = useRef<Point>(cursorPos);
+    useEffect(() => {
+        // Only update camera if cursor actually moved
+        if (prevCursorPosRef.current.x !== cursorPos.x || prevCursorPosRef.current.y !== cursorPos.y) {
+            // Update camera if in chat or command mode
+            if (chatMode.isActive || commandState.isActive) {
+                updateCameraTracking(cursorPos);
+            }
+            prevCursorPosRef.current = cursorPos;
+        }
+    }, [cursorPos, chatMode.isActive, commandState.isActive, updateCameraTracking]);
 
     // === Bounded Region Detection ===
     const getBoundedRegion = useCallback((worldData: WorldData, cursorPos: Point): { startX: number; endX: number; y: number } | null => {
@@ -2500,13 +2558,13 @@ export function useWorldEngine({
                     // Shift+Enter: Move to next line without sending to AI
                     const newInput = chatMode.currentInput + '\n';
                     const startX = chatMode.inputPositions[0]?.x || cursorPos.x;
-                    
+
                     setChatMode(prev => ({
                         ...prev,
                         currentInput: newInput,
                         inputPositions: [...prev.inputPositions, { x: startX, y: cursorPos.y + 1 }]
                     }));
-                    
+
                     // Move cursor to next line at start position
                     setCursorPos({ x: startX, y: cursorPos.y + 1 });
                     return true;
@@ -2654,19 +2712,19 @@ export function useWorldEngine({
                 // Add character to chat input
                 const newInput = chatMode.currentInput + key;
                 const currentKey = `${cursorPos.x},${cursorPos.y}`;
-                
+
                 setChatMode(prev => ({
                     ...prev,
                     currentInput: newInput,
                     inputPositions: [...prev.inputPositions, cursorPos]
                 }));
-                
+
                 // Add to chatData instead of worldData
                 setChatData(prev => ({
                     ...prev,
                     [currentKey]: key
                 }));
-                
+
                 // Move cursor immediately for chat mode
                 setCursorPos({ x: cursorPos.x + 1, y: cursorPos.y });
                 return true;
@@ -2675,21 +2733,21 @@ export function useWorldEngine({
                     // Remove last character from chat input
                     const newInput = chatMode.currentInput.slice(0, -1);
                     const lastPos = chatMode.inputPositions[chatMode.inputPositions.length - 1];
-                    
+
                     if (lastPos) {
                         setChatMode(prev => ({
                             ...prev,
                             currentInput: newInput,
                             inputPositions: prev.inputPositions.slice(0, -1)
                         }));
-                        
+
                         // Remove from chatData
                         setChatData(prev => {
                             const newChatData = { ...prev };
                             delete newChatData[`${lastPos.x},${lastPos.y}`];
                             return newChatData;
                         });
-                        
+
                         // Move cursor immediately for chat mode
                         setCursorPos({ x: lastPos.x, y: lastPos.y });
                     }
@@ -3861,50 +3919,9 @@ export function useWorldEngine({
         // === Update State ===
         if (moved) {
             setCursorPos(nextCursorPos);
-            
+
             // Camera tracking modes
-            if (typeof window !== 'undefined') {
-                const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
-                if (effectiveCharWidth > 0 && effectiveCharHeight > 0) {
-                    const viewportCharWidth = window.innerWidth / effectiveCharWidth;
-                    const viewportCharHeight = window.innerHeight / effectiveCharHeight;
-                    
-                    if (cameraMode === 'default') {
-                        // Default mode: Keep cursor in view (was ripstop behavior)
-                        // Check if cursor is outside current viewport bounds
-                        const cursorOutsideLeft = nextCursorPos.x < viewOffset.x;
-                        const cursorOutsideRight = nextCursorPos.x >= viewOffset.x + viewportCharWidth;
-                        const cursorOutsideTop = nextCursorPos.y < viewOffset.y;
-                        const cursorOutsideBottom = nextCursorPos.y >= viewOffset.y + viewportCharHeight;
-                        
-                        let newViewOffset = { ...viewOffset };
-                        
-                        // Adjust view to keep cursor in bounds
-                        if (cursorOutsideLeft) {
-                            newViewOffset.x = nextCursorPos.x;
-                        } else if (cursorOutsideRight) {
-                            newViewOffset.x = nextCursorPos.x - viewportCharWidth + 1;
-                        }
-                        
-                        if (cursorOutsideTop) {
-                            newViewOffset.y = nextCursorPos.y;
-                        } else if (cursorOutsideBottom) {
-                            newViewOffset.y = nextCursorPos.y - viewportCharHeight + 1;
-                        }
-                        
-                        // Update view offset if needed
-                        if (newViewOffset.x !== viewOffset.x || newViewOffset.y !== viewOffset.y) {
-                            setViewOffset(newViewOffset);
-                        }
-                    } else if (cameraMode === 'focus') {
-                        // Focus mode: Center cursor in viewport
-                        const centerX = nextCursorPos.x - viewportCharWidth / 2;
-                        const centerY = nextCursorPos.y - viewportCharHeight / 2;
-                        
-                        setViewOffset({ x: centerX, y: centerY });
-                    }
-                }
-            }
+            updateCameraTracking(nextCursorPos);
             
             // Update selection based on movement and shift key
             // Only use shift for selection when using navigation keys, not when typing
@@ -4423,7 +4440,6 @@ export function useWorldEngine({
         hostData,
         setHostData,
         addInstantAIResponse,
-        getViewportCenter,
         getCharacter,
         getCharacterStyle,
         isImageData,

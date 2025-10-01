@@ -2108,9 +2108,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     });
                     
                     // Move cursor to end of completed command
-                    setCursorPos({ 
-                        x: commandState.commandStartPos.x + selectedCommand.length + 1, // +1 for the '/' 
-                        y: commandState.commandStartPos.y 
+                    setCursorPos({
+                        x: commandState.commandStartPos.x + selectedCommand.length + 1, // +1 for the '/'
+                        y: commandState.commandStartPos.y
                     });
                 }
             }
