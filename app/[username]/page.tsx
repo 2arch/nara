@@ -64,16 +64,16 @@ export default function UserHome() {
 
   if (authLoading || uidLookupLoading || engine.isLoadingWorld) {
     return (
-      <div className="w-screen h-screen flex items-center justify-center" style={{}}>
-        <div className="text-black">Loading...</div>
+      <div className="w-screen h-screen flex items-center justify-center" style={{ backgroundColor: '#000000' }}>
+        <div style={{ color: '#F0FF6A' }}>Loading...</div>
       </div>
     );
   }
 
   if (!targetUserUid) {
     return (
-      <div className="w-screen h-screen flex items-center justify-center" style={{}}>
-        <div className="text-black">User not found</div>
+      <div className="w-screen h-screen flex items-center justify-center" style={{ backgroundColor: '#000000' }}>
+        <div style={{ color: '#F0FF6A' }}>User not found</div>
       </div>
     );
   }

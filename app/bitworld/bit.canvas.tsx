@@ -962,8 +962,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const BASE_CHAR_WIDTH = BASE_FONT_SIZE * 0.6;
             const charWidth = effectiveCharWidth || BASE_CHAR_WIDTH;
             const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
+            const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
             const availableWidthChars = Math.floor(viewportWidth / charWidth);
-            const MARGIN_CHARS = 8;
+            const isPortrait = viewportHeight > viewportWidth;
+            const MARGIN_CHARS = isPortrait ? 2 : 8; // Smaller margins on mobile
             const MAX_WIDTH_CHARS = 60;
             const wrapWidth = Math.min(MAX_WIDTH_CHARS, availableWidthChars - (2 * MARGIN_CHARS));
 
@@ -1002,16 +1004,26 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const maxLineWidth = Math.max(...wrappedLines.map(line => line.length));
             const totalHeight = wrappedLines.length;
 
-            // Center the text block around the stored position
-            const centeredStartX = Math.floor(engine.hostData.centerPos.x - maxLineWidth / 2);
-            const centeredStartY = Math.floor(engine.hostData.centerPos.y - totalHeight / 2);
+            // Position text: left-aligned on mobile (portrait), centered on desktop
+            let textStartX: number;
+            let textStartY: number;
+
+            if (isPortrait) {
+                // Left-aligned with margin on mobile
+                textStartX = Math.floor(engine.hostData.centerPos.x - (availableWidthChars / 2) + MARGIN_CHARS);
+                textStartY = Math.floor(engine.hostData.centerPos.y - totalHeight / 2);
+            } else {
+                // Centered on desktop
+                textStartX = Math.floor(engine.hostData.centerPos.x - maxLineWidth / 2);
+                textStartY = Math.floor(engine.hostData.centerPos.y - totalHeight / 2);
+            }
 
             // Render each character
-            let y = centeredStartY;
+            let y = textStartY;
             wrappedLines.forEach(line => {
                 for (let x = 0; x < line.length; x++) {
                     const char = line[x];
-                    const worldX = centeredStartX + x;
+                    const worldX = textStartX + x;
                     const worldY = y;
 
                     if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {

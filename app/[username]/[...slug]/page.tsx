@@ -68,7 +68,7 @@ export default function UserState() {
   if (authLoading || uidLookupLoading || engine.isLoadingWorld) {
     return (
       <div className="w-screen h-screen flex items-center justify-center" style={{}}>
-        <div className="text-black">Loading...</div>
+        <div>Loading...</div>
       </div>
     );
   }
@@ -76,7 +76,7 @@ export default function UserState() {
   if (!targetUserUid) {
     return (
       <div className="w-screen h-screen flex items-center justify-center" style={{}}>
-        <div className="text-black">User not found</div>
+        <div>User not found</div>
       </div>
     );
   }

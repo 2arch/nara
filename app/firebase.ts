@@ -1,7 +1,7 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
 import { getDatabase, connectDatabaseEmulator, ref, onValue, set, get, query, orderByChild, equalTo } from "firebase/database";
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, User } from "firebase/auth";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, User, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink } from "firebase/auth";
 import { logger } from './bitworld/logger';
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
@@ -123,9 +123,113 @@ export const signInUser = async (email: string, password: string): Promise<{succ
     return { success: true, user: userCredential.user };
   } catch (error: any) {
     logger.error('Signin error:', error);
-    return { 
-      success: false, 
-      error: error.message || 'Failed to sign in' 
+    return {
+      success: false,
+      error: error.message || 'Failed to sign in'
+    };
+  }
+};
+
+// Email link (passwordless) authentication
+export const sendSignInLink = async (email: string, firstName?: string, lastName?: string, username?: string): Promise<{success: boolean, error?: string}> => {
+  try {
+    const actionCodeSettings = {
+      // URL to redirect to after email link is clicked
+      url: typeof window !== 'undefined' ? `${window.location.origin}/auth/verify` : 'http://localhost:3000/auth/verify',
+      handleCodeInApp: true,
+    };
+
+    await sendSignInLinkToEmail(auth, email, actionCodeSettings);
+
+    // Save email to local storage to complete sign-in on redirect
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('emailForSignIn', email);
+      // Save additional user info for account creation if provided
+      if (firstName && lastName && username) {
+        window.localStorage.setItem('pendingUserData', JSON.stringify({ firstName, lastName, username }));
+      }
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    logger.error('Error sending sign-in link:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to send sign-in link'
+    };
+  }
+};
+
+export const completeSignInWithEmailLink = async (emailLink?: string): Promise<{success: boolean, user?: User, error?: string, isNewUser?: boolean}> => {
+  try {
+    const url = emailLink || (typeof window !== 'undefined' ? window.location.href : '');
+
+    // Check if the URL is a sign-in link
+    if (!isSignInWithEmailLink(auth, url)) {
+      return { success: false, error: 'Invalid sign-in link' };
+    }
+
+    // Get email from local storage
+    let email = typeof window !== 'undefined' ? window.localStorage.getItem('emailForSignIn') : null;
+
+    if (!email) {
+      // Fallback: ask user for email if not in storage
+      return { success: false, error: 'Email not found. Please enter your email.' };
+    }
+
+    // Sign in with email link
+    const userCredential = await signInWithEmailLink(auth, email, url);
+    const user = userCredential.user;
+
+    // Check if this is a new user
+    const isNewUser = userCredential.user.metadata.creationTime === userCredential.user.metadata.lastSignInTime;
+
+    if (isNewUser && typeof window !== 'undefined') {
+      // Get pending user data from storage
+      const pendingDataStr = window.localStorage.getItem('pendingUserData');
+      if (pendingDataStr) {
+        const { firstName, lastName, username } = JSON.parse(pendingDataStr);
+
+        // Update profile
+        await updateProfile(user, {
+          displayName: `${firstName} ${lastName}`
+        });
+
+        // Create user profile in database
+        const userProfileData: UserProfileData = {
+          firstName,
+          lastName,
+          username,
+          email: user.email || email,
+          uid: user.uid,
+          createdAt: new Date().toISOString(),
+          membership: 'fresh',
+          aiUsage: {
+            daily: {},
+            monthly: {},
+            total: 0,
+            lastReset: new Date().toISOString()
+          }
+        };
+
+        await set(ref(database, `users/${user.uid}`), userProfileData);
+
+        // Clean up pending data
+        window.localStorage.removeItem('pendingUserData');
+      }
+    }
+
+    // Clean up email from storage
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem('emailForSignIn');
+    }
+
+    return { success: true, user, isNewUser };
+  } catch (error: any) {
+    logger.error('Error completing sign-in with email link:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to complete sign-in'
     };
   }
 };
