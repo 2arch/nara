@@ -122,7 +122,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
     // Host dialogue system for onboarding
     const hostDialogue = useHostDialogue({
-        addInstantAIResponse: engine.addInstantAIResponse,
+        setHostData: engine.setHostData,
+        getViewportCenter: engine.getViewportCenter,
         setDialogueText: engine.setDialogueText,
         onAuthSuccess
     });
@@ -148,8 +149,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 inputPositions: [],
                 isProcessing: false
             });
-            // Start the flow at viewport center
-            hostDialogue.startFlow(initialHostFlow, engine.getViewportCenter());
+            // Start the flow
+            hostDialogue.startFlow(initialHostFlow);
         }
     }, [hostModeEnabled, initialHostFlow, hostDialogue, engine]);
 
@@ -900,20 +901,22 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-                    // Apply text background if specified (like regular text rendering)
-                    if (engine.currentTextStyle.background && char && char.trim() !== '') {
-                        if (opacity < 1.0) {
-                            ctx.globalAlpha = opacity;
-                        }
-                        ctx.fillStyle = engine.currentTextStyle.background;
-                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                        if (opacity < 1.0) {
-                            ctx.globalAlpha = 1.0;
-                        }
-                    }
-
                     if (char && char.trim() !== '') {
-                        // Apply opacity to color
+                        // Apply text background: use currentTextStyle.background if set,
+                        // or backgroundColor when monogram is ACTUALLY enabled (to block out monogram pattern)
+                        const textBackground = engine.currentTextStyle.background || (monogramSystem.options.enabled ? engine.backgroundColor : undefined);
+                        if (textBackground) {
+                            if (opacity < 1.0) {
+                                ctx.globalAlpha = opacity;
+                            }
+                            ctx.fillStyle = textBackground;
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            if (opacity < 1.0) {
+                                ctx.globalAlpha = 1.0;
+                            }
+                        }
+
+                        // Render the character with opacity
                         if (opacity < 1.0) {
                             ctx.globalAlpha = opacity;
                         }
@@ -925,6 +928,92 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     }
                 }
             }
+        }
+
+        // === Render Host Data (Centered at Initial Position) ===
+        if (engine.hostData) {
+            const hostText = engine.hostData.text;
+            const hostColor = engine.hostData.color || engine.textColor;
+
+            // Intelligent wrap width based on viewport (same logic as addInstantAIResponse)
+            const BASE_FONT_SIZE = 16;
+            const BASE_CHAR_WIDTH = BASE_FONT_SIZE * 0.6;
+            const charWidth = effectiveCharWidth || BASE_CHAR_WIDTH;
+            const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
+            const availableWidthChars = Math.floor(viewportWidth / charWidth);
+            const MARGIN_CHARS = 8;
+            const MAX_WIDTH_CHARS = 60;
+            const wrapWidth = Math.min(MAX_WIDTH_CHARS, availableWidthChars - (2 * MARGIN_CHARS));
+
+            // Text wrapping
+            const wrapText = (text: string, maxWidth: number): string[] => {
+                const paragraphs = text.split('\n');
+                const lines: string[] = [];
+                for (let i = 0; i < paragraphs.length; i++) {
+                    const paragraph = paragraphs[i].trim();
+                    if (paragraph === '') {
+                        lines.push('');
+                        continue;
+                    }
+                    const words = paragraph.split(' ');
+                    let currentLine = '';
+                    for (const word of words) {
+                        const testLine = currentLine ? `${currentLine} ${word}` : word;
+                        if (testLine.length <= maxWidth) {
+                            currentLine = testLine;
+                        } else {
+                            if (currentLine) {
+                                lines.push(currentLine);
+                                currentLine = word;
+                            } else {
+                                lines.push(word.substring(0, maxWidth));
+                                currentLine = word.substring(maxWidth);
+                            }
+                        }
+                    }
+                    if (currentLine) lines.push(currentLine);
+                }
+                return lines;
+            };
+
+            const wrappedLines = wrapText(hostText, wrapWidth);
+            const maxLineWidth = Math.max(...wrappedLines.map(line => line.length));
+            const totalHeight = wrappedLines.length;
+
+            // Center the text block around the stored position
+            const centeredStartX = Math.floor(engine.hostData.centerPos.x - maxLineWidth / 2);
+            const centeredStartY = Math.floor(engine.hostData.centerPos.y - totalHeight / 2);
+
+            // Render each character
+            let y = centeredStartY;
+            wrappedLines.forEach(line => {
+                for (let x = 0; x < line.length; x++) {
+                    const char = line[x];
+                    const worldX = centeredStartX + x;
+                    const worldY = y;
+
+                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                        if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                            screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+
+                            if (char && char.trim() !== '') {
+                                // Apply text background when monogram is enabled
+                                const textBackground = engine.currentTextStyle.background || (monogramSystem.options.enabled ? engine.backgroundColor : undefined);
+                                if (textBackground) {
+                                    ctx.fillStyle = textBackground;
+                                    ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                }
+
+                                // Render the character
+                                ctx.fillStyle = hostColor;
+                                ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                            }
+                        }
+                    }
+                }
+                y++;
+            });
         }
 
         // === Render Bounded Region Backgrounds ===
@@ -2468,11 +2557,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         if (hostDialogue.isHostActive && engine.chatMode.isActive && e.key === 'Enter' && !e.shiftKey) {
             const userInput = engine.chatMode.currentInput.trim();
             if (userInput && !hostDialogue.isHostProcessing) {
-                // Clear previous host message (ephemeral text)
-                engine.clearLightModeData();
-
-                // Process through host dialogue (always use viewport center)
-                hostDialogue.processInput(userInput, engine.getViewportCenter());
+                // Process through host dialogue
+                hostDialogue.processInput(userInput);
 
                 // Clear chat input and visual data
                 engine.clearChatData();

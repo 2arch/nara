@@ -61,6 +61,7 @@ export interface WorldEngine {
     commandSystem: { selectCommand: (command: string) => void };
     chatData: WorldData;
     lightModeData: WorldData;
+    hostData: { text: string; color?: string; centerPos: Point } | null; // Host messages rendered at fixed position
     searchData: WorldData;
     viewOffset: Point;
     cursorPos: Point;
@@ -137,6 +138,8 @@ export interface WorldEngine {
         isActive: boolean;
         currentInputType: import('./host.flows').InputType | null;
     }>>;
+    hostData: { text: string; color?: string; centerPos: Point } | null;
+    setHostData: React.Dispatch<React.SetStateAction<{ text: string; color?: string; centerPos: Point } | null>>;
     // Ephemeral text rendering for host dialogue
     addInstantAIResponse: (startPos: Point, text: string, options?: {
         wrapWidth?: number;
@@ -363,6 +366,7 @@ export function useWorldEngine({
 
     const [chatData, setChatData] = useState<WorldData>({});
     const [searchData, setSearchData] = useState<WorldData>({});
+    const [hostData, setHostData] = useState<{ text: string; color?: string; centerPos: Point } | null>(null);
     
     // === Text Frame and Cluster System ===
     const [textFrames, setTextFrames] = useState<Array<{
@@ -4325,6 +4329,8 @@ export function useWorldEngine({
         clearLightModeData: clearLightModeData,
         hostMode,
         setHostMode,
+        hostData,
+        setHostData,
         addInstantAIResponse,
         getViewportCenter,
         getCharacter,

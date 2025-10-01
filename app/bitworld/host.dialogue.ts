@@ -13,7 +13,8 @@ export interface HostDialogueState {
 }
 
 export interface UseHostDialogueProps {
-  addInstantAIResponse: (startPos: Point, text: string, options?: any) => { width: number; height: number };
+  setHostData: (data: { text: string; color?: string; centerPos: Point } | null) => void;
+  getViewportCenter: () => Point;
   setDialogueText: (text: string) => void;
   onAuthSuccess?: (username: string) => void;
 }
@@ -30,7 +31,7 @@ function getFieldNameFromMessageId(messageId: string): string {
   return fieldMap[messageId] || messageId;
 }
 
-export function useHostDialogue({ addInstantAIResponse, setDialogueText, onAuthSuccess }: UseHostDialogueProps) {
+export function useHostDialogue({ setHostData, getViewportCenter, setDialogueText, onAuthSuccess }: UseHostDialogueProps) {
   const [state, setState] = useState<HostDialogueState>({
     isActive: false,
     currentFlowId: null,
@@ -40,7 +41,7 @@ export function useHostDialogue({ addInstantAIResponse, setDialogueText, onAuthS
   });
 
   // Start a flow
-  const startFlow = useCallback((flowId: string, cursorPos: Point) => {
+  const startFlow = useCallback((flowId: string, cursorPos?: Point) => {
     const flow = HOST_FLOWS[flowId];
     if (!flow) {
       console.error(`Flow ${flowId} not found`);
@@ -53,10 +54,11 @@ export function useHostDialogue({ addInstantAIResponse, setDialogueText, onAuthS
       return;
     }
 
-    // Display the first message (will be manually cleared when user responds)
-    addInstantAIResponse(cursorPos, startMessage.text, {
-      fadeDelay: 999999, // Don't auto-fade
-      fadeInterval: 1 // Instant fade when it does fade
+    // Display the first message (centered at current viewport)
+    setHostData({
+      text: startMessage.text,
+      color: undefined, // Will use engine.textColor
+      centerPos: getViewportCenter()
     });
 
     setState({
@@ -66,7 +68,7 @@ export function useHostDialogue({ addInstantAIResponse, setDialogueText, onAuthS
       collectedData: {},
       isProcessing: false
     });
-  }, [addInstantAIResponse]);
+  }, [setHostData]);
 
   // Get current message
   const getCurrentMessage = useCallback((): HostMessage | null => {
@@ -88,7 +90,7 @@ export function useHostDialogue({ addInstantAIResponse, setDialogueText, onAuthS
   }, [getCurrentMessage]);
 
   // Process user input and advance flow
-  const processInput = useCallback(async (input: string, cursorPos: Point): Promise<boolean> => {
+  const processInput = useCallback(async (input: string): Promise<boolean> => {
     if (state.isProcessing) return false;
 
     const currentMessage = getCurrentMessage();
@@ -100,9 +102,10 @@ export function useHostDialogue({ addInstantAIResponse, setDialogueText, onAuthS
     const validation = await validateInput(input);
     if (!validation.valid) {
       // Show error message
-      addInstantAIResponse(cursorPos, validation.error || 'invalid input', {
+      setHostData({
+        text: validation.error || 'invalid input',
         color: '#FF0000',
-        fadeDelay: 3000
+        centerPos: getViewportCenter()
       });
       return false;
     }
@@ -129,8 +132,9 @@ export function useHostDialogue({ addInstantAIResponse, setDialogueText, onAuthS
       // Show "creating account" message first
       const flow = HOST_FLOWS[state.currentFlowId!];
       const creatingMessage = flow.messages['creating_account'];
-      addInstantAIResponse(cursorPos, creatingMessage.text, {
-        fadeDelay: 999999
+      setHostData({
+        text: creatingMessage.text,
+        centerPos: getViewportCenter()
       });
 
       setState(prev => ({ ...prev, currentMessageId: 'creating_account' }));
@@ -148,9 +152,10 @@ export function useHostDialogue({ addInstantAIResponse, setDialogueText, onAuthS
         if (result.success) {
           // Show success message
           const successMessage = flow.messages['account_created'];
-          addInstantAIResponse(cursorPos, successMessage.text, {
+          setHostData({
+            text: successMessage.text,
             color: '#00AA00',
-            fadeDelay: 3000
+            centerPos: getViewportCenter()
           });
 
           // Navigate to user's world
@@ -170,18 +175,20 @@ export function useHostDialogue({ addInstantAIResponse, setDialogueText, onAuthS
           return true;
         } else {
           // Show error
-          addInstantAIResponse(cursorPos, result.error || 'failed to create account', {
+          setHostData({
+            text: result.error || 'failed to create account',
             color: '#FF0000',
-            fadeDelay: 3000
+            centerPos: getViewportCenter()
           });
 
           setState(prev => ({ ...prev, isProcessing: false }));
           return false;
         }
       } catch (error: any) {
-        addInstantAIResponse(cursorPos, 'something went wrong. please try again.', {
+        setHostData({
+          text: 'something went wrong. please try again.',
           color: '#FF0000',
-          fadeDelay: 3000
+          centerPos: getViewportCenter()
         });
 
         setState(prev => ({ ...prev, isProcessing: false }));
@@ -195,10 +202,10 @@ export function useHostDialogue({ addInstantAIResponse, setDialogueText, onAuthS
       const nextMessage = flow.messages[nextMessageId];
 
       if (nextMessage) {
-        // Display next message (will be manually cleared when user responds)
-        addInstantAIResponse(cursorPos, nextMessage.text, {
-          fadeDelay: 999999, // Don't auto-fade
-          fadeInterval: 1 // Instant fade when it does fade
+        // Display next message (centered at current viewport)
+        setHostData({
+          text: nextMessage.text,
+          centerPos: getViewportCenter()
         });
 
         setState(prev => ({
@@ -219,7 +226,7 @@ export function useHostDialogue({ addInstantAIResponse, setDialogueText, onAuthS
     }));
 
     return true;
-  }, [state, getCurrentMessage, validateInput, addInstantAIResponse, onAuthSuccess]);
+  }, [state, getCurrentMessage, validateInput, setHostData, onAuthSuccess]);
 
   // Get current input type for rendering (e.g., password masking)
   const getCurrentInputType = useCallback((): InputType | null => {
