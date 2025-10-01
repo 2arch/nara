@@ -2562,7 +2562,8 @@ export function useWorldEngine({
                     setChatMode(prev => ({
                         ...prev,
                         currentInput: newInput,
-                        inputPositions: [...prev.inputPositions, { x: startX, y: cursorPos.y + 1 }]
+                        // Don't add a position for the newline - it's not a visible character
+                        inputPositions: prev.inputPositions
                     }));
 
                     // Move cursor to next line at start position
@@ -2730,27 +2731,54 @@ export function useWorldEngine({
                 return true;
             } else if (key === 'Backspace') {
                 if (chatMode.currentInput.length > 0) {
+                    // Check if we're deleting a newline character
+                    const lastChar = chatMode.currentInput[chatMode.currentInput.length - 1];
+                    const isNewline = lastChar === '\n';
+
                     // Remove last character from chat input
                     const newInput = chatMode.currentInput.slice(0, -1);
-                    const lastPos = chatMode.inputPositions[chatMode.inputPositions.length - 1];
 
-                    if (lastPos) {
+                    if (isNewline) {
+                        // Backspacing over newline: just remove it from input string, keep positions unchanged
+                        // The cursor should move to end of previous line (after last visible character)
+                        const lastPos = chatMode.inputPositions[chatMode.inputPositions.length - 1];
+
                         setChatMode(prev => ({
                             ...prev,
                             currentInput: newInput,
-                            inputPositions: prev.inputPositions.slice(0, -1)
+                            // Don't remove any positions - newlines don't have positions
+                            inputPositions: prev.inputPositions
                         }));
 
-                        // Remove from chatData
-                        setChatData(prev => {
-                            const newChatData = { ...prev };
-                            delete newChatData[`${lastPos.x},${lastPos.y}`];
-                            return newChatData;
-                        });
+                        // Move cursor to end of previous line (after last character)
+                        if (lastPos) {
+                            setCursorPos({ x: lastPos.x + 1, y: lastPos.y });
+                        }
+                    } else {
+                        // Regular character deletion
+                        const lastPos = chatMode.inputPositions[chatMode.inputPositions.length - 1];
 
-                        // Move cursor immediately for chat mode
-                        setCursorPos({ x: lastPos.x, y: lastPos.y });
+                        if (lastPos) {
+                            setChatMode(prev => ({
+                                ...prev,
+                                currentInput: newInput,
+                                inputPositions: prev.inputPositions.slice(0, -1)
+                            }));
+
+                            // Remove from chatData
+                            setChatData(prev => {
+                                const newChatData = { ...prev };
+                                delete newChatData[`${lastPos.x},${lastPos.y}`];
+                                return newChatData;
+                            });
+
+                            // Move cursor immediately for chat mode
+                            setCursorPos({ x: lastPos.x, y: lastPos.y });
+                        }
                     }
+                } else {
+                    // No input to delete - just move cursor left (like regular backspace)
+                    setCursorPos({ x: cursorPos.x - 1, y: cursorPos.y });
                 }
                 return true;
             }
@@ -3510,9 +3538,11 @@ export function useWorldEngine({
                     nextCursorPos.y = parseInt(lyStr, 10);
                 } else {
                     // Check if we're at the beginning of a line (need to merge with previous line)
+                    // Only merge if cursor is actually before any characters on this line, not at first character
                     const currentLineChars = extractLineCharacters(worldData, cursorPos.y);
-                    const isAtLineStart = cursorPos.x === 0 || 
-                        (currentLineChars.length > 0 && cursorPos.x <= currentLineChars[0].x);
+                    const isAtLineStart = currentLineChars.length > 0 ?
+                        cursorPos.x < currentLineChars[0].x :
+                        cursorPos.x === 0;
                     
                     if (isAtLineStart && cursorPos.y > 0) {
                         // Find the last character position on the previous line
