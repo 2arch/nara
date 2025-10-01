@@ -2257,6 +2257,53 @@ export function useWorldEngine({
                         logger.debug('No bound found at cursor position');
                         setDialogueWithRevert(`No bounded region found at cursor position`, setDialogueText);
                     }
+                } else if (exec.command === 'glitch') {
+                    // Create glitched region with 1:1 square cells by subdividing each cell vertically
+                    const selection = getNormalizedSelection();
+
+                    if (!selection) {
+                        setDialogueWithRevert(`Select a region to glitch (minimum 1x2)`, setDialogueText);
+                        return true;
+                    }
+
+                    const width = selection.endX - selection.startX + 1;
+                    const height = selection.endY - selection.startY + 1;
+
+                    // Validate minimum size (at least 1x2 - one row, two columns)
+                    if (width < 2 && height < 2) {
+                        setDialogueWithRevert(`Glitch region must be at least 1x2 (one row, two columns)`, setDialogueText);
+                        setSelectionStart(null);
+                        setSelectionEnd(null);
+                        return true;
+                    }
+
+                    const newWorldData = { ...worldData };
+
+                    // Remove any existing text in the selected region
+                    for (let y = selection.startY; y <= selection.endY; y++) {
+                        for (let x = selection.startX; x <= selection.endX; x++) {
+                            const key = `${x},${y}`;
+                            delete newWorldData[key];
+                        }
+                    }
+
+                    // Create glitch metadata entry to mark this region as glitched
+                    const glitchKey = `glitched_${selection.startX},${selection.startY}`;
+                    const glitchData = {
+                        startX: selection.startX,
+                        endX: selection.endX,
+                        startY: selection.startY,
+                        endY: selection.endY
+                    };
+                    newWorldData[glitchKey] = JSON.stringify(glitchData);
+
+                    setWorldData(newWorldData);
+
+                    // Clear selection
+                    setSelectionStart(null);
+                    setSelectionEnd(null);
+
+                    setDialogueWithRevert(`Region glitched (${width}x${height} → ${width}x${height*2} square cells)`, setDialogueText);
                 } else if (exec.command === 'upload') {
                     // Check if there's a selection for image placement
                     const selection = getNormalizedSelection();
@@ -3561,6 +3608,28 @@ export function useWorldEngine({
         }
         // --- Typing ---
         else if (!isMod && key.length === 1) { // Basic check for printable chars
+            // Check if cursor is in a glitched region - block typing if so
+            let isInGlitchedRegion = false;
+            for (const key in worldData) {
+                if (key.startsWith('glitched_')) {
+                    try {
+                        const glitchData = JSON.parse(worldData[key] as string);
+                        if (cursorPos.x >= glitchData.startX && cursorPos.x <= glitchData.endX &&
+                            cursorPos.y >= glitchData.startY && cursorPos.y <= glitchData.endY) {
+                            isInGlitchedRegion = true;
+                            break;
+                        }
+                    } catch (e) {
+                        // Skip invalid glitch data
+                    }
+                }
+            }
+
+            if (isInGlitchedRegion) {
+                // Don't allow typing in glitched regions - they use a different coordinate system
+                return true;
+            }
+
             let dataToDeleteFrom = worldData;
             let cursorAfterDelete = cursorPos;
 
@@ -3871,7 +3940,29 @@ export function useWorldEngine({
 
     const handleCanvasClick = useCallback((canvasRelativeX: number, canvasRelativeY: number, clearSelection: boolean = false, shiftKey: boolean = false): void => {
         const newCursorPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
-        
+
+        // Check if clicking in a glitched region - block cursor movement if so
+        let isInGlitchedRegion = false;
+        for (const key in worldData) {
+            if (key.startsWith('glitched_')) {
+                try {
+                    const glitchData = JSON.parse(worldData[key] as string);
+                    if (newCursorPos.x >= glitchData.startX && newCursorPos.x <= glitchData.endX &&
+                        newCursorPos.y >= glitchData.startY && newCursorPos.y <= glitchData.endY) {
+                        isInGlitchedRegion = true;
+                        break;
+                    }
+                } catch (e) {
+                    // Skip invalid glitch data
+                }
+            }
+        }
+
+        if (isInGlitchedRegion) {
+            // Don't allow cursor movement into glitched regions
+            return;
+        }
+
         // If in chat mode, clear previous input when clicking
         if (chatMode.isActive && chatMode.currentInput) {
             setChatData({});

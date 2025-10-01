@@ -494,15 +494,37 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
 
     // --- Cursor Preview Functions ---
-    const drawHoverPreview = useCallback((ctx: CanvasRenderingContext2D, worldPos: Point, currentZoom: number, currentOffset: Point, effectiveCharWidth: number, effectiveCharHeight: number, cssWidth: number, cssHeight: number, shiftPressed: boolean = false) => {
+    const drawHoverPreview = useCallback((ctx: CanvasRenderingContext2D, worldPos: any, currentZoom: number, currentOffset: Point, effectiveCharWidth: number, effectiveCharHeight: number, cssWidth: number, cssHeight: number, shiftPressed: boolean = false) => {
         // Only show preview if different from current cursor position
-        if (worldPos.x === engine.cursorPos.x && worldPos.y === engine.cursorPos.y) return;
-        
+        if (worldPos.x === engine.cursorPos.x && worldPos.y === engine.cursorPos.y && !worldPos.subY) return;
+
         const screenPos = engine.worldToScreen(worldPos.x, worldPos.y, currentZoom, currentOffset);
-        
+
+        // Check if we're in a glitched region
+        const subY = worldPos.subY !== undefined ? worldPos.subY : 0;
+        const hasSubY = worldPos.subY !== undefined;
+        const isGlitched = hasSubY || (() => {
+            for (const key in engine.worldData) {
+                if (key.startsWith('glitched_')) {
+                    try {
+                        const glitchData = JSON.parse(engine.worldData[key] as string);
+                        if (worldPos.x >= glitchData.startX && worldPos.x <= glitchData.endX &&
+                            worldPos.y >= glitchData.startY && worldPos.y <= glitchData.endY) {
+                            return true;
+                        }
+                    } catch (e) {}
+                }
+            }
+            return false;
+        })();
+
+        // Adjust height and Y position for glitched cells
+        const previewHeight = isGlitched ? effectiveCharHeight / 2 : effectiveCharHeight;
+        const adjustedScreenY = screenPos.y + (subY * effectiveCharHeight);
+
         // Only draw if visible on screen
-        if (screenPos.x < -effectiveCharWidth || screenPos.x > cssWidth || 
-            screenPos.y < -effectiveCharHeight || screenPos.y > cssHeight) return;
+        if (screenPos.x < -effectiveCharWidth || screenPos.x > cssWidth ||
+            adjustedScreenY < -previewHeight || adjustedScreenY > cssHeight) return;
         
         // Check if there's existing text at this position OR if we're within a text block
         const key = `${worldPos.x},${worldPos.y}`;
@@ -570,34 +592,34 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     bottomRightScreen.y - topLeftScreen.y - lineWidth
                 );
             } else {
-                // Draw outline around the hovered cell
+                // Draw outline around the hovered cell (use adjusted dimensions for glitched cells)
                 ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
                 const lineWidth = 2;
                 ctx.lineWidth = lineWidth;
                 const halfWidth = lineWidth / 2;
-                ctx.strokeRect(screenPos.x + halfWidth, screenPos.y + halfWidth, effectiveCharWidth - lineWidth, effectiveCharHeight - lineWidth);
+                ctx.strokeRect(screenPos.x + halfWidth, adjustedScreenY + halfWidth, effectiveCharWidth - lineWidth, previewHeight - lineWidth);
             }
         } else {
             if (shiftPressed) {
-                // When shift is pressed over empty cell, draw border
+                // When shift is pressed over empty cell, draw border (use adjusted dimensions for glitched cells)
                 ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.7)`; // Border matching text accent color
                 const lineWidth = 2;
                 ctx.lineWidth = lineWidth;
                 const halfWidth = lineWidth / 2;
-                ctx.strokeRect(screenPos.x + halfWidth, screenPos.y + halfWidth, effectiveCharWidth - lineWidth, effectiveCharHeight - lineWidth);
+                ctx.strokeRect(screenPos.x + halfWidth, adjustedScreenY + halfWidth, effectiveCharWidth - lineWidth, previewHeight - lineWidth);
 
                 ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.2)`; // Fill matching text accent color
-                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                ctx.fillRect(screenPos.x, adjustedScreenY, effectiveCharWidth, previewHeight);
             } else {
-                // Regular preview for empty cells
+                // Regular preview for empty cells (use adjusted dimensions for glitched cells)
                 ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.7)`;
                 const lineWidth = 2;
                 ctx.lineWidth = lineWidth;
                 const halfWidth = lineWidth / 2;
-                ctx.strokeRect(screenPos.x + halfWidth, screenPos.y + halfWidth, effectiveCharWidth - lineWidth, effectiveCharHeight - lineWidth);
+                ctx.strokeRect(screenPos.x + halfWidth, adjustedScreenY + halfWidth, effectiveCharWidth - lineWidth, previewHeight - lineWidth);
 
                 ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.2)`;
-                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                ctx.fillRect(screenPos.x, adjustedScreenY, effectiveCharWidth, previewHeight);
             }
         }
     }, [engine, findImageAtPosition]);
@@ -1065,6 +1087,57 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Glitched Regions (1:1 square cells via vertical subdivision) ===
+        // Build index of glitched regions for efficient lookup
+        const glitchedRegions: Array<{startX: number, endX: number, startY: number, endY: number}> = [];
+        for (const key in engine.worldData) {
+            if (key.startsWith('glitched_')) {
+                try {
+                    const glitchData = JSON.parse(engine.worldData[key] as string);
+                    glitchedRegions.push(glitchData);
+                } catch (e) {
+                    // Skip invalid glitch data
+                }
+            }
+        }
+
+        // Helper function to check if a coordinate is in a glitched region
+        const isInGlitchedRegion = (x: number, y: number) => {
+            for (const region of glitchedRegions) {
+                if (x >= region.startX && x <= region.endX &&
+                    y >= region.startY && y <= region.endY) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        // Render glitched regions with subdivided grid (draw as lines like main grid)
+        ctx.strokeStyle = GRID_COLOR;
+        ctx.lineWidth = GRID_LINE_WIDTH / dpr;
+
+        for (const region of glitchedRegions) {
+            const { startX, endX, startY, endY } = region;
+            const squareHeight = effectiveCharHeight / 2;
+
+            // Draw horizontal subdivision lines (the middle line of each cell)
+            for (let y = startY; y <= endY; y++) {
+                if (y >= startWorldY - 5 && y <= endWorldY + 5) {
+                    // Draw the middle horizontal line for this row
+                    const leftScreenPos = engine.worldToScreen(startX, y, currentZoom, currentOffset);
+                    const rightScreenPos = engine.worldToScreen(endX + 1, y, currentZoom, currentOffset);
+                    const middleY = leftScreenPos.y + squareHeight;
+
+                    if (middleY >= -10 && middleY <= cssHeight + 10) {
+                        ctx.beginPath();
+                        ctx.moveTo(leftScreenPos.x, middleY);
+                        ctx.lineTo(rightScreenPos.x, middleY);
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+
         // === Render Images ===
         const renderedImages = new Set<string>(); // Track which images we've already rendered
         for (const key in engine.worldData) {
@@ -1146,8 +1219,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         ctx.fillStyle = engine.textColor;
         for (const key in engine.worldData) {
-            // Skip block, label, bound, and image data - we render those separately
-            if (key.startsWith('block_') || key.startsWith('label_') || key.startsWith('bound_') || key.startsWith('image_')) continue;
+            // Skip block, label, bound, glitched, and image data - we render those separately
+            if (key.startsWith('block_') || key.startsWith('label_') || key.startsWith('bound_') || key.startsWith('glitched_') || key.startsWith('image_')) continue;
             
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
@@ -2407,10 +2480,38 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         // Always track mouse position for preview (when not actively dragging)
         if (!isMiddleMouseDownRef.current && !isSelectingMouseDownRef.current) {
             const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
-            const snappedWorldPos = {
-                x: Math.floor(worldPos.x),
-                y: Math.floor(worldPos.y)
+
+            // Check if we're in a glitched region - if so, snap to half-cells (vertical subdivision)
+            const baseX = Math.floor(worldPos.x);
+            const baseY = Math.floor(worldPos.y);
+
+            // Check if this base cell is in a glitched region
+            let isInGlitch = false;
+            for (const key in engine.worldData) {
+                if (key.startsWith('glitched_')) {
+                    try {
+                        const glitchData = JSON.parse(engine.worldData[key] as string);
+                        if (baseX >= glitchData.startX && baseX <= glitchData.endX &&
+                            baseY >= glitchData.startY && baseY <= glitchData.endY) {
+                            isInGlitch = true;
+                            break;
+                        }
+                    } catch (e) {
+                        // Skip invalid glitch data
+                    }
+                }
+            }
+
+            // Calculate which half of the cell we're in (only for glitched regions)
+            const snappedWorldPos: any = {
+                x: baseX,
+                y: baseY
             };
+
+            if (isInGlitch) {
+                const fractionalY = worldPos.y - baseY;
+                snappedWorldPos.subY = fractionalY >= 0.5 ? 0.5 : 0;
+            }
             setMouseWorldPos(snappedWorldPos);
             
             // Update monogram trail with mouse position
