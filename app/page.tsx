@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useWorldEngine } from './bitworld/world.engine';
 import { BitHomeCanvas } from './bitworld/bit.home';
+import { BitCanvas } from './bitworld/bit.canvas';
 import { auth } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { getUsernameByUid } from './firebase';
@@ -18,21 +19,25 @@ export default function Home() {
   const showForm = pathname === '/signup' || pathname === '/login';
   const isSignup = pathname === '/signup';
   const isLogin = pathname === '/login';
-  
+
+  // Always use host mode on home page (both authenticated and anonymous)
+  const shouldUseHostMode = pathname === '/' && !authLoading;
+
   // Listen for authentication state changes
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       setAuthLoading(false);
     });
-    
+
     return () => unsubscribe();
   }, []);
-  
-  const engine = useWorldEngine({ 
-    worldId: null, 
-    // initialBackgroundColor: '#000',
-    userUid: user?.uid || null
+
+  const engine = useWorldEngine({
+    worldId: null,
+    initialBackgroundColor: pathname === '/' ? '#162400' : undefined, // garden for host mode
+    userUid: user?.uid || null,
+    initialZoomLevel: pathname === '/' ? 1.6 : 1.0 // Zoomed in for host mode onboarding
   });
 
   // Navigation handlers
@@ -95,6 +100,26 @@ export default function Home() {
     );
   }
 
+  // Use host mode for anonymous users on home page
+  if (shouldUseHostMode) {
+    return (
+      <div className="w-screen h-screen relative" style={{backgroundColor: '#F8F8F0'}}>
+        <BitCanvas
+          engine={engine}
+          cursorColorAlternate={cursorAlternate}
+          className="w-full h-full"
+          monogramEnabled={true}
+          dialogueEnabled={false}
+          hostModeEnabled={true}
+          initialHostFlow="welcome"
+          onAuthSuccess={handleAuthSuccess}
+          fontFamily={engine.fontFamily}
+        />
+      </div>
+    );
+  }
+
+  // Use old form-based UI for /login and /signup routes
   return (
     <div className="w-screen h-screen relative" style={{backgroundColor: '#F8F8F0'}}>
       <BitHomeCanvas

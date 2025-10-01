@@ -994,7 +994,7 @@ const useMonogramSystem = (
 
     // Cycle to next mode (only clear and perlin are available)
     const cycleMode = useCallback(() => {
-        const modes: MonogramMode[] = ['clear', 'perlin'];
+        const modes: MonogramMode[] = ['clear', 'perlin', 'nara'];
         setOptions(prev => {
             const currentIndex = modes.indexOf(prev.mode);
             const nextIndex = (currentIndex + 1) % modes.length;

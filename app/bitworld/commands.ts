@@ -68,6 +68,8 @@ interface UseCommandSystemProps {
     username?: string;
     updateSettings?: (settings: Partial<WorldSettings>) => void;
     settings?: WorldSettings;
+    getEffectiveCharDims: (zoom: number) => { width: number; height: number; fontSize: number; };
+    zoomLevel: number;
 }
 
 // --- Command System Constants ---
@@ -84,12 +86,13 @@ export const COLOR_MAP: { [name: string]: string } = {
     'black': '#000000',
     'sulfur': '#F0FF6A',
     'chalk': '#69AED6',
+    'garden': '#162400',
     'orange': '#FFA500',
     'ochre': '#FFC0CB',
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, updateSettings, settings }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, updateSettings, settings, getEffectiveCharDims, zoomLevel }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const [commandState, setCommandState] = useState<CommandState>({
@@ -775,7 +778,20 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         color?: string;
         queryText?: string;
     }) => {
-        const wrapWidth = options?.wrapWidth || (options?.queryText ? calculateResponseWidth(options.queryText) : 30);
+        // Calculate intelligent wrap width based on viewport (like dialogue system)
+        const BASE_FONT_SIZE = 16;
+        const BASE_CHAR_WIDTH = BASE_FONT_SIZE * 0.6;
+        const { width: effectiveCharWidth } = getEffectiveCharDims(zoomLevel);
+        const charWidth = effectiveCharWidth || BASE_CHAR_WIDTH;
+
+        const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
+        const availableWidthChars = Math.floor(viewportWidth / charWidth);
+        const MARGIN_CHARS = 8; // Comfortable margin on each side
+        const MAX_WIDTH_CHARS = 60; // Maximum for readability
+
+        const intelligentWrapWidth = Math.min(MAX_WIDTH_CHARS, availableWidthChars - (2 * MARGIN_CHARS));
+        const wrapWidth = options?.wrapWidth || intelligentWrapWidth;
+
         const fadeDelay = options?.fadeDelay || 3000;  // Wait 3 seconds before starting fade
         const fadeInterval = options?.fadeInterval || 50;  // 50ms between each character fade
         const color = options?.color || '#808080';
@@ -817,15 +833,23 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         
         const wrappedLines = wrapText(text, wrapWidth);
         const allCharPositions: Array<{ x: number; y: number; char: string }> = [];
-        
+
+        // Calculate dimensions for centering
+        const maxLineWidth = Math.max(...wrappedLines.map(line => line.length));
+        const totalHeight = wrappedLines.length;
+
+        // Offset startPos to center the text block
+        const centeredStartX = Math.floor(startPos.x - maxLineWidth / 2);
+        const centeredStartY = Math.floor(startPos.y - totalHeight / 2);
+
         // Add all characters instantly
-        let y = startPos.y;
+        let y = centeredStartY;
         wrappedLines.forEach(line => {
             for (let x = 0; x < line.length; x++) {
                 const char = line[x];
-                const worldX = startPos.x + x;
+                const worldX = centeredStartX + x;
                 allCharPositions.push({ x: worldX, y, char });
-                
+
                 // Add character instantly with no initial fade
                 addEphemeralText({ x: worldX, y }, char, {
                     color: color,
@@ -834,8 +858,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             }
             y++;
         });
-        
-        return { width: wrapWidth, height: wrappedLines.length };
+
+        return { width: maxLineWidth, height: totalHeight };
     }, [addEphemeralText, calculateResponseWidth]);
 
     // Start command mode when '/' is pressed
@@ -2154,6 +2178,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         searchPattern: modeState.searchPattern,
         isSearchActive: modeState.isSearchActive,
         clearSearch: () => setModeState(prev => ({ ...prev, searchPattern: '', isSearchActive: false })),
+        clearLightModeData: () => setModeState(prev => ({ ...prev, lightModeData: {} })),
         cameraMode: modeState.cameraMode,
         isIndentEnabled: modeState.isIndentEnabled,
         isMoveMode: modeState.isMoveMode,

@@ -7,6 +7,7 @@ import { useMonogramSystem } from './monogram';
 import { useControllerSystem, createMonogramController, createCameraController, createGridController } from './controllers';
 import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchicalFrames, HierarchicalFrame, HierarchyLevel } from './bit.blocks';
 import { COLOR_MAP } from './commands';
+import { useHostDialogue } from './host.dialogue';
 
 // --- Constants --- (Copied and relevant ones kept)
 const GRID_COLOR = '#F2F2F233';
@@ -41,9 +42,12 @@ interface BitCanvasProps {
     monogramEnabled?: boolean;
     dialogueEnabled?: boolean;
     fontFamily?: string; // Font family for text rendering
+    hostModeEnabled?: boolean; // Enable host dialogue mode for onboarding
+    initialHostFlow?: string; // Initial flow to start (e.g., 'welcome')
+    onAuthSuccess?: (username: string) => void; // Callback after successful auth
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono' }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -116,6 +120,50 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         }
     );
 
+    // Host dialogue system for onboarding
+    const hostDialogue = useHostDialogue({
+        addInstantAIResponse: engine.addInstantAIResponse,
+        setDialogueText: engine.setDialogueText,
+        onAuthSuccess
+    });
+
+    // Start host flow when enabled
+    useEffect(() => {
+        if (hostModeEnabled && initialHostFlow && !hostDialogue.isHostActive) {
+            // Set host mode colors (garden bg, sulfur text)
+            // The background is already set via initialBackgroundColor in page.tsx
+            // We just need to update the text color by using updateSettings
+            if (engine.updateSettings) {
+                engine.updateSettings({
+                    textColor: '#F0FF6A' // sulfur
+                });
+            }
+
+            // Activate host mode in engine
+            engine.setHostMode({ isActive: true, currentInputType: null });
+            // Activate chat mode for input
+            engine.setChatMode({
+                isActive: true,
+                currentInput: '',
+                inputPositions: [],
+                isProcessing: false
+            });
+            // Start the flow at viewport center
+            hostDialogue.startFlow(initialHostFlow, engine.getViewportCenter());
+        }
+    }, [hostModeEnabled, initialHostFlow, hostDialogue, engine]);
+
+    // Sync host input type with engine for password masking
+    useEffect(() => {
+        if (hostDialogue.isHostActive) {
+            const inputType = hostDialogue.getCurrentInputType();
+            const currentInputType = engine.hostMode.currentInputType;
+            // Only update if actually changed to avoid infinite loop
+            if (currentInputType !== inputType) {
+                engine.setHostMode({ isActive: true, currentInputType: inputType });
+            }
+        }
+    }, [hostDialogue.isHostActive, hostDialogue.hostState.currentMessageId, engine.hostMode.currentInputType, engine]);
 
     // Controller system for handling keyboard inputs
     const { registerGroup, handleKeyDown: handleKeyDownFromController, getHelpText } = useControllerSystem();
@@ -830,28 +878,40 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         // Render each ephemeral character individually at its exact grid position
         for (const key in engine.lightModeData) {
             const [xStr, yStr] = key.split(',');
-            const worldX = parseInt(xStr, 10); 
+            const worldX = parseInt(xStr, 10);
             const worldY = parseInt(yStr, 10);
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.lightModeData[key];
-                
+
                 // Skip image data - only process text characters
                 if (engine.isImageData(charData)) {
                     continue;
                 }
-                
+
                 const char = typeof charData === 'string' ? charData : charData.char;
-                const color = typeof charData === 'object' && charData.style?.color ? charData.style.color : '#808080';
-                
+                const color = typeof charData === 'object' && charData.style?.color ? charData.style.color : engine.textColor;
+
                 // Calculate opacity if fadeStart is set
                 let opacity = 1.0;
                 if (typeof charData === 'object' && charData.fadeStart) {
                     const fadeProgress = (Date.now() - charData.fadeStart) / 1000; // Fade over 1 second
                     opacity = Math.max(0, 1 - fadeProgress);
                 }
-                
+
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                    // Apply text background if specified (like regular text rendering)
+                    if (engine.currentTextStyle.background && char && char.trim() !== '') {
+                        if (opacity < 1.0) {
+                            ctx.globalAlpha = opacity;
+                        }
+                        ctx.fillStyle = engine.currentTextStyle.background;
+                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        if (opacity < 1.0) {
+                            ctx.globalAlpha = 1.0;
+                        }
+                    }
+
                     if (char && char.trim() !== '') {
                         // Apply opacity to color
                         if (opacity < 1.0) {
@@ -1033,28 +1093,37 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         // === Render Chat Data (Black Background, White Text) ===
+        // Check if we need to mask passwords in host mode
+        const shouldMaskPassword = engine.hostMode?.isActive && engine.hostMode?.currentInputType === 'password';
+
         for (const key in engine.chatData) {
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.chatData[key];
-                
+
                 // Skip image data - only process text characters
                 if (engine.isImageData(charData)) {
                     continue;
                 }
-                
-                const char = typeof charData === 'string' ? charData : charData.char;
+
+                let char = typeof charData === 'string' ? charData : charData.char;
+
+                // Mask password characters with bullets in host mode
+                if (shouldMaskPassword && char && char.trim() !== '') {
+                    char = '•';
+                }
+
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
                     if (char) {
-                        // Draw black background for all characters including spaces
-                        ctx.fillStyle = '#000000';
+                        // Draw background using accent color (engine.textColor)
+                        ctx.fillStyle = engine.textColor;
                         ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                        
-                        // Draw white text (only if not a space)
+
+                        // Draw text using background color (inverse of accent)
                         if (char.trim() !== '') {
-                            ctx.fillStyle = '#FFFFFF';
+                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
                             ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
                         }
                     }
@@ -2395,6 +2464,31 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
 
     const handleCanvasKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
+        // Intercept Enter in host mode for chat input processing
+        if (hostDialogue.isHostActive && engine.chatMode.isActive && e.key === 'Enter' && !e.shiftKey) {
+            const userInput = engine.chatMode.currentInput.trim();
+            if (userInput && !hostDialogue.isHostProcessing) {
+                // Clear previous host message (ephemeral text)
+                engine.clearLightModeData();
+
+                // Process through host dialogue (always use viewport center)
+                hostDialogue.processInput(userInput, engine.getViewportCenter());
+
+                // Clear chat input and visual data
+                engine.clearChatData();
+                engine.setChatMode({
+                    isActive: true,
+                    currentInput: '',
+                    inputPositions: [],
+                    isProcessing: false
+                });
+
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+        }
+
         // Try controller system first
         const handled = handleKeyDownFromController(e);
         if (handled) {
@@ -2402,7 +2496,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             e.stopPropagation();
             return;
         }
-        
+
         // Handle image-specific keys before passing to engine
         if (selectedImageKey && e.key === 'Backspace') {
             // Delete the selected image
@@ -2412,14 +2506,14 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             e.stopPropagation();
             return;
         }
-        
+
         // Let engine handle all key input (including regular typing)
         const preventDefault = engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey, e.shiftKey);
         if (preventDefault) {
             e.preventDefault();
             e.stopPropagation();
         }
-    }, [engine, handleKeyDownFromController, selectedImageKey]);
+    }, [engine, handleKeyDownFromController, selectedImageKey, hostDialogue]);
 
     return (
         <canvas

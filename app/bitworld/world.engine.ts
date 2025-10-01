@@ -126,6 +126,25 @@ export interface WorldEngine {
         inputPositions: Point[];
         isProcessing: boolean;
     }>>;
+    clearChatData: () => void;
+    clearLightModeData: () => void;
+    // Host mode for onboarding
+    hostMode: {
+        isActive: boolean;
+        currentInputType: import('./host.flows').InputType | null;
+    };
+    setHostMode: React.Dispatch<React.SetStateAction<{
+        isActive: boolean;
+        currentInputType: import('./host.flows').InputType | null;
+    }>>;
+    // Ephemeral text rendering for host dialogue
+    addInstantAIResponse: (startPos: Point, text: string, options?: {
+        wrapWidth?: number;
+        fadeDelay?: number;
+        fadeInterval?: number;
+        color?: string;
+        queryText?: string;
+    }) => { width: number; height: number };
     // Text compilation access
     getCompiledText: () => { [lineY: number]: string };
     compiledTextCache: { [lineY: number]: string }; // Direct access to compiled text cache for real-time updates
@@ -332,7 +351,16 @@ export function useWorldEngine({
         inputPositions: [],
         isProcessing: false
     });
-    
+
+    // === Host Mode State (for onboarding) ===
+    const [hostMode, setHostMode] = useState<{
+        isActive: boolean;
+        currentInputType: import('./host.flows').InputType | null;
+    }>({
+        isActive: false,
+        currentInputType: null
+    });
+
     const [chatData, setChatData] = useState<WorldData>({});
     const [searchData, setSearchData] = useState<WorldData>({});
     
@@ -673,9 +701,9 @@ export function useWorldEngine({
     const { settings, setSettings, updateSettings } = useWorldSettings();
     
     // === Command System ===
-    const { 
-        commandState, 
-        commandData, 
+    const {
+        commandState,
+        commandData,
         handleKeyDown: handleCommandKeyDown,
         selectCommand,
         pendingCommand,
@@ -696,6 +724,7 @@ export function useWorldEngine({
         searchPattern,
         isSearchActive,
         clearSearch,
+        clearLightModeData,
         cameraMode,
         isIndentEnabled,
         isMoveMode,
@@ -704,7 +733,7 @@ export function useWorldEngine({
         cycleGridMode,
         artefactsEnabled,
         artifactType,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, updateSettings, settings });
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, updateSettings, settings, getEffectiveCharDims, zoomLevel });
 
     // Generate search data when search pattern changes
     useEffect(() => {
@@ -4292,6 +4321,12 @@ export function useWorldEngine({
         setDialogueText,
         chatMode,
         setChatMode,
+        clearChatData: () => setChatData({}),
+        clearLightModeData: clearLightModeData,
+        hostMode,
+        setHostMode,
+        addInstantAIResponse,
+        getViewportCenter,
         getCharacter,
         getCharacterStyle,
         isImageData,
