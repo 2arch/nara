@@ -106,7 +106,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             speed: 0.5,
             complexity: 1.0,
             colorShift: 0,
-            enabled: engine.settings.monogramEnabled || false,
+            enabled: hostModeEnabled ? true : (engine.settings.monogramEnabled || false),
             geometryType: 'octahedron',
             interactiveTrails: true,
             trailIntensity: 1.0,
