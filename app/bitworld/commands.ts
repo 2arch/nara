@@ -415,7 +415,23 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             }
             return CAMERA_COMMANDS.map(camera => `cam ${camera}`);
         }
-        
+
+        if (lowerInput === 'upload') {
+            const parts = input.split(' ');
+
+            if (parts.length > 1) {
+                const secondArg = parts[1];
+
+                // Handle --bitmap flag
+                if (secondArg === '--bitmap') {
+                    return ['upload --bitmap'];
+                } else if ('--bitmap'.startsWith(secondArg)) {
+                    return ['upload --bitmap'];
+                }
+            }
+            return ['upload', 'upload --bitmap'];
+        }
+
         return AVAILABLE_COMMANDS.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
     }, [getAllLabels, getAllBounds, availableStates]);
 

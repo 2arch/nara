@@ -58,6 +58,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const [shiftDragStartPos, setShiftDragStartPos] = useState<Point | null>(null);
     const [selectedImageKey, setSelectedImageKey] = useState<string | null>(null);
     const lastCursorPosRef = useRef<Point | null>(null);
+    const [hostTextVisibleChars, setHostTextVisibleChars] = useState<number>(0);
 
     // Track shift key state globally
     useEffect(() => {
@@ -127,6 +128,29 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         setDialogueText: engine.setDialogueText,
         onAuthSuccess
     });
+
+    // Animate host text typing
+    useEffect(() => {
+        if (!engine.hostData || !engine.hostData.timestamp) {
+            setHostTextVisibleChars(0);
+            return;
+        }
+
+        const fullText = engine.hostData.text;
+        const CHAR_SPEED = 50; // 50ms per character (same as addAIResponse)
+        let currentCharCount = 0;
+
+        const typeInterval = setInterval(() => {
+            currentCharCount++;
+            setHostTextVisibleChars(currentCharCount);
+
+            if (currentCharCount >= fullText.length) {
+                clearInterval(typeInterval);
+            }
+        }, CHAR_SPEED);
+
+        return () => clearInterval(typeInterval);
+    }, [engine.hostData?.timestamp]); // Re-run when hostData changes
 
     // Start host flow when enabled
     useEffect(() => {
@@ -1018,10 +1042,18 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 textStartY = Math.floor(engine.hostData.centerPos.y - totalHeight / 2);
             }
 
-            // Render each character
+            // Render each character (only up to hostTextVisibleChars for typing effect)
+            let totalCharsRendered = 0;
             let y = textStartY;
             wrappedLines.forEach(line => {
                 for (let x = 0; x < line.length; x++) {
+                    // Only render if we haven't reached the visible char limit
+                    if (totalCharsRendered >= hostTextVisibleChars) {
+                        totalCharsRendered++;
+                        continue;
+                    }
+                    totalCharsRendered++;
+
                     const char = line[x];
                     const worldX = textStartX + x;
                     const worldY = y;

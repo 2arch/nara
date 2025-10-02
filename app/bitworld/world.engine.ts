@@ -61,7 +61,7 @@ export interface WorldEngine {
     commandSystem: { selectCommand: (command: string) => void };
     chatData: WorldData;
     lightModeData: WorldData;
-    hostData: { text: string; color?: string; centerPos: Point } | null; // Host messages rendered at fixed position
+    hostData: { text: string; color?: string; centerPos: Point; timestamp?: number } | null; // Host messages rendered at fixed position with streaming
     searchData: WorldData;
     viewOffset: Point;
     cursorPos: Point;
@@ -138,7 +138,7 @@ export interface WorldEngine {
         isActive: boolean;
         currentInputType: import('./host.flows').InputType | null;
     }>>;
-    setHostData: React.Dispatch<React.SetStateAction<{ text: string; color?: string; centerPos: Point } | null>>;
+    setHostData: React.Dispatch<React.SetStateAction<{ text: string; color?: string; centerPos: Point; timestamp?: number } | null>>;
     // Ephemeral text rendering for host dialogue
     addInstantAIResponse: (startPos: Point, text: string, options?: {
         wrapWidth?: number;
@@ -365,7 +365,7 @@ export function useWorldEngine({
 
     const [chatData, setChatData] = useState<WorldData>({});
     const [searchData, setSearchData] = useState<WorldData>({});
-    const [hostData, setHostData] = useState<{ text: string; color?: string; centerPos: Point } | null>(null);
+    const [hostData, setHostData] = useState<{ text: string; color?: string; centerPos: Point; timestamp?: number } | null>(null);
     
     // === Text Frame and Cluster System ===
     const [textFrames, setTextFrames] = useState<Array<{
@@ -2369,36 +2369,63 @@ export function useWorldEngine({
                         setDialogueWithRevert("Please select a region first, then use /upload", setDialogueText);
                         return true;
                     }
-                    
+
+                    // Check if --bitmap flag is present
+                    const isBitmapMode = exec.args.includes('--bitmap');
+
                     // Create and trigger file input
                     const fileInput = document.createElement('input');
                     fileInput.type = 'file';
                     fileInput.accept = 'image/*';
                     fileInput.style.display = 'none';
-                    
+
                     fileInput.onchange = async (e) => {
                         const file = (e.target as HTMLInputElement).files?.[0];
                         if (!file) return;
-                        
+
                         try {
-                            setDialogueWithRevert("Processing image...", setDialogueText);
-                            
+                            setDialogueWithRevert(isBitmapMode ? "Processing bitmap..." : "Processing image...", setDialogueText);
+
                             // Convert file to data URL
                             const reader = new FileReader();
                             reader.onload = async (event) => {
                                 const dataUrl = event.target?.result as string;
-                                
+
                                 // Create image to get dimensions
                                 const img = new Image();
-                                img.onload = () => {
+                                img.onload = async () => {
                                     // Calculate selection dimensions
                                     const selectionWidth = selection.endX - selection.startX + 1;
                                     const selectionHeight = selection.endY - selection.startY + 1;
-                                    
+
+                                    let finalSrc = dataUrl;
+
+                                    if (isBitmapMode) {
+                                        try {
+                                            // Import bitmap processing utilities
+                                            const { processImageToBitmap } = await import('./image.bitmap');
+
+                                            // Use the larger of the two selection dimensions for grid size
+                                            const gridSize = Math.max(selectionWidth, selectionHeight);
+
+                                            // Process image to bitmap using current text color
+                                            const bitmapCanvas = processImageToBitmap(img, {
+                                                gridSize,
+                                                color: textColor
+                                            });
+
+                                            // Convert bitmap canvas to data URL
+                                            finalSrc = bitmapCanvas.toDataURL();
+                                        } catch (bitmapError) {
+                                            logger.error('Error processing bitmap:', bitmapError);
+                                            setDialogueWithRevert("Error processing bitmap, using original image", setDialogueText);
+                                        }
+                                    }
+
                                     // Create image data entry
                                     const imageData: ImageData = {
                                         type: 'image',
-                                        src: dataUrl,
+                                        src: finalSrc,
                                         startX: selection.startX,
                                         startY: selection.startY,
                                         endX: selection.endX,
@@ -2406,19 +2433,20 @@ export function useWorldEngine({
                                         originalWidth: img.width,
                                         originalHeight: img.height
                                     };
-                                    
+
                                     // Store image with unique key
                                     const imageKey = `image_${selection.startX},${selection.startY}`;
                                     setWorldData(prev => ({
                                         ...prev,
                                         [imageKey]: imageData
                                     }));
-                                    
+
                                     // Clear selection
                                     setSelectionStart(null);
                                     setSelectionEnd(null);
-                                    
-                                    setDialogueWithRevert(`Image uploaded to region (${selectionWidth}x${selectionHeight} cells)`, setDialogueText);
+
+                                    const modeText = isBitmapMode ? "Bitmap" : "Image";
+                                    setDialogueWithRevert(`${modeText} uploaded to region (${selectionWidth}x${selectionHeight} cells)`, setDialogueText);
                                 };
                                 img.src = dataUrl;
                             };
@@ -2430,7 +2458,7 @@ export function useWorldEngine({
                             document.body.removeChild(fileInput);
                         }
                     };
-                    
+
                     document.body.appendChild(fileInput);
                     fileInput.click();
                 }

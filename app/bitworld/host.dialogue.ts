@@ -58,7 +58,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
     setHostData({
       text: startMessage.text,
       color: undefined, // Will use engine.textColor
-      centerPos: getViewportCenter()
+      centerPos: getViewportCenter(),
+      timestamp: Date.now()
     });
 
     setState({
@@ -105,7 +106,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       setHostData({
         text: validation.error || 'invalid input',
         color: '#FF0000',
-        centerPos: getViewportCenter()
+        centerPos: getViewportCenter(),
+        timestamp: Date.now()
       });
       return false;
     }
@@ -134,7 +136,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       const creatingMessage = flow.messages['creating_account'];
       setHostData({
         text: creatingMessage.text,
-        centerPos: getViewportCenter()
+        centerPos: getViewportCenter(),
+        timestamp: Date.now()
       });
 
       setState(prev => ({ ...prev, currentMessageId: 'creating_account' }));
@@ -155,7 +158,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           setHostData({
             text: successMessage.text,
             color: '#00AA00',
-            centerPos: getViewportCenter()
+            centerPos: getViewportCenter(),
+            timestamp: Date.now()
           });
 
           // Navigate to user's world
@@ -178,7 +182,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           setHostData({
             text: result.error || 'failed to create account',
             color: '#FF0000',
-            centerPos: getViewportCenter()
+            centerPos: getViewportCenter(),
+            timestamp: Date.now()
           });
 
           setState(prev => ({ ...prev, isProcessing: false }));
@@ -188,7 +193,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
         setHostData({
           text: 'something went wrong. please try again.',
           color: '#FF0000',
-          centerPos: getViewportCenter()
+          centerPos: getViewportCenter(),
+          timestamp: Date.now()
         });
 
         setState(prev => ({ ...prev, isProcessing: false }));
@@ -205,7 +211,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
         // Display next message (centered at current viewport)
         setHostData({
           text: nextMessage.text,
-          centerPos: getViewportCenter()
+          centerPos: getViewportCenter(),
+          timestamp: Date.now()
         });
 
         setState(prev => ({
