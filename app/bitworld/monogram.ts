@@ -10,7 +10,7 @@ interface MonogramTrailPosition {
 }
 
 // --- Monogram Pattern Types ---
-export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'geometry3d';
+export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'geometry3d' | 'macintosh';
 
 // 3D Geometry System - Extensible foundation for any 3D format
 export interface Vertex3D {
@@ -178,6 +178,7 @@ const useMonogramSystem = (
             perlin: [' ', '░', '▒', '▓', '█'],
             nara: ['░', '▒', '▓', '█'], // Back to varied blocks for texture
             geometry3d: [' ', '░', '▒', '▓', '█'], // Standard block progression for 3D
+            macintosh: [' ', '░', '▒', '▓', '█'], // Standard block progression for Mac face
         };
 
         const charSet = chars[mode] || chars.perlin;
@@ -187,8 +188,8 @@ const useMonogramSystem = (
 
     // Get color from palette based on value
     const getColorFromPalette = useCallback((value: number, mode: MonogramMode, accentColor: string): string => {
-        if (mode === 'nara') {
-            // Use accent color for NARA mode
+        if (mode === 'nara' || mode === 'macintosh') {
+            // Use accent color for NARA and Macintosh modes
             return accentColor;
         }
 
@@ -675,6 +676,57 @@ const useMonogramSystem = (
         return result;
     }, [perlinNoise, vibrantColors]);
 
+const calculateMacintosh = useCallback((x: number, y: number, time: number, viewportBounds?: {
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number
+}): number => {
+    if (!viewportBounds) return 0;
+
+    // viewportBounds are in WORLD COORDINATES (character grid positions)
+    const viewportWidth = viewportBounds.endX - viewportBounds.startX;  // e.g., 100 chars wide
+    const viewportHeight = viewportBounds.endY - viewportBounds.startY; // e.g., 50 chars tall
+    const centerX = (viewportBounds.startX + viewportBounds.endX) / 2;
+    const centerY = (viewportBounds.startY + viewportBounds.endY) / 2;
+
+    // Since cells are w1 x h2, we need to account for that in our coordinate system
+    // Normalize to a square coordinate system
+    const nx = (x - centerX);
+    const ny = (y - centerY) * 2; // multiply by 2 because cells are twice as tall
+
+    // blink logic
+    const blinkCycle = time * 0.5;
+    const blinkPhase = blinkCycle % 5;
+    let eyeOpenness = 1.0;
+    if (blinkPhase < 0.15) {
+        eyeOpenness = Math.sin(blinkPhase / 0.15 * Math.PI);
+    } else if (blinkPhase > 4.5 && blinkPhase < 4.7) {
+        eyeOpenness = Math.sin((blinkPhase - 4.5) / 0.2 * Math.PI);
+    }
+
+    // Eyes - shorter vertical rectangles (30% larger overall, 20% shorter height)
+    // Left eye
+    if (Math.abs(nx + 14.3) < 2.9 && Math.abs(ny + 9.1) < 7.3 * eyeOpenness) return 1.0;
+
+    // Right eye
+    if (Math.abs(nx - 14.3) < 2.9 && Math.abs(ny + 9.1) < 7.3 * eyeOpenness) return 1.0;
+
+    // Nose (L-shape) - thinner stroke
+    if (Math.abs(nx) < 2.2 && ny > -1.3 && ny < 9.1) return 1.0;
+    if (nx > 0 && nx < 10.4 && Math.abs(ny - 9.1) < 2.2) return 1.0;
+
+    // Mouth (horizontal bar) - more distance from nose
+    if (Math.abs(ny - 18.2) < 2.2 && nx > -9.1 && nx < 14.3) return 1.0;
+
+    // Left mouth corner
+    if (Math.abs(nx + 11) < 2.2 && Math.abs(ny - 16.2) < 2.2) return 1.0;
+
+    // Right mouth corner
+    if (Math.abs(nx - 16.2) < 2.2 && Math.abs(ny - 16.2) < 2.2) return 1.0;
+
+    return 0;
+}, []);
     // NARA text stretch distortion effect
     const calculateNara = useCallback((x: number, y: number, time: number, viewportBounds?: {
         startX: number,
@@ -841,9 +893,10 @@ const useMonogramSystem = (
             case 'perlin': return calculatePerlin(x, y, time);
             case 'nara': return calculateNara(x, y, time, viewportBounds);
             case 'geometry3d': return calculate3DGeometry(x, y, time, viewportBounds);
+            case 'macintosh': return calculateMacintosh(x, y, time, viewportBounds);
             default: return calculatePerlin(x, y, time);
         }
-    }, [calculatePerlin, calculateNara, calculate3DGeometry]);
+    }, [calculatePerlin, calculateNara, calculate3DGeometry, calculateMacintosh]);
 
     // Calculate comet trail effect at a specific position
     const calculateTrailEffect = useCallback((x: number, y: number): number => {
@@ -911,18 +964,18 @@ const useMonogramSystem = (
         const pattern: MonogramPattern = {};
         const time = timeRef.current;
         const accentColor = textColor || '#000000'; // Default to black if not provided
-        
-        // For NARA and 3D geometry modes, use finer sampling for better quality
-        const step = (options.mode === 'nara' || options.mode === 'geometry3d') ? 1 : Math.max(1, Math.floor(3 - options.complexity * 2));
+
+        // For NARA, Macintosh, and 3D geometry modes, use finer sampling for better quality
+        const step = (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh') ? 1 : Math.max(1, Math.floor(3 - options.complexity * 2));
         
         for (let worldY = Math.floor(startWorldY); worldY <= Math.ceil(endWorldY); worldY += step) {
             for (let worldX = Math.floor(startWorldX); worldX <= Math.ceil(endWorldX); worldX += step) {
                 
                 let rawValue: number;
                 let intensity: number;
-                
-                // Special handling for nara and geometry3d modes that need viewport bounds
-                if (options.mode === 'nara' || options.mode === 'geometry3d') {
+
+                // Special handling for nara, macintosh, and geometry3d modes that need viewport bounds
+                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh') {
                     const viewportBounds = {
                         startX: startWorldX,
                         startY: startWorldY,
@@ -941,8 +994,8 @@ const useMonogramSystem = (
                 intensity = Math.max(intensity, trailEffect);
                 
                 // Skip very low intensity cells for performance (adjusted for trail effects)
-                const minThreshold = trailEffect > 0 ? 0.05 : 
-                    ((options.mode === 'nara' || options.mode === 'geometry3d') ? 0.15 : 0.1);
+                const minThreshold = trailEffect > 0 ? 0.05 :
+                    ((options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh') ? 0.15 : 0.1);
                 if (intensity < minThreshold) continue;
                 
                 const char = getCharForIntensity(intensity, options.mode);
@@ -957,7 +1010,7 @@ const useMonogramSystem = (
                     const g = parseInt(hex.substring(2, 4), 16);
                     const b = parseInt(hex.substring(4, 6), 16);
                     color = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-                } else if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'clear') {
+                } else if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'clear' || options.mode === 'macintosh') {
                     // Use text color for all monochromatic modes
                     color = accentColor;
                 } else {
@@ -965,8 +1018,8 @@ const useMonogramSystem = (
                     color = getColorFromPalette(colorValue, options.mode, accentColor);
                 }
                 
-                // For NARA and geometry3d modes, only set the exact position to avoid grid artifacts
-                if (options.mode === 'nara' || options.mode === 'geometry3d') {
+                // For NARA, Macintosh, and geometry3d modes, only set the exact position to avoid grid artifacts
+                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh') {
                     const key = `${worldX},${worldY}`;
                     pattern[key] = {
                         char,
@@ -992,9 +1045,9 @@ const useMonogramSystem = (
         return pattern;
     }, [options, calculatePattern, getCharForIntensity, getColorFromPalette]);
 
-    // Cycle to next mode (only clear and perlin are available)
+    // Cycle to next mode
     const cycleMode = useCallback(() => {
-        const modes: MonogramMode[] = ['clear', 'perlin', 'nara'];
+        const modes: MonogramMode[] = ['clear', 'perlin'];
         setOptions(prev => {
             const currentIndex = modes.indexOf(prev.mode);
             const nextIndex = (currentIndex + 1) % modes.length;

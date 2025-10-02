@@ -32,7 +32,7 @@ export const welcomeFlow: HostFlow = {
   messages: {
     'welcome': {
       id: 'welcome',
-      text: 'hey there! welcome to nara.\n\ni\'m here to help you get started.\n\nwhat brings you here today?\n\n  explore\n  create\n  learn',
+      text: 'hi! welcome to nara \n\nwhat brings you here today?\n',
       expectsInput: true,
       inputType: 'choice',
       choices: ['explore', 'create', 'learn'],

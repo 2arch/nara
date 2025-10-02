@@ -35,7 +35,7 @@ export default function Home() {
 
   const engine = useWorldEngine({
     worldId: null,
-    initialBackgroundColor: pathname === '/' ? '#162400' : undefined, // garden for host mode
+    initialBackgroundColor: pathname === '/' ? '#F0FF6A' : undefined, // garden for host mode
     userUid: user?.uid || null,
     initialZoomLevel: pathname === '/' ? 1.6 : 1.0 // Zoomed in for host mode onboarding
   });

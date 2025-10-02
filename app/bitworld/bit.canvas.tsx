@@ -160,7 +160,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             // We just need to update the text color by using updateSettings
             if (engine.updateSettings) {
                 engine.updateSettings({
-                    textColor: '#F0FF6A' // sulfur
+                    textColor: '#FFA500' // sulfur
                 });
             }
 
