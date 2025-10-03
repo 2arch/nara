@@ -45,6 +45,20 @@ export interface ImageData {
     originalHeight: number;
 }
 
+export interface ListData {
+    startX: number;
+    startY: number;
+    endX: number;
+    visibleHeight: number;
+    scrollOffset: number;
+    color: string;
+    title?: string;
+}
+
+export interface ListContent {
+    [lineIndex: number]: string;
+}
+
 export interface WorldData { [key: string]: string | StyledCharacter | ImageData; }
 export interface Point { x: number; y: number; }
 
@@ -1425,6 +1439,26 @@ export function useWorldEngine({
         return closestBoundAbove;
     }, []);
 
+    // === List Detection ===
+    const findListAt = useCallback((x: number, y: number): { key: string; data: ListData } | null => {
+        for (const key in worldData) {
+            if (key.startsWith('list_')) {
+                try {
+                    const listData = JSON.parse(worldData[key] as string) as ListData;
+                    const { startX, endX, startY, visibleHeight } = listData;
+
+                    // Check if position is within list viewport (no title bar)
+                    if (x >= startX && x <= endX &&
+                        y >= startY && y < startY + visibleHeight) {
+                        return { key, data: listData };
+                    }
+                } catch (e) {
+                    // Skip invalid list data
+                }
+            }
+        }
+        return null;
+    }, [worldData]);
 
     // === Helper Functions (Largely unchanged, but use state variables) ===
     const worldToScreen = useCallback((worldX: number, worldY: number, currentZoom: number, currentOffset: Point): Point => {
@@ -2315,6 +2349,132 @@ export function useWorldEngine({
                         logger.debug('No bound found at cursor position');
                         setDialogueWithRevert(`No bounded region found at cursor position`, setDialogueText);
                     }
+                } else if (exec.command === 'list') {
+                    console.log('LIST COMMAND RECEIVED!', exec);
+                    logger.debug('List command execution:', exec);
+
+                    // Create scrollable list from selection
+                    const selection = getNormalizedSelection();
+                    console.log('Selection:', selection);
+
+                    if (selection) {
+                        // Calculate visible height from selection size (full selection, no title bar)
+                        const selectionHeight = selection.endY - selection.startY + 1; // Full selection height
+                        let visibleHeight = selectionHeight; // Use selection as viewport size
+                        let color = '#FF8800'; // Default orange (not used for rendering, just metadata)
+                        let totalContentLines = 100; // Default total capacity (creates scrollable list)
+
+                        // Optional argument: color only (no height override)
+                        if (exec.args.length > 0) {
+                            color = exec.args[0];
+                        }
+
+                        console.log('Creating list with visibleHeight:', visibleHeight, '(from selection)', 'color:', color);
+
+                        // Capture existing content in selection region as initial list content
+                        const initialContent: ListContent = {};
+                        let lineIndex = 0;
+
+                        // Capture existing text from selection (entire selection, no title bar)
+                        for (let y = selection.startY; y <= selection.endY; y++) {
+                            let lineText = '';
+                            for (let x = selection.startX; x <= selection.endX; x++) {
+                                const key = `${x},${y}`;
+                                const charData = worldData[key];
+                                if (charData && !isImageData(charData)) {
+                                    lineText += getCharacter(charData);
+                                } else {
+                                    lineText += ' ';
+                                }
+                            }
+                            // Store line even if empty (preserves structure)
+                            initialContent[lineIndex] = lineText;
+                            lineIndex++;
+                        }
+
+                        // Start with just the captured content - no pre-allocation
+                        const capturedLines = lineIndex;
+
+                        console.log('Captured content lines:', capturedLines);
+
+                        // Create list metadata
+                        const listKey = `list_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                        const listData: ListData = {
+                            startX: selection.startX,
+                            endX: selection.endX,
+                            startY: selection.startY,
+                            visibleHeight: visibleHeight,
+                            scrollOffset: 0,
+                            color: color
+                        };
+
+                        console.log('List data:', listData);
+                        console.log('List key:', listKey);
+
+                        // Store list and content
+                        let newWorldData = { ...worldData };
+                        newWorldData[listKey] = JSON.stringify(listData);
+                        newWorldData[`${listKey}_content`] = JSON.stringify(initialContent);
+
+                        console.log('Storing list in worldData');
+
+                        // Clear the selection area (content now in list storage)
+                        for (let y = selection.startY; y <= selection.endY; y++) {
+                            for (let x = selection.startX; x <= selection.endX; x++) {
+                                delete newWorldData[`${x},${y}`];
+                            }
+                        }
+
+                        setWorldData(newWorldData);
+                        setDialogueWithRevert(`List created with ${lineIndex} lines (${visibleHeight} visible)`, setDialogueText);
+                        console.log('List creation complete!');
+
+                        // Clear selection
+                        setSelectionStart(null);
+                        setSelectionEnd(null);
+                    } else {
+                        console.log('No selection found!');
+                        setDialogueWithRevert(`No region selected. Select an area first, then use /list [visibleHeight] [color]`, setDialogueText);
+                    }
+                } else if (exec.command === 'unlist') {
+                    // Find and remove any list that contains the cursor position
+                    const cursorX = cursorPos.x;
+                    const cursorY = cursorPos.y;
+                    let foundList = false;
+                    let newWorldData = { ...worldData };
+
+                    console.log('Unlist command - cursor position:', cursorX, cursorY);
+
+                    // Look through all list_ entries to find one that contains the cursor
+                    for (const key in worldData) {
+                        if (key.startsWith('list_')) {
+                            try {
+                                const listData = JSON.parse(worldData[key] as string);
+
+                                // Check if cursor is within the list viewport
+                                const withinList = cursorX >= listData.startX && cursorX <= listData.endX &&
+                                                  cursorY >= listData.startY && cursorY < listData.startY + listData.visibleHeight;
+
+                                if (withinList) {
+                                    // Remove this list and its content
+                                    delete newWorldData[key];
+                                    delete newWorldData[`${key}_content`];
+                                    foundList = true;
+                                    console.log('Removing list:', key, listData);
+                                }
+                            } catch (e) {
+                                console.error('Error parsing list data:', key, e);
+                            }
+                        }
+                    }
+
+                    if (foundList) {
+                        setWorldData(newWorldData);
+                        setDialogueWithRevert(`List removed`, setDialogueText);
+                    } else {
+                        console.log('No list found at cursor position');
+                        setDialogueWithRevert(`No list found at cursor position`, setDialogueText);
+                    }
                 } else if (exec.command === 'glitch') {
                     // Create glitched region with 1:1 square cells by subdividing each cell vertically
                     const selection = getNormalizedSelection();
@@ -2931,9 +3091,95 @@ export function useWorldEngine({
                             logger.debug('No selection found!');
                             setDialogueWithRevert(`No region selected. Select an area first by clicking and dragging, then use /bound`, setDialogueText);
                         }
+                    } else if (exec.command === 'list') {
+                        // Create scrollable list from selection
+                        const selection = getNormalizedSelection();
+
+                        if (selection) {
+                            // Parse arguments: [visibleHeight] [color]
+                            let visibleHeight = 10; // Default visible lines
+                            let color = '#B0B0B0'; // Default gray
+
+                            if (exec.args.length > 0) {
+                                const heightArg = parseInt(exec.args[0], 10);
+                                if (!isNaN(heightArg) && heightArg > 0) {
+                                    visibleHeight = heightArg;
+                                }
+                                if (exec.args.length > 1) {
+                                    color = exec.args[1];
+                                }
+                            }
+
+                            // Extract title from top bar
+                            let title = '';
+                            for (let x = selection.startX; x <= selection.endX; x++) {
+                                const key = `${x},${selection.startY}`;
+                                const charData = worldData[key];
+                                if (charData && !isImageData(charData)) {
+                                    const char = getCharacter(charData);
+                                    if (char && char.trim()) {
+                                        title += char;
+                                    }
+                                }
+                            }
+                            title = title.trim();
+
+                            // Capture existing content in selection region as initial list content
+                            const initialContent: ListContent = {};
+                            let lineIndex = 0;
+
+                            for (let y = selection.startY + 1; y <= selection.endY; y++) {
+                                let lineText = '';
+                                for (let x = selection.startX; x <= selection.endX; x++) {
+                                    const key = `${x},${y}`;
+                                    const charData = worldData[key];
+                                    if (charData && !isImageData(charData)) {
+                                        lineText += getCharacter(charData);
+                                    } else {
+                                        lineText += ' ';
+                                    }
+                                }
+                                // Store line even if empty (preserves structure)
+                                initialContent[lineIndex] = lineText;
+                                lineIndex++;
+                            }
+
+                            // Create list metadata
+                            const listKey = `list_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                            const listData: ListData = {
+                                startX: selection.startX,
+                                endX: selection.endX,
+                                startY: selection.startY,
+                                visibleHeight: visibleHeight,
+                                scrollOffset: 0,
+                                color: color,
+                                title: title || undefined
+                            };
+
+                            // Store list and content
+                            let newWorldData = { ...worldData };
+                            newWorldData[listKey] = JSON.stringify(listData);
+                            newWorldData[`${listKey}_content`] = JSON.stringify(initialContent);
+
+                            // Clear the selection area (content now in list storage)
+                            for (let y = selection.startY; y <= selection.endY; y++) {
+                                for (let x = selection.startX; x <= selection.endX; x++) {
+                                    delete newWorldData[`${x},${y}`];
+                                }
+                            }
+
+                            setWorldData(newWorldData);
+                            setDialogueWithRevert(`List created with ${lineIndex} lines (${visibleHeight} visible)`, setDialogueText);
+
+                            // Clear selection
+                            setSelectionStart(null);
+                            setSelectionEnd(null);
+                        } else {
+                            setDialogueWithRevert(`No region selected. Select an area first, then use /list [visibleHeight] [color]`, setDialogueText);
+                        }
                     }
                 }
-                
+
                 // Clear selection after executing pending command
                 clearSelectionState();
             } else {
@@ -3118,10 +3364,89 @@ export function useWorldEngine({
             }
             return true;
         }
-        // --- Movement ---
+        // --- List-specific Enter handling ---
         else if (key === 'Enter') {
-            const dataToCheck = currentMode === 'air' ? 
-                { ...worldData, ...lightModeData } : 
+            // Check if cursor is in a list first
+            const listAt = findListAt(cursorPos.x, cursorPos.y);
+            if (listAt) {
+                const { key: listKey, data: listData } = listAt;
+                const contentKey = `${listKey}_content`;
+                const contentData = worldData[contentKey];
+
+                if (contentData) {
+                    try {
+                        const content = JSON.parse(contentData as string) as ListContent;
+
+                        // Calculate which content line we're on
+                        const viewportRow = cursorPos.y - listData.startY;
+                        if (viewportRow >= 0 && viewportRow < listData.visibleHeight) {
+                            const contentLineIndex = listData.scrollOffset + viewportRow;
+                            const currentLine = content[contentLineIndex] || '';
+                            const cursorCol = cursorPos.x - listData.startX;
+
+                            // Split line at cursor: text before cursor stays, text after moves to next line
+                            const beforeCursor = currentLine.substring(0, cursorCol);
+                            const afterCursor = currentLine.substring(cursorCol);
+
+                            // Shift all lines after current line down by 1
+                            const totalLines = Object.keys(content).length;
+                            const updatedContent = { ...content };
+
+                            // Shift lines down (work backwards to avoid overwriting)
+                            for (let i = totalLines; i > contentLineIndex; i--) {
+                                updatedContent[i] = content[i - 1] || '';
+                            }
+
+                            // Update current and next line
+                            updatedContent[contentLineIndex] = beforeCursor;
+                            updatedContent[contentLineIndex + 1] = afterCursor;
+
+                            // Auto-grow if needed
+                            if (contentLineIndex >= totalLines - 10) {
+                                for (let i = totalLines + 1; i < totalLines + 21; i++) {
+                                    if (!updatedContent[i]) {
+                                        updatedContent[i] = '';
+                                    }
+                                }
+                                console.log('Auto-growing list from', totalLines, 'to', totalLines + 20, 'lines');
+                            }
+
+                            // Save updated content
+                            setWorldData(prev => ({
+                                ...prev,
+                                [contentKey]: JSON.stringify(updatedContent)
+                            }));
+
+                            // Move cursor to start of next line
+                            if (viewportRow < listData.visibleHeight - 1) {
+                                // Next line is visible, just move cursor down
+                                setCursorPos({ x: listData.startX, y: cursorPos.y + 1 });
+                            } else {
+                                // Next line would be off screen, need to scroll down
+                                const maxScroll = Math.max(0, totalLines - listData.visibleHeight);
+                                const newScrollOffset = Math.min(maxScroll, listData.scrollOffset + 1);
+
+                                setWorldData(prev => ({
+                                    ...prev,
+                                    [listKey]: JSON.stringify({ ...listData, scrollOffset: newScrollOffset }),
+                                    [contentKey]: JSON.stringify(updatedContent)
+                                }));
+
+                                // Keep cursor at same screen position (last visible line)
+                                setCursorPos({ x: listData.startX, y: cursorPos.y });
+                            }
+
+                            return true; // Handled by list
+                        }
+                    } catch (e) {
+                        console.error('Error handling Enter in list:', e);
+                    }
+                }
+            }
+
+            // Not in a list, continue with normal Enter behavior
+            const dataToCheck = currentMode === 'air' ?
+                { ...worldData, ...lightModeData } :
                 worldData;
             
             // Function to find reasonable text block alignment in current viewport
@@ -3484,8 +3809,99 @@ export function useWorldEngine({
             setLastEnterX(null); // Reset Enter X tracking on horizontal movement
             moved = true;
         }
-        // --- Deletion ---
+        // --- List-specific Backspace handling ---
         else if (key === 'Backspace') {
+            // Check if cursor is in a list first (and no selection active)
+            if (!currentSelectionActive) {
+                const listAt = findListAt(cursorPos.x, cursorPos.y);
+                if (listAt) {
+                    const { key: listKey, data: listData } = listAt;
+                    const contentKey = `${listKey}_content`;
+                    const contentData = worldData[contentKey];
+
+                    if (contentData) {
+                        try {
+                            const content = JSON.parse(contentData as string) as ListContent;
+
+                            // Calculate which content line we're on
+                            const viewportRow = cursorPos.y - listData.startY;
+                            if (viewportRow >= 0 && viewportRow < listData.visibleHeight) {
+                                const contentLineIndex = listData.scrollOffset + viewportRow;
+                                const currentLine = content[contentLineIndex] || '';
+                                const cursorCol = cursorPos.x - listData.startX;
+
+                                if (cursorCol > 0) {
+                                    // Delete character before cursor
+                                    const newLine = currentLine.substring(0, cursorCol - 1) + currentLine.substring(cursorCol);
+
+                                    const updatedContent = { ...content, [contentLineIndex]: newLine };
+
+                                    setWorldData(prev => ({
+                                        ...prev,
+                                        [contentKey]: JSON.stringify(updatedContent)
+                                    }));
+
+                                    // Move cursor left
+                                    setCursorPos({ x: cursorPos.x - 1, y: cursorPos.y });
+
+                                    return true; // Handled by list
+                                } else if (contentLineIndex > 0) {
+                                    // At start of line - merge with previous line
+                                    const previousLine = content[contentLineIndex - 1] || '';
+                                    const mergedLine = previousLine + currentLine;
+                                    const previousLineLength = previousLine.length;
+
+                                    // Shift all lines after current line up by 1
+                                    const totalLines = Object.keys(content).length;
+                                    const updatedContent = { ...content };
+
+                                    // Update previous line with merged content
+                                    updatedContent[contentLineIndex - 1] = mergedLine;
+
+                                    // Shift lines up
+                                    for (let i = contentLineIndex; i < totalLines - 1; i++) {
+                                        updatedContent[i] = content[i + 1] || '';
+                                    }
+
+                                    // Remove last line
+                                    delete updatedContent[totalLines - 1];
+
+                                    setWorldData(prev => ({
+                                        ...prev,
+                                        [contentKey]: JSON.stringify(updatedContent)
+                                    }));
+
+                                    // Move cursor to end of previous line
+                                    if (viewportRow > 0) {
+                                        // Previous line is visible
+                                        setCursorPos({ x: listData.startX + previousLineLength, y: cursorPos.y - 1 });
+                                    } else {
+                                        // Need to scroll up to see previous line
+                                        const newScrollOffset = Math.max(0, listData.scrollOffset - 1);
+
+                                        setWorldData(prev => ({
+                                            ...prev,
+                                            [listKey]: JSON.stringify({ ...listData, scrollOffset: newScrollOffset }),
+                                            [contentKey]: JSON.stringify(updatedContent)
+                                        }));
+
+                                        // Keep cursor at same screen position
+                                        setCursorPos({ x: listData.startX + previousLineLength, y: cursorPos.y });
+                                    }
+
+                                    return true; // Handled by list
+                                }
+                                // At start of first line - do nothing
+                                return true;
+                            }
+                        } catch (e) {
+                            console.error('Error handling Backspace in list:', e);
+                        }
+                    }
+                }
+            }
+
+            // Not in a list, continue with normal Backspace behavior
             if (currentSelectionActive) {
                 if (deleteSelectedCharacters()) {
                     // State updates happen inside deleteSelectedCharacters
@@ -3694,9 +4110,84 @@ export function useWorldEngine({
                 setBoundCycleIndex(nextIndex + 1); // Prepare for next cycle
                 moved = true;
             }
-            
+
             preventDefault = true; // Prevent Tab from moving focus
         } else if (key === 'Delete') {
+            // Check if cursor is in a list first (and no selection active)
+            if (!currentSelectionActive) {
+                const listAt = findListAt(cursorPos.x, cursorPos.y);
+                if (listAt) {
+                    const { key: listKey, data: listData } = listAt;
+                    const contentKey = `${listKey}_content`;
+                    const contentData = worldData[contentKey];
+
+                    if (contentData) {
+                        try {
+                            const content = JSON.parse(contentData as string) as ListContent;
+
+                            // Calculate which content line we're on
+                            const viewportRow = cursorPos.y - listData.startY;
+                            if (viewportRow >= 0 && viewportRow < listData.visibleHeight) {
+                                const contentLineIndex = listData.scrollOffset + viewportRow;
+                                const currentLine = content[contentLineIndex] || '';
+                                const cursorCol = cursorPos.x - listData.startX;
+
+                                if (cursorCol < currentLine.length) {
+                                    // Delete character at cursor
+                                    const newLine = currentLine.substring(0, cursorCol) + currentLine.substring(cursorCol + 1);
+
+                                    const updatedContent = { ...content, [contentLineIndex]: newLine };
+
+                                    setWorldData(prev => ({
+                                        ...prev,
+                                        [contentKey]: JSON.stringify(updatedContent)
+                                    }));
+
+                                    // Cursor doesn't move
+                                    moved = true;
+                                    return true; // Handled by list
+                                } else {
+                                    // At end of line - merge with next line
+                                    const totalLines = Object.keys(content).length;
+                                    if (contentLineIndex < totalLines - 1) {
+                                        const nextLine = content[contentLineIndex + 1] || '';
+                                        const mergedLine = currentLine + nextLine;
+
+                                        // Shift all lines after next line up by 1
+                                        const updatedContent = { ...content };
+
+                                        // Update current line with merged content
+                                        updatedContent[contentLineIndex] = mergedLine;
+
+                                        // Shift lines up
+                                        for (let i = contentLineIndex + 1; i < totalLines - 1; i++) {
+                                            updatedContent[i] = content[i + 1] || '';
+                                        }
+
+                                        // Remove last line
+                                        delete updatedContent[totalLines - 1];
+
+                                        setWorldData(prev => ({
+                                            ...prev,
+                                            [contentKey]: JSON.stringify(updatedContent)
+                                        }));
+
+                                        // Cursor doesn't move
+                                        moved = true;
+                                        return true; // Handled by list
+                                    }
+                                }
+                                // At end of last line - do nothing
+                                return true;
+                            }
+                        } catch (e) {
+                            console.error('Error handling Delete in list:', e);
+                        }
+                    }
+                }
+            }
+
+            // Not in a list, continue with normal Delete behavior
             if (currentSelectionActive) {
                  if (deleteSelectedCharacters()) {
                     // State updates happen inside deleteSelectedCharacters
@@ -3724,6 +4215,152 @@ export function useWorldEngine({
         }
         // --- Typing ---
         else if (!isMod && key.length === 1) { // Basic check for printable chars
+            // Check if cursor is in a list - handle list editing separately
+            const listAt = findListAt(cursorPos.x, cursorPos.y);
+            if (listAt) {
+                const { key: listKey, data: listData } = listAt;
+                const contentKey = `${listKey}_content`;
+                const contentData = worldData[contentKey];
+
+                if (contentData) {
+                    try {
+                        const content = JSON.parse(contentData as string) as ListContent;
+
+                        // Calculate which content line we're editing (no title bar, direct mapping)
+                        const viewportRow = cursorPos.y - listData.startY;
+                        if (viewportRow >= 0 && viewportRow < listData.visibleHeight) {
+                            const contentLineIndex = listData.scrollOffset + viewportRow;
+                            const currentLine = content[contentLineIndex] || '';
+                            const cursorCol = cursorPos.x - listData.startX;
+
+                            // Insert character at cursor position
+                            const newLine = currentLine.substring(0, cursorCol) + key + currentLine.substring(cursorCol);
+
+                            // Auto-grow: Add empty lines if typing near the end
+                            const totalLines = Object.keys(content).length;
+                            const updatedContent = { ...content, [contentLineIndex]: newLine };
+
+                            // If we're within 10 lines of the end, add 20 more empty lines
+                            if (contentLineIndex >= totalLines - 10) {
+                                for (let i = totalLines; i < totalLines + 20; i++) {
+                                    if (!updatedContent[i]) {
+                                        updatedContent[i] = '';
+                                    }
+                                }
+                                console.log('Auto-growing list from', totalLines, 'to', totalLines + 20, 'lines');
+                            }
+
+                            // Check if line exceeds width (need word wrapping)
+                            const listWidth = listData.endX - listData.startX + 1;
+                            const newCursorCol = cursorCol + 1;
+
+                            if (newLine.length > listWidth) {
+                                // Line exceeds width - need to reflow
+                                const totalLinesBeforeWrap = Object.keys(content).length;
+
+                                // Track cursor position as character offset from start of current line
+                                const cursorCharOffset = newCursorCol;
+
+                                // Reflow starting from current line
+                                let currentReflowLine = newLine;
+                                let reflowLineIndex = contentLineIndex;
+                                let charsProcessed = 0;
+                                let cursorFinalLine = contentLineIndex;
+                                let cursorFinalCol = newCursorCol;
+
+                                while (currentReflowLine.length > listWidth && reflowLineIndex < totalLinesBeforeWrap + 20) {
+                                    // Find wrap point
+                                    let wrapPoint = 0;
+                                    for (let col = listWidth - 1; col >= 0; col--) {
+                                        if (currentReflowLine[col] === ' ') {
+                                            wrapPoint = col + 1;
+                                            break;
+                                        }
+                                    }
+                                    if (wrapPoint === 0) {
+                                        wrapPoint = listWidth;
+                                    }
+
+                                    // Split current line
+                                    const lineBeforeWrap = currentReflowLine.substring(0, wrapPoint);
+                                    const overflow = currentReflowLine.substring(wrapPoint);
+
+                                    // Update current line
+                                    updatedContent[reflowLineIndex] = lineBeforeWrap;
+
+                                    // Track cursor position
+                                    if (reflowLineIndex === contentLineIndex) {
+                                        // First line - check if cursor is on this line or wraps
+                                        if (cursorCharOffset <= lineBeforeWrap.length) {
+                                            cursorFinalLine = reflowLineIndex;
+                                            cursorFinalCol = cursorCharOffset;
+                                        } else {
+                                            cursorFinalLine = reflowLineIndex + 1;
+                                            cursorFinalCol = cursorCharOffset - lineBeforeWrap.length;
+                                        }
+                                    }
+
+                                    // Get next line's content and prepend overflow
+                                    const nextLineContent = content[reflowLineIndex + 1] || '';
+                                    currentReflowLine = overflow + nextLineContent;
+
+                                    // Move to next line
+                                    reflowLineIndex++;
+                                }
+
+                                // Update the last line after reflow loop
+                                updatedContent[reflowLineIndex] = currentReflowLine;
+
+                                // Auto-grow if needed
+                                if (reflowLineIndex >= totalLinesBeforeWrap - 10) {
+                                    for (let i = totalLinesBeforeWrap + 1; i < totalLinesBeforeWrap + 21; i++) {
+                                        if (!updatedContent[i]) {
+                                            updatedContent[i] = '';
+                                        }
+                                    }
+                                }
+
+                                // Save updated content
+                                setWorldData(prev => ({
+                                    ...prev,
+                                    [contentKey]: JSON.stringify(updatedContent)
+                                }));
+
+                                // Move cursor to final position after reflow
+                                const finalViewportRow = cursorFinalLine - listData.scrollOffset;
+                                if (finalViewportRow >= 0 && finalViewportRow < listData.visibleHeight) {
+                                    // Cursor is visible
+                                    setCursorPos({ x: listData.startX + cursorFinalCol, y: listData.startY + finalViewportRow });
+                                } else if (finalViewportRow >= listData.visibleHeight) {
+                                    // Need to scroll down to show cursor
+                                    const newScrollOffset = cursorFinalLine - listData.visibleHeight + 1;
+                                    setWorldData(prev => ({
+                                        ...prev,
+                                        [listKey]: JSON.stringify({ ...listData, scrollOffset: newScrollOffset })
+                                    }));
+                                    setCursorPos({ x: listData.startX + cursorFinalCol, y: listData.startY + listData.visibleHeight - 1 });
+                                } else {
+                                    // Just set cursor position
+                                    setCursorPos({ x: listData.startX + cursorFinalCol, y: cursorPos.y });
+                                }
+                            } else {
+                                // No wrapping needed - just save and move cursor right
+                                setWorldData(prev => ({
+                                    ...prev,
+                                    [contentKey]: JSON.stringify(updatedContent)
+                                }));
+
+                                setCursorPos({ x: cursorPos.x + 1, y: cursorPos.y });
+                            }
+                        }
+
+                        return true; // Handled by list editing
+                    } catch (e) {
+                        // Fall through to normal typing if content is invalid
+                    }
+                }
+            }
+
             // Check if cursor is in a glitched region - block typing if so
             let isInGlitchedRegion = false;
             for (const key in worldData) {
@@ -4008,7 +4645,7 @@ export function useWorldEngine({
         cursorPos, worldData, selectionStart, selectionEnd, commandState, chatMode, chatData, // State dependencies
         currentMode, addEphemeralText, cameraMode, viewOffset, zoomLevel, getEffectiveCharDims, // Mode system dependencies
         getNormalizedSelection, deleteSelectedCharacters, copySelectedCharacters, cutSelection, pasteText, getSelectedText, // Callback dependencies
-        handleCommandKeyDown, textColor, currentTextStyle
+        handleCommandKeyDown, textColor, currentTextStyle, findListAt
         // Include setters used directly in the handler (if any, preferably avoid)
         // setCursorPos, setWorldData, setSelectionStart, setSelectionEnd // Setters are stable, no need to list
     ]);
@@ -4082,6 +4719,47 @@ export function useWorldEngine({
     }, [zoomLevel, viewOffset, screenToWorld, selectionStart, selectionEnd, chatMode]);
 
     const handleCanvasWheel = useCallback((deltaX: number, deltaY: number, canvasRelativeX: number, canvasRelativeY: number, ctrlOrMetaKey: boolean): void => {
+        // First, check if mouse is over a list (unless zooming with ctrl/meta)
+        if (!ctrlOrMetaKey) {
+            const worldPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
+            const listAtPos = findListAt(worldPos.x, worldPos.y);
+
+            if (listAtPos) {
+                // Scroll the list content instead of panning world
+                const { key, data } = listAtPos;
+                const scrollSpeed = 3; // Lines per scroll tick
+                const scrollDelta = Math.sign(deltaY) * scrollSpeed;
+
+                // Get content length from storage
+                const contentKey = `${key}_content`;
+                const contentData = worldData[contentKey];
+                let totalLines = 0;
+                if (contentData) {
+                    try {
+                        const content = JSON.parse(worldData[contentKey] as string) as ListContent;
+                        totalLines = Object.keys(content).length;
+                    } catch (e) {
+                        // Invalid content, treat as empty
+                    }
+                }
+
+                // Calculate max scroll offset
+                const maxScroll = Math.max(0, totalLines - data.visibleHeight);
+
+                // Update scroll offset with bounds checking
+                const newScrollOffset = Math.max(0, Math.min(maxScroll, data.scrollOffset + scrollDelta));
+
+                // Update list data with new scroll offset
+                const updatedListData = { ...data, scrollOffset: newScrollOffset };
+                setWorldData(prev => ({
+                    ...prev,
+                    [key]: JSON.stringify(updatedListData)
+                }));
+
+                return; // Don't pan world
+            }
+        }
+
         if (ctrlOrMetaKey) {
             // Zooming
             const worldPointBeforeZoom = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
@@ -4105,7 +4783,7 @@ export function useWorldEngine({
             const deltaWorldY = deltaY / effectiveCharHeight;
             setViewOffset(prev => ({ x: prev.x + deltaWorldX, y: prev.y + deltaWorldY }));
         }
-    }, [zoomLevel, viewOffset, screenToWorld, getEffectiveCharDims]);
+    }, [zoomLevel, viewOffset, screenToWorld, getEffectiveCharDims, findListAt, worldData]);
 
     const handlePanStart = useCallback((clientX: number, clientY: number): PanStartInfo | null => {
         isPanningRef.current = true;

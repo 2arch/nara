@@ -1131,6 +1131,136 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render List Content (No borders - just content + scrollbar) ===
+        for (const key in engine.worldData) {
+            if (key.startsWith('list_')) {
+                try {
+                    const listData = JSON.parse(engine.worldData[key] as string);
+                    const { startX, endX, startY, visibleHeight, scrollOffset, color } = listData;
+
+                    // Render list content from virtual storage
+                    const contentKey = `${key}_content`;
+                    const contentData = engine.worldData[contentKey];
+                    if (contentData) {
+                        try {
+                            const content = JSON.parse(contentData as string);
+
+                            // Render visible lines (no title bar, start directly at startY)
+                            for (let viewportRow = 0; viewportRow < visibleHeight; viewportRow++) {
+                                const contentLineIndex = scrollOffset + viewportRow;
+                                const lineContent = content[contentLineIndex] || '';
+                                const renderY = startY + viewportRow;
+
+                                // Check if this row is in visible viewport
+                                if (renderY >= startWorldY - 5 && renderY <= endWorldY + 5) {
+                                    // Render each character in the line
+                                    for (let charIndex = 0; charIndex < lineContent.length && charIndex <= (endX - startX); charIndex++) {
+                                        const renderX = startX + charIndex;
+                                        if (renderX >= startWorldX - 5 && renderX <= endWorldX + 5) {
+                                            const screenPos = engine.worldToScreen(renderX, renderY, currentZoom, currentOffset);
+                                            if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                                                screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                                                ctx.fillStyle = engine.textColor;
+                                                ctx.fillText(lineContent[charIndex], screenPos.x, screenPos.y + verticalTextOffset);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            // Skip invalid content data
+                        }
+                    }
+
+                    // Always render scrollbar track as visual indicator (even when no scroll needed)
+                    const scrollbarX = endX + 1;
+                    const scrollbarStartY = startY;
+                    const scrollbarHeight = visibleHeight;
+
+                    // Render scrollbar track (full height, always visible)
+                    for (let y = scrollbarStartY; y < scrollbarStartY + scrollbarHeight; y++) {
+                        if (y >= startWorldY - 5 && y <= endWorldY + 5 && scrollbarX >= startWorldX - 5 && scrollbarX <= endWorldX + 5) {
+                            const screenPos = engine.worldToScreen(scrollbarX, y, currentZoom, currentOffset);
+                            if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                                screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                                ctx.fillStyle = `${engine.textColor}33`; // 20% opacity - visible track
+                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            }
+                        }
+                    }
+
+                    // Only render scrollbar thumb if content exceeds visible area
+                    const totalLines = contentData ? Object.keys(JSON.parse(contentData as string)).length : 0;
+                    if (totalLines > visibleHeight) {
+                        const scrollProgress = scrollOffset / (totalLines - visibleHeight);
+                        const thumbHeight = Math.max(1, Math.floor(scrollbarHeight * (visibleHeight / totalLines)));
+                        const thumbY = scrollbarStartY + Math.floor((scrollbarHeight - thumbHeight) * scrollProgress);
+
+                        // Debug: Log thumb proportions
+                        const thumbPercent = Math.round((visibleHeight / totalLines) * 100);
+                        console.log(`Scrollbar: ${thumbHeight}/${scrollbarHeight} cells (${thumbPercent}% - ${totalLines} total lines)`);
+
+                        // Render scrollbar thumb (only when scrollable)
+                        for (let y = thumbY; y < thumbY + thumbHeight; y++) {
+                            if (y >= startWorldY - 5 && y <= endWorldY + 5 && scrollbarX >= startWorldX - 5 && scrollbarX <= endWorldX + 5) {
+                                const screenPos = engine.worldToScreen(scrollbarX, y, currentZoom, currentOffset);
+                                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                                    screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                                    ctx.fillStyle = `${engine.textColor}CC`; // 80% opacity - prominent thumb
+                                    ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                }
+                            }
+                        }
+                    }
+
+                    // Render border around list (same style as scrollbar track for seamless look)
+                    const borderColor = `${engine.textColor}33`; // 20% opacity - same as scrollbar track
+
+                    // Top border - thin 1px line
+                    for (let x = startX; x <= scrollbarX; x++) {
+                        if (x >= startWorldX - 5 && x <= endWorldX + 5 && startY >= startWorldY - 5 && startY <= endWorldY + 5) {
+                            const screenPos = engine.worldToScreen(x, startY, currentZoom, currentOffset);
+                            if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                                screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                                ctx.fillStyle = borderColor;
+                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, 1);
+                            }
+                        }
+                    }
+
+                    // Bottom border - thin 1px line
+                    const bottomY = startY + visibleHeight - 1;
+                    for (let x = startX; x <= scrollbarX; x++) {
+                        if (x >= startWorldX - 5 && x <= endWorldX + 5 && bottomY >= startWorldY - 5 && bottomY <= endWorldY + 5) {
+                            const screenPos = engine.worldToScreen(x, bottomY, currentZoom, currentOffset);
+                            if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                                screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                                ctx.fillStyle = borderColor;
+                                ctx.fillRect(screenPos.x, screenPos.y + effectiveCharHeight - 1, effectiveCharWidth, 1);
+                            }
+                        }
+                    }
+
+                    // Left border - thin 1px line
+                    for (let y = startY; y < startY + visibleHeight; y++) {
+                        if (startX >= startWorldX - 5 && startX <= endWorldX + 5 && y >= startWorldY - 5 && y <= endWorldY + 5) {
+                            const screenPos = engine.worldToScreen(startX, y, currentZoom, currentOffset);
+                            if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                                screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                                ctx.fillStyle = borderColor;
+                                ctx.fillRect(screenPos.x, screenPos.y, 1, effectiveCharHeight);
+                            }
+                        }
+                    }
+
+                    // Right border - use same full-width style as scrollbar track for seamless appearance
+                    // Don't render separate right border - scrollbar track serves as the right border
+                } catch (e) {
+                    // Skip invalid list data
+                }
+            }
+        }
+
         // === Render Glitched Regions (1:1 square cells via vertical subdivision) ===
         // Build index of glitched regions for efficient lookup
         const glitchedRegions: Array<{startX: number, endX: number, startY: number, endY: number}> = [];

@@ -73,7 +73,7 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'clear', 'cam', 'indent', 'bound', 'unbound', 'move', 'upload', 'pro', 'spawn'];
+const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'clear', 'cam', 'indent', 'bound', 'unbound', 'list', 'unlist', 'move', 'upload', 'pro', 'spawn'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro', 'Neureal'];
@@ -402,6 +402,16 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 }
             }
             return ['bound', 'bound --x', 'bound --y', 'bound --x <width> --y <height>'];
+        }
+
+        if (lowerInput === 'list') {
+            const parts = input.split(' ');
+
+            if (parts.length > 1) {
+                // User is typing color argument - show what they've typed
+                return [input];
+            }
+            return ['list', 'list #FF8800', 'list #00FF00', 'list #0088FF'];
         }
 
         if (lowerInput === 'cam') {
@@ -1814,10 +1824,52 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 hasNavigated: false
             });
             setCommandData({});
-            
+
             // Return command execution for immediate processing
             return {
                 command: 'unbound',
+                args: [],
+                commandStartPos: commandState.commandStartPos
+            };
+        }
+
+        if (commandToExecute.startsWith('list')) {
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            // Return command execution for immediate processing
+            const args = inputParts.slice(1);
+
+            return {
+                command: 'list',
+                args: args,
+                commandStartPos: commandState.commandStartPos
+            };
+        }
+
+        if (commandToExecute.startsWith('unlist')) {
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            // Return command execution for immediate processing
+            return {
+                command: 'unlist',
                 args: [],
                 commandStartPos: commandState.commandStartPos
             };
