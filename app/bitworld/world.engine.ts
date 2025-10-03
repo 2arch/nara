@@ -4232,15 +4232,18 @@ export function useWorldEngine({
                             const contentLineIndex = listData.scrollOffset + viewportRow;
                             const currentLine = content[contentLineIndex] || '';
                             const cursorCol = cursorPos.x - listData.startX;
+                            const listWidth = listData.endX - listData.startX + 1;
 
-                            // Insert character at cursor position
-                            const newLine = currentLine.substring(0, cursorCol) + key + currentLine.substring(cursorCol);
+                            console.log('=== LIST TYPING ===');
+                            console.log('List width:', listWidth);
+                            console.log('Current line:', currentLine, '(length:', currentLine.length + ')');
+                            console.log('Cursor col:', cursorCol);
+                            console.log('Character being typed:', key);
 
                             // Auto-grow: Add empty lines if typing near the end
                             const totalLines = Object.keys(content).length;
-                            const updatedContent = { ...content, [contentLineIndex]: newLine };
+                            const updatedContent = { ...content };
 
-                            // If we're within 10 lines of the end, add 20 more empty lines
                             if (contentLineIndex >= totalLines - 10) {
                                 for (let i = totalLines; i < totalLines + 20; i++) {
                                     if (!updatedContent[i]) {
@@ -4250,11 +4253,66 @@ export function useWorldEngine({
                                 console.log('Auto-growing list from', totalLines, 'to', totalLines + 20, 'lines');
                             }
 
-                            // Check if line exceeds width (need word wrapping)
-                            const listWidth = listData.endX - listData.startX + 1;
-                            const newCursorCol = cursorCol + 1;
+                            // Check if inserting this character would exceed width
+                            const wouldExceedWidth = currentLine.length >= listWidth;
 
-                            if (newLine.length > listWidth) {
+                            if (wouldExceedWidth) {
+                                console.log('Would exceed width - wrapping BEFORE inserting character');
+
+                                // Need to wrap current line first, THEN insert character on next line
+                                // Find wrap point in current line
+                                let wrapPoint = 0;
+                                for (let col = listWidth - 1; col >= 0; col--) {
+                                    if (currentLine[col] === ' ') {
+                                        wrapPoint = col + 1;
+                                        break;
+                                    }
+                                }
+                                if (wrapPoint === 0) {
+                                    wrapPoint = listWidth;
+                                }
+
+                                const lineBeforeWrap = currentLine.substring(0, wrapPoint);
+                                const overflow = currentLine.substring(wrapPoint);
+
+                                // Update current line
+                                updatedContent[contentLineIndex] = lineBeforeWrap;
+
+                                // Put overflow + new character on next line
+                                const nextLineContent = (updatedContent[contentLineIndex + 1] || content[contentLineIndex + 1] || '').trimEnd();
+                                updatedContent[contentLineIndex + 1] = overflow + key + nextLineContent;
+
+                                console.log('Wrapped line:', lineBeforeWrap);
+                                console.log('Next line with overflow + char:', updatedContent[contentLineIndex + 1]);
+
+                                // Save and move cursor to next line
+                                setWorldData(prev => ({
+                                    ...prev,
+                                    [contentKey]: JSON.stringify(updatedContent)
+                                }));
+
+                                // Move cursor to next line, after the character we just inserted
+                                const newCursorCol = overflow.length + 1;
+                                if (viewportRow < listData.visibleHeight - 1) {
+                                    setCursorPos({ x: listData.startX + newCursorCol, y: cursorPos.y + 1 });
+                                } else {
+                                    // Need to scroll
+                                    const newScrollOffset = listData.scrollOffset + 1;
+                                    setWorldData(prev => ({
+                                        ...prev,
+                                        [listKey]: JSON.stringify({ ...listData, scrollOffset: newScrollOffset })
+                                    }));
+                                    setCursorPos({ x: listData.startX + newCursorCol, y: cursorPos.y });
+                                }
+                            } else {
+                                console.log('Normal insert - no wrap needed');
+
+                                // Insert character normally
+                                const newLine = currentLine.substring(0, cursorCol) + key + currentLine.substring(cursorCol);
+                                updatedContent[contentLineIndex] = newLine;
+
+                                // Check if THIS LINE now needs reflow (in case we inserted in the middle)
+                                if (newLine.length > listWidth) {
                                 // Line exceeds width - need to reflow
                                 const totalLinesBeforeWrap = Object.keys(content).length;
 
@@ -4269,7 +4327,7 @@ export function useWorldEngine({
                                 let cursorFinalCol = newCursorCol;
 
                                 while (currentReflowLine.length > listWidth && reflowLineIndex < totalLinesBeforeWrap + 20) {
-                                    // Find wrap point
+                                    // Find wrap point (look for last space before boundary)
                                     let wrapPoint = 0;
                                     for (let col = listWidth - 1; col >= 0; col--) {
                                         if (currentReflowLine[col] === ' ') {
@@ -4278,14 +4336,17 @@ export function useWorldEngine({
                                         }
                                     }
                                     if (wrapPoint === 0) {
+                                        console.log('No space found - hard wrapping at', listWidth);
                                         wrapPoint = listWidth;
+                                    } else {
+                                        console.log('Found space at', wrapPoint - 1, '- wrapping after it');
                                     }
 
                                     // Split current line
                                     const lineBeforeWrap = currentReflowLine.substring(0, wrapPoint);
                                     const overflow = currentReflowLine.substring(wrapPoint);
 
-                                    // Update current line
+                                    // Update current line in updatedContent
                                     updatedContent[reflowLineIndex] = lineBeforeWrap;
 
                                     // Track cursor position
@@ -4301,15 +4362,25 @@ export function useWorldEngine({
                                     }
 
                                     // Get next line's content and prepend overflow
-                                    const nextLineContent = content[reflowLineIndex + 1] || '';
+                                    // IMPORTANT: Read from updatedContent to get any reflowed changes, fall back to content
+                                    // Trim the next line to remove trailing spaces that might have been left from previous reflows
+                                    const nextLineContent = (updatedContent[reflowLineIndex + 1] || content[reflowLineIndex + 1] || '').trimEnd();
                                     currentReflowLine = overflow + nextLineContent;
+                                    console.log(`Reflowing line ${reflowLineIndex}: overflow="${overflow}" + nextLine="${nextLineContent}" = "${currentReflowLine}" (${currentReflowLine.length} chars)`);
 
                                     // Move to next line
                                     reflowLineIndex++;
                                 }
 
-                                // Update the last line after reflow loop
+                                // Update the last line after reflow loop (this line is <= listWidth)
                                 updatedContent[reflowLineIndex] = currentReflowLine;
+
+                                console.log('=== REFLOW COMPLETE ===');
+                                console.log('Total lines after reflow:', reflowLineIndex + 1);
+                                console.log('Updated content:');
+                                for (let i = contentLineIndex; i <= reflowLineIndex && i < contentLineIndex + 5; i++) {
+                                    console.log(`Line ${i}:`, updatedContent[i] || '(empty)', `(length: ${(updatedContent[i] || '').length})`);
+                                }
 
                                 // Auto-grow if needed
                                 if (reflowLineIndex >= totalLinesBeforeWrap - 10) {
@@ -4350,7 +4421,14 @@ export function useWorldEngine({
                                     [contentKey]: JSON.stringify(updatedContent)
                                 }));
 
-                                setCursorPos({ x: cursorPos.x + 1, y: cursorPos.y });
+                                // Don't move cursor beyond list boundary
+                                if (cursorPos.x < listData.endX) {
+                                    setCursorPos({ x: cursorPos.x + 1, y: cursorPos.y });
+                                } else {
+                                    // At boundary - stay in place (should trigger wrap on next character)
+                                    setCursorPos({ x: cursorPos.x, y: cursorPos.y });
+                                }
+                            }
                             }
                         }
 
