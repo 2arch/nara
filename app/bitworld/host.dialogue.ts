@@ -1,7 +1,9 @@
 // Host dialogue system for conversational onboarding
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { HOST_FLOWS, HostFlow, HostMessage, InputType } from './host.flows';
-import { signUpUser } from '../firebase';
+import { signUpUser, sendSignInLink, auth, database, getUserProfile } from '../firebase';
+import { set, ref } from 'firebase/database';
+import { updateProfile } from 'firebase/auth';
 import type { Point } from './world.engine';
 
 export interface HostDialogueState {
@@ -13,7 +15,7 @@ export interface HostDialogueState {
 }
 
 export interface UseHostDialogueProps {
-  setHostData: (data: { text: string; color?: string; centerPos: Point } | null) => void;
+  setHostData: (data: { text: string; color?: string; centerPos: Point; timestamp?: number } | null) => void;
   getViewportCenter: () => Point;
   setDialogueText: (text: string) => void;
   onAuthSuccess?: (username: string) => void;
@@ -26,9 +28,10 @@ function getFieldNameFromMessageId(messageId: string): string {
     'collect_lastname': 'lastName',
     'collect_email': 'email',
     'collect_password': 'password',
-    'collect_username': 'username'
+    'collect_username': 'username',
+    'welcome': 'email' // For magic link flow
   };
-  return fieldMap[messageId] || messageId;
+  return fieldMap[messageId] || 'username'; // Default to username for verification flow
 }
 
 export function useHostDialogue({ setHostData, getViewportCenter, setDialogueText, onAuthSuccess }: UseHostDialogueProps) {
@@ -127,6 +130,156 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       nextMessageId = await currentMessage.onResponse(input, newCollectedData);
     } else if (currentMessage.nextMessageId) {
       nextMessageId = currentMessage.nextMessageId;
+    }
+
+    // Handle magic link sending flow
+    if (nextMessageId === 'link_sent') {
+      const flow = HOST_FLOWS[state.currentFlowId!];
+
+      // Update state immediately
+      setState(prev => ({ ...prev, currentMessageId: 'link_sent', isProcessing: true }));
+
+      // Actually send the magic link
+      try {
+        const result = await sendSignInLink(newCollectedData.email);
+
+        if (result.success) {
+          // Show success message
+          const linkSentMessage = flow.messages['link_sent'];
+          setHostData({
+            text: linkSentMessage.text,
+            centerPos: getViewportCenter(),
+            timestamp: Date.now()
+          });
+
+          setState(prev => ({
+            ...prev,
+            currentMessageId: 'link_sent',
+            isProcessing: false,
+            isActive: true // Keep active - waiting for email verification
+          }));
+
+          return true;
+        } else {
+          // Show error with user-friendly message
+          let errorMessage = result.error || 'failed to send magic link';
+
+          // Handle quota exceeded error
+          if (errorMessage.includes('quota-exceeded')) {
+            errorMessage = 'daily email limit reached. please try again tomorrow or contact support.';
+          }
+
+          setHostData({
+            text: errorMessage,
+            color: '#FF0000',
+            centerPos: getViewportCenter(),
+            timestamp: Date.now()
+          });
+
+          setState(prev => ({ ...prev, isProcessing: false }));
+          return false;
+        }
+      } catch (error: any) {
+        setHostData({
+          text: 'something went wrong. please try again.',
+          color: '#FF0000',
+          centerPos: getViewportCenter(),
+          timestamp: Date.now()
+        });
+
+        setState(prev => ({ ...prev, isProcessing: false }));
+        return false;
+      }
+    }
+
+    // Handle profile creation flow (after email verification)
+    if (nextMessageId === 'creating_profile') {
+      const flow = HOST_FLOWS[state.currentFlowId!];
+      const creatingMessage = flow.messages['creating_profile'];
+      setHostData({
+        text: creatingMessage.text,
+        centerPos: getViewportCenter(),
+        timestamp: Date.now()
+      });
+
+      setState(prev => ({ ...prev, currentMessageId: 'creating_profile' }));
+
+      // Actually create/update the profile
+      try {
+        const user = auth.currentUser;
+        if (!user) {
+          throw new Error('No authenticated user found');
+        }
+
+        const username = newCollectedData.username;
+
+        // Check if profile already exists
+        const existingProfile = await getUserProfile(user.uid);
+
+        if (!existingProfile) {
+          // Create new profile
+          const userProfileData = {
+            firstName: '',
+            lastName: '',
+            username,
+            email: user.email || '',
+            uid: user.uid,
+            createdAt: new Date().toISOString(),
+            membership: 'fresh',
+            aiUsage: {
+              daily: {},
+              monthly: {},
+              total: 0,
+              lastReset: new Date().toISOString()
+            }
+          };
+
+          await set(ref(database, `users/${user.uid}`), userProfileData);
+        } else {
+          // Update existing profile with username
+          await set(ref(database, `users/${user.uid}/username`), username);
+        }
+
+        // Update Firebase Auth display name
+        await updateProfile(user, {
+          displayName: username
+        });
+
+        // Show success message
+        const successMessage = flow.messages['profile_created'];
+        setHostData({
+          text: successMessage.text,
+          color: '#00AA00',
+          centerPos: getViewportCenter(),
+          timestamp: Date.now()
+        });
+
+        // Navigate to user's world
+        if (onAuthSuccess) {
+          setTimeout(() => {
+            onAuthSuccess(username);
+          }, 2000);
+        }
+
+        setState(prev => ({
+          ...prev,
+          currentMessageId: 'profile_created',
+          isProcessing: false,
+          isActive: false // End flow
+        }));
+
+        return true;
+      } catch (error: any) {
+        setHostData({
+          text: 'something went wrong. please try again.',
+          color: '#FF0000',
+          centerPos: getViewportCenter(),
+          timestamp: Date.now()
+        });
+
+        setState(prev => ({ ...prev, isProcessing: false }));
+        return false;
+      }
     }
 
     // Handle account creation flow

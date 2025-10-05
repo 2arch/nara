@@ -6,15 +6,16 @@ import { BitHomeCanvas } from './bitworld/bit.home';
 import { BitCanvas } from './bitworld/bit.canvas';
 import { auth } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { getUsernameByUid } from './firebase';
+import { getUsernameByUid, completeSignInWithEmailLink } from './firebase';
 
 export default function Home() {
   const [cursorAlternate, setCursorAlternate] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [isVerifyingEmail, setIsVerifyingEmail] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
-  
+
   // Control form display based on route
   const showForm = pathname === '/signup' || pathname === '/login';
   const isSignup = pathname === '/signup';
@@ -22,6 +23,31 @@ export default function Home() {
 
   // Always use host mode on home page (both authenticated and anonymous)
   const shouldUseHostMode = pathname === '/' && !authLoading;
+
+  // Check for email link sign-in on mount
+  useEffect(() => {
+    const handleEmailLink = async () => {
+      // Check if URL contains email link parameters
+      if (typeof window !== 'undefined' && window.location.href.includes('apiKey=')) {
+        setIsVerifyingEmail(true);
+        try {
+          const result = await completeSignInWithEmailLink();
+          if (result.success && result.user) {
+            // Auth state listener will handle the rest
+            console.log('Email link verification successful');
+            // Keep isVerifyingEmail true so we can show success message
+          } else {
+            setIsVerifyingEmail(false);
+          }
+        } catch (error) {
+          setIsVerifyingEmail(false);
+          console.log('Email link verification failed:', error);
+        }
+      }
+    };
+
+    handleEmailLink();
+  }, []);
 
   // Listen for authentication state changes
   useEffect(() => {
@@ -102,6 +128,9 @@ export default function Home() {
 
   // Use host mode for anonymous users on home page
   if (shouldUseHostMode) {
+    // If coming from email verification, don't start normal flow
+    const initialFlow = isVerifyingEmail ? undefined : "welcome";
+
     return (
       <div className="w-screen h-screen relative" style={{backgroundColor: '#F8F8F0'}}>
         <BitCanvas
@@ -111,9 +140,10 @@ export default function Home() {
           monogramEnabled={true}
           dialogueEnabled={false}
           hostModeEnabled={true}
-          initialHostFlow="welcome"
+          initialHostFlow={initialFlow}
           onAuthSuccess={handleAuthSuccess}
           fontFamily={engine.fontFamily}
+          isVerifyingEmail={isVerifyingEmail}
         />
       </div>
     );

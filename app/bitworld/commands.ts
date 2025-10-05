@@ -57,6 +57,15 @@ export interface ModeState {
     gridMode: GridMode; // 3D grid rendering mode
     artefactsEnabled: boolean; // Whether 3D artifacts are enabled in space mode
     artifactType: ArtifactType; // Type of artifacts to show (images or questions)
+    isFullscreenMode: boolean; // Whether fullscreen/constrained mode is active
+    fullscreenRegion?: { // The region to constrain viewport to
+        type: 'bound' | 'list';
+        key: string;
+        startX: number;
+        endX: number;
+        startY: number;
+        endY?: number; // For lists/finite bounds
+    };
 }
 
 interface UseCommandSystemProps {
@@ -73,7 +82,7 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'clear', 'cam', 'indent', 'bound', 'unbound', 'list', 'unlist', 'move', 'upload', 'pro', 'spawn'];
+const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'clear', 'cam', 'indent', 'bound', 'unbound', 'list', 'unlist', 'move', 'upload', 'pro', 'spawn', 'full'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro', 'Neureal'];
@@ -131,6 +140,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         gridMode: 'dots', // Default grid mode
         artefactsEnabled: false, // Artifacts enabled by default in space mode
         artifactType: 'images', // Default to image artifacts
+        isFullscreenMode: false, // Fullscreen mode not active initially
+        fullscreenRegion: undefined, // No fullscreen region initially
     });
 
     // Function to load saved color preferences
@@ -1881,10 +1892,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 ...prev,
                 isMoveMode: !prev.isMoveMode
             }));
-            
+
             const newState = !modeState.isMoveMode;
             setDialogueWithRevert(newState ? "Move mode enabled - hover over text blocks to drag them. Press Escape to exit." : "Move mode disabled", setDialogueText);
-            
+
             // Clear command mode
             setCommandState({
                 isActive: false,
@@ -1895,8 +1906,28 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 hasNavigated: false
             });
             setCommandData({});
-            
+
             return null;
+        }
+
+        if (commandToExecute.startsWith('full')) {
+            // Clear command mode first
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            // Toggle fullscreen mode or return command for world engine to handle detection
+            return {
+                command: 'full',
+                args: [],
+                commandStartPos: commandState.commandStartPos
+            };
         }
 
         if (commandToExecute.startsWith('pro')) {
@@ -2278,5 +2309,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         })),
         artefactsEnabled: modeState.artefactsEnabled,
         artifactType: modeState.artifactType,
+        isFullscreenMode: modeState.isFullscreenMode,
+        fullscreenRegion: modeState.fullscreenRegion,
+        setFullscreenMode: (enabled: boolean, region?: ModeState['fullscreenRegion']) =>
+            setModeState(prev => ({ ...prev, isFullscreenMode: enabled, fullscreenRegion: region })),
+        exitFullscreenMode: () =>
+            setModeState(prev => ({ ...prev, isFullscreenMode: false, fullscreenRegion: undefined })),
     };
 }

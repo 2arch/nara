@@ -25,7 +25,7 @@ export interface WorldSettings {
 export const initialSettings: WorldSettings = {
     isDebugVisible: false,
     monogramOptions: {
-        mode: 'plasma',
+        mode: 'perlin',
         speed: 0.5, // Slower default speed
         complexity: 1.0,
         colorShift: 0,

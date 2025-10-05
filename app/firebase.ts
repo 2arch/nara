@@ -134,12 +134,21 @@ export const signInUser = async (email: string, password: string): Promise<{succ
 export const sendSignInLink = async (email: string, firstName?: string, lastName?: string, username?: string): Promise<{success: boolean, error?: string}> => {
   try {
     const actionCodeSettings = {
-      // URL to redirect to after email link is clicked
-      url: typeof window !== 'undefined' ? `${window.location.origin}/auth/verify` : 'http://localhost:3000/auth/verify',
+      // URL to redirect to after email link is clicked - redirect to home so auth state listener can catch it
+      url: typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000',
       handleCodeInApp: true,
     };
 
+    // Generate the sign-in link
     await sendSignInLinkToEmail(auth, email, actionCodeSettings);
+
+    // Note: To use a custom email (no-reply@nara.ws), you would need to:
+    // 1. Set up Firebase Cloud Functions with custom SMTP
+    // 2. Call a custom function here instead of sendSignInLinkToEmail
+    // 3. Example: await customSendSignInEmail(email, link);
+
+    // For now, Firebase's default email will be used
+    // The email template can be customized in Firebase Console > Authentication > Templates
 
     // Save email to local storage to complete sign-in on redirect
     if (typeof window !== 'undefined') {
@@ -184,22 +193,16 @@ export const completeSignInWithEmailLink = async (emailLink?: string): Promise<{
     // Check if this is a new user
     const isNewUser = userCredential.user.metadata.creationTime === userCredential.user.metadata.lastSignInTime;
 
-    if (isNewUser && typeof window !== 'undefined') {
-      // Get pending user data from storage
-      const pendingDataStr = window.localStorage.getItem('pendingUserData');
-      if (pendingDataStr) {
-        const { firstName, lastName, username } = JSON.parse(pendingDataStr);
+    if (isNewUser) {
+      // Check if profile already exists (shouldn't happen but defensive)
+      const existingProfile = await get(ref(database, `users/${user.uid}`));
 
-        // Update profile
-        await updateProfile(user, {
-          displayName: `${firstName} ${lastName}`
-        });
-
-        // Create user profile in database
-        const userProfileData: UserProfileData = {
-          firstName,
-          lastName,
-          username,
+      if (!existingProfile.exists()) {
+        // Create minimal user profile - username will be added later in verification flow
+        const userProfileData: Partial<UserProfileData> = {
+          firstName: '',
+          lastName: '',
+          username: '', // Will be set by verification flow
           email: user.email || email,
           uid: user.uid,
           createdAt: new Date().toISOString(),
@@ -213,9 +216,7 @@ export const completeSignInWithEmailLink = async (emailLink?: string): Promise<{
         };
 
         await set(ref(database, `users/${user.uid}`), userProfileData);
-
-        // Clean up pending data
-        window.localStorage.removeItem('pendingUserData');
+        logger.debug('Created minimal user profile for', user.uid);
       }
     }
 

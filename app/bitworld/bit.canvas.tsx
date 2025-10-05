@@ -45,9 +45,10 @@ interface BitCanvasProps {
     hostModeEnabled?: boolean; // Enable host dialogue mode for onboarding
     initialHostFlow?: string; // Initial flow to start (e.g., 'welcome')
     onAuthSuccess?: (username: string) => void; // Callback after successful auth
+    isVerifyingEmail?: boolean; // Flag to indicate email verification in progress
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, isVerifyingEmail = false }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -102,7 +103,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Monogram system for psychedelic patterns - load from settings and sync changes
     const monogramSystem = useMonogramSystem(
         {
-            mode: engine.settings.monogramMode || 'clear',
+            mode: hostModeEnabled ? 'perlin' : (engine.settings.monogramMode || 'clear'),
             speed: 0.5,
             complexity: 1.0,
             colorShift: 0,
@@ -128,6 +129,45 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         setDialogueText: engine.setDialogueText,
         onAuthSuccess
     });
+
+    // Handle email verification flow
+    useEffect(() => {
+        if (isVerifyingEmail && hostModeEnabled && !hostDialogue.isHostActive) {
+            // Set up host mode
+            engine.setHostMode({ isActive: true, currentInputType: null });
+            engine.setChatMode({
+                isActive: true,
+                currentInput: '',
+                inputPositions: [],
+                isProcessing: false
+            });
+
+            // Set text color
+            if (engine.updateSettings) {
+                engine.updateSettings({
+                    textColor: '#FFA500' // sulfur
+                });
+            }
+
+            // Show "email verified!" message
+            engine.setHostData({
+                text: 'email verified!',
+                color: '#00AA00',
+                centerPos: engine.getViewportCenter(),
+                timestamp: Date.now()
+            });
+
+            // Auto-focus canvas so typing works immediately
+            if (canvasRef.current) {
+                canvasRef.current.focus();
+            }
+
+            // After brief delay, start verification flow to collect username
+            setTimeout(() => {
+                hostDialogue.startFlow('verification');
+            }, 2000);
+        }
+    }, [isVerifyingEmail, hostModeEnabled, hostDialogue.isHostActive, engine, hostDialogue]);
 
     // Animate host text typing
     useEffect(() => {
@@ -175,6 +215,11 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             });
             // Start the flow
             hostDialogue.startFlow(initialHostFlow);
+
+            // Auto-focus canvas so typing works immediately without clicking
+            if (canvasRef.current) {
+                canvasRef.current.focus();
+            }
         }
     }, [hostModeEnabled, initialHostFlow, hostDialogue, engine]);
 
@@ -857,6 +902,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         ctx.font = `${effectiveFontSize}px ${fontFamily}`;
         ctx.textBaseline = 'top';
 
+        // Calculate viewport bounds
         const startWorldX = currentOffset.x;
         const startWorldY = currentOffset.y;
         const endWorldX = startWorldX + (cssWidth / effectiveCharWidth);
@@ -2843,6 +2889,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     inputPositions: [],
                     isProcessing: false
                 });
+
+                // Keep canvas focused for next input
+                setTimeout(() => {
+                    if (canvasRef.current) {
+                        canvasRef.current.focus();
+                    }
+                }, 100);
 
                 e.preventDefault();
                 e.stopPropagation();

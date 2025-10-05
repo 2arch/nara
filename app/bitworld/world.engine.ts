@@ -750,6 +750,10 @@ export function useWorldEngine({
         cycleGridMode,
         artefactsEnabled,
         artifactType,
+        isFullscreenMode,
+        fullscreenRegion,
+        setFullscreenMode,
+        exitFullscreenMode,
     } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, updateSettings, settings, getEffectiveCharDims, zoomLevel });
 
     // Generate search data when search pattern changes
@@ -819,7 +823,35 @@ export function useWorldEngine({
 
         setSearchData(newSearchData);
     }, [isSearchActive, searchPattern, worldData]);
-    
+
+    // === Fullscreen Mode Zoom Constraint ===
+    useEffect(() => {
+        if (isFullscreenMode && fullscreenRegion) {
+            // Calculate zoom to fit region width to viewport
+            const regionWidth = fullscreenRegion.endX - fullscreenRegion.startX + 1;
+            const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
+
+            // Calculate zoom level that fits region width exactly
+            const { width: baseCharWidth } = getEffectiveCharDims(1.0);
+            const requiredZoom = viewportWidth / (regionWidth * baseCharWidth);
+
+            // Clamp zoom to reasonable bounds (0.1 to 5.0)
+            const constrainedZoom = Math.max(0.1, Math.min(5.0, requiredZoom));
+
+            setZoomLevel(constrainedZoom);
+
+            // Center viewport on region
+            const centerX = fullscreenRegion.startX + regionWidth / 2;
+            const centerY = fullscreenRegion.startY +
+                ((fullscreenRegion.endY || fullscreenRegion.startY) - fullscreenRegion.startY) / 2;
+
+            setViewOffset({
+                x: centerX - (viewportWidth / (2 * baseCharWidth * constrainedZoom)),
+                y: centerY - (window.innerHeight / (2 * baseCharWidth * constrainedZoom))
+            });
+        }
+    }, [isFullscreenMode, fullscreenRegion, getEffectiveCharDims]);
+
     // === Ambient Text Compilation System ===
     const [compiledTextCache, setCompiledTextCache] = useState<{ [lineY: number]: string }>({});
     const lastCompiledRef = useRef<{ [lineY: number]: string }>({});
@@ -1105,19 +1137,53 @@ export function useWorldEngine({
 
     const deleteState = useCallback(async (stateName: string): Promise<boolean> => {
         if (!worldId || !userUid) return false;
-        
+
         try {
             const stateRef = ref(database, getUserPath(`${stateName}`));
             await set(stateRef, null); // Firebase way to delete
-            
+
             // If we're deleting the current state, clear the current state name
             if (currentStateName === stateName) {
                 setCurrentStateName(null);
             }
-            
+
             return true;
         } catch (error) {
             logger.error('Error deleting state:', error);
+            return false;
+        }
+    }, [worldId, currentStateName, getUserPath, userUid]);
+
+    const renameState = useCallback(async (oldName: string, newName: string): Promise<boolean> => {
+        if (!worldId || !userUid) return false;
+
+        try {
+            // Read the old state data
+            const oldStateRef = ref(database, getUserPath(`${oldName}`));
+            const snapshot = await get(oldStateRef);
+
+            if (!snapshot.exists()) {
+                logger.error('State does not exist:', oldName);
+                return false;
+            }
+
+            const stateData = snapshot.val();
+
+            // Write to new state location
+            const newStateRef = ref(database, getUserPath(`${newName}`));
+            await set(newStateRef, stateData);
+
+            // Delete old state
+            await set(oldStateRef, null);
+
+            // If we're renaming the current state, update the current state name
+            if (currentStateName === oldName) {
+                setCurrentStateName(newName);
+            }
+
+            return true;
+        } catch (error) {
+            logger.error('Error renaming state:', error);
             return false;
         }
     }, [worldId, currentStateName, getUserPath, userUid]);
@@ -1718,7 +1784,14 @@ export function useWorldEngine({
             setDialogueWithRevert("Move mode disabled", setDialogueText);
             return true;
         }
-        
+
+        // === Fullscreen Mode Exit ===
+        if (key === 'Escape' && isFullscreenMode) {
+            exitFullscreenMode();
+            setDialogueWithRevert("Exited fullscreen mode", setDialogueText);
+            return true;
+        }
+
         // === Command Handling (Early Priority) ===
         if (enableCommands) {
             const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos);
@@ -1870,6 +1943,31 @@ export function useWorldEngine({
                     } else {
                         setDialogueWithRevert("No current state to unpublish", setDialogueText);
                     }
+                } else if (exec.command === 'state' && exec.args.length >= 2 && exec.args[0] === '--rm') {
+                    // Delete state command: /state --rm <stateName>
+                    const stateName = exec.args[1];
+                    setDialogueWithRevert(`Deleting state "${stateName}"...`, setDialogueText);
+                    deleteState(stateName).then((success) => {
+                        if (success) {
+                            loadAvailableStates().then(setAvailableStates);
+                            setDialogueWithRevert(`State "${stateName}" deleted successfully`, setDialogueText);
+                        } else {
+                            setDialogueWithRevert(`Failed to delete state "${stateName}"`, setDialogueText);
+                        }
+                    });
+                } else if (exec.command === 'state' && exec.args.length >= 3 && exec.args[0] === '--mv') {
+                    // Rename state command: /state --mv <oldName> <newName>
+                    const oldName = exec.args[1];
+                    const newName = exec.args[2];
+                    setDialogueWithRevert(`Renaming state "${oldName}" to "${newName}"...`, setDialogueText);
+                    renameState(oldName, newName).then((success) => {
+                        if (success) {
+                            loadAvailableStates().then(setAvailableStates);
+                            setDialogueWithRevert(`State "${oldName}" renamed to "${newName}" successfully`, setDialogueText);
+                        } else {
+                            setDialogueWithRevert(`Failed to rename state "${oldName}"`, setDialogueText);
+                        }
+                    });
                 } else if (exec.command === 'cluster') {
                     if (exec.args.length === 0) {
                         // Generate frames + AI clusters + waypoints (everything)
@@ -1973,6 +2071,82 @@ export function useWorldEngine({
                         setDialogueWithRevert(`Spawn point set at (${spawnPoint.x}, ${spawnPoint.y})`, setDialogueText);
                     } else {
                         setDialogueWithRevert("Failed to set spawn point", setDialogueText);
+                    }
+                } else if (exec.command === 'full') {
+                    // Toggle fullscreen mode for bound/list at cursor
+                    if (isFullscreenMode) {
+                        // Exit fullscreen mode
+                        exitFullscreenMode();
+                        setDialogueWithRevert("Exited fullscreen mode", setDialogueText);
+                    } else {
+                        // Find bound or list at cursor position
+                        const cursorX = cursorPos.x;
+                        const cursorY = cursorPos.y;
+                        let foundRegion = false;
+
+                        // Check for bound at cursor
+                        for (const key in worldData) {
+                            if (key.startsWith('bound_')) {
+                                try {
+                                    const boundData = JSON.parse(worldData[key] as string);
+                                    const { startX, endX, startY, endY, maxY } = boundData;
+                                    const actualEndY = maxY !== null && maxY !== undefined ? maxY : endY;
+
+                                    // Check if cursor is within bound
+                                    if (cursorX >= startX && cursorX <= endX &&
+                                        cursorY >= startY && cursorY <= actualEndY) {
+                                        setFullscreenMode(true, {
+                                            type: 'bound',
+                                            key,
+                                            startX,
+                                            endX,
+                                            startY,
+                                            endY: actualEndY
+                                        });
+                                        setDialogueWithRevert("Entered fullscreen mode - Press Escape or /full to exit", setDialogueText);
+                                        foundRegion = true;
+                                        break;
+                                    }
+                                } catch (e) {
+                                    // Skip invalid bound data
+                                }
+                            }
+                        }
+
+                        // If no bound found, check for list
+                        if (!foundRegion) {
+                            for (const key in worldData) {
+                                if (key.startsWith('list_')) {
+                                    try {
+                                        const listData = JSON.parse(worldData[key] as string);
+                                        const { startX, endX, startY, visibleHeight } = listData;
+                                        const endY = startY + visibleHeight - 1;
+
+                                        // Check if cursor is within list viewport
+                                        if (cursorX >= startX && cursorX <= endX &&
+                                            cursorY >= startY && cursorY <= endY) {
+                                            setFullscreenMode(true, {
+                                                type: 'list',
+                                                key,
+                                                startX,
+                                                endX,
+                                                startY,
+                                                endY
+                                            });
+                                            setDialogueWithRevert("Entered fullscreen mode - Press Escape or /full to exit", setDialogueText);
+                                            foundRegion = true;
+                                            break;
+                                        }
+                                    } catch (e) {
+                                        // Skip invalid list data
+                                    }
+                                }
+                            }
+                        }
+
+                        if (!foundRegion) {
+                            setDialogueWithRevert("No bound or list found at cursor position", setDialogueText);
+                        }
                     }
                 } else if (exec.command === 'clear') {
                     // Clear the entire canvas
@@ -4317,14 +4491,14 @@ export function useWorldEngine({
                                 const totalLinesBeforeWrap = Object.keys(content).length;
 
                                 // Track cursor position as character offset from start of current line
-                                const cursorCharOffset = newCursorCol;
+                                const cursorCharOffset = cursorCol + 1; // +1 for the inserted character
 
                                 // Reflow starting from current line
                                 let currentReflowLine = newLine;
                                 let reflowLineIndex = contentLineIndex;
                                 let charsProcessed = 0;
                                 let cursorFinalLine = contentLineIndex;
-                                let cursorFinalCol = newCursorCol;
+                                let cursorFinalCol = cursorCol + 1;
 
                                 while (currentReflowLine.length > listWidth && reflowLineIndex < totalLinesBeforeWrap + 20) {
                                     // Find wrap point (look for last space before boundary)
@@ -4622,37 +4796,35 @@ export function useWorldEngine({
             
             nextCursorPos = proposedCursorPos;
             moved = true;
-            
-            if (currentMode === 'air') {
+
+            // Check if chat mode is active first (for host mode compatibility)
+            if (chatMode.isActive) {
+                // Add to chat data instead of world data
+                setChatData(prev => ({
+                    ...prev,
+                    [`${cursorAfterDelete.x},${cursorAfterDelete.y}`]: key
+                }));
+                setChatMode(prev => ({
+                    ...prev,
+                    currentInput: prev.currentInput + key,
+                    inputPositions: [...prev.inputPositions, cursorAfterDelete]
+                }));
+            } else if (currentMode === 'air') {
                 // Air mode: Add ephemeral text that disappears after 2 seconds
                 addEphemeralText(cursorAfterDelete, key);
                 // Don't modify worldData in air mode
             } else if (currentMode === 'chat') {
-                // Chat mode: Use existing chat functionality
-                if (chatMode.isActive) {
-                    // Add to chat data instead of world data
-                    setChatData(prev => ({
-                        ...prev,
-                        [`${cursorAfterDelete.x},${cursorAfterDelete.y}`]: key
-                    }));
-                    setChatMode(prev => ({
-                        ...prev,
-                        currentInput: prev.currentInput + key,
-                        inputPositions: [...prev.inputPositions, cursorAfterDelete]
-                    }));
-                } else {
-                    // If not in active chat mode but mode is chat, activate it
-                    setChatMode({
-                        isActive: true,
-                        currentInput: key,
-                        inputPositions: [cursorAfterDelete],
-                        isProcessing: false
-                    });
-                    setChatData({
-                        [`${cursorAfterDelete.x},${cursorAfterDelete.y}`]: key
-                    });
-                    setDialogueText("Chat mode activated. Enter: ephemeral response, Cmd+Enter: permanent response, Shift+Enter: new line. Use /exit to leave.");
-                }
+                // Chat mode but not active: activate it
+                setChatMode({
+                    isActive: true,
+                    currentInput: key,
+                    inputPositions: [cursorAfterDelete],
+                    isProcessing: false
+                });
+                setChatData({
+                    [`${cursorAfterDelete.x},${cursorAfterDelete.y}`]: key
+                });
+                setDialogueText("Chat mode activated. Enter: ephemeral response, Cmd+Enter: permanent response, Shift+Enter: new line. Use /exit to leave.");
             } else {
                 // Air mode (default): Normal text input to worldData
                 nextWorldData = { ...dataToDeleteFrom }; // Start with data after potential deletion
@@ -4840,6 +5012,36 @@ export function useWorldEngine({
 
         if (ctrlOrMetaKey) {
             // Zooming
+            if (isFullscreenMode && fullscreenRegion) {
+                // In fullscreen mode, allow zoom but constrain to keep region visible
+                const worldPointBeforeZoom = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
+                const delta = deltaY * ZOOM_SENSITIVITY;
+                let newZoom = zoomLevel * (1 - delta);
+
+                // Calculate zoom bounds based on region width
+                const regionWidth = fullscreenRegion.endX - fullscreenRegion.startX + 1;
+                const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
+                const { width: baseCharWidth } = getEffectiveCharDims(1.0);
+                const fitZoom = viewportWidth / (regionWidth * baseCharWidth);
+
+                // Allow zoom from 50% of fit to 200% of fit
+                const minZoom = fitZoom * 0.5;
+                const maxZoom = fitZoom * 2.0;
+                newZoom = Math.min(Math.max(newZoom, minZoom), maxZoom);
+
+                const { width: effectiveWidthAfter } = getEffectiveCharDims(newZoom);
+                if (effectiveWidthAfter === 0) return;
+
+                // Keep X centered on region, allow Y to follow mouse
+                const regionCenterX = fullscreenRegion.startX + regionWidth / 2;
+                const newViewOffsetX = regionCenterX - (viewportWidth / 2 / effectiveWidthAfter);
+                const newViewOffsetY = worldPointBeforeZoom.y - (canvasRelativeY / effectiveWidthAfter);
+
+                setZoomLevel(newZoom);
+                setViewOffset({ x: newViewOffsetX, y: newViewOffsetY });
+                return;
+            }
+
             const worldPointBeforeZoom = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
             const delta = deltaY * ZOOM_SENSITIVITY;
             let newZoom = zoomLevel * (1 - delta);
@@ -4859,9 +5061,40 @@ export function useWorldEngine({
             if (effectiveCharWidth === 0 || effectiveCharHeight === 0) return;
             const deltaWorldX = deltaX / effectiveCharWidth;
             const deltaWorldY = deltaY / effectiveCharHeight;
-            setViewOffset(prev => ({ x: prev.x + deltaWorldX, y: prev.y + deltaWorldY }));
+
+            // Constrain panning if in fullscreen mode
+            if (isFullscreenMode && fullscreenRegion) {
+                // Allow scrolling within region bounds with margins
+                const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
+                const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
+                const viewportWidthInChars = viewportWidth / effectiveCharWidth;
+                const viewportHeightInChars = viewportHeight / effectiveCharHeight;
+
+                const regionWidth = fullscreenRegion.endX - fullscreenRegion.startX + 1;
+                const horizontalMargin = regionWidth * 0.2; // 20% margin on each side
+                const verticalMargin = viewportHeightInChars * 0.5; // 50% viewport margin top
+
+                setViewOffset(prev => {
+                    const newX = prev.x + deltaWorldX;
+                    const newY = prev.y + deltaWorldY;
+
+                    // Allow horizontal panning within margins
+                    const minX = fullscreenRegion.startX - horizontalMargin;
+                    const maxX = fullscreenRegion.endX + horizontalMargin - viewportWidthInChars;
+
+                    // Vertical bounds - allow margin above region start, infinite below
+                    const minY = fullscreenRegion.startY - verticalMargin;
+
+                    return {
+                        x: Math.max(minX, Math.min(maxX, newX)),
+                        y: Math.max(minY, newY)
+                    };
+                });
+            } else {
+                setViewOffset(prev => ({ x: prev.x + deltaWorldX, y: prev.y + deltaWorldY }));
+            }
         }
-    }, [zoomLevel, viewOffset, screenToWorld, getEffectiveCharDims, findListAt, worldData]);
+    }, [zoomLevel, viewOffset, screenToWorld, getEffectiveCharDims, findListAt, worldData, isFullscreenMode, fullscreenRegion]);
 
     const handlePanStart = useCallback((clientX: number, clientY: number): PanStartInfo | null => {
         isPanningRef.current = true;
@@ -4884,22 +5117,43 @@ export function useWorldEngine({
         const deltaWorldY = dy / effectiveCharHeight;
 
         // Calculate new offset
-        const newOffset = {
+        let newOffset = {
             x: panStartInfo.startOffset.x - deltaWorldX,
             y: panStartInfo.startOffset.y - deltaWorldY,
         };
-        
+
+        // Constrain panning if in fullscreen mode
+        if (isFullscreenMode && fullscreenRegion) {
+            const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
+            const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
+            const viewportWidthInChars = viewportWidth / effectiveCharWidth;
+            const viewportHeightInChars = viewportHeight / effectiveCharHeight;
+
+            const regionWidth = fullscreenRegion.endX - fullscreenRegion.startX + 1;
+            const horizontalMargin = regionWidth * 0.2; // 20% margin on each side
+            const verticalMargin = viewportHeightInChars * 0.5; // 50% viewport margin top
+
+            // Allow horizontal panning within margins
+            const minX = fullscreenRegion.startX - horizontalMargin;
+            const maxX = fullscreenRegion.endX + horizontalMargin - viewportWidthInChars;
+            newOffset.x = Math.max(minX, Math.min(maxX, newOffset.x));
+
+            // Vertical - allow margin above region start, infinite below
+            const minY = fullscreenRegion.startY - verticalMargin;
+            newOffset.y = Math.max(minY, newOffset.y);
+        }
+
         // Track viewport history with throttling to prevent infinite loops
         if (typeof window !== 'undefined' && effectiveCharWidth > 0 && effectiveCharHeight > 0) {
             const viewportWidth = window.innerWidth;
             const viewportHeight = window.innerHeight;
             const centerX = newOffset.x + (viewportWidth / effectiveCharWidth) / 2;
             const centerY = newOffset.y + (viewportHeight / effectiveCharHeight) / 2;
-            
+
         }
-        
+
         return newOffset;
-    }, [zoomLevel, getEffectiveCharDims, viewOffset]);
+    }, [zoomLevel, getEffectiveCharDims, viewOffset, isFullscreenMode, fullscreenRegion]);
 
     const handlePanEnd = useCallback((newOffset: Point): void => {
         if (isPanningRef.current) {

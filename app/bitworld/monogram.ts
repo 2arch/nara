@@ -10,7 +10,7 @@ interface MonogramTrailPosition {
 }
 
 // --- Monogram Pattern Types ---
-export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'geometry3d' | 'macintosh';
+export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'geometry3d' | 'macintosh' | 'loading';
 
 // 3D Geometry System - Extensible foundation for any 3D format
 export interface Vertex3D {
@@ -179,6 +179,7 @@ const useMonogramSystem = (
             nara: ['░', '▒', '▓', '█'], // Back to varied blocks for texture
             geometry3d: [' ', '░', '▒', '▓', '█'], // Standard block progression for 3D
             macintosh: [' ', '░', '▒', '▓', '█'], // Standard block progression for Mac face
+            loading: [' ', '░', '▒', '▓', '█'], // Standard block progression for loading text
         };
 
         const charSet = chars[mode] || chars.perlin;
@@ -188,8 +189,8 @@ const useMonogramSystem = (
 
     // Get color from palette based on value
     const getColorFromPalette = useCallback((value: number, mode: MonogramMode, accentColor: string): string => {
-        if (mode === 'nara' || mode === 'macintosh') {
-            // Use accent color for NARA and Macintosh modes
+        if (mode === 'nara' || mode === 'macintosh' || mode === 'loading') {
+            // Use accent color for NARA, Macintosh, and Loading modes
             return accentColor;
         }
 
@@ -534,40 +535,41 @@ const useMonogramSystem = (
     const textBitmapCache = useRef<{ [key: string]: ImageData | ExtendedBitmapData }>({});
     
     // Text-to-bitmap renderer using Canvas API (with caching)
-    const textToBitmap = useCallback((text: string, fontSize: number = 48): ImageData | null => {
+    const textToBitmap = useCallback((text: string, fontSize: number = 48, bold: boolean = false): ImageData | null => {
         if (typeof window === 'undefined') return null;
-        
-        const cacheKey = `${text}-${fontSize}`;
+
+        const cacheKey = `${text}-${fontSize}-${bold ? 'bold' : 'normal'}`;
         if (textBitmapCache.current[cacheKey]) {
             const cached = textBitmapCache.current[cacheKey];
             return 'imageData' in cached ? cached.imageData : cached;
         }
-        
+
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         if (!ctx) return null;
-        
-        // Set up canvas for text measurement
-        ctx.font = `${fontSize}px "Courier New", Courier, monospace`;
+
+        // Set up canvas for text measurement with optional bold
+        const fontWeight = bold ? 'bold ' : '';
+        ctx.font = `${fontWeight}${fontSize}px "Courier New", Courier, monospace`;
         ctx.textBaseline = 'top';
         const textMetrics = ctx.measureText(text);
         const textWidth = Math.ceil(textMetrics.width);
         const textHeight = fontSize * 1.2; // Account for descenders
-        
+
         // Resize canvas to fit text with some padding
         canvas.width = textWidth + 4;
         canvas.height = textHeight + 4;
-        
+
         // Clear and redraw with correct settings
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.font = `${fontSize}px "Courier New", Courier, monospace`;
+        ctx.font = `${fontWeight}${fontSize}px "Courier New", Courier, monospace`;
         ctx.textBaseline = 'top';
         ctx.fillStyle = 'white';
         ctx.fillText(text, 2, 2);
-        
+
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         textBitmapCache.current[cacheKey] = imageData;
-        
+
         return imageData;
     }, []);
     
@@ -727,6 +729,72 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
 
     return 0;
 }, []);
+
+    // Loading text - static centered display with progress bar
+    const calculateLoading = useCallback((x: number, y: number, time: number, viewportBounds?: {
+        startX: number,
+        startY: number,
+        endX: number,
+        endY: number
+    }): number => {
+        if (!viewportBounds) return 0;
+
+        // Use simple text bitmap (same size as NARA, but bold)
+        const textBitmap = textToBitmap("LOADING", 120, true);
+        if (!textBitmap) return 0;
+
+        // Calculate viewport dimensions and center
+        const viewportWidth = viewportBounds.endX - viewportBounds.startX;
+        const viewportHeight = viewportBounds.endY - viewportBounds.startY;
+        const centerX = (viewportBounds.startX + viewportBounds.endX) / 2;
+        const centerY = (viewportBounds.startY + viewportBounds.endY) / 2;
+
+        // Scale text to match NARA (60% of viewport width)
+        const scale = (viewportWidth * 0.6) / textBitmap.width;
+
+        // Transform screen coordinates relative to center
+        const relX = x - centerX;
+        const relY = y - centerY;
+
+        // Check if we're in the text area (centered vertically)
+        const textBitmapX = Math.floor(relX / scale + textBitmap.width / 2);
+        const textBitmapY = Math.floor(relY / scale + textBitmap.height / 2);
+
+        // Text rendering
+        if (textBitmapX >= 0 && textBitmapX < textBitmap.width &&
+            textBitmapY >= 0 && textBitmapY < textBitmap.height) {
+            const pixelIndex = (textBitmapY * textBitmap.width + textBitmapX) * 4;
+            const brightness = textBitmap.data[pixelIndex] / 255;
+            if (brightness > 0) {
+                return Math.max(0, Math.min(1, brightness));
+            }
+        }
+
+        // Loading bar - absolutely positioned at bottom center
+        const barMarginFromBottom = 3; // characters from bottom
+        const barY = viewportHeight / 2 - barMarginFromBottom - 1; // Position from center
+        const barWidth = viewportWidth * 0.5; // 50% of viewport width
+        const barStartX = -barWidth / 2;
+        const barEndX = barWidth / 2;
+
+        // Check if we're on the loading bar row (1 character tall)
+        if (Math.abs(relY - barY) < 0.5) {
+            if (relX >= barStartX && relX <= barEndX) {
+                // Calculate position along bar
+                const progress = (relX - barStartX) / barWidth;
+
+                // 67% filled with solid, 33% with dithered
+                if (progress <= 0.67) {
+                    return 1.0; // Solid fill (█)
+                } else {
+                    return 0.5; // Dithered unfilled (▒)
+                }
+            }
+        }
+
+        return 0;
+    }, [textToBitmap]);
+
     // NARA text stretch distortion effect
     const calculateNara = useCallback((x: number, y: number, time: number, viewportBounds?: {
         startX: number,
@@ -894,9 +962,10 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
             case 'nara': return calculateNara(x, y, time, viewportBounds);
             case 'geometry3d': return calculate3DGeometry(x, y, time, viewportBounds);
             case 'macintosh': return calculateMacintosh(x, y, time, viewportBounds);
+            case 'loading': return calculateLoading(x, y, time, viewportBounds);
             default: return calculatePerlin(x, y, time);
         }
-    }, [calculatePerlin, calculateNara, calculate3DGeometry, calculateMacintosh]);
+    }, [calculatePerlin, calculateNara, calculate3DGeometry, calculateMacintosh, calculateLoading]);
 
     // Calculate comet trail effect at a specific position
     const calculateTrailEffect = useCallback((x: number, y: number): number => {
@@ -965,8 +1034,8 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
         const time = timeRef.current;
         const accentColor = textColor || '#000000'; // Default to black if not provided
 
-        // For NARA, Macintosh, and 3D geometry modes, use finer sampling for better quality
-        const step = (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh') ? 1 : Math.max(1, Math.floor(3 - options.complexity * 2));
+        // For NARA, Macintosh, Loading, and 3D geometry modes, use finer sampling for better quality
+        const step = (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading') ? 1 : Math.max(1, Math.floor(3 - options.complexity * 2));
         
         for (let worldY = Math.floor(startWorldY); worldY <= Math.ceil(endWorldY); worldY += step) {
             for (let worldX = Math.floor(startWorldX); worldX <= Math.ceil(endWorldX); worldX += step) {
@@ -974,8 +1043,8 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                 let rawValue: number;
                 let intensity: number;
 
-                // Special handling for nara, macintosh, and geometry3d modes that need viewport bounds
-                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh') {
+                // Special handling for nara, macintosh, loading, and geometry3d modes that need viewport bounds
+                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading') {
                     const viewportBounds = {
                         startX: startWorldX,
                         startY: startWorldY,
@@ -995,7 +1064,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                 
                 // Skip very low intensity cells for performance (adjusted for trail effects)
                 const minThreshold = trailEffect > 0 ? 0.05 :
-                    ((options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh') ? 0.15 : 0.1);
+                    ((options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading') ? 0.15 : 0.1);
                 if (intensity < minThreshold) continue;
                 
                 const char = getCharForIntensity(intensity, options.mode);
@@ -1010,7 +1079,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                     const g = parseInt(hex.substring(2, 4), 16);
                     const b = parseInt(hex.substring(4, 6), 16);
                     color = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-                } else if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'clear' || options.mode === 'macintosh') {
+                } else if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'clear' || options.mode === 'macintosh' || options.mode === 'loading') {
                     // Use text color for all monochromatic modes
                     color = accentColor;
                 } else {
@@ -1018,8 +1087,8 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                     color = getColorFromPalette(colorValue, options.mode, accentColor);
                 }
                 
-                // For NARA, Macintosh, and geometry3d modes, only set the exact position to avoid grid artifacts
-                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh') {
+                // For NARA, Macintosh, Loading, and geometry3d modes, only set the exact position to avoid grid artifacts
+                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading') {
                     const key = `${worldX},${worldY}`;
                     pattern[key] = {
                         char,
@@ -1047,7 +1116,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
 
     // Cycle to next mode
     const cycleMode = useCallback(() => {
-        const modes: MonogramMode[] = ['clear', 'perlin'];
+        const modes: MonogramMode[] = ['clear', 'perlin', 'loading', 'nara'];
         setOptions(prev => {
             const currentIndex = modes.indexOf(prev.mode);
             const nextIndex = (currentIndex + 1) % modes.length;
