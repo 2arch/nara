@@ -396,8 +396,6 @@ export function useWorldEngine({
     const [agentStartPos, setAgentStartPos] = useState<Point>({ x: 0, y: 0 }); // Track where agent started for line breaks
     const [agentSelectionStart, setAgentSelectionStart] = useState<Point | null>(null);
     const [agentSelectionEnd, setAgentSelectionEnd] = useState<Point | null>(null);
-    const agentSelectionTargetRef = useRef<Point | null>(null);
-    const agentSelectionCompleteRef = useRef<boolean>(false); // Track if expansion is complete
     const lastViewOffsetRef = useRef<Point>(viewOffset);
 
     // Agent greetings
@@ -1595,55 +1593,25 @@ export function useWorldEngine({
                     const height = Math.floor(Math.random() * 40) + 20; // 20-60 cells tall
 
                     const selStart = { x: agentPos.x, y: agentPos.y };
-                    const targetEnd = { x: agentPos.x + width, y: agentPos.y + height };
+                    const selEnd = { x: agentPos.x + width, y: agentPos.y + height };
 
-                    // Store target in ref so it persists across ticks
-                    agentSelectionTargetRef.current = targetEnd;
-                    agentSelectionCompleteRef.current = false; // Reset completion flag
-
+                    // Make selection instant - no gradual expansion
                     setAgentSelectionStart(selStart);
-                    setAgentSelectionEnd(selStart); // Start at same point (like mouse down)
+                    setAgentSelectionEnd(selEnd);
                     setAgentState('selecting');
 
-                    return 0; // Reset timer
+                    return 0; // Reset timer for hold period
                 }
 
-                // If selecting, gradually expand selection to target (like dragging mouse)
-                if (agentState === 'selecting' && agentSelectionStart && agentSelectionEnd && agentSelectionTargetRef.current) {
-                    const targetEnd = agentSelectionTargetRef.current;
-
-                    // Calculate how far we still need to go
-                    const currentWidth = agentSelectionEnd.x - agentSelectionStart.x;
-                    const currentHeight = agentSelectionEnd.y - agentSelectionStart.y;
-                    const targetWidth = targetEnd.x - agentSelectionStart.x;
-                    const targetHeight = targetEnd.y - agentSelectionStart.y;
-
-                    // Continue expanding until we reach target (expand 2 cells per tick for faster visible growth)
-                    if (currentWidth < targetWidth || currentHeight < targetHeight) {
-                        setAgentSelectionEnd({
-                            x: currentWidth < targetWidth ? Math.min(agentSelectionEnd.x + 2, targetEnd.x) : agentSelectionEnd.x,
-                            y: currentHeight < targetHeight ? Math.min(agentSelectionEnd.y + 2, targetEnd.y) : agentSelectionEnd.y
-                        });
-                        return newTimer; // Keep timer running while expanding
-                    } else {
-                        // Selection reached target size
-                        if (!agentSelectionCompleteRef.current) {
-                            // Just finished expanding - mark as complete and reset timer for hold period
-                            agentSelectionCompleteRef.current = true;
-                            return 0;
-                        }
-
-                        // Hold the selection for a moment before clearing
-                        if (newTimer > 15) { // Hold for 1.5 seconds after completing
-                            setAgentSelectionStart(null);
-                            setAgentSelectionEnd(null);
-                            agentSelectionTargetRef.current = null;
-                            agentSelectionCompleteRef.current = false;
-                            setAgentState('idle');
-                            return 0;
-                        }
-                        return newTimer; // Continue incrementing during hold
+                // If selecting, just hold the selection then clear
+                if (agentState === 'selecting') {
+                    if (newTimer > 10) { // Hold for 1 second
+                        setAgentSelectionStart(null);
+                        setAgentSelectionEnd(null);
+                        setAgentState('idle');
+                        return 0;
                     }
+                    return newTimer; // Continue incrementing during hold
                 }
 
                 return newTimer;
