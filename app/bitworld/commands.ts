@@ -82,7 +82,7 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'clear', 'cam', 'indent', 'bound', 'unbound', 'list', 'unlist', 'move', 'upload', 'pro', 'spawn', 'full'];
+const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'clear', 'cam', 'indent', 'bound', 'unbound', 'list', 'unlist', 'move', 'upload', 'pro', 'spawn', 'full', 'zoom', 'agent'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro', 'Neureal'];
@@ -668,18 +668,27 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         animationDelay?: number;
         frameDelay?: number;
         color?: string;
+        background?: string;
     }) => {
-        
+
         const key = `${pos.x},${pos.y}`;
         const animationDelay = options?.animationDelay || 1500;
         const frameDelay = options?.frameDelay || 80;
-        
+
         // Symbol sequence for despawn animation - progressive decay
         const despawnSymbols = ['@', '#', '*', '=', ';', ':', '•', '·', '.'];
         let symbolIndex = 0;
-        
-        // Set initial character with optional color
-        const charData = options?.color ? { char, color: options.color } : char;
+
+        // Set initial character with optional color and background (using StyledCharacter format)
+        const charData = (options?.color || options?.background)
+            ? {
+                char,
+                style: {
+                    ...(options.color && { color: options.color }),
+                    ...(options.background && { background: options.background })
+                }
+              }
+            : char;
         setModeState(prev => ({
             ...prev,
             lightModeData: {
@@ -2015,6 +2024,46 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             // Return command execution for world engine to handle glitch region creation
             return {
                 command: 'glitch',
+                args: [],
+                commandStartPos: commandState.commandStartPos
+            };
+        }
+
+        if (commandToExecute.startsWith('zoom')) {
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            // Return command execution for world engine to handle zoom animation
+            return {
+                command: 'zoom',
+                args: [],
+                commandStartPos: commandState.commandStartPos
+            };
+        }
+
+        if (commandToExecute.startsWith('agent')) {
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            // Return command execution for world engine to handle agent toggle
+            return {
+                command: 'agent',
                 args: [],
                 commandStartPos: commandState.commandStartPos
             };

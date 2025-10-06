@@ -1116,7 +1116,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
 
     // Cycle to next mode
     const cycleMode = useCallback(() => {
-        const modes: MonogramMode[] = ['clear', 'perlin', 'loading', 'nara'];
+        const modes: MonogramMode[] = ['clear', 'perlin'];
         setOptions(prev => {
             const currentIndex = modes.indexOf(prev.mode);
             const nextIndex = (currentIndex + 1) % modes.length;

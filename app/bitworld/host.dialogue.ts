@@ -19,6 +19,7 @@ export interface UseHostDialogueProps {
   getViewportCenter: () => Point;
   setDialogueText: (text: string) => void;
   onAuthSuccess?: (username: string) => void;
+  onTriggerZoom?: (targetZoom: number, centerPos: Point) => void;
 }
 
 // Helper to map message IDs to field names
@@ -34,7 +35,7 @@ function getFieldNameFromMessageId(messageId: string): string {
   return fieldMap[messageId] || 'username'; // Default to username for verification flow
 }
 
-export function useHostDialogue({ setHostData, getViewportCenter, setDialogueText, onAuthSuccess }: UseHostDialogueProps) {
+export function useHostDialogue({ setHostData, getViewportCenter, setDialogueText, onAuthSuccess, onTriggerZoom }: UseHostDialogueProps) {
   const [state, setState] = useState<HostDialogueState>({
     isActive: false,
     currentFlowId: null,
@@ -102,6 +103,9 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       return false;
     }
 
+    // Set processing state immediately to prevent race conditions
+    setState(prev => ({ ...prev, isProcessing: true }));
+
     // Validate input
     const validation = await validateInput(input);
     if (!validation.valid) {
@@ -112,14 +116,13 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
         centerPos: getViewportCenter(),
         timestamp: Date.now()
       });
+      setState(prev => ({ ...prev, isProcessing: false }));
       return false;
     }
 
     // Store collected data based on message ID (more precise than inputType)
     const fieldName = getFieldNameFromMessageId(currentMessage.id);
     const newCollectedData = { ...state.collectedData, [fieldName]: input };
-
-    setState(prev => ({ ...prev, collectedData: newCollectedData, isProcessing: true }));
 
     // Determine next message
     let nextMessageId: string | null = null;
@@ -254,19 +257,49 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           timestamp: Date.now()
         });
 
-        // Navigate to user's world
-        if (onAuthSuccess) {
-          setTimeout(() => {
-            onAuthSuccess(username);
-          }, 2000);
-        }
-
         setState(prev => ({
           ...prev,
           currentMessageId: 'profile_created',
-          isProcessing: false,
-          isActive: false // End flow
+          isProcessing: false
         }));
+
+        // After showing "welcome to nara!", transition to "explore"
+        setTimeout(() => {
+          const exploreMessage = flow.messages['explore'];
+          const centerPos = getViewportCenter();
+
+          setHostData({
+            text: exploreMessage.text,
+            centerPos: centerPos,
+            timestamp: Date.now()
+          });
+
+          setState(prev => ({
+            ...prev,
+            currentMessageId: 'explore',
+            isProcessing: false,
+            isActive: true // Keep flow active
+          }));
+
+          // After showing explore, zoom out with explore as center
+          setTimeout(() => {
+            if (onTriggerZoom) {
+              // Zoom out to 0.5x (50% of current zoom)
+              onTriggerZoom(0.5, centerPos);
+            }
+
+            // After zoom completes, navigate to user's world
+            setTimeout(() => {
+              if (onAuthSuccess) {
+                onAuthSuccess(username);
+              }
+              setState(prev => ({
+                ...prev,
+                isActive: false // End flow
+              }));
+            }, 1000); // Wait for zoom animation to complete
+          }, 2000); // Wait 2 seconds before zooming
+        }, 2000);
 
         return true;
       } catch (error: any) {

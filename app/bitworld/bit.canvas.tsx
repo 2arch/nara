@@ -53,13 +53,14 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
     const [cursorTrail, setCursorTrail] = useState<CursorTrailPosition[]>([]);
+    const [agentTrail, setAgentTrail] = useState<CursorTrailPosition[]>([]);
     const [statePublishStatuses, setStatePublishStatuses] = useState<Record<string, boolean>>({});
     const [mouseWorldPos, setMouseWorldPos] = useState<Point | null>(null);
     const [isShiftPressed, setIsShiftPressed] = useState<boolean>(false);
     const [shiftDragStartPos, setShiftDragStartPos] = useState<Point | null>(null);
     const [selectedImageKey, setSelectedImageKey] = useState<string | null>(null);
     const lastCursorPosRef = useRef<Point | null>(null);
-    const [hostTextVisibleChars, setHostTextVisibleChars] = useState<number>(0);
+    const lastEnterPressRef = useRef<number>(0);
 
     // Track shift key state globally
     useEffect(() => {
@@ -122,12 +123,38 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         }
     );
 
+    // Zoom handler for host dialogue
+    const handleZoom = useCallback((targetZoomMultiplier: number, centerPos: Point) => {
+        const startZoom = engine.zoomLevel;
+        const targetZoom = startZoom * targetZoomMultiplier;
+        const duration = 500; // 500ms animation
+        const startTime = Date.now();
+
+        const animateZoom = () => {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            // Easing function for smooth animation (ease-out)
+            const easeProgress = 1 - Math.pow(1 - progress, 3);
+
+            const currentZoom = startZoom + (targetZoom - startZoom) * easeProgress;
+            engine.setZoomLevel(currentZoom);
+
+            if (progress < 1) {
+                requestAnimationFrame(animateZoom);
+            }
+        };
+
+        requestAnimationFrame(animateZoom);
+    }, [engine]);
+
     // Host dialogue system for onboarding
     const hostDialogue = useHostDialogue({
         setHostData: engine.setHostData,
         getViewportCenter: engine.getViewportCenter,
         setDialogueText: engine.setDialogueText,
-        onAuthSuccess
+        onAuthSuccess,
+        onTriggerZoom: handleZoom
     });
 
     // Handle email verification flow
@@ -169,28 +196,53 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         }
     }, [isVerifyingEmail, hostModeEnabled, hostDialogue.isHostActive, engine, hostDialogue]);
 
-    // Animate host text typing
+    // Listen for auth state changes (when user verifies email in another tab)
     useEffect(() => {
-        if (!engine.hostData || !engine.hostData.timestamp) {
-            setHostTextVisibleChars(0);
-            return;
-        }
+        if (!hostModeEnabled || hostDialogue.isHostActive) return;
 
-        const fullText = engine.hostData.text;
-        const CHAR_SPEED = 50; // 50ms per character (same as addAIResponse)
-        let currentCharCount = 0;
+        const { auth } = require('../firebase');
+        const { onAuthStateChanged } = require('firebase/auth');
 
-        const typeInterval = setInterval(() => {
-            currentCharCount++;
-            setHostTextVisibleChars(currentCharCount);
+        const unsubscribe = onAuthStateChanged(auth, async (user: any) => {
+            if (user && !hostDialogue.isHostActive) {
+                const { getUserProfile } = require('../firebase');
+                const profile = await getUserProfile(user.uid);
 
-            if (currentCharCount >= fullText.length) {
-                clearInterval(typeInterval);
+                if (profile && !profile.username) {
+                    engine.setHostMode({ isActive: true, currentInputType: null });
+                    engine.setChatMode({
+                        isActive: true,
+                        currentInput: '',
+                        inputPositions: [],
+                        isProcessing: false
+                    });
+
+                    if (engine.updateSettings) {
+                        engine.updateSettings({ textColor: '#FFA500' });
+                    }
+
+                    engine.setHostData({
+                        text: 'email verified!',
+                        color: '#00AA00',
+                        centerPos: engine.getViewportCenter(),
+                        timestamp: Date.now()
+                    });
+
+                    if (canvasRef.current) {
+                        canvasRef.current.focus();
+                    }
+
+                    setTimeout(() => {
+                        hostDialogue.startFlow('verification');
+                    }, 2000);
+                }
             }
-        }, CHAR_SPEED);
+        });
 
-        return () => clearInterval(typeInterval);
-    }, [engine.hostData?.timestamp]); // Re-run when hostData changes
+        return () => unsubscribe();
+    }, [hostModeEnabled, hostDialogue, engine]);
+
+    // No animation - host text renders immediately (removed typing animation)
 
     // Start host flow when enabled
     useEffect(() => {
@@ -221,7 +273,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 canvasRef.current.focus();
             }
         }
-    }, [hostModeEnabled, initialHostFlow, hostDialogue, engine]);
+    }, [hostModeEnabled, initialHostFlow, hostDialogue.isHostActive]);
 
     // Sync host input type with engine for password masking
     useEffect(() => {
@@ -233,7 +285,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 engine.setHostMode({ isActive: true, currentInputType: inputType });
             }
         }
-    }, [hostDialogue.isHostActive, hostDialogue.hostState.currentMessageId, engine.hostMode.currentInputType, engine]);
+    }, [hostDialogue.isHostActive, hostDialogue.hostState.currentMessageId]);
 
     // Controller system for handling keyboard inputs
     const { registerGroup, handleKeyDown: handleKeyDownFromController, getHelpText } = useControllerSystem();
@@ -507,7 +559,36 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
     }, [engine.cursorPos]);
 
+    // Track agent position for trail
+    const lastAgentPosRef = useRef<Point | null>(null);
+    useEffect(() => {
+        if (!engine.agentEnabled) {
+            setAgentTrail([]);
+            return;
+        }
 
+        const currentPos = engine.agentPos;
+        const lastPos = lastAgentPosRef.current;
+
+        // Only add to trail if position actually changed
+        if (!lastPos || lastPos.x !== currentPos.x || lastPos.y !== currentPos.y) {
+            const now = Date.now();
+            const newTrailPosition = {
+                x: currentPos.x,
+                y: currentPos.y,
+                timestamp: now
+            };
+
+            setAgentTrail(prev => {
+                // Add new position and filter out old ones
+                const cutoffTime = now - CURSOR_TRAIL_FADE_MS;
+                const updated = [newTrailPosition, ...prev.filter(pos => pos.timestamp >= cutoffTime)];
+                return updated;
+            });
+
+            lastAgentPosRef.current = {...currentPos};
+        }
+    }, [engine.agentEnabled, engine.agentPos]);
 
     // --- Bounds Spatial Index Cache ---
     const boundsIndexRef = useRef<Map<string, {isFocused: boolean, textColor: string}> | null>(null);
@@ -982,7 +1063,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
 
                 const char = typeof charData === 'string' ? charData : charData.char;
-                const color = typeof charData === 'object' && charData.style?.color ? charData.style.color : engine.textColor;
+                const color = typeof charData === 'object' && charData.style?.color
+                    ? charData.style.color
+                    : engine.textColor;
 
                 // Calculate opacity if fadeStart is set
                 let opacity = 1.0;
@@ -993,10 +1076,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-                    if (char && char.trim() !== '') {
-                        // Apply text background: use currentTextStyle.background if set,
+                    if (char) {
+                        // Apply text background: use charData.style.background if set, otherwise currentTextStyle.background,
                         // or backgroundColor when monogram is ACTUALLY enabled (to block out monogram pattern)
-                        const textBackground = engine.currentTextStyle.background || (monogramSystem.options.enabled ? engine.backgroundColor : undefined);
+                        const textBackground = (typeof charData === 'object' && charData.style?.background)
+                            ? charData.style.background
+                            : (engine.currentTextStyle.background || (monogramSystem.options.enabled ? engine.backgroundColor : undefined));
                         if (textBackground) {
                             if (opacity < 1.0) {
                                 ctx.globalAlpha = opacity;
@@ -1008,14 +1093,16 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             }
                         }
 
-                        // Render the character with opacity
-                        if (opacity < 1.0) {
-                            ctx.globalAlpha = opacity;
-                        }
-                        ctx.fillStyle = color; // Use character's color or default
-                        ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
-                        if (opacity < 1.0) {
-                            ctx.globalAlpha = 1.0; // Reset alpha
+                        // Render the character with opacity (only if not a space)
+                        if (char.trim() !== '') {
+                            if (opacity < 1.0) {
+                                ctx.globalAlpha = opacity;
+                            }
+                            ctx.fillStyle = color; // Use character's color or default
+                            ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                            if (opacity < 1.0) {
+                                ctx.globalAlpha = 1.0; // Reset alpha
+                            }
                         }
                     }
                 }
@@ -1088,18 +1175,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 textStartY = Math.floor(engine.hostData.centerPos.y - totalHeight / 2);
             }
 
-            // Render each character (only up to hostTextVisibleChars for typing effect)
-            let totalCharsRendered = 0;
+            // Render all characters immediately (no typing effect)
             let y = textStartY;
             wrappedLines.forEach(line => {
                 for (let x = 0; x < line.length; x++) {
-                    // Only render if we haven't reached the visible char limit
-                    if (totalCharsRendered >= hostTextVisibleChars) {
-                        totalCharsRendered++;
-                        continue;
-                    }
-                    totalCharsRendered++;
-
                     const char = line[x];
                     const worldX = textStartX + x;
                     const worldY = y;
@@ -1687,10 +1766,16 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             // Check if this is a text command with a color
                             else if (commandText.startsWith('text ')) {
                                 const parts = commandText.split(' ');
-                                const colorArg = parts[1];
+                                let colorArg: string | undefined;
 
-                                // Skip flags and non-color arguments
-                                if (colorArg && colorArg !== '--g') {
+                                // Handle both /text [color] and /text --g [color]
+                                if (parts[1] === '--g' && parts.length > 2) {
+                                    colorArg = parts[2];
+                                } else if (parts[1] && parts[1] !== '--g') {
+                                    colorArg = parts[1];
+                                }
+
+                                if (colorArg) {
                                     swatchColor = COLOR_MAP[colorArg.toLowerCase()] || (colorArg.startsWith('#') ? colorArg : null);
                                 }
                             }
@@ -2421,6 +2506,96 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Agent ===
+        if (engine.agentEnabled) {
+            // Draw agent selection (if active)
+            if (engine.agentSelectionStart && engine.agentSelectionEnd) {
+                const minX = Math.min(engine.agentSelectionStart.x, engine.agentSelectionEnd.x);
+                const maxX = Math.max(engine.agentSelectionStart.x, engine.agentSelectionEnd.x);
+                const minY = Math.min(engine.agentSelectionStart.y, engine.agentSelectionEnd.y);
+                const maxY = Math.max(engine.agentSelectionStart.y, engine.agentSelectionEnd.y);
+
+                // Fill selected region with semi-transparent pink (no border - just like user selection)
+                for (let y = minY; y <= maxY; y++) {
+                    for (let x = minX; x <= maxX; x++) {
+                        const screenPos = engine.worldToScreen(x, y, currentZoom, currentOffset);
+
+                        // Only draw if visible on screen
+                        if (screenPos.x >= -effectiveCharWidth &&
+                            screenPos.x <= cssWidth &&
+                            screenPos.y >= -effectiveCharHeight &&
+                            screenPos.y <= cssHeight) {
+
+                            ctx.fillStyle = 'rgba(255, 105, 180, 0.3)'; // Semi-transparent pink
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        }
+                    }
+                }
+            }
+
+            // Draw agent trail (older positions first, for proper layering)
+            const now = Date.now();
+            for (let i = agentTrail.length - 1; i >= 0; i--) {
+                const trailPos = agentTrail[i];
+                const age = now - trailPos.timestamp;
+
+                // Skip positions that are too old
+                if (age > CURSOR_TRAIL_FADE_MS) continue;
+
+                // Skip the current position only if it perfectly matches the agent
+                if (age < 20 &&
+                    trailPos.x === engine.agentPos.x &&
+                    trailPos.y === engine.agentPos.y) continue;
+
+                // Calculate opacity based on age (1.0 to 0.0)
+                const opacity = 1 - (age / CURSOR_TRAIL_FADE_MS);
+
+                const trailScreenPos = engine.worldToScreen(
+                    trailPos.x, trailPos.y,
+                    currentZoom, currentOffset
+                );
+
+                // Only draw if visible on screen
+                if (trailScreenPos.x >= -effectiveCharWidth &&
+                    trailScreenPos.x <= cssWidth &&
+                    trailScreenPos.y >= -effectiveCharHeight &&
+                    trailScreenPos.y <= cssHeight) {
+
+                    // Draw faded pink cursor rectangle
+                    ctx.fillStyle = `rgba(255, 105, 180, ${opacity})`; // Pink with fade
+                    ctx.fillRect(
+                        trailScreenPos.x,
+                        trailScreenPos.y,
+                        effectiveCharWidth,
+                        effectiveCharHeight
+                    );
+                }
+            }
+
+            // Draw current agent position
+            const agentScreenPos = engine.worldToScreen(engine.agentPos.x, engine.agentPos.y, currentZoom, currentOffset);
+
+            // Only draw if visible on screen
+            if (agentScreenPos.x >= -effectiveCharWidth &&
+                agentScreenPos.x <= cssWidth &&
+                agentScreenPos.y >= -effectiveCharHeight &&
+                agentScreenPos.y <= cssHeight) {
+
+                // Draw pink cursor for agent
+                ctx.fillStyle = '#FF69B4'; // Hot pink
+                ctx.fillRect(agentScreenPos.x, agentScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+
+                // Check if there's a character at agent position and render it in white
+                const agentKey = `${engine.agentPos.x},${engine.agentPos.y}`;
+                const charData = engine.worldData[agentKey];
+                if (charData) {
+                    const char = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
+                    ctx.fillStyle = '#FFFFFF'; // White text on pink background
+                    ctx.fillText(char, agentScreenPos.x, agentScreenPos.y + verticalTextOffset);
+                }
+            }
+        }
+
         // === Render Nav Dialogue ===
         if (engine.isNavVisible) {
             renderNavDialogue({
@@ -2876,8 +3051,14 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     const handleCanvasKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
         // Intercept Enter in host mode for chat input processing
         if (hostDialogue.isHostActive && engine.chatMode.isActive && e.key === 'Enter' && !e.shiftKey) {
+            // Debounce: prevent rapid Enter presses
+            const now = Date.now();
+            if (now - lastEnterPressRef.current < 500) return; // 500ms debounce
+
             const userInput = engine.chatMode.currentInput.trim();
             if (userInput && !hostDialogue.isHostProcessing) {
+                lastEnterPressRef.current = now;
+
                 // Process through host dialogue
                 hostDialogue.processInput(userInput);
 

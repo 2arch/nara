@@ -143,6 +143,12 @@ export interface WorldEngine {
     }>>;
     clearChatData: () => void;
     clearLightModeData: () => void;
+    // Agent system
+    agentEnabled: boolean;
+    agentPos: Point;
+    agentState: 'idle' | 'typing' | 'moving' | 'walking' | 'selecting';
+    agentSelectionStart: Point | null;
+    agentSelectionEnd: Point | null;
     // Host mode for onboarding
     hostMode: {
         isActive: boolean;
@@ -380,6 +386,33 @@ export function useWorldEngine({
     const [chatData, setChatData] = useState<WorldData>({});
     const [searchData, setSearchData] = useState<WorldData>({});
     const [hostData, setHostData] = useState<{ text: string; color?: string; centerPos: Point; timestamp?: number } | null>(null);
+
+    // === Agent System ===
+    const [agentEnabled, setAgentEnabled] = useState<boolean>(false);
+    const [agentPos, setAgentPos] = useState<Point>({ x: 0, y: 0 });
+    const [agentState, setAgentState] = useState<'idle' | 'typing' | 'moving' | 'walking' | 'selecting'>('idle');
+    const [agentIdleTimer, setAgentIdleTimer] = useState<number>(0);
+    const [agentTargetPos, setAgentTargetPos] = useState<Point | null>(null);
+    const [agentStartPos, setAgentStartPos] = useState<Point>({ x: 0, y: 0 }); // Track where agent started for line breaks
+    const [agentSelectionStart, setAgentSelectionStart] = useState<Point | null>(null);
+    const [agentSelectionEnd, setAgentSelectionEnd] = useState<Point | null>(null);
+    const agentSelectionTargetRef = useRef<Point | null>(null);
+    const agentSelectionCompleteRef = useRef<boolean>(false); // Track if expansion is complete
+    const lastViewOffsetRef = useRef<Point>(viewOffset);
+
+    // Agent greetings
+    const AGENT_GREETINGS = [
+        'hello',
+        'hi there',
+        'hey',
+        'greetings',
+        'howdy',
+        'sup',
+        'yo',
+        'hiya',
+        'what\'s up',
+        'good to see you'
+    ];
     
     // === Text Frame and Cluster System ===
     const [textFrames, setTextFrames] = useState<Array<{
@@ -1454,6 +1487,229 @@ export function useWorldEngine({
         }
     }, [cursorPos, chatMode.isActive, commandState.isActive, updateCameraTracking]);
 
+    // === Agent Behavior System ===
+    useEffect(() => {
+        if (!agentEnabled) return;
+
+        const agentInterval = setInterval(() => {
+            setAgentIdleTimer(prev => {
+                const newTimer = prev + 1;
+
+                // If moving toward target (viewport relocation), take one step
+                if (agentState === 'moving' && agentTargetPos) {
+                    setAgentPos(prevPos => {
+                        const dx = agentTargetPos.x - prevPos.x;
+                        const dy = agentTargetPos.y - prevPos.y;
+
+                        // If reached target, stop moving
+                        if (dx === 0 && dy === 0) {
+                            setAgentState('idle');
+                            setAgentTargetPos(null);
+                            return prevPos;
+                        }
+
+                        // Move one step toward target (prioritize horizontal or vertical based on distance)
+                        const stepX = dx !== 0 ? (dx > 0 ? 1 : -1) : 0;
+                        const stepY = dy !== 0 ? (dy > 0 ? 1 : -1) : 0;
+
+                        // Move in one direction at a time (alternate between x and y)
+                        if (Math.abs(dx) >= Math.abs(dy)) {
+                            return { x: prevPos.x + stepX, y: prevPos.y };
+                        } else {
+                            return { x: prevPos.x, y: prevPos.y + stepY };
+                        }
+                    });
+                }
+
+                // Random walking when idle (10% chance each tick to start walking)
+                if (agentState === 'idle' && Math.random() < 0.1) {
+                    setAgentState('walking');
+                    return 0;
+                }
+
+                // If walking, take a step
+                if (agentState === 'walking') {
+                    setAgentPos(prevPos => {
+                        // Random walk: choose random direction
+                        const directions = [
+                            { x: 1, y: 0 },   // right
+                            { x: -1, y: 0 },  // left
+                            { x: 0, y: 1 },   // down
+                            { x: 0, y: -1 },  // up
+                        ];
+                        const dir = directions[Math.floor(Math.random() * directions.length)];
+                        return { x: prevPos.x + dir.x, y: prevPos.y + dir.y };
+                    });
+
+                    // After 3-5 steps, go back to idle
+                    if (newTimer > Math.random() * 2 + 3) {
+                        setAgentState('idle');
+                        return 0;
+                    }
+                }
+
+                // Random chance to say a greeting while idle (2% chance each tick)
+                if (agentState === 'idle' && Math.random() < 0.02) {
+                    const greeting = AGENT_GREETINGS[Math.floor(Math.random() * AGENT_GREETINGS.length)];
+
+                    // Set to typing state to disable repositioning and walking during typing
+                    setAgentState('typing');
+
+                    // Type out greeting character by character with cursor trail
+                    let charIndex = 0;
+                    // Start typing 2 spaces to the right of current position
+                    const startPos = { x: agentPos.x + 2, y: agentPos.y };
+
+                    const typeInterval = setInterval(() => {
+                        if (charIndex < greeting.length) {
+                            const char = greeting[charIndex];
+                            const charPos = { x: startPos.x + charIndex, y: startPos.y };
+
+                            // Add ephemeral text for each character (including spaces) with pink bg and white text
+                            addEphemeralText(
+                                charPos,
+                                char,
+                                {
+                                    animationDelay: 3000,
+                                    color: '#FFFFFF',
+                                    background: '#FF69B4'
+                                }
+                            );
+
+                            charIndex++;
+
+                            // Move agent cursor to position after the character (like normal typing)
+                            setAgentPos({ x: startPos.x + charIndex, y: startPos.y });
+                        } else {
+                            // Done typing, go back to idle
+                            clearInterval(typeInterval);
+                            setAgentState('idle');
+                        }
+                    }, 100);
+                }
+
+                // Random chance to start selecting a region while idle (8% chance)
+                if (agentState === 'idle' && Math.random() < 0.08) {
+                    // Pick a LARGE rectangular region to select
+                    const width = Math.floor(Math.random() * 60) + 40; // 40-100 cells wide
+                    const height = Math.floor(Math.random() * 40) + 20; // 20-60 cells tall
+
+                    const selStart = { x: agentPos.x, y: agentPos.y };
+                    const targetEnd = { x: agentPos.x + width, y: agentPos.y + height };
+
+                    // Store target in ref so it persists across ticks
+                    agentSelectionTargetRef.current = targetEnd;
+                    agentSelectionCompleteRef.current = false; // Reset completion flag
+
+                    setAgentSelectionStart(selStart);
+                    setAgentSelectionEnd(selStart); // Start at same point (like mouse down)
+                    setAgentState('selecting');
+
+                    return 0; // Reset timer
+                }
+
+                // If selecting, gradually expand selection to target (like dragging mouse)
+                if (agentState === 'selecting' && agentSelectionStart && agentSelectionEnd && agentSelectionTargetRef.current) {
+                    const targetEnd = agentSelectionTargetRef.current;
+
+                    // Calculate how far we still need to go
+                    const currentWidth = agentSelectionEnd.x - agentSelectionStart.x;
+                    const currentHeight = agentSelectionEnd.y - agentSelectionStart.y;
+                    const targetWidth = targetEnd.x - agentSelectionStart.x;
+                    const targetHeight = targetEnd.y - agentSelectionStart.y;
+
+                    // Continue expanding until we reach target (expand 2 cells per tick for faster visible growth)
+                    if (currentWidth < targetWidth || currentHeight < targetHeight) {
+                        setAgentSelectionEnd({
+                            x: currentWidth < targetWidth ? Math.min(agentSelectionEnd.x + 2, targetEnd.x) : agentSelectionEnd.x,
+                            y: currentHeight < targetHeight ? Math.min(agentSelectionEnd.y + 2, targetEnd.y) : agentSelectionEnd.y
+                        });
+                        return newTimer; // Keep timer running while expanding
+                    } else {
+                        // Selection reached target size
+                        if (!agentSelectionCompleteRef.current) {
+                            // Just finished expanding - mark as complete and reset timer for hold period
+                            agentSelectionCompleteRef.current = true;
+                            return 0;
+                        }
+
+                        // Hold the selection for a moment before clearing
+                        if (newTimer > 15) { // Hold for 1.5 seconds after completing
+                            setAgentSelectionStart(null);
+                            setAgentSelectionEnd(null);
+                            agentSelectionTargetRef.current = null;
+                            agentSelectionCompleteRef.current = false;
+                            setAgentState('idle');
+                            return 0;
+                        }
+                        return newTimer; // Continue incrementing during hold
+                    }
+                }
+
+                return newTimer;
+            });
+        }, 100); // Tick every 100ms for smooth movement
+
+        return () => clearInterval(agentInterval);
+    }, [agentEnabled, agentState, agentPos, agentTargetPos, addEphemeralText]);
+
+    // Agent follows viewport when panning
+    useEffect(() => {
+        if (!agentEnabled) return;
+
+        const viewOffsetDiff = {
+            x: Math.abs(viewOffset.x - lastViewOffsetRef.current.x),
+            y: Math.abs(viewOffset.y - lastViewOffsetRef.current.y)
+        };
+
+        // If viewport has moved significantly (panning occurred)
+        if (viewOffsetDiff.x > 1 || viewOffsetDiff.y > 1) {
+            // Update the last known viewport position
+            lastViewOffsetRef.current = { ...viewOffset };
+
+            // Don't move agent if it's currently typing
+            if (agentState === 'typing') return;
+
+            // Check if agent is off-screen
+            const centerPos = getViewportCenter();
+            const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
+
+            // Calculate viewport dimensions in world coordinates
+            const viewportWidth = window.innerWidth / effectiveCharWidth;
+            const viewportHeight = window.innerHeight / effectiveCharHeight;
+
+            // Calculate viewport bounds
+            const viewportLeft = centerPos.x - viewportWidth / 2;
+            const viewportRight = centerPos.x + viewportWidth / 2;
+            const viewportTop = centerPos.y - viewportHeight / 2;
+            const viewportBottom = centerPos.y + viewportHeight / 2;
+
+            // Check if agent is off-screen
+            const isOffScreen = agentPos.x < viewportLeft || agentPos.x > viewportRight ||
+                                agentPos.y < viewportTop || agentPos.y > viewportBottom;
+
+            // Only relocate if agent is off-screen
+            if (isOffScreen) {
+                // Use smaller dimension to ensure agent stays in visible region
+                const maxRadius = Math.min(viewportWidth, viewportHeight) / 2.5; // Stay within ~40% of viewport
+
+                // Random angle and distance using polar coordinates
+                const angle = Math.random() * Math.PI * 2; // 0 to 2π
+                const distance = Math.random() * maxRadius;
+
+                // Convert polar to cartesian and add to center
+                const newTargetPos = {
+                    x: Math.round(centerPos.x + distance * Math.cos(angle)),
+                    y: Math.round(centerPos.y + distance * Math.sin(angle))
+                };
+
+                // Set target and start moving
+                setAgentTargetPos(newTargetPos);
+                setAgentState('moving');
+            }
+        }
+    }, [agentEnabled, viewOffset, agentState, agentPos, getViewportCenter, getEffectiveCharDims, zoomLevel]);
+
     // === Bounded Region Detection ===
     const getBoundedRegion = useCallback((worldData: WorldData, cursorPos: Point): { startX: number; endX: number; y: number } | null => {
         // Check if cursor is within any bounded region
@@ -2071,6 +2327,46 @@ export function useWorldEngine({
                         setDialogueWithRevert(`Spawn point set at (${spawnPoint.x}, ${spawnPoint.y})`, setDialogueText);
                     } else {
                         setDialogueWithRevert("Failed to set spawn point", setDialogueText);
+                    }
+                } else if (exec.command === 'zoom') {
+                    // Gradually zoom in by 30%
+                    const startZoom = zoomLevel;
+                    const targetZoom = startZoom * 1.3;
+                    const duration = 500; // 500ms animation
+                    const startTime = Date.now();
+
+                    const animateZoom = () => {
+                        const elapsed = Date.now() - startTime;
+                        const progress = Math.min(elapsed / duration, 1);
+
+                        // Easing function for smooth animation (ease-out)
+                        const easeProgress = 1 - Math.pow(1 - progress, 3);
+
+                        const currentZoom = startZoom + (targetZoom - startZoom) * easeProgress;
+                        setZoomLevel(currentZoom);
+
+                        if (progress < 1) {
+                            requestAnimationFrame(animateZoom);
+                        }
+                    };
+
+                    requestAnimationFrame(animateZoom);
+                    setDialogueWithRevert(`Zooming to ${Math.round(targetZoom * 100)}%`, setDialogueText);
+                } else if (exec.command === 'agent') {
+                    // Toggle agent
+                    const newAgentEnabled = !agentEnabled;
+                    setAgentEnabled(newAgentEnabled);
+
+                    if (newAgentEnabled) {
+                        // Initialize agent at viewport center
+                        const centerPos = getViewportCenter();
+                        setAgentPos(centerPos);
+                        setAgentStartPos(centerPos); // Set initial start position
+                        setAgentState('idle');
+                        setAgentIdleTimer(0);
+                        setDialogueWithRevert("Agent enabled", setDialogueText);
+                    } else {
+                        setDialogueWithRevert("Agent disabled", setDialogueText);
                     }
                 } else if (exec.command === 'full') {
                     // Toggle fullscreen mode for bound/list at cursor
@@ -3060,16 +3356,20 @@ export function useWorldEngine({
                     return true;
                 }
             } else if (key === 'Escape') {
-                // Exit chat mode
-                setChatMode({
-                    isActive: false,
-                    currentInput: '',
-                    inputPositions: [],
-                    isProcessing: false
-                });
-                // Clear any chat input
-                setChatData({});
-                setDialogueWithRevert("Chat mode deactivated.", setDialogueText);
+                // Only allow exiting chat mode if NOT in host mode
+                if (!hostMode.isActive) {
+                    // Exit chat mode
+                    setChatMode({
+                        isActive: false,
+                        currentInput: '',
+                        inputPositions: [],
+                        isProcessing: false
+                    });
+                    // Clear any chat input
+                    setChatData({});
+                    setDialogueWithRevert("Chat mode deactivated.", setDialogueText);
+                }
+                // In host mode, Escape does nothing - user stays in chat mode
                 return true;
             } else if (key.length === 1) {
                 // Add character to chat input
@@ -5508,6 +5808,12 @@ export function useWorldEngine({
         hostData,
         setHostData,
         addInstantAIResponse,
+        // Agent system
+        agentEnabled,
+        agentPos,
+        agentState,
+        agentSelectionStart,
+        agentSelectionEnd,
         getCharacter,
         getCharacterStyle,
         isImageData,
