@@ -480,7 +480,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             }
             
             let finalTextColor: string;
-            
+            let preserveCustomText = false;
+
             if (textColor) {
                 // User specified text color - validate it
                 const hexTextColor = (COLOR_MAP[textColor.toLowerCase()] || textColor).toUpperCase();
@@ -489,6 +490,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     return false;
                 }
                 finalTextColor = hexTextColor;
+            } else if (settings?.hasCustomTextColor && settings?.textColor) {
+                // User has previously set a custom text color via /text --g
+                // Preserve it instead of auto-assigning
+                finalTextColor = settings.textColor;
+                preserveCustomText = true;
             } else {
                 // Auto-assign text color based on background brightness for optimal contrast
                 const rgb = parseInt(hexBgColor.substring(1), 16);
@@ -1360,10 +1366,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                         }
                     }));
 
-                    // Save to settings
+                    // Save to settings and mark as custom text color
                     if (updateSettings) {
                         updateSettings({
-                            textColor: finalTextColor
+                            textColor: finalTextColor,
+                            hasCustomTextColor: true
                         });
                     }
 
@@ -2329,6 +2336,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         // Mode system exports
         modeState,
         switchMode,
+        switchBackgroundMode,
         addEphemeralText,
         addAIResponse,
         addInstantAIResponse,

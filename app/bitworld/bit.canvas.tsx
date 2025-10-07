@@ -154,7 +154,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         getViewportCenter: engine.getViewportCenter,
         setDialogueText: engine.setDialogueText,
         onAuthSuccess,
-        onTriggerZoom: handleZoom
+        onTriggerZoom: handleZoom,
+        setHostMode: engine.setHostMode,
+        setChatMode: engine.setChatMode
     });
 
     // Handle email verification flow

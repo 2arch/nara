@@ -20,6 +20,8 @@ export interface UseHostDialogueProps {
   setDialogueText: (text: string) => void;
   onAuthSuccess?: (username: string) => void;
   onTriggerZoom?: (targetZoom: number, centerPos: Point) => void;
+  setHostMode?: (mode: { isActive: boolean; currentInputType: any }) => void;
+  setChatMode?: (mode: { isActive: boolean; currentInput: string; inputPositions: any[]; isProcessing: boolean }) => void;
 }
 
 // Helper to map message IDs to field names
@@ -35,7 +37,7 @@ function getFieldNameFromMessageId(messageId: string): string {
   return fieldMap[messageId] || 'username'; // Default to username for verification flow
 }
 
-export function useHostDialogue({ setHostData, getViewportCenter, setDialogueText, onAuthSuccess, onTriggerZoom }: UseHostDialogueProps) {
+export function useHostDialogue({ setHostData, getViewportCenter, setDialogueText, onAuthSuccess, onTriggerZoom, setHostMode, setChatMode }: UseHostDialogueProps) {
   const [state, setState] = useState<HostDialogueState>({
     isActive: false,
     currentFlowId: null,
@@ -257,49 +259,31 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           timestamp: Date.now()
         });
 
+        // End the flow immediately after showing success
         setState(prev => ({
           ...prev,
           currentMessageId: 'profile_created',
-          isProcessing: false
+          isProcessing: false,
+          isActive: false // End flow - don't restart
         }));
 
-        // After showing "welcome to nara!", transition to "explore"
-        setTimeout(() => {
-          const exploreMessage = flow.messages['explore'];
-          const centerPos = getViewportCenter();
-
-          setHostData({
-            text: exploreMessage.text,
-            centerPos: centerPos,
-            timestamp: Date.now()
+        // Disable host mode and chat mode to prevent restart
+        if (setHostMode) {
+          setHostMode({ isActive: false, currentInputType: null });
+        }
+        if (setChatMode) {
+          setChatMode({
+            isActive: false,
+            currentInput: '',
+            inputPositions: [],
+            isProcessing: false
           });
+        }
 
-          setState(prev => ({
-            ...prev,
-            currentMessageId: 'explore',
-            isProcessing: false,
-            isActive: true // Keep flow active
-          }));
-
-          // After showing explore, zoom out with explore as center
-          setTimeout(() => {
-            if (onTriggerZoom) {
-              // Zoom out to 0.5x (50% of current zoom)
-              onTriggerZoom(0.5, centerPos);
-            }
-
-            // After zoom completes, navigate to user's world
-            setTimeout(() => {
-              if (onAuthSuccess) {
-                onAuthSuccess(username);
-              }
-              setState(prev => ({
-                ...prev,
-                isActive: false // End flow
-              }));
-            }, 1000); // Wait for zoom animation to complete
-          }, 2000); // Wait 2 seconds before zooming
-        }, 2000);
+        // Instantly navigate to user's world
+        if (onAuthSuccess) {
+          onAuthSuccess(username);
+        }
 
         return true;
       } catch (error: any) {

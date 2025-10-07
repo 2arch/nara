@@ -8,6 +8,7 @@ export interface WorldSettings {
     labelProximityThreshold: number;
     textColor?: string;
     backgroundColor?: string;
+    hasCustomTextColor?: boolean; // Track if user has set custom text color via /text --g
     customBackground?: {
         type: 'ai-generated' | 'custom';
         content: string; // SVG string for AI backgrounds, color/gradient for custom

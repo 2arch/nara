@@ -1,7 +1,7 @@
 // hooks/useWorldEngine.ts
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useWorldSave } from './world.save'; // Import the new hook
-import { useCommandSystem, CommandState, CommandExecution, BackgroundMode } from './commands'; // Import command system
+import { useCommandSystem, CommandState, CommandExecution, BackgroundMode, COLOR_MAP } from './commands'; // Import command system
 import { getSmartIndentation, calculateWordDeletion, extractLineCharacters, detectTextBlocks, findClosestBlock, extractAllTextBlocks, groupTextBlocksIntoClusters, filterClustersForLabeling, generateTextBlockFrames, generateHierarchicalFrames, HierarchicalFrameSystem, HierarchicalFrame, HierarchyLevel, defaultDistanceConfig, DistanceBasedConfig } from './bit.blocks'; // Import block detection utilities
 import { useWorldSettings, WorldSettings } from './settings';
 import { set, ref } from 'firebase/database';
@@ -411,6 +411,17 @@ export function useWorldEngine({
         'what\'s up',
         'good to see you'
     ];
+
+    // Agent commands - simple commands the agent can execute
+    const AGENT_COMMANDS = [
+        '/bg chalk',
+        '/bg sulfur',
+        '/bg garden',
+        '/bg white',
+        '/text chalk',
+        '/text sulfur',
+        '/text garden'
+    ];
     
     // === Text Frame and Cluster System ===
     const [textFrames, setTextFrames] = useState<Array<{
@@ -785,6 +796,7 @@ export function useWorldEngine({
         fullscreenRegion,
         setFullscreenMode,
         exitFullscreenMode,
+        switchBackgroundMode,
     } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, updateSettings, settings, getEffectiveCharDims, zoomLevel });
 
     // Generate search data when search pattern changes
@@ -1495,6 +1507,12 @@ export function useWorldEngine({
 
                 // If moving toward target (viewport relocation), take one step
                 if (agentState === 'moving' && agentTargetPos) {
+                    // Clear any active selection when starting to move
+                    if (agentSelectionStart || agentSelectionEnd) {
+                        setAgentSelectionStart(null);
+                        setAgentSelectionEnd(null);
+                    }
+
                     setAgentPos(prevPos => {
                         const dx = agentTargetPos.x - prevPos.x;
                         const dy = agentTargetPos.y - prevPos.y;
@@ -1521,6 +1539,11 @@ export function useWorldEngine({
 
                 // Random walking when idle (10% chance each tick to start walking)
                 if (agentState === 'idle' && Math.random() < 0.1) {
+                    // Clear any active selection when starting to walk
+                    if (agentSelectionStart || agentSelectionEnd) {
+                        setAgentSelectionStart(null);
+                        setAgentSelectionEnd(null);
+                    }
                     setAgentState('walking');
                     return 0;
                 }
@@ -1546,8 +1569,14 @@ export function useWorldEngine({
                     }
                 }
 
-                // Random chance to say a greeting while idle (2% chance each tick)
-                if (agentState === 'idle' && Math.random() < 0.02) {
+                // Random chance to say a greeting while idle (1% chance each tick)
+                if (agentState === 'idle' && Math.random() < 0.01) {
+                    // Clear any active selection when starting to type
+                    if (agentSelectionStart || agentSelectionEnd) {
+                        setAgentSelectionStart(null);
+                        setAgentSelectionEnd(null);
+                    }
+
                     const greeting = AGENT_GREETINGS[Math.floor(Math.random() * AGENT_GREETINGS.length)];
 
                     // Set to typing state to disable repositioning and walking during typing
@@ -1586,11 +1615,69 @@ export function useWorldEngine({
                     }, 100);
                 }
 
+                // Random chance to execute a command while idle (3% chance each tick)
+                if (agentState === 'idle' && Math.random() < 0.03) {
+                    // Clear any active selection when starting to type command
+                    if (agentSelectionStart || agentSelectionEnd) {
+                        setAgentSelectionStart(null);
+                        setAgentSelectionEnd(null);
+                    }
+
+                    const command = AGENT_COMMANDS[Math.floor(Math.random() * AGENT_COMMANDS.length)];
+
+                    // Set to typing state
+                    setAgentState('typing');
+
+                    // Type out command character by character
+                    let charIndex = 0;
+                    const startPos = { x: agentPos.x + 2, y: agentPos.y };
+
+                    const typeInterval = setInterval(() => {
+                        if (charIndex < command.length) {
+                            const char = command[charIndex];
+                            const charPos = { x: startPos.x + charIndex, y: startPos.y };
+
+                            // Add ephemeral text with pink bg and white text
+                            addEphemeralText(
+                                charPos,
+                                char,
+                                {
+                                    animationDelay: 2000,
+                                    color: '#FFFFFF',
+                                    background: '#FF69B4'
+                                }
+                            );
+
+                            charIndex++;
+                            setAgentPos({ x: startPos.x + charIndex, y: startPos.y });
+                        } else {
+                            // Done typing, execute the command
+                            clearInterval(typeInterval);
+
+                            // Parse and execute command
+                            const parts = command.trim().substring(1).split(' '); // Remove '/' and split
+                            const cmd = parts[0];
+                            const args = parts.slice(1);
+
+                            if (cmd === 'bg' && args.length > 0) {
+                                switchBackgroundMode('color', args[0]);
+                            } else if (cmd === 'text' && args.length > 0) {
+                                const colorValue = COLOR_MAP[args[0]] || args[0];
+                                if (updateSettings) {
+                                    updateSettings({ textColor: colorValue });
+                                }
+                            }
+
+                            setAgentState('idle');
+                        }
+                    }, 100);
+                }
+
                 // Random chance to start selecting a region while idle (8% chance)
                 if (agentState === 'idle' && Math.random() < 0.08) {
-                    // Pick a LARGE rectangular region to select
-                    const width = Math.floor(Math.random() * 60) + 40; // 40-100 cells wide
-                    const height = Math.floor(Math.random() * 40) + 20; // 20-60 cells tall
+                    // Pick a small rectangular region to select
+                    const width = Math.floor(Math.random() * 20) + 10; // 10-30 cells wide
+                    const height = Math.floor(Math.random() * 10) + 5; // 5-15 cells tall
 
                     const selStart = { x: agentPos.x, y: agentPos.y };
                     const selEnd = { x: agentPos.x + width, y: agentPos.y + height };
@@ -1619,7 +1706,7 @@ export function useWorldEngine({
         }, 100); // Tick every 100ms for smooth movement
 
         return () => clearInterval(agentInterval);
-    }, [agentEnabled, agentState, agentPos, agentTargetPos, addEphemeralText]);
+    }, [agentEnabled, agentState, agentPos, agentTargetPos, addEphemeralText, switchBackgroundMode, updateSettings]);
 
     // Agent follows viewport when panning
     useEffect(() => {

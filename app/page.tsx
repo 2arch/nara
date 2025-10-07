@@ -54,10 +54,18 @@ export default function Home() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       setAuthLoading(false);
+
+      // If user is authenticated and on home page, redirect to their world
+      if (user && pathname === '/') {
+        const username = await getUsernameByUid(user.uid);
+        if (username) {
+          router.push(`/@${username}`);
+        }
+      }
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [pathname, router]);
 
   const engine = useWorldEngine({
     worldId: null,

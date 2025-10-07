@@ -32,7 +32,7 @@ export const welcomeFlow: HostFlow = {
   messages: {
     'welcome': {
       id: 'welcome',
-      text: 'type your email to get access',
+      text: 'type your email to join',
       expectsInput: true,
       inputType: 'email',
       inputValidator: (input: string) => {
@@ -88,13 +88,6 @@ export const verificationFlow: HostFlow = {
     'profile_created': {
       id: 'profile_created',
       text: 'welcome to nara!',
-      expectsInput: false,
-      nextMessageId: 'explore'
-    },
-
-    'explore': {
-      id: 'explore',
-      text: 'explore',
       expectsInput: false
     }
   }
