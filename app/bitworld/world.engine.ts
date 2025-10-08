@@ -168,6 +168,8 @@ export interface WorldEngine {
         queryText?: string;
     }) => { width: number; height: number };
     setWorldData: React.Dispatch<React.SetStateAction<WorldData>>;
+    // Monogram command callback
+    setMonogramCommandHandler: (handler: (args: string[]) => void) => void;
     // Text compilation access
     getCompiledText: () => { [lineY: number]: string };
     compiledTextCache: { [lineY: number]: string }; // Direct access to compiled text cache for real-time updates
@@ -245,6 +247,7 @@ interface UseWorldEngineProps {
     username?: string; // Add username for routing
     enableCommands?: boolean; // Enable/disable command system (default: true)
     initialStateName?: string | null; // Initial state name from URL
+    onMonogramCommand?: (args: string[]) => void; // Callback for monogram commands
 }
 
 
@@ -289,6 +292,7 @@ export function useWorldEngine({
     enableCommands = true, // Default to enabled
     username,            // Username for routing
     initialStateName = null, // Initial state name from URL
+    onMonogramCommand,   // Callback for monogram commands
 }: UseWorldEngineProps): WorldEngine {
     // === Router ===
     const router = useRouter();
@@ -305,10 +309,13 @@ export function useWorldEngine({
     const [focusedBoundKey, setFocusedBoundKey] = useState<string | null>(null); // Track which bound is focused
     const [boundCycleIndex, setBoundCycleIndex] = useState<number>(0); // Track which bound to cycle to next
     const [dialogueText, setDialogueText] = useState('');
-    
+
     // Double ESC detection for AI interruption
     const lastEscTimeRef = useRef<number | null>(null);
     const [lastEnterX, setLastEnterX] = useState<number | null>(null); // Track X position from last Enter
+
+    // Monogram command handler ref
+    const monogramCommandHandlerRef = useRef<((args: string[]) => void) | null>(null);
     
     // Auto-clear temporary dialogue messages
     useAutoDialogue(dialogueText, setDialogueText);
@@ -2218,54 +2225,11 @@ export function useWorldEngine({
                         setDialogueWithRevert("Usage: /label 'text' [textColor] [backgroundColor] or /label --distance <number>", setDialogueText);
                     }
                 } else if (exec.command === 'monogram') {
-                    // Handle monogram background effects
-                    if (exec.args.length === 0) {
-                        // Toggle monogram on/off (keeps current mode)
-                        const newEnabled = !monogramSystem.options.enabled;
-                        monogramSystem.updateOption('enabled', newEnabled);
-
-                        // Save to settings
-                        const newSettings = {
-                            monogramEnabled: newEnabled,
-                            monogramMode: monogramSystem.options.mode
-                        };
-                        updateSettings(newSettings);
-                        saveSettingsToFirebase(newSettings);
-
-                        setDialogueWithRevert(
-                            newEnabled ? `Monogram enabled (${monogramSystem.options.mode})` : "Monogram disabled",
-                            setDialogueText
-                        );
-                    } else if (exec.args[0] === 'clear') {
-                        // Set to clear mode (only trails, no background pattern)
-                        monogramSystem.updateOption('mode', 'clear');
-                        monogramSystem.updateOption('enabled', true);
-
-                        // Save to settings
-                        const newSettings = {
-                            monogramEnabled: true,
-                            monogramMode: 'clear' as const
-                        };
-                        updateSettings(newSettings);
-                        saveSettingsToFirebase(newSettings);
-
-                        setDialogueWithRevert("Monogram: clear mode", setDialogueText);
-                    } else if (exec.args[0] === 'perlin') {
-                        // Set to perlin mode (flowing noise pattern)
-                        monogramSystem.updateOption('mode', 'perlin');
-                        monogramSystem.updateOption('enabled', true);
-
-                        // Save to settings
-                        const newSettings = {
-                            monogramEnabled: true,
-                            monogramMode: 'perlin' as const
-                        };
-                        updateSettings(newSettings);
-                        saveSettingsToFirebase(newSettings);
-
-                        setDialogueWithRevert("Monogram: perlin mode", setDialogueText);
+                    // Handle monogram via callback
+                    if (monogramCommandHandlerRef.current) {
+                        monogramCommandHandlerRef.current(exec.args);
                     } else {
-                        setDialogueWithRevert("Usage: /monogram [clear|perlin]", setDialogueText);
+                        setDialogueWithRevert("Monogram control not available", setDialogueText);
                     }
                 } else if (exec.command === 'signout') {
                     // Sign out from Firebase
@@ -5915,6 +5879,9 @@ export function useWorldEngine({
         setHostData,
         addInstantAIResponse,
         setWorldData,
+        setMonogramCommandHandler: (handler: (args: string[]) => void) => {
+            monogramCommandHandlerRef.current = handler;
+        },
         // Agent system
         agentEnabled,
         agentPos,

@@ -2144,7 +2144,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             
             return { command: 'pending_selection', args: [commandToExecute], commandStartPos: commandState.commandStartPos };
         }
-        
+
         // Handle monogram command
         if (commandToExecute.startsWith('monogram')) {
             const args = inputParts.slice(1);

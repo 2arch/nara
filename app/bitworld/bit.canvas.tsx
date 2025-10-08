@@ -125,6 +125,28 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         }
     );
 
+    // Monogram command handler
+    const handleMonogramCommand = useCallback((args: string[]) => {
+        if (args.length === 0) {
+            // Toggle monogram on/off (keeps current mode)
+            const newEnabled = !monogramSystem.options.enabled;
+            monogramSystem.updateOption('enabled', newEnabled);
+        } else if (args[0] === 'clear') {
+            // Set to clear mode (only trails, no background pattern)
+            monogramSystem.updateOption('mode', 'clear');
+            monogramSystem.updateOption('enabled', true);
+        } else if (args[0] === 'perlin') {
+            // Set to perlin mode (flowing noise pattern)
+            monogramSystem.updateOption('mode', 'perlin');
+            monogramSystem.updateOption('enabled', true);
+        }
+    }, [monogramSystem]);
+
+    // Register monogram command handler with engine
+    useEffect(() => {
+        engine.setMonogramCommandHandler(handleMonogramCommand);
+    }, [engine, handleMonogramCommand]);
+
     // Zoom handler for host dialogue
     const handleZoom = useCallback((targetZoomMultiplier: number, centerPos: Point) => {
         const startZoom = engine.zoomLevel;
