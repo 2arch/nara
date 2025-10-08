@@ -134,7 +134,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         },
         searchPattern: '', // No search pattern initially
         isSearchActive: false, // Search not active initially
-        cameraMode: 'default', // Default camera mode (ripstop behavior)
+        cameraMode: typeof window !== 'undefined' && 'ontouchstart' in window ? 'focus' : 'default', // Focus mode on mobile, default on desktop
         isIndentEnabled: true, // Smart indentation enabled by default
         isMoveMode: false, // Move mode not active initially
         gridMode: 'dots', // Default grid mode

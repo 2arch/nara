@@ -137,7 +137,7 @@ export default function Home() {
 
   if (authLoading || engine.isLoadingWorld) {
     return (
-      <div className="w-screen h-screen flex items-center justify-center" style={{backgroundColor: '#F8F8F0'}}>
+      <div className="w-screen flex items-center justify-center" style={{backgroundColor: '#F8F8F0', height: '100dvh'}}>
         <div style={{ fontFamily: 'monospace', fontSize: '14px', color: '#000' }}>
           {authLoading ? 'loading...' : 'redirecting...'}
         </div>
@@ -151,7 +151,7 @@ export default function Home() {
     const initialFlow = isVerifyingEmail ? undefined : "welcome";
 
     return (
-      <div className="w-screen h-screen relative" style={{backgroundColor: '#F8F8F0'}}>
+      <div className="w-screen relative" style={{backgroundColor: '#F8F8F0', height: '100dvh'}}>
         <BitCanvas
           engine={engine}
           cursorColorAlternate={cursorAlternate}
@@ -172,7 +172,7 @@ export default function Home() {
 
   // Use old form-based UI for /login and /signup routes
   return (
-    <div className="w-screen h-screen relative" style={{backgroundColor: '#F8F8F0'}}>
+    <div className="w-screen relative" style={{backgroundColor: '#F8F8F0', height: '100dvh'}}>
       <BitHomeCanvas
         engine={engine}
         cursorColorAlternate={cursorAlternate}

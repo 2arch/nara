@@ -208,7 +208,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
                     // If user already has a username, they're an existing user - just redirect
                     if (profile && profile.username) {
-                        // Don't prompt for username, auth success handler will redirect them
+                        // Redirect immediately to their world
+                        const router = require('next/navigation').useRouter;
+                        window.location.href = `/${profile.username}`;
                         return;
                     }
                 }
@@ -986,8 +988,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             lastBoundsDataRef.current = currentBoundsData;
         }
 
-        // Use intermediate offset if panning, otherwise use engine's state
-        const currentOffset = isMiddleMouseDownRef.current ? intermediatePanOffsetRef.current : engine.viewOffset;
+        // Use intermediate offset if panning (mouse or touch), otherwise use engine's state
+        const currentOffset = (isMiddleMouseDownRef.current || isTouchPanningRef.current) ? intermediatePanOffsetRef.current : engine.viewOffset;
         const verticalTextOffset = 0;
 
         // --- Actual Drawing (Copied from previous `draw` function) ---
@@ -2959,8 +2961,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         canvasRef.current?.focus(); // Ensure focus for keyboard
 
-        // On mobile, focus the hidden input to trigger iOS keyboard
-        if ('ontouchstart' in window && hiddenInputRef.current) {
+        // On mobile, focus the hidden input to trigger iOS keyboard only when host dialogue expects input
+        if ('ontouchstart' in window && hiddenInputRef.current && hostDialogue.isExpectingInput()) {
             hiddenInputRef.current.focus();
         }
     }, [engine, canvasSize, router, handleNavClick, handleCoordinateClick, handleColorFilterClick, handleSortModeClick, handleStateClick, handleIndexClick, hostDialogue]);
@@ -3275,7 +3277,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         const touches = Array.from(e.touches).map(touch => ({
             id: touch.identifier,
             x: touch.clientX - rect.left,
-            y: touch.clientY - rect.top
+            y: touch.clientY - rect.top,
+            clientX: touch.clientX,
+            clientY: touch.clientY
         }));
 
         touchStartRef.current = { touches };
@@ -3285,9 +3289,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             // Two-finger gesture - prepare for pan or pinch
             e.preventDefault();
             isTouchPanningRef.current = true;
-            const centerX = (touches[0].x + touches[1].x) / 2;
-            const centerY = (touches[0].y + touches[1].y) / 2;
-            const info = engine.handlePanStart(centerX + rect.left, centerY + rect.top);
+            const centerClientX = (touches[0].clientX + touches[1].clientX) / 2;
+            const centerClientY = (touches[0].clientY + touches[1].clientY) / 2;
+            const info = engine.handlePanStart(centerClientX, centerClientY);
             panStartInfoRef.current = info;
             intermediatePanOffsetRef.current = { ...engine.viewOffset };
 
@@ -3310,19 +3314,21 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         const touches = Array.from(e.touches).map(touch => ({
             id: touch.identifier,
             x: touch.clientX - rect.left,
-            y: touch.clientY - rect.top
+            y: touch.clientY - rect.top,
+            clientX: touch.clientX,
+            clientY: touch.clientY
         }));
 
         if (touches.length === 2 && isTouchPanningRef.current && panStartInfoRef.current) {
             e.preventDefault();
 
-            // Two-finger pan
-            const centerX = (touches[0].x + touches[1].x) / 2;
-            const centerY = (touches[0].y + touches[1].y) / 2;
-            const newOffset = engine.handlePanMove(centerX + rect.left, centerY + rect.top, panStartInfoRef.current);
+            // Two-finger pan - use clientX/clientY for absolute viewport coordinates
+            const centerClientX = (touches[0].clientX + touches[1].clientX) / 2;
+            const centerClientY = (touches[0].clientY + touches[1].clientY) / 2;
+            const newOffset = engine.handlePanMove(centerClientX, centerClientY, panStartInfoRef.current);
             intermediatePanOffsetRef.current = newOffset;
 
-            // Pinch-to-zoom
+            // Pinch-to-zoom - use canvas-relative coordinates
             const dx = touches[1].x - touches[0].x;
             const dy = touches[1].y - touches[0].y;
             const currentDistance = Math.sqrt(dx * dx + dy * dy);
@@ -3331,7 +3337,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const scale = currentDistance / lastPinchDistanceRef.current;
                 const delta = (scale - 1) * 100; // Convert to wheel delta equivalent
 
-                // Use center point for zoom
+                // Use canvas-relative center point for zoom
+                const centerX = (touches[0].x + touches[1].x) / 2;
+                const centerY = (touches[0].y + touches[1].y) / 2;
                 engine.handleCanvasWheel(0, -delta, centerX, centerY, true);
             }
 
@@ -3402,8 +3410,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         } as React.MouseEvent<HTMLCanvasElement>;
                         handleCanvasClick(syntheticEvent);
 
-                        // Focus hidden input for iOS keyboard
-                        if (hiddenInputRef.current) {
+                        // Focus hidden input for iOS keyboard only when host dialogue expects input
+                        if (hiddenInputRef.current && hostDialogue.isExpectingInput()) {
                             hiddenInputRef.current.focus();
                         }
                     }

@@ -63,7 +63,7 @@ export default function UserHome() {
 
   if (authLoading || uidLookupLoading || engine.isLoadingWorld) {
     return (
-      <div className="w-screen h-screen flex items-center justify-center" style={{ backgroundColor: '#000000' }}>
+      <div className="w-screen flex items-center justify-center" style={{ backgroundColor: '#000000', height: '100dvh' }}>
         <div style={{ color: '#F0FF6A' }}>Loading...</div>
       </div>
     );
@@ -71,14 +71,14 @@ export default function UserHome() {
 
   if (!targetUserUid) {
     return (
-      <div className="w-screen h-screen flex items-center justify-center" style={{ backgroundColor: '#000000' }}>
+      <div className="w-screen flex items-center justify-center" style={{ backgroundColor: '#000000', height: '100dvh' }}>
         <div style={{ color: '#F0FF6A' }}>User not found</div>
       </div>
     );
   }
 
   return (
-    <div className="w-screen h-screen relative" style={{}}>
+    <div className="w-screen relative" style={{height: '100dvh'}}>
       {/* Render Grid3DBackground when space mode is active */}
       {engine.backgroundMode === 'space' && (
         <Grid3DBackground 

@@ -131,7 +131,7 @@ Output only the result.`,
                 config: {
                     maxOutputTokens: 75,
                     temperature: 0.9,
-                    systemInstruction: 'Transform text. Output result only. Be sharp and direct.'
+                    systemInstruction: 'Transform text. Output result only. Be brutally concise.'
                 }
             }),
             new Promise((_, reject) => {
@@ -178,7 +178,7 @@ export async function explainText(text: string, analysisType: string = 'analysis
                 config: {
                     maxOutputTokens: 60,
                     temperature: 0.9,
-                    systemInstruction: 'Lead with sharp questions. Get to the core insight. Maximum 2 sentences.'
+                    systemInstruction: 'Get to the core insight. Be brutally concise. Maximum 2 sentences.'
                 }
             }),
             new Promise((_, reject) => {
@@ -225,7 +225,7 @@ export async function summarizeText(text: string, focus?: string): Promise<strin
                 config: {
                     maxOutputTokens: 50,
                     temperature: 0.9,
-                    systemInstruction: 'Distill to essence. Lead with sharp questions. Maximum 2 sentences.'
+                    systemInstruction: 'Distill to essence. Be brutally concise. Maximum 2 sentences.'
                 }
             }),
             new Promise((_, reject) => {
@@ -324,7 +324,7 @@ export async function chatWithAI(message: string, useCache: boolean = true): Pro
                                 cachedContent: cachedContentName,
                                 maxOutputTokens: 50,
                                 temperature: 0.9,
-                                systemInstruction: 'Lead with a sharp question. Be brutally concise. Maximum 2 sentences total.'
+                                systemInstruction: 'Be brutally concise. Maximum 2 sentences total.'
                             }
                         }),
                         new Promise((_, reject) => {
@@ -344,7 +344,7 @@ export async function chatWithAI(message: string, useCache: boolean = true): Pro
                             config: {
                                 maxOutputTokens: 50,
                                 temperature: 0.9,
-                                systemInstruction: 'Lead with a sharp question. Be brutally concise. Maximum 2 sentences total.'
+                                systemInstruction: 'Be brutally concise. Maximum 2 sentences total.'
                             }
                         }),
                         new Promise((_, reject) => {
@@ -379,11 +379,11 @@ ${conversationContext}
 
 User: ${message}
 
-Start with a provocative question. Maximum 2 sentences total.`,
+Be brutally concise. Maximum 2 sentences total.`,
                     config: {
                         maxOutputTokens: 75,
                         temperature: 0.9,
-                        systemInstruction: 'Start with a provocative question. Maximum 2 sentences total.'
+                        systemInstruction: 'Be brutally concise. Maximum 2 sentences total.'
                     }
                 }),
                 new Promise((_, reject) => {
@@ -472,7 +472,7 @@ This context represents the current state of the canvas/world that the user is w
                 contents: worldContextContent,
                 systemInstruction: {
                     role: 'system',
-                    parts: [{ text: 'You are a concise ambient navigator. Lead with sharp questions. Be brutally concise. No explanations.' }]
+                    parts: [{ text: 'You are a concise ambient navigator. Be brutally concise. No explanations.' }]
                 },
                 ttl: '3600s', // 1 hour cache
                 displayName: 'World Context Cache'

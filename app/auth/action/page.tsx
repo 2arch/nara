@@ -66,94 +66,15 @@ function AuthActionContent() {
   return (
     <div style={{
       display: 'flex',
-      flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'center',
       minHeight: '100vh',
-      backgroundColor: '#F8F8F0',
-      color: '#162400',
+      backgroundColor: '#000000',
       fontFamily: 'IBM Plex Mono, monospace',
-      padding: '20px'
+      fontSize: '14px',
+      color: '#FFFFFF'
     }}>
-      <div style={{
-        textAlign: 'center',
-        maxWidth: '500px',
-        background: 'white',
-        padding: '40px',
-        borderRadius: '8px'
-      }}>
-        {status === 'loading' && (
-          <>
-            <div style={{
-              fontSize: '48px',
-              marginBottom: '20px',
-              animation: 'pulse 2s ease-in-out infinite'
-            }}>
-              ⏳
-            </div>
-            <h1 style={{ fontSize: '24px', marginBottom: '10px' }}>
-              {message}
-            </h1>
-          </>
-        )}
-
-        {status === 'success' && (
-          <>
-            <div style={{
-              fontSize: '48px',
-              marginBottom: '20px'
-            }}>
-              ✓
-            </div>
-            <h1 style={{ fontSize: '24px', marginBottom: '10px' }}>
-              {message}
-            </h1>
-            <p style={{ fontSize: '14px', opacity: 0.7 }}>
-              Redirecting...
-            </p>
-          </>
-        )}
-
-        {status === 'error' && (
-          <>
-            <div style={{
-              fontSize: '48px',
-              marginBottom: '20px',
-              color: '#FF0000'
-            }}>
-              ✗
-            </div>
-            <h1 style={{ fontSize: '24px', marginBottom: '10px' }}>
-              Action Failed
-            </h1>
-            <p style={{ fontSize: '14px', marginBottom: '20px' }}>
-              {message}
-            </p>
-            <button
-              onClick={() => router.push('/')}
-              style={{
-                backgroundColor: '#F0FF6A',
-                color: '#162400',
-                border: 'none',
-                padding: '10px 20px',
-                fontSize: '14px',
-                fontFamily: 'IBM Plex Mono, monospace',
-                cursor: 'pointer',
-                borderRadius: '4px'
-              }}
-            >
-              Return to Home
-            </button>
-          </>
-        )}
-      </div>
-
-      <style jsx>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
-        }
-      `}</style>
+      {message}
     </div>
   );
 }
@@ -166,10 +87,12 @@ export default function AuthActionPage() {
         alignItems: 'center',
         justifyContent: 'center',
         minHeight: '100vh',
-        backgroundColor: '#F8F8F0',
-        fontFamily: 'IBM Plex Mono, monospace'
+        backgroundColor: '#000000',
+        fontFamily: 'IBM Plex Mono, monospace',
+        fontSize: '14px',
+        color: '#FFFFFF'
       }}>
-        Loading...
+        loading...
       </div>
     }>
       <AuthActionContent />
