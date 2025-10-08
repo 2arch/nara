@@ -47,9 +47,10 @@ interface BitCanvasProps {
     onAuthSuccess?: (username: string) => void; // Callback after successful auth
     isVerifyingEmail?: boolean; // Flag to indicate email verification in progress
     hostTextColor?: string; // Text color for host mode
+    hostBackgroundColor?: string; // Host background color to save as initial world setting
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, isVerifyingEmail = false, hostTextColor }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, isVerifyingEmail = false, hostTextColor, hostBackgroundColor }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -167,7 +168,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                     wrapWidth: 1 // Single character
                 });
             } : undefined,
-        setWorldData: engine.setWorldData
+        setWorldData: engine.setWorldData,
+        hostBackgroundColor: hostBackgroundColor
     });
 
     // Handle email verification flow

@@ -112,7 +112,7 @@ export const welcomeFlow: HostFlow = {
     },
     'welcome': {
       id: 'welcome',
-      text: 'Type your email and confirm for an official invite to the space.',
+      text: 'Type your email and hit enter for an official invite!',
       expectsInput: true,
       inputType: 'email',
       inputValidator: (input: string) => {
@@ -127,7 +127,7 @@ export const welcomeFlow: HostFlow = {
 
     'link_sent': {
       id: 'link_sent',
-      text: 'Email sent. Please check your email and click the link to get started!',
+      text: 'Email sent. Please check your email to get started.',
       expectsInput: false
     }
   }

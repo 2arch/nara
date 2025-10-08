@@ -24,6 +24,7 @@ export interface UseHostDialogueProps {
   setChatMode?: (mode: { isActive: boolean; currentInput: string; inputPositions: any[]; isProcessing: boolean }) => void;
   addEphemeralText?: (pos: Point, char: string, options?: { animationDelay?: number; color?: string; background?: string }) => void;
   setWorldData?: (updater: (prev: Record<string, any>) => Record<string, any>) => void;
+  hostBackgroundColor?: string; // Host greeting background color to set as initial world bg
 }
 
 // Helper to map message IDs to field names
@@ -39,7 +40,7 @@ function getFieldNameFromMessageId(messageId: string): string {
   return fieldMap[messageId] || 'username'; // Default to username for verification flow
 }
 
-export function useHostDialogue({ setHostData, getViewportCenter, setDialogueText, onAuthSuccess, onTriggerZoom, setHostMode, setChatMode, addEphemeralText, setWorldData }: UseHostDialogueProps) {
+export function useHostDialogue({ setHostData, getViewportCenter, setDialogueText, onAuthSuccess, onTriggerZoom, setHostMode, setChatMode, addEphemeralText, setWorldData, hostBackgroundColor }: UseHostDialogueProps) {
   const [state, setState] = useState<HostDialogueState>({
     isActive: false,
     currentFlowId: null,
@@ -72,6 +73,21 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           centerPos: centerPos,
           timestamp: Date.now()
         });
+
+        // Despawn labels if requested
+        if (nextMessage.despawnLabels && setWorldData) {
+          console.log('Despawning labels for message:', nextMessage.id);
+          setWorldData(prev => {
+            const newData = { ...prev };
+            // Remove all label_ keys
+            Object.keys(newData).forEach(key => {
+              if (key.startsWith('label_')) {
+                delete newData[key];
+              }
+            });
+            return newData;
+          });
+        }
 
         // Spawn staged content if defined (only if not already spawned)
         console.log('Checking spawn:', { hasSpawn: !!nextMessage.spawnContent, hasSetWorldData: !!setWorldData });
@@ -226,7 +242,6 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       // Show error message
       setHostData({
         text: validation.error || 'invalid input',
-        color: '#FF0000',
         centerPos: getViewportCenter(),
         timestamp: Date.now()
       });
@@ -288,7 +303,6 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
 
           setHostData({
             text: errorMessage,
-            color: '#FF0000',
             centerPos: getViewportCenter(),
             timestamp: Date.now()
           });
@@ -299,7 +313,6 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       } catch (error: any) {
         setHostData({
           text: 'something went wrong. please try again.',
-          color: '#FF0000',
           centerPos: getViewportCenter(),
           timestamp: Date.now()
         });
@@ -334,7 +347,9 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
         const existingProfile = await getUserProfile(user.uid);
 
         if (!existingProfile) {
-          // Create new profile
+          // Create new profile with host background color as initial world setting
+          const textColor = hostBackgroundColor === '#F0FF6A' ? '#000000' : '#FFFFFF';
+
           const userProfileData = {
             firstName: '',
             lastName: '',
@@ -348,13 +363,29 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
               monthly: {},
               total: 0,
               lastReset: new Date().toISOString()
+            },
+            worlds: {
+              home: {
+                settings: {
+                  backgroundColor: hostBackgroundColor || '#FFFFFF',
+                  textColor: textColor
+                }
+              }
             }
           };
 
           await set(ref(database, `users/${user.uid}`), userProfileData);
         } else {
-          // Update existing profile with username
+          // Update existing profile with username and initial world settings
           await set(ref(database, `users/${user.uid}/username`), username);
+
+          if (hostBackgroundColor) {
+            const textColor = hostBackgroundColor === '#F0FF6A' ? '#000000' : '#FFFFFF';
+            await set(ref(database, `users/${user.uid}/worlds/home/settings`), {
+              backgroundColor: hostBackgroundColor,
+              textColor: textColor
+            });
+          }
         }
 
         // Update Firebase Auth display name
@@ -401,7 +432,6 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       } catch (error: any) {
         setHostData({
           text: 'something went wrong. please try again.',
-          color: '#FF0000',
           centerPos: getViewportCenter(),
           timestamp: Date.now()
         });
@@ -439,7 +469,6 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           const successMessage = flow.messages['account_created'];
           setHostData({
             text: successMessage.text,
-            color: '#00AA00',
             centerPos: getViewportCenter(),
             timestamp: Date.now()
           });
@@ -463,8 +492,7 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           // Show error
           setHostData({
             text: result.error || 'failed to create account',
-            color: '#FF0000',
-            centerPos: getViewportCenter(),
+              centerPos: getViewportCenter(),
             timestamp: Date.now()
           });
 
@@ -474,7 +502,6 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       } catch (error: any) {
         setHostData({
           text: 'something went wrong. please try again.',
-          color: '#FF0000',
           centerPos: getViewportCenter(),
           timestamp: Date.now()
         });

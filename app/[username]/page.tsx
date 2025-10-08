@@ -47,9 +47,8 @@ export default function UserHome() {
     }
   }, [username]);
   
-  const engine = useWorldEngine({ 
-    worldId: 'home', 
-    // initialBackgroundColor: '#000',
+  const engine = useWorldEngine({
+    worldId: 'home',
     userUid: targetUserUid, // Use the target user's UID, not the authenticated user's UID
     username: username
   });

@@ -100,7 +100,7 @@ export default function Home() {
   }, [router]);
 
   const handleAuthSuccess = useCallback((username: string) => {
-    // Navigate to user's homepage
+    // Navigate to user's homepage (background color already saved to Firebase)
     router.push(`/@${username}`);
   }, [router]);
 
@@ -164,6 +164,7 @@ export default function Home() {
           fontFamily={engine.fontFamily}
           isVerifyingEmail={isVerifyingEmail}
           hostTextColor={hostColors.text}
+          hostBackgroundColor={hostColors.background}
         />
       </div>
     );
