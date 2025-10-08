@@ -63,6 +63,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const [selectedImageKey, setSelectedImageKey] = useState<string | null>(null);
     const lastCursorPosRef = useRef<Point | null>(null);
     const lastEnterPressRef = useRef<number>(0);
+    const [isPasswordVisible, setIsPasswordVisible] = useState<boolean>(false);
 
     // Track shift key state globally
     useEffect(() => {
@@ -333,6 +334,10 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             // Only update if actually changed to avoid infinite loop
             if (currentInputType !== inputType) {
                 engine.setHostMode({ isActive: true, currentInputType: inputType });
+                // Reset password visibility when moving away from password input
+                if (inputType !== 'password') {
+                    setIsPasswordVisible(false);
+                }
             }
         }
     }, [hostDialogue.isHostActive, hostDialogue.hostState.currentMessageId]);
@@ -1262,14 +1267,23 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 y++;
             });
 
-            // Render "press any key to continue" for non-input messages (desktop only)
+            // Render context-specific hints for certain messages
             const currentMessage = hostDialogue.getCurrentMessage();
             const isMobile = typeof window !== 'undefined' && 'ontouchstart' in window;
-            if (currentMessage && !currentMessage.expectsInput && currentMessage.nextMessageId && !isMobile) {
-                const hintText = 'press any key to continue';
 
+            let hintText: string | null = null;
+
+            // Show hint only for specific message IDs
+            if (currentMessage && !isMobile) {
+                if (currentMessage.id === 'welcome_message' && !currentMessage.expectsInput) {
+                    hintText = 'press any key to continue';
+                } else if (currentMessage.id === 'collect_password' && currentMessage.expectsInput) {
+                    hintText = 'press Tab to unhide password';
+                }
+            }
+
+            if (hintText) {
                 // Position hint at bottom of viewport, centered horizontally
-                // Use screenToWorld to find the world coordinate at bottom of screen
                 const bottomScreenY = cssHeight - (4 * effectiveCharHeight); // 4 lines from bottom
                 const bottomWorldPos = engine.screenToWorld(cssWidth / 2, bottomScreenY, currentZoom, currentOffset);
                 const hintY = Math.floor(bottomWorldPos.y);
@@ -1293,8 +1307,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
                                 }
 
-                                // Render the character in a dimmed color
-                                // Convert to rgba with 50% opacity
+                                // Render the character in a dimmed color (50% opacity)
                                 const dimmedColor = hostColor.startsWith('#')
                                     ? hostColor + '80'
                                     : hostColor.replace('rgb', 'rgba').replace(')', ', 0.5)');
@@ -1654,8 +1667,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         // === Render Chat Data (Black Background, White Text) ===
-        // Check if we need to mask passwords in host mode
-        const shouldMaskPassword = engine.hostMode?.isActive && engine.hostMode?.currentInputType === 'password';
+        // Check if we need to mask passwords in host mode (only if not toggled to visible)
+        const shouldMaskPassword = engine.hostMode?.isActive && engine.hostMode?.currentInputType === 'password' && !isPasswordVisible;
 
         for (const key in engine.chatData) {
             const [xStr, yStr] = key.split(',');
@@ -3447,8 +3460,21 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
             }
 
+            // Tab key toggles password visibility ONLY in password input mode during host dialogue
+            if (e.key === 'Tab' &&
+                hostDialogue.isHostActive &&
+                hostDialogue.isExpectingInput() &&
+                engine.hostMode.currentInputType === 'password' &&
+                engine.chatMode.isActive) {
+                setIsPasswordVisible(prev => !prev);
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+
             // Intercept Enter in host mode for chat input processing
-            if (engine.chatMode.isActive && e.key === 'Enter' && !e.shiftKey) {
+            // Only intercept if we're actively expecting input from the user
+            if (engine.chatMode.isActive && e.key === 'Enter' && !e.shiftKey && hostDialogue.isHostActive && hostDialogue.isExpectingInput()) {
                 // Debounce: prevent rapid Enter presses
                 const now = Date.now();
                 if (now - lastEnterPressRef.current < 500) return; // 500ms debounce

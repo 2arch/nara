@@ -122,7 +122,10 @@ export const signInUser = async (email: string, password: string): Promise<{succ
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     return { success: true, user: userCredential.user };
   } catch (error: any) {
-    logger.error('Signin error:', error);
+    // Don't log invalid-credential errors since they're expected for new users
+    if (error.code !== 'auth/invalid-credential') {
+      logger.error('Signin error:', error);
+    }
     return {
       success: false,
       error: error.message || 'Failed to sign in'

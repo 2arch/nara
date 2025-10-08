@@ -105,14 +105,14 @@ export const welcomeFlow: HostFlow = {
     },
     'validate_user': {
       id: 'validate_user',
-      text:  'You can also access the commands menu that can be toggled with the "/" key.',
+      text:  'You can also access the commands menu by toggling the "/" key.',
       expectsInput: false,
       nextMessageId: 'welcome',
       previousMessageId: 'explain_user'
     },
     'welcome': {
       id: 'welcome',
-      text: 'Type your email and hit enter for an invite!',
+      text: 'Type your email and hit enter to get started!',
       expectsInput: true,
       inputType: 'email',
       inputValidator: (input: string) => {
@@ -120,14 +120,66 @@ export const welcomeFlow: HostFlow = {
         if (!emailRegex.test(input)) return { valid: false, error: 'that doesn\'t look like a valid email' };
         return { valid: true };
       },
-      nextMessageId: 'link_sent',
+      nextMessageId: 'collect_password',
       previousMessageId: 'validate_user',
       despawnLabels: true // Remove exploration labels when user reaches email step
     },
 
-    'link_sent': {
-      id: 'link_sent',
-      text: 'Email sent. Please check your email to get started.',
+    'collect_password': {
+      id: 'collect_password',
+      text: 'choose a password (at least 6 characters)',
+      expectsInput: true,
+      inputType: 'password',
+      inputValidator: (input: string) => {
+        if (input.length < 6) return { valid: false, error: 'password must be at least 6 characters' };
+        return { valid: true };
+      },
+      onResponse: async (input: string, collectedData: Record<string, any>) => {
+        // Check if this is an existing user by trying to sign in
+        return 'checking_user';
+      },
+      previousMessageId: 'welcome'
+    },
+
+    'checking_user': {
+      id: 'checking_user',
+      text: 'checking credentials...',
+      expectsInput: false
+    },
+
+    'collect_username_welcome': {
+      id: 'collect_username_welcome',
+      text: 'choose a username',
+      expectsInput: true,
+      inputType: 'username',
+      inputValidator: async (input: string) => {
+        // Username validation
+        if (input.length < 3) return { valid: false, error: 'username must be at least 3 characters' };
+        if (input.length > 20) return { valid: false, error: 'username must be 20 characters or less' };
+        if (!/^[a-zA-Z0-9_]+$/.test(input)) return { valid: false, error: 'username can only contain letters, numbers, and underscores' };
+
+        // Check availability
+        const isAvailable = await checkUsernameAvailability(input);
+        if (!isAvailable) return { valid: false, error: 'username already taken' };
+
+        return { valid: true };
+      },
+      onResponse: async (input: string, collectedData: Record<string, any>) => {
+        // Trigger account creation with email/password/username
+        return 'creating_account';
+      },
+      previousMessageId: 'collect_password'
+    },
+
+    'creating_account': {
+      id: 'creating_account',
+      text: 'creating your account...',
+      expectsInput: false
+    },
+
+    'account_created': {
+      id: 'account_created',
+      text: 'welcome to nara!',
       expectsInput: false
     }
   }

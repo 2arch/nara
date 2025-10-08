@@ -35,7 +35,8 @@ function getFieldNameFromMessageId(messageId: string): string {
     'collect_email': 'email',
     'collect_password': 'password',
     'collect_username': 'username',
-    'welcome': 'email' // For magic link flow
+    'collect_username_welcome': 'username',
+    'welcome': 'email'
   };
   return fieldMap[messageId] || 'username'; // Default to username for verification flow
 }
@@ -253,6 +254,9 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
     const fieldName = getFieldNameFromMessageId(currentMessage.id);
     const newCollectedData = { ...state.collectedData, [fieldName]: input };
 
+    // Update state with collected data immediately
+    setState(prev => ({ ...prev, collectedData: newCollectedData }));
+
     // Determine next message
     let nextMessageId: string | null = null;
 
@@ -262,6 +266,124 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       nextMessageId = await currentMessage.onResponse(input, newCollectedData);
     } else if (currentMessage.nextMessageId) {
       nextMessageId = currentMessage.nextMessageId;
+    }
+
+    // Handle checking existing user credentials
+    if (nextMessageId === 'checking_user') {
+      const flow = HOST_FLOWS[state.currentFlowId!];
+      const checkingMessage = flow.messages['checking_user'];
+
+      // Show checking message
+      setHostData({
+        text: checkingMessage.text,
+        centerPos: getViewportCenter(),
+        timestamp: Date.now()
+      });
+
+      setState(prev => ({ ...prev, currentMessageId: 'checking_user', isProcessing: true }));
+
+      // Try to sign in with existing credentials
+      try {
+        const { signInUser, getUserProfile } = await import('../firebase');
+
+        // Debug: Check collected data
+        console.log('Collected data for sign in:', newCollectedData);
+
+        if (!newCollectedData.email || !newCollectedData.password) {
+          console.error('Missing email or password:', { email: !!newCollectedData.email, password: !!newCollectedData.password });
+          throw new Error('Missing credentials');
+        }
+
+        const result = await signInUser(newCollectedData.email, newCollectedData.password);
+
+        if (result.success && result.user) {
+          // Existing user - get their profile and redirect
+          const profile = await getUserProfile(result.user.uid);
+
+          if (profile && profile.username) {
+            console.log('Existing user found:', profile.username);
+            // Show success message
+            setHostData({
+              text: `welcome back, ${profile.username}!`,
+              color: '#00AA00',
+              centerPos: getViewportCenter(),
+              timestamp: Date.now()
+            });
+
+            // End the flow
+            setState(prev => ({
+              ...prev,
+              isProcessing: false,
+              isActive: false
+            }));
+
+            // Disable modes
+            if (setHostMode) {
+              setHostMode({ isActive: false, currentInputType: null });
+            }
+            if (setChatMode) {
+              setChatMode({
+                isActive: false,
+                currentInput: '',
+                inputPositions: [],
+                isProcessing: false
+              });
+            }
+
+            // Redirect to their world
+            if (onAuthSuccess) {
+              onAuthSuccess(profile.username);
+            }
+
+            return true;
+          }
+        }
+
+        // Sign in failed - check if it's wrong password or new user
+        if (result.error && result.error.includes('invalid-credential')) {
+          // This is a new user, continue to username collection
+          console.log('New user detected, continuing to username collection');
+
+          const flow = HOST_FLOWS[state.currentFlowId!];
+          const usernameMessage = flow.messages['collect_username_welcome'];
+
+          setHostData({
+            text: usernameMessage.text,
+            centerPos: getViewportCenter(),
+            timestamp: Date.now()
+          });
+
+          setState(prev => ({
+            ...prev,
+            currentMessageId: 'collect_username_welcome',
+            isProcessing: false
+          }));
+
+          return true;
+        } else {
+          // Other error (wrong password, network issue, etc)
+          setHostData({
+            text: result.error || 'sign in failed. please try again.',
+            centerPos: getViewportCenter(),
+            timestamp: Date.now()
+          });
+
+          setState(prev => ({ ...prev, isProcessing: false }));
+          return false;
+        }
+      } catch (error: any) {
+        // Unexpected error
+        console.error('Unexpected sign in error:', error);
+
+        setHostData({
+          text: 'something went wrong. please try again.',
+          centerPos: getViewportCenter(),
+          timestamp: Date.now()
+        });
+
+        setState(prev => ({ ...prev, isProcessing: false }));
+        return false;
+      }
     }
 
     // Handle magic link sending flow
@@ -456,52 +578,84 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
 
       // Actually create the account
       try {
-        const result = await signUpUser(
-          newCollectedData.email,
-          newCollectedData.password,
-          newCollectedData.firstName,
-          newCollectedData.lastName,
-          newCollectedData.username
-        );
+        const { auth, database } = await import('../firebase');
+        const { createUserWithEmailAndPassword, updateProfile } = await import('firebase/auth');
+        const { ref, set } = await import('firebase/database');
 
-        if (result.success) {
-          // Show success message
-          const successMessage = flow.messages['account_created'];
-          setHostData({
-            text: successMessage.text,
-            centerPos: getViewportCenter(),
-            timestamp: Date.now()
-          });
+        // Create user with email and password
+        const userCredential = await createUserWithEmailAndPassword(auth, newCollectedData.email, newCollectedData.password);
+        const user = userCredential.user;
 
-          // Navigate to user's world
-          if (onAuthSuccess) {
-            setTimeout(() => {
-              onAuthSuccess(newCollectedData.username);
-            }, 2000);
+        // Update display name
+        await updateProfile(user, {
+          displayName: newCollectedData.username
+        });
+
+        // Create user profile in database
+        const userProfileData = {
+          firstName: '',
+          lastName: '',
+          username: newCollectedData.username,
+          email: newCollectedData.email,
+          uid: user.uid,
+          createdAt: new Date().toISOString(),
+          membership: 'fresh',
+          aiUsage: {
+            daily: {},
+            monthly: {},
+            total: 0,
+            lastReset: new Date().toISOString()
+          },
+          worlds: {
+            home: {
+              settings: {
+                backgroundColor: hostBackgroundColor || '#FFFFFF',
+                textColor: hostBackgroundColor === '#F0FF6A' ? '#000000' : '#FFFFFF'
+              }
+            }
           }
+        };
 
-          setState(prev => ({
-            ...prev,
-            currentMessageId: 'account_created',
-            isProcessing: false,
-            isActive: false // End flow
-          }));
+        await set(ref(database, `users/${user.uid}`), userProfileData);
 
-          return true;
-        } else {
-          // Show error
-          setHostData({
-            text: result.error || 'failed to create account',
-              centerPos: getViewportCenter(),
-            timestamp: Date.now()
-          });
+        // Show success message
+        const successMessage = flow.messages['account_created'];
+        setHostData({
+          text: successMessage.text,
+          centerPos: getViewportCenter(),
+          timestamp: Date.now()
+        });
 
-          setState(prev => ({ ...prev, isProcessing: false }));
-          return false;
+        // End flow immediately
+        setState(prev => ({
+          ...prev,
+          currentMessageId: 'account_created',
+          isProcessing: false,
+          isActive: false
+        }));
+
+        // Disable modes
+        if (setHostMode) {
+          setHostMode({ isActive: false, currentInputType: null });
         }
+        if (setChatMode) {
+          setChatMode({
+            isActive: false,
+            currentInput: '',
+            inputPositions: [],
+            isProcessing: false
+          });
+        }
+
+        // Redirect immediately to user's world
+        if (onAuthSuccess) {
+          onAuthSuccess(newCollectedData.username);
+        }
+
+        return true;
       } catch (error: any) {
         setHostData({
-          text: 'something went wrong. please try again.',
+          text: error.message || 'failed to create account',
           centerPos: getViewportCenter(),
           timestamp: Date.now()
         });

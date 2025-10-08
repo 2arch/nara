@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Nara: Boundless Medium",
+  title: "Nara: Beautiful Tools for Boundless Thought",
   description: "typed canvas",
   icons: {
     icon: '/apple-icon.svg',
