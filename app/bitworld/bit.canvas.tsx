@@ -2934,8 +2934,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         
         // Pass to engine's regular click handler
         engine.handleCanvasClick(clickX, clickY, false, e.shiftKey);
-        
+
         canvasRef.current?.focus(); // Ensure focus for keyboard
+
+        // On mobile, focus the hidden input to trigger iOS keyboard
+        if ('ontouchstart' in window && hiddenInputRef.current) {
+            hiddenInputRef.current.focus();
+        }
     }, [engine, canvasSize, router, handleNavClick, handleCoordinateClick, handleColorFilterClick, handleSortModeClick, handleStateClick, handleIndexClick, hostDialogue]);
 
     const handleCanvasDoubleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -3234,6 +3239,160 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
     }, [engine]);
 
+    // Touch interaction state
+    const touchStartRef = useRef<{ touches: Array<{ id: number; x: number; y: number }> } | null>(null);
+    const lastPinchDistanceRef = useRef<number | null>(null);
+    const isTouchPanningRef = useRef<boolean>(false);
+    const isTouchSelectingRef = useRef<boolean>(false);
+    const touchHasMovedRef = useRef<boolean>(false);
+
+    const handleTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (!rect) return;
+
+        const touches = Array.from(e.touches).map(touch => ({
+            id: touch.identifier,
+            x: touch.clientX - rect.left,
+            y: touch.clientY - rect.top
+        }));
+
+        touchStartRef.current = { touches };
+        touchHasMovedRef.current = false;
+
+        if (touches.length === 2) {
+            // Two-finger gesture - prepare for pan or pinch
+            e.preventDefault();
+            isTouchPanningRef.current = true;
+            const centerX = (touches[0].x + touches[1].x) / 2;
+            const centerY = (touches[0].y + touches[1].y) / 2;
+            const info = engine.handlePanStart(centerX + rect.left, centerY + rect.top);
+            panStartInfoRef.current = info;
+            intermediatePanOffsetRef.current = { ...engine.viewOffset };
+
+            // Calculate initial pinch distance
+            const dx = touches[1].x - touches[0].x;
+            const dy = touches[1].y - touches[0].y;
+            lastPinchDistanceRef.current = Math.sqrt(dx * dx + dy * dy);
+        } else if (touches.length === 1) {
+            // Single touch - prepare for potential drag selection
+            isTouchSelectingRef.current = true;
+        }
+
+        canvasRef.current?.focus();
+    }, [engine]);
+
+    const handleTouchMove = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (!rect) return;
+
+        const touches = Array.from(e.touches).map(touch => ({
+            id: touch.identifier,
+            x: touch.clientX - rect.left,
+            y: touch.clientY - rect.top
+        }));
+
+        if (touches.length === 2 && isTouchPanningRef.current && panStartInfoRef.current) {
+            e.preventDefault();
+
+            // Two-finger pan
+            const centerX = (touches[0].x + touches[1].x) / 2;
+            const centerY = (touches[0].y + touches[1].y) / 2;
+            const newOffset = engine.handlePanMove(centerX + rect.left, centerY + rect.top, panStartInfoRef.current);
+            intermediatePanOffsetRef.current = newOffset;
+
+            // Pinch-to-zoom
+            const dx = touches[1].x - touches[0].x;
+            const dy = touches[1].y - touches[0].y;
+            const currentDistance = Math.sqrt(dx * dx + dy * dy);
+
+            if (lastPinchDistanceRef.current) {
+                const scale = currentDistance / lastPinchDistanceRef.current;
+                const delta = (scale - 1) * 100; // Convert to wheel delta equivalent
+
+                // Use center point for zoom
+                engine.handleCanvasWheel(0, -delta, centerX, centerY, true);
+            }
+
+            lastPinchDistanceRef.current = currentDistance;
+        } else if (touches.length === 1 && isTouchSelectingRef.current && touchStartRef.current) {
+            // Single touch drag - check if movement threshold reached
+            const startTouch = touchStartRef.current.touches[0];
+            const dx = touches[0].x - startTouch.x;
+            const dy = touches[0].y - startTouch.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            // Only start selection if moved more than 5px
+            if (!touchHasMovedRef.current && distance > 5) {
+                touchHasMovedRef.current = true;
+                engine.handleSelectionStart(startTouch.x, startTouch.y);
+            }
+
+            // Continue selection if already started
+            if (touchHasMovedRef.current) {
+                engine.handleSelectionMove(touches[0].x, touches[0].y);
+
+                // Update mouse world position for preview
+                const worldPos = engine.screenToWorld(touches[0].x, touches[0].y, engine.zoomLevel, engine.viewOffset);
+                setMouseWorldPos({
+                    x: Math.floor(worldPos.x),
+                    y: Math.floor(worldPos.y)
+                });
+            }
+        }
+    }, [engine]);
+
+    const handleTouchEnd = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (!rect) return;
+
+        if (isTouchPanningRef.current) {
+            // End two-finger pan
+            isTouchPanningRef.current = false;
+            engine.handlePanEnd(intermediatePanOffsetRef.current);
+            panStartInfoRef.current = null;
+            lastPinchDistanceRef.current = null;
+        } else if (isTouchSelectingRef.current) {
+            // End single-touch selection
+            isTouchSelectingRef.current = false;
+
+            if (e.touches.length === 0) {
+                // All touches ended - finalize selection or click
+                if (touchHasMovedRef.current) {
+                    // User dragged - finalize the selection
+                    engine.handleSelectionEnd();
+                } else if (touchStartRef.current && touchStartRef.current.touches.length === 1) {
+                    // User tapped (didn't drag) - treat as click
+                    const startTouch = touchStartRef.current.touches[0];
+                    const endTouches = Array.from(e.changedTouches).map(touch => ({
+                        x: touch.clientX - rect.left,
+                        y: touch.clientY - rect.top
+                    }));
+
+                    if (endTouches.length > 0) {
+                        // Create synthetic event for handleCanvasClick
+                        const syntheticEvent = {
+                            button: 0,
+                            clientX: endTouches[0].x + rect.left,
+                            clientY: endTouches[0].y + rect.top,
+                            shiftKey: false,
+                            preventDefault: () => {},
+                            stopPropagation: () => {}
+                        } as React.MouseEvent<HTMLCanvasElement>;
+                        handleCanvasClick(syntheticEvent);
+
+                        // Focus hidden input for iOS keyboard
+                        if (hiddenInputRef.current) {
+                            hiddenInputRef.current.focus();
+                        }
+                    }
+                }
+            }
+        }
+
+        touchStartRef.current = null;
+        touchHasMovedRef.current = false;
+    }, [engine, handleCanvasClick]);
+
 
     const handleCanvasKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
         // Host mode: check if we're on a non-input message that needs manual advancement
@@ -3320,28 +3479,60 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
     }, [engine, handleKeyDownFromController, selectedImageKey, hostDialogue]);
 
+    const hiddenInputRef = useRef<HTMLInputElement>(null);
+
     return (
-        <canvas
-            ref={canvasRef}
-            className={className}
-            onClick={handleCanvasClick}
-            onDoubleClick={handleCanvasDoubleClick}
-            onMouseDown={handleCanvasMouseDown}
-            onMouseMove={handleCanvasMouseMove}
-            onMouseUp={handleCanvasMouseUp}
-            onMouseLeave={handleCanvasMouseLeave}
-            onKeyDown={handleCanvasKeyDown}
-            tabIndex={0}
-            style={{ 
-                display: 'block',
-                outline: 'none',
-                width: '100%',
-                height: '100%',
-                cursor: hostModeEnabled && hostDialogue.isHostActive && !hostDialogue.isExpectingInput() && hostDialogue.getCurrentMessage()?.id !== 'validate_user' ? 'pointer' : 'text',
-                position: 'relative',
-                zIndex: 1
-            }}
-        />
+        <>
+            <canvas
+                ref={canvasRef}
+                className={className}
+                onClick={handleCanvasClick}
+                onDoubleClick={handleCanvasDoubleClick}
+                onMouseDown={handleCanvasMouseDown}
+                onMouseMove={handleCanvasMouseMove}
+                onMouseUp={handleCanvasMouseUp}
+                onMouseLeave={handleCanvasMouseLeave}
+                onKeyDown={handleCanvasKeyDown}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                tabIndex={0}
+                style={{
+                    display: 'block',
+                    outline: 'none',
+                    width: '100%',
+                    height: '100%',
+                    cursor: hostModeEnabled && hostDialogue.isHostActive && !hostDialogue.isExpectingInput() && hostDialogue.getCurrentMessage()?.id !== 'validate_user' ? 'pointer' : 'text',
+                    position: 'relative',
+                    zIndex: 1
+                }}
+            />
+            <input
+                ref={hiddenInputRef}
+                type="text"
+                style={{
+                    position: 'absolute',
+                    opacity: 0,
+                    pointerEvents: 'none',
+                    left: -9999,
+                    top: -9999
+                }}
+                onKeyDown={(e) => {
+                    // Forward key events to canvas handler
+                    const syntheticEvent = {
+                        ...e,
+                        preventDefault: () => e.preventDefault(),
+                        stopPropagation: () => e.stopPropagation(),
+                        key: e.key,
+                        shiftKey: e.shiftKey,
+                        ctrlKey: e.ctrlKey,
+                        metaKey: e.metaKey,
+                        altKey: e.altKey
+                    } as any;
+                    handleCanvasKeyDown(syntheticEvent);
+                }}
+            />
+        </>
     );
 }
 
