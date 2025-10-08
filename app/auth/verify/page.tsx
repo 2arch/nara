@@ -12,7 +12,7 @@ export default function VerifyEmailPage() {
         const result = await completeSignInWithEmailLink();
 
         if (result.success && result.user) {
-          setMessage('you are now verified. you may close this tab.');
+          setMessage('verified.');
         } else {
           setMessage(result.error || 'verification failed');
         }
@@ -30,8 +30,10 @@ export default function VerifyEmailPage() {
       alignItems: 'center',
       justifyContent: 'center',
       minHeight: '100vh',
-      fontFamily: 'IBM Plex Mono, monospace',
-      fontSize: '16px'
+      backgroundColor: '#F8F8F0',
+      fontFamily: 'monospace',
+      fontSize: '14px',
+      color: '#000'
     }}>
       {message}
     </div>

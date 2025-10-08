@@ -167,6 +167,7 @@ export interface WorldEngine {
         color?: string;
         queryText?: string;
     }) => { width: number; height: number };
+    setWorldData: React.Dispatch<React.SetStateAction<WorldData>>;
     // Text compilation access
     getCompiledText: () => { [lineY: number]: string };
     compiledTextCache: { [lineY: number]: string }; // Direct access to compiled text cache for real-time updates
@@ -5863,6 +5864,7 @@ export function useWorldEngine({
         hostData,
         setHostData,
         addInstantAIResponse,
+        setWorldData,
         // Agent system
         agentEnabled,
         agentPos,

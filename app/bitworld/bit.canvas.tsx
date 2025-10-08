@@ -46,9 +46,10 @@ interface BitCanvasProps {
     initialHostFlow?: string; // Initial flow to start (e.g., 'welcome')
     onAuthSuccess?: (username: string) => void; // Callback after successful auth
     isVerifyingEmail?: boolean; // Flag to indicate email verification in progress
+    hostTextColor?: string; // Text color for host mode
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, isVerifyingEmail = false }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, isVerifyingEmail = false, hostTextColor }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -156,105 +157,126 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         onAuthSuccess,
         onTriggerZoom: handleZoom,
         setHostMode: engine.setHostMode,
-        setChatMode: engine.setChatMode
+        setChatMode: engine.setChatMode,
+        addEphemeralText: engine.addInstantAIResponse ?
+            (pos, char, options) => {
+                // Use addInstantAIResponse to render single character
+                engine.addInstantAIResponse(pos, char, {
+                    fadeDelay: options?.animationDelay || 1500,
+                    color: options?.color,
+                    wrapWidth: 1 // Single character
+                });
+            } : undefined,
+        setWorldData: engine.setWorldData
     });
 
     // Handle email verification flow
     useEffect(() => {
         if (isVerifyingEmail && hostModeEnabled && !hostDialogue.isHostActive) {
-            // Set up host mode
-            engine.setHostMode({ isActive: true, currentInputType: null });
-            engine.setChatMode({
-                isActive: true,
-                currentInput: '',
-                inputPositions: [],
-                isProcessing: false
-            });
+            // Check if user already has a username (existing user)
+            const checkExistingUser = async () => {
+                const { auth } = require('../firebase');
+                const { getUserProfile } = require('../firebase');
+                const user = auth.currentUser;
 
-            // Set text color
-            if (engine.updateSettings) {
-                engine.updateSettings({
-                    textColor: '#FFA500' // sulfur
+                if (user) {
+                    const profile = await getUserProfile(user.uid);
+
+                    // If user already has a username, they're an existing user - just redirect
+                    if (profile && profile.username) {
+                        // Don't prompt for username, auth success handler will redirect them
+                        return;
+                    }
+                }
+
+                // New user without username - show verification flow
+                engine.setHostMode({ isActive: true, currentInputType: null });
+                engine.setChatMode({
+                    isActive: true,
+                    currentInput: '',
+                    inputPositions: [],
+                    isProcessing: false
                 });
-            }
 
-            // Show "email verified!" message
-            engine.setHostData({
-                text: 'email verified!',
-                color: '#00AA00',
-                centerPos: engine.getViewportCenter(),
-                timestamp: Date.now()
-            });
 
-            // Auto-focus canvas so typing works immediately
-            if (canvasRef.current) {
-                canvasRef.current.focus();
-            }
+                engine.setHostData({
+                    text: 'email verified!',
+                    color: '#00AA00',
+                    centerPos: engine.getViewportCenter(),
+                    timestamp: Date.now()
+                });
 
-            // After brief delay, start verification flow to collect username
-            setTimeout(() => {
-                hostDialogue.startFlow('verification');
-            }, 2000);
+                if (canvasRef.current) {
+                    canvasRef.current.focus();
+                }
+
+                setTimeout(() => {
+                    hostDialogue.startFlow('verification');
+                }, 2000);
+            };
+
+            checkExistingUser();
         }
     }, [isVerifyingEmail, hostModeEnabled, hostDialogue.isHostActive, engine, hostDialogue]);
 
     // Listen for auth state changes (when user verifies email in another tab)
-    useEffect(() => {
-        if (!hostModeEnabled || hostDialogue.isHostActive) return;
+    // DISABLED: This was auto-prompting for username on every page load
+    // useEffect(() => {
+    //     if (!hostModeEnabled || hostDialogue.isHostActive) return;
 
-        const { auth } = require('../firebase');
-        const { onAuthStateChanged } = require('firebase/auth');
+    //     const { auth } = require('../firebase');
+    //     const { onAuthStateChanged } = require('firebase/auth');
 
-        const unsubscribe = onAuthStateChanged(auth, async (user: any) => {
-            if (user && !hostDialogue.isHostActive) {
-                const { getUserProfile } = require('../firebase');
-                const profile = await getUserProfile(user.uid);
+    //     const unsubscribe = onAuthStateChanged(auth, async (user: any) => {
+    //         if (user && !hostDialogue.isHostActive) {
+    //             const { getUserProfile } = require('../firebase');
+    //             const profile = await getUserProfile(user.uid);
 
-                if (profile && !profile.username) {
-                    engine.setHostMode({ isActive: true, currentInputType: null });
-                    engine.setChatMode({
-                        isActive: true,
-                        currentInput: '',
-                        inputPositions: [],
-                        isProcessing: false
-                    });
+    //             if (profile && !profile.username) {
+    //                 engine.setHostMode({ isActive: true, currentInputType: null });
+    //                 engine.setChatMode({
+    //                     isActive: true,
+    //                     currentInput: '',
+    //                     inputPositions: [],
+    //                     isProcessing: false
+    //                 });
 
-                    if (engine.updateSettings) {
-                        engine.updateSettings({ textColor: '#FFA500' });
-                    }
+    //                 if (engine.updateSettings) {
+    //                     engine.updateSettings({ textColor: '#FFA500' });
+    //                 }
 
-                    engine.setHostData({
-                        text: 'email verified!',
-                        color: '#00AA00',
-                        centerPos: engine.getViewportCenter(),
-                        timestamp: Date.now()
-                    });
+    //                 engine.setHostData({
+    //                     text: 'email verified!',
+    //                     color: '#00AA00',
+    //                     centerPos: engine.getViewportCenter(),
+    //                     timestamp: Date.now()
+    //                 });
 
-                    if (canvasRef.current) {
-                        canvasRef.current.focus();
-                    }
+    //                 if (canvasRef.current) {
+    //                     canvasRef.current.focus();
+    //                 }
 
-                    setTimeout(() => {
-                        hostDialogue.startFlow('verification');
-                    }, 2000);
-                }
-            }
-        });
+    //                 setTimeout(() => {
+    //                     hostDialogue.startFlow('verification');
+    //                 }, 2000);
+    //             }
+    //         }
+    //     });
 
-        return () => unsubscribe();
-    }, [hostModeEnabled, hostDialogue, engine]);
+    //     return () => unsubscribe();
+    // }, [hostModeEnabled, hostDialogue, engine]);
 
     // No animation - host text renders immediately (removed typing animation)
 
     // Start host flow when enabled
     useEffect(() => {
         if (hostModeEnabled && initialHostFlow && !hostDialogue.isHostActive) {
-            // Set host mode colors (garden bg, sulfur text)
+            // Set host mode colors
             // The background is already set via initialBackgroundColor in page.tsx
-            // We just need to update the text color by using updateSettings
-            if (engine.updateSettings) {
+            // Set text color if provided
+            if (hostTextColor && engine.updateSettings) {
                 engine.updateSettings({
-                    textColor: '#FFA500' // sulfur
+                    textColor: hostTextColor
                 });
             }
 
@@ -275,7 +297,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 canvasRef.current.focus();
             }
         }
-    }, [hostModeEnabled, initialHostFlow, hostDialogue.isHostActive]);
+    }, [hostModeEnabled, initialHostFlow, hostDialogue.isHostActive, hostTextColor]);
 
     // Sync host input type with engine for password masking
     useEffect(() => {
@@ -1207,6 +1229,50 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
                 y++;
             });
+
+            // Render "press any key to continue" for non-input messages (desktop only)
+            const currentMessage = hostDialogue.getCurrentMessage();
+            const isMobile = typeof window !== 'undefined' && 'ontouchstart' in window;
+            if (currentMessage && !currentMessage.expectsInput && currentMessage.nextMessageId && !isMobile) {
+                const hintText = 'press any key to continue';
+
+                // Position hint at bottom of viewport, centered horizontally
+                // Use screenToWorld to find the world coordinate at bottom of screen
+                const bottomScreenY = cssHeight - (4 * effectiveCharHeight); // 4 lines from bottom
+                const bottomWorldPos = engine.screenToWorld(cssWidth / 2, bottomScreenY, currentZoom, currentOffset);
+                const hintY = Math.floor(bottomWorldPos.y);
+                const hintStartX = Math.floor(engine.getViewportCenter().x - hintText.length / 2);
+
+                for (let x = 0; x < hintText.length; x++) {
+                    const char = hintText[x];
+                    const worldX = hintStartX + x;
+                    const worldY = hintY;
+
+                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                        if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                            screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+
+                            if (char && char.trim() !== '') {
+                                // Apply text background when monogram is enabled
+                                const textBackground = engine.currentTextStyle.background || (monogramSystem.options.enabled ? engine.backgroundColor : undefined);
+                                if (textBackground) {
+                                    ctx.fillStyle = textBackground;
+                                    ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                }
+
+                                // Render the character in a dimmed color
+                                // Convert to rgba with 50% opacity
+                                const dimmedColor = hostColor.startsWith('#')
+                                    ? hostColor + '80'
+                                    : hostColor.replace('rgb', 'rgba').replace(')', ', 0.5)');
+                                ctx.fillStyle = dimmedColor;
+                                ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // === Render Bounded Region Backgrounds ===
@@ -2010,6 +2076,108 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Waypoint Arrows for Ephemeral Labels (lightModeData) ===
+        {
+            // Check lightModeData for label patterns (ephemeral labels from host mode)
+            const ephemeralLabels: Map<string, { x: number, y: number, text: string, color: string }> = new Map();
+
+            for (const key in engine.lightModeData) {
+                const [xStr, yStr] = key.split(',');
+                const x = parseInt(xStr, 10);
+                const y = parseInt(yStr, 10);
+
+                if (!isNaN(x) && !isNaN(y)) {
+                    const charData = engine.lightModeData[key];
+                    if (!engine.isImageData(charData)) {
+                        const char = engine.getCharacter(charData);
+                        const style = engine.getCharacterStyle(charData);
+
+                        // Group consecutive characters by y-coordinate to detect labels
+                        const labelKey = `${y}`;
+                        if (!ephemeralLabels.has(labelKey)) {
+                            ephemeralLabels.set(labelKey, {
+                                x: x,
+                                y: y,
+                                text: char,
+                                color: style?.color || '#FFFFFF'
+                            });
+                        } else {
+                            const existing = ephemeralLabels.get(labelKey)!;
+                            if (x === existing.x + existing.text.length) {
+                                existing.text += char;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Render waypoint arrows for offscreen ephemeral labels
+            ephemeralLabels.forEach((labelData) => {
+                const worldX = labelData.x;
+                const worldY = labelData.y;
+                const text = labelData.text;
+                const color = labelData.color;
+                const labelWidthInChars = text.length;
+
+                const isVisible = worldX <= viewBounds.maxX && (worldX + labelWidthInChars) >= viewBounds.minX &&
+                                  worldY >= viewBounds.minY && worldY <= viewBounds.maxY;
+
+                if (!isVisible) {
+                    // Calculate distance from viewport center
+                    const viewportCenter = engine.getViewportCenter();
+                    const deltaX = worldX - viewportCenter.x;
+                    const deltaY = worldY - viewportCenter.y;
+                    const distance = Math.round(Math.sqrt(deltaX * deltaX + deltaY * deltaY));
+
+                    // Show waypoint arrow (using large threshold for ephemeral labels)
+                    if (distance <= 200) { // Fixed threshold for ephemeral labels
+                        const labelScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                        const intersection = getViewportEdgeIntersection(
+                            viewportCenterScreen.x, viewportCenterScreen.y,
+                            labelScreenPos.x, labelScreenPos.y,
+                            cssWidth, cssHeight
+                        );
+
+                        if (intersection) {
+                            const edgeBuffer = ARROW_MARGIN;
+                            let adjustedX = intersection.x;
+                            let adjustedY = intersection.y;
+
+                            adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
+                            adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
+
+                            drawArrow(ctx, adjustedX, adjustedY, intersection.angle, color);
+
+                            // Draw label text next to arrow
+                            if (text) {
+                                ctx.fillStyle = color;
+                                ctx.font = `${effectiveFontSize}px ${fontFamily}`;
+                                const textOffset = ARROW_SIZE * 1.5;
+
+                                let textX = adjustedX - Math.cos(intersection.angle) * textOffset;
+                                let textY = adjustedY - Math.sin(intersection.angle) * textOffset;
+
+                                ctx.textAlign = intersection.angle > -Math.PI/2 && intersection.angle < Math.PI/2 ? 'left' : 'right';
+
+                                if (intersection.angle > Math.PI / 4 && intersection.angle < 3 * Math.PI / 4) {
+                                    ctx.textBaseline = 'bottom';
+                                } else if (intersection.angle < -Math.PI / 4 && intersection.angle > -3 * Math.PI / 4) {
+                                    ctx.textBaseline = 'top';
+                                } else {
+                                    ctx.textBaseline = 'middle';
+                                }
+
+                                ctx.fillText(text + ` [${distance}]`, textX, textY);
+
+                                ctx.textAlign = 'left';
+                                ctx.textBaseline = 'top';
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
         // === Render Waypoint Arrows for Off-Screen Bounds ===
         if (!engine.isNavVisible) {
             for (const key in engine.worldData) {
@@ -2706,14 +2874,23 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             panStartInfoRef.current = null;
             if (isMiddleMouseDownRef.current) return;
         }
-        
+
         // Get canvas-relative coordinates
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return;
 
         const clickX = e.clientX - rect.left;
         const clickY = e.clientY - rect.top;
-        
+
+        // Host mode: tap/click to advance to next message (if not expecting input)
+        if (engine.hostMode.isActive && hostDialogue.isHostActive) {
+            const currentMessage = hostDialogue.getCurrentMessage();
+            if (currentMessage && !currentMessage.expectsInput) {
+                hostDialogue.advanceToNextMessage();
+                return; // Don't process further
+            }
+        }
+
         // Check for nav coordinate clicks first
         if (engine.isNavVisible && canvasRef.current) {
             if (handleNavClick(canvasRef.current, clickX, clickY, handleCoordinateClick, handleColorFilterClick, handleSortModeClick, handleStateClick, handleIndexClick, handlePublishClick, handleNavigateClick)) {
@@ -2751,7 +2928,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         engine.handleCanvasClick(clickX, clickY, false, e.shiftKey);
         
         canvasRef.current?.focus(); // Ensure focus for keyboard
-    }, [engine, canvasSize, router, handleNavClick, handleCoordinateClick, handleColorFilterClick, handleSortModeClick, handleStateClick, handleIndexClick]);
+    }, [engine, canvasSize, router, handleNavClick, handleCoordinateClick, handleColorFilterClick, handleSortModeClick, handleStateClick, handleIndexClick, hostDialogue]);
 
     const handleCanvasDoubleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         if (e.button !== 0) return; // Only left clicks
@@ -3051,38 +3228,61 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
 
     const handleCanvasKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
-        // Intercept Enter in host mode for chat input processing
-        if (hostDialogue.isHostActive && engine.chatMode.isActive && e.key === 'Enter' && !e.shiftKey) {
-            // Debounce: prevent rapid Enter presses
-            const now = Date.now();
-            if (now - lastEnterPressRef.current < 500) return; // 500ms debounce
+        // Host mode: check if we're on a non-input message that needs manual advancement
+        if (hostDialogue.isHostActive) {
+            const currentMessage = hostDialogue.getCurrentMessage();
 
-            const userInput = engine.chatMode.currentInput.trim();
-            if (userInput && !hostDialogue.isHostProcessing) {
-                lastEnterPressRef.current = now;
+            // If message doesn't expect input (display-only), allow navigation
+            if (currentMessage && !currentMessage.expectsInput) {
+                // Right arrow or any other key advances forward (if next exists)
+                if (currentMessage.nextMessageId && (e.key === 'ArrowRight' || (e.key !== 'ArrowLeft' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown'))) {
+                    hostDialogue.advanceToNextMessage();
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
+                // Left arrow goes back to previous message
+                if (e.key === 'ArrowLeft' && currentMessage.previousMessageId) {
+                    hostDialogue.goBackToPreviousMessage();
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
+            }
 
-                // Process through host dialogue
-                hostDialogue.processInput(userInput);
+            // Intercept Enter in host mode for chat input processing
+            if (engine.chatMode.isActive && e.key === 'Enter' && !e.shiftKey) {
+                // Debounce: prevent rapid Enter presses
+                const now = Date.now();
+                if (now - lastEnterPressRef.current < 500) return; // 500ms debounce
 
-                // Clear chat input and visual data
-                engine.clearChatData();
-                engine.setChatMode({
-                    isActive: true,
-                    currentInput: '',
-                    inputPositions: [],
-                    isProcessing: false
-                });
+                const userInput = engine.chatMode.currentInput.trim();
+                if (userInput && !hostDialogue.isHostProcessing) {
+                    lastEnterPressRef.current = now;
 
-                // Keep canvas focused for next input
-                setTimeout(() => {
-                    if (canvasRef.current) {
-                        canvasRef.current.focus();
-                    }
-                }, 100);
+                    // Process through host dialogue
+                    hostDialogue.processInput(userInput);
 
-                e.preventDefault();
-                e.stopPropagation();
-                return;
+                    // Clear chat input and visual data
+                    engine.clearChatData();
+                    engine.setChatMode({
+                        isActive: true,
+                        currentInput: '',
+                        inputPositions: [],
+                        isProcessing: false
+                    });
+
+                    // Keep canvas focused for next input
+                    setTimeout(() => {
+                        if (canvasRef.current) {
+                            canvasRef.current.focus();
+                        }
+                    }, 100);
+
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
             }
         }
 

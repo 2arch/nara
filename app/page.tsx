@@ -67,9 +67,18 @@ export default function Home() {
     return () => unsubscribe();
   }, [pathname, router]);
 
+  // Dynamic colors based on time of day
+  const [hostColors, setHostColors] = useState(() => {
+    const hour = new Date().getHours();
+    const isDaytime = hour >= 6 && hour < 18;
+    return isDaytime
+      ? { background: '#F0FF6A', text: '#FFA500' } // sulfur bg, orange text
+      : { background: '#69AED6', text: '#000000' }; // chalk bg, black text
+  });
+
   const engine = useWorldEngine({
     worldId: null,
-    initialBackgroundColor: pathname === '/' ? '#F0FF6A' : undefined, // garden for host mode
+    initialBackgroundColor: pathname === '/' ? hostColors.background : undefined,
     userUid: user?.uid || null,
     initialZoomLevel: pathname === '/' ? 1.6 : 1.0 // Zoomed in for host mode onboarding
   });
@@ -129,7 +138,9 @@ export default function Home() {
   if (authLoading || engine.isLoadingWorld) {
     return (
       <div className="w-screen h-screen flex items-center justify-center" style={{backgroundColor: '#F8F8F0'}}>
-        <div>Loading...</div>
+        <div style={{ fontFamily: 'monospace', fontSize: '14px', color: '#000' }}>
+          {authLoading ? 'loading...' : 'redirecting...'}
+        </div>
       </div>
     );
   }
@@ -152,6 +163,7 @@ export default function Home() {
           onAuthSuccess={handleAuthSuccess}
           fontFamily={engine.fontFamily}
           isVerifyingEmail={isVerifyingEmail}
+          hostTextColor={hostColors.text}
         />
       </div>
     );

@@ -22,6 +22,8 @@ export interface UseHostDialogueProps {
   onTriggerZoom?: (targetZoom: number, centerPos: Point) => void;
   setHostMode?: (mode: { isActive: boolean; currentInputType: any }) => void;
   setChatMode?: (mode: { isActive: boolean; currentInput: string; inputPositions: any[]; isProcessing: boolean }) => void;
+  addEphemeralText?: (pos: Point, char: string, options?: { animationDelay?: number; color?: string; background?: string }) => void;
+  setWorldData?: (updater: (prev: Record<string, any>) => Record<string, any>) => void;
 }
 
 // Helper to map message IDs to field names
@@ -37,7 +39,7 @@ function getFieldNameFromMessageId(messageId: string): string {
   return fieldMap[messageId] || 'username'; // Default to username for verification flow
 }
 
-export function useHostDialogue({ setHostData, getViewportCenter, setDialogueText, onAuthSuccess, onTriggerZoom, setHostMode, setChatMode }: UseHostDialogueProps) {
+export function useHostDialogue({ setHostData, getViewportCenter, setDialogueText, onAuthSuccess, onTriggerZoom, setHostMode, setChatMode, addEphemeralText, setWorldData }: UseHostDialogueProps) {
   const [state, setState] = useState<HostDialogueState>({
     isActive: false,
     currentFlowId: null,
@@ -45,6 +47,92 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
     collectedData: {},
     isProcessing: false
   });
+
+  // Manual advance through non-input messages (removed auto-advance)
+  const advanceToNextMessage = useCallback(() => {
+    if (!state.isActive || !state.currentFlowId || !state.currentMessageId || state.isProcessing) {
+      return;
+    }
+
+    const flow = HOST_FLOWS[state.currentFlowId];
+    if (!flow) return;
+
+    const currentMessage = flow.messages[state.currentMessageId];
+    if (!currentMessage) return;
+
+    // If message doesn't expect input and has a nextMessageId, advance manually
+    if (!currentMessage.expectsInput && currentMessage.nextMessageId) {
+      const nextMessage = flow.messages[currentMessage.nextMessageId!];
+      if (nextMessage) {
+        const centerPos = getViewportCenter();
+
+        setHostData({
+          text: nextMessage.text,
+          color: undefined,
+          centerPos: centerPos,
+          timestamp: Date.now()
+        });
+
+        // Spawn staged content if defined (only if not already spawned)
+        console.log('Checking spawn:', { hasSpawn: !!nextMessage.spawnContent, hasSetWorldData: !!setWorldData });
+        if (nextMessage.spawnContent && setWorldData) {
+          const content = nextMessage.spawnContent(centerPos);
+
+          // Check if labels already exist (don't duplicate)
+          const labelKeys = Object.keys(content).filter(k => k.startsWith('label_'));
+
+          setWorldData(prev => {
+            const labelsExist = labelKeys.some(key => key in prev);
+            if (labelsExist) {
+              console.log('Labels already exist, skipping spawn for message:', nextMessage.id);
+              return prev;
+            }
+
+            console.log('Spawning content for message:', nextMessage.id, content);
+            return {
+              ...prev,
+              ...content
+            };
+          });
+        }
+
+        setState(prev => ({
+          ...prev,
+          currentMessageId: currentMessage.nextMessageId!
+        }));
+      }
+    }
+  }, [state, setHostData, getViewportCenter, setWorldData]);
+
+  // Go back to previous message
+  const goBackToPreviousMessage = useCallback(() => {
+    if (!state.isActive || !state.currentFlowId || !state.currentMessageId || state.isProcessing) {
+      return;
+    }
+
+    const flow = HOST_FLOWS[state.currentFlowId];
+    if (!flow) return;
+
+    const currentMessage = flow.messages[state.currentMessageId];
+    if (!currentMessage) return;
+
+    // If message has a previousMessageId, go back
+    if (currentMessage.previousMessageId) {
+      const previousMessage = flow.messages[currentMessage.previousMessageId];
+      if (previousMessage) {
+        setHostData({
+          text: previousMessage.text,
+          color: undefined,
+          centerPos: getViewportCenter(),
+          timestamp: Date.now()
+        });
+        setState(prev => ({
+          ...prev,
+          currentMessageId: currentMessage.previousMessageId!
+        }));
+      }
+    }
+  }, [state, setHostData, getViewportCenter]);
 
   // Start a flow
   const startFlow = useCallback((flowId: string, cursorPos?: Point) => {
@@ -61,12 +149,36 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
     }
 
     // Display the first message (centered at current viewport)
+    const centerPos = getViewportCenter();
+
     setHostData({
       text: startMessage.text,
       color: undefined, // Will use engine.textColor
-      centerPos: getViewportCenter(),
+      centerPos: centerPos,
       timestamp: Date.now()
     });
+
+    // Spawn staged content if defined (only if not already spawned)
+    if (startMessage.spawnContent && setWorldData) {
+      const content = startMessage.spawnContent(centerPos);
+
+      // Check if labels already exist (don't duplicate)
+      const labelKeys = Object.keys(content).filter(k => k.startsWith('label_'));
+
+      setWorldData(prev => {
+        const labelsExist = labelKeys.some(key => key in prev);
+        if (labelsExist) {
+          console.log('Labels already exist, skipping spawn for start message:', startMessage.id);
+          return prev;
+        }
+
+        console.log('Spawning content for start message:', startMessage.id, content);
+        return {
+          ...prev,
+          ...content
+        };
+      });
+    }
 
     setState({
       isActive: true,
@@ -75,7 +187,7 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       collectedData: {},
       isProcessing: false
     });
-  }, [setHostData]);
+  }, [setHostData, getViewportCenter, setWorldData]);
 
   // Get current message
   const getCurrentMessage = useCallback((): HostMessage | null => {
@@ -437,6 +549,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
     isExpectingInput,
     exitFlow,
     isHostActive: state.isActive,
-    isHostProcessing: state.isProcessing
+    isHostProcessing: state.isProcessing,
+    advanceToNextMessage,
+    goBackToPreviousMessage
   };
 }
