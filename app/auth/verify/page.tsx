@@ -30,10 +30,10 @@ export default function VerifyEmailPage() {
       alignItems: 'center',
       justifyContent: 'center',
       minHeight: '100vh',
-      backgroundColor: '#F8F8F0',
-      fontFamily: 'monospace',
+      backgroundColor: '#000000',
+      fontFamily: 'IBM Plex Mono, monospace',
       fontSize: '14px',
-      color: '#000'
+      color: '#FFFFFF'
     }}>
       {message}
     </div>

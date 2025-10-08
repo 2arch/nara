@@ -1058,16 +1058,22 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
                         
                         const cell = monogramPattern[key];
-                        
+
                         // Only render if there's no regular text at this position
                         const textKey = `${worldX},${worldY}`;
                         const charData = engine.worldData[textKey];
                         const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';
                         if ((!char || char.trim() === '') && !engine.commandData[textKey]) {
+                            // Use IBM Plex Mono for monogram to ensure block characters render correctly
+                            ctx.font = `${effectiveFontSize}px IBM Plex Mono`;
+
                             // Set color and render character
                             ctx.fillStyle = cell.color;
                             // No transparency for monogram patterns - render at full opacity
                             ctx.fillText(cell.char, screenPos.x, screenPos.y + verticalTextOffset);
+
+                            // Restore original font
+                            ctx.font = `${effectiveFontSize}px ${fontFamily}`;
                         }
                     }
                 }
@@ -3327,11 +3333,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             onKeyDown={handleCanvasKeyDown}
             tabIndex={0}
             style={{ 
-                display: 'block', 
-                outline: 'none', 
-                width: '100%', 
-                height: '100%', 
-                cursor: 'text',
+                display: 'block',
+                outline: 'none',
+                width: '100%',
+                height: '100%',
+                cursor: hostModeEnabled && hostDialogue.isHostActive && !hostDialogue.isExpectingInput() && hostDialogue.getCurrentMessage()?.id !== 'validate_user' ? 'pointer' : 'text',
                 position: 'relative',
                 zIndex: 1
             }}

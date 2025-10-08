@@ -82,7 +82,7 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'clear', 'cam', 'indent', 'bound', 'unbound', 'list', 'unlist', 'move', 'upload', 'pro', 'spawn', 'full', 'zoom', 'agent'];
+const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'clear', 'cam', 'indent', 'bound', 'unbound', 'upload', 'spawn', 'monogram'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro', 'Neureal'];
@@ -2145,6 +2145,24 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return { command: 'pending_selection', args: [commandToExecute], commandStartPos: commandState.commandStartPos };
         }
         
+        // Handle monogram command
+        if (commandToExecute.startsWith('monogram')) {
+            const args = inputParts.slice(1);
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            return { command: 'monogram', args, commandStartPos: commandState.commandStartPos };
+        }
+
         // Clear command mode for other commands
         setCommandState({
             isActive: false,
@@ -2155,12 +2173,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             hasNavigated: false
         });
         setCommandData({});
-        
+
         if (commandToExecute.toLowerCase().startsWith(commandName.toLowerCase())) {
             const args = inputParts.slice(1);
             return { command: commandName, args, commandStartPos: commandState.commandStartPos };
         }
-        
+
         return null;
     }, [commandState, switchMode]);
 

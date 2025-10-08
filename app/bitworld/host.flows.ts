@@ -112,7 +112,7 @@ export const welcomeFlow: HostFlow = {
     },
     'welcome': {
       id: 'welcome',
-      text: 'Type your email and hit enter for an official invite!',
+      text: 'Type your email and hit enter for an invite!',
       expectsInput: true,
       inputType: 'email',
       inputValidator: (input: string) => {

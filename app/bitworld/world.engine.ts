@@ -2217,6 +2217,56 @@ export function useWorldEngine({
                     } else {
                         setDialogueWithRevert("Usage: /label 'text' [textColor] [backgroundColor] or /label --distance <number>", setDialogueText);
                     }
+                } else if (exec.command === 'monogram') {
+                    // Handle monogram background effects
+                    if (exec.args.length === 0) {
+                        // Toggle monogram on/off (keeps current mode)
+                        const newEnabled = !monogramSystem.options.enabled;
+                        monogramSystem.updateOption('enabled', newEnabled);
+
+                        // Save to settings
+                        const newSettings = {
+                            monogramEnabled: newEnabled,
+                            monogramMode: monogramSystem.options.mode
+                        };
+                        updateSettings(newSettings);
+                        saveSettingsToFirebase(newSettings);
+
+                        setDialogueWithRevert(
+                            newEnabled ? `Monogram enabled (${monogramSystem.options.mode})` : "Monogram disabled",
+                            setDialogueText
+                        );
+                    } else if (exec.args[0] === 'clear') {
+                        // Set to clear mode (only trails, no background pattern)
+                        monogramSystem.updateOption('mode', 'clear');
+                        monogramSystem.updateOption('enabled', true);
+
+                        // Save to settings
+                        const newSettings = {
+                            monogramEnabled: true,
+                            monogramMode: 'clear' as const
+                        };
+                        updateSettings(newSettings);
+                        saveSettingsToFirebase(newSettings);
+
+                        setDialogueWithRevert("Monogram: clear mode", setDialogueText);
+                    } else if (exec.args[0] === 'perlin') {
+                        // Set to perlin mode (flowing noise pattern)
+                        monogramSystem.updateOption('mode', 'perlin');
+                        monogramSystem.updateOption('enabled', true);
+
+                        // Save to settings
+                        const newSettings = {
+                            monogramEnabled: true,
+                            monogramMode: 'perlin' as const
+                        };
+                        updateSettings(newSettings);
+                        saveSettingsToFirebase(newSettings);
+
+                        setDialogueWithRevert("Monogram: perlin mode", setDialogueText);
+                    } else {
+                        setDialogueWithRevert("Usage: /monogram [clear|perlin]", setDialogueText);
+                    }
                 } else if (exec.command === 'signout') {
                     // Sign out from Firebase
                     signOut(auth).then(() => {
