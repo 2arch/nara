@@ -83,7 +83,7 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'share', 'clear', 'cam', 'indent', 'bound', 'unbound', 'upload', 'spawn', 'monogram'];
+const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'share', 'clear', 'cam', 'indent', 'bound', 'unbound', 'upload', 'spawn', 'monogram', 'stage'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro', 'Neureal'];
@@ -2041,6 +2041,30 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return {
                 command: 'spawn',
                 args: [],
+                commandStartPos: commandState.commandStartPos
+            };
+        }
+
+        if (commandToExecute.startsWith('stage')) {
+            // Parse: /stage <url>
+            const parts = commandToExecute.split(/\s+/);
+            const url = parts[1];
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            // Return command execution for world engine to handle image staging
+            return {
+                command: 'stage',
+                args: url ? [url] : [],
                 commandStartPos: commandState.commandStartPos
             };
         }

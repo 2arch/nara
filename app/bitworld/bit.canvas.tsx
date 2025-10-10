@@ -1709,6 +1709,79 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Staged Image (Ephemeral) ===
+        if (engine.stagedImageData) {
+            const imageData = engine.stagedImageData;
+
+            // Check if image is visible in current viewport
+            const imageVisible = imageData.startX <= endWorldX && imageData.endX >= startWorldX &&
+                                imageData.startY <= endWorldY && imageData.endY >= startWorldY;
+
+            if (imageVisible) {
+                // Calculate screen positions
+                const startScreenPos = engine.worldToScreen(imageData.startX, imageData.startY, currentZoom, currentOffset);
+                const endScreenPos = engine.worldToScreen(imageData.endX + 1, imageData.endY + 1, currentZoom, currentOffset);
+
+                // Calculate target dimensions
+                const targetWidth = endScreenPos.x - startScreenPos.x;
+                const targetHeight = endScreenPos.y - startScreenPos.y;
+
+                // Check if image is cached
+                let img = imageCache.current.get(imageData.src);
+                if (!img) {
+                    // Create and cache new image
+                    img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = () => {
+                        // Force re-render when loaded
+                    };
+                    img.src = imageData.src;
+                    imageCache.current.set(imageData.src, img);
+                }
+
+                // Only draw if image is fully loaded
+                if (img.complete && img.naturalWidth > 0) {
+                    // Calculate crop and fit
+                    const aspectRatio = img.width / img.height;
+                    const targetAspectRatio = targetWidth / targetHeight;
+
+                    let drawWidth = targetWidth;
+                    let drawHeight = targetHeight;
+                    let offsetX = 0;
+                    let offsetY = 0;
+
+                    // Crop to fit
+                    if (aspectRatio > targetAspectRatio) {
+                        const scaledWidth = targetHeight * aspectRatio;
+                        offsetX = (targetWidth - scaledWidth) / 2;
+                        drawWidth = scaledWidth;
+                    } else {
+                        const scaledHeight = targetWidth / aspectRatio;
+                        offsetY = (targetHeight - scaledHeight) / 2;
+                        drawHeight = scaledHeight;
+                    }
+
+                    // Use clipping
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.rect(startScreenPos.x, startScreenPos.y, targetWidth, targetHeight);
+                    ctx.clip();
+
+                    // Draw with slight transparency to indicate it's ephemeral
+                    ctx.globalAlpha = 0.9;
+                    ctx.drawImage(
+                        img,
+                        startScreenPos.x + offsetX,
+                        startScreenPos.y + offsetY,
+                        drawWidth,
+                        drawHeight
+                    );
+
+                    ctx.restore();
+                }
+            }
+        }
+
         ctx.fillStyle = engine.textColor;
         for (const key in engine.worldData) {
             // Skip block, label, bound, glitched, and image data - we render those separately

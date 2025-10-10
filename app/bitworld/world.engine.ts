@@ -76,6 +76,7 @@ export interface WorldEngine {
     chatData: WorldData;
     lightModeData: WorldData;
     hostData: { text: string; color?: string; centerPos: Point; timestamp?: number } | null; // Host messages rendered at fixed position with streaming
+    stagedImageData: ImageData | null; // Ephemeral staged images (cleared with Escape)
     searchData: WorldData;
     viewOffset: Point;
     cursorPos: Point;
@@ -397,6 +398,7 @@ export function useWorldEngine({
     const [chatData, setChatData] = useState<WorldData>({});
     const [searchData, setSearchData] = useState<WorldData>({});
     const [hostData, setHostData] = useState<{ text: string; color?: string; centerPos: Point; timestamp?: number } | null>(null);
+    const [stagedImageData, setStagedImageData] = useState<ImageData | null>(null); // Ephemeral staged images
 
     // === Agent System ===
     const [agentEnabled, setAgentEnabled] = useState<boolean>(false);
@@ -2234,6 +2236,13 @@ export function useWorldEngine({
             return true;
         }
 
+        // === Staged Image Clearing ===
+        if (key === 'Escape' && stagedImageData) {
+            setStagedImageData(null);
+            setDialogueWithRevert("Staged image cleared", setDialogueText);
+            return true;
+        }
+
         // === Command Handling (Early Priority) ===
         if (enableCommands && !isReadOnly) {
             const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos);
@@ -2587,6 +2596,53 @@ export function useWorldEngine({
                     updateSettings(newSettings);
                     saveSettingsToFirebase(newSettings);
                     setDialogueWithRevert(`Spawn point set at (${spawnPoint.x}, ${spawnPoint.y})`, setDialogueText);
+                } else if (exec.command === 'stage') {
+                    // Stage an ephemeral image from URL at cursor position
+                    // Default image if no URL provided
+                    const defaultImageUrl = 'https://d2w9rnfcy7mm78.cloudfront.net/40233614/original_0d11441860fbe41b13c3a9bf97c18e42.webp?1760119834?bc=0';
+                    const imageUrl = exec.args.length > 0 ? exec.args[0] : defaultImageUrl;
+
+                    setDialogueWithRevert("Loading image...", setDialogueText);
+
+                    // Load image to get dimensions
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+
+                    img.onload = () => {
+                        // Default size: 40 cells wide, maintain aspect ratio
+                        const defaultWidthInCells = 40;
+                        const aspectRatio = img.height / img.width;
+                        const defaultHeightInCells = Math.round(defaultWidthInCells * aspectRatio);
+
+                        // Calculate bounds from cursor position
+                        const startX = cursorPos.x;
+                        const startY = cursorPos.y;
+                        const endX = startX + defaultWidthInCells;
+                        const endY = startY + defaultHeightInCells;
+
+                        // Create ephemeral image data
+                        const imageData: ImageData = {
+                            type: 'image',
+                            src: imageUrl,
+                            startX,
+                            startY,
+                            endX,
+                            endY,
+                            originalWidth: img.width,
+                            originalHeight: img.height
+                        };
+
+                        // Store in ephemeral state (won't persist to Firebase)
+                        setStagedImageData(imageData);
+
+                        setDialogueWithRevert(`Image staged (ephemeral) - press Escape to clear`, setDialogueText);
+                    };
+
+                    img.onerror = () => {
+                        setDialogueWithRevert("Failed to load image. Check URL.", setDialogueText);
+                    };
+
+                    img.src = imageUrl;
                 } else if (exec.command === 'zoom') {
                     // Gradually zoom in by 30%
                     const startZoom = zoomLevel;
@@ -6066,6 +6122,7 @@ export function useWorldEngine({
         setHostMode,
         hostData,
         setHostData,
+        stagedImageData, // Ephemeral staged images
         addInstantAIResponse,
         setWorldData,
         setMonogramCommandHandler: (handler: (args: string[]) => void) => {
