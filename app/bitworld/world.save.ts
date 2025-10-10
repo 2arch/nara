@@ -545,6 +545,44 @@ export function useWorldSave(
         };
     }, [localClipboard, isLoading, worldId, clipboardRefPath, isReadOnly]);
 
-    return { isLoading, isSaving, error };
+    // Function to clear all world data from Firebase
+    const clearWorldData = useCallback(async () => {
+        if (!worldId || isReadOnly || isBlogs) {
+            return;
+        }
+
+        try {
+            const updates: Record<string, any> = {};
+
+            // Clear canonical data
+            if (worldDataRefPath) {
+                updates[worldDataRefPath] = null;
+            }
+
+            // Clear all client channels
+            if (usersBasePath) {
+                updates[usersBasePath] = null;
+            }
+
+            // Clear clipboard
+            if (clipboardRefPath) {
+                updates[clipboardRefPath] = null;
+            }
+
+            // Execute all deletes in one operation
+            await update(ref(database), updates);
+
+            // Update local refs to prevent re-sync
+            lastSyncedDataRef.current = {};
+            lastSyncedClipboardRef.current = [];
+
+            logger.info('Firebase: World data cleared successfully');
+        } catch (err: any) {
+            logger.error('Firebase: Error clearing world data:', err);
+            throw err;
+        }
+    }, [worldId, worldDataRefPath, usersBasePath, clipboardRefPath, isReadOnly, isBlogs]);
+
+    return { isLoading, isSaving, error, clearWorldData };
 }
  

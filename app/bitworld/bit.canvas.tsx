@@ -453,12 +453,12 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         if (currentLength > prevClipboardLengthRef.current) {
             const newItem = engine.clipboardItems[0]; // Most recent is first
             if (newItem) {
-                const boundKey = `bound_${newItem.startX},${newItem.startY}`;
+                const flashKey = `flash_${newItem.startX},${newItem.startY}`;
                 const timestamp = Date.now();
 
                 setClipboardFlashBounds(prev => {
                     const updated = new Map(prev);
-                    updated.set(boundKey, timestamp);
+                    updated.set(flashKey, timestamp);
                     return updated;
                 });
 
@@ -466,7 +466,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 setTimeout(() => {
                     setClipboardFlashBounds(prev => {
                         const updated = new Map(prev);
-                        updated.delete(boundKey);
+                        updated.delete(flashKey);
                         return updated;
                     });
                 }, 800);
@@ -844,22 +844,28 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
     // Helper to check if worldPos is within a clipboard-flashed bound
     const isInClipboardFlashBound = useCallback((worldPos: Point): string | null => {
-        for (const [boundKey, timestamp] of clipboardFlashBounds.entries()) {
-            try {
-                const boundData = JSON.parse(engine.worldData[boundKey] as string);
-                const { startX, endX, startY, endY, maxY } = boundData;
-                const renderEndY = (maxY !== null && maxY !== undefined) ? maxY : endY;
-
-                if (worldPos.x >= startX && worldPos.x <= endX &&
-                    worldPos.y >= startY && worldPos.y <= renderEndY) {
-                    return boundKey;
-                }
-            } catch (e) {
-                // Skip invalid bound data
-            }
+        // Get the most recent clipboard item (first in array)
+        const recentItem = engine.clipboardItems[0];
+        if (!recentItem) {
+            return null;
         }
+
+        const flashKey = `flash_${recentItem.startX},${recentItem.startY}`;
+
+        // Only check if this item is currently flashing
+        if (!clipboardFlashBounds.has(flashKey)) {
+            return null;
+        }
+
+        const { startX, endX, startY, endY } = recentItem;
+
+        if (worldPos.x >= startX && worldPos.x <= endX &&
+            worldPos.y >= startY && worldPos.y <= endY) {
+            return flashKey;
+        }
+
         return null;
-    }, [clipboardFlashBounds, engine.worldData]);
+    }, [clipboardFlashBounds, engine.clipboardItems]);
 
     // --- Cursor Preview Functions ---
     const drawHoverPreview = useCallback((ctx: CanvasRenderingContext2D, worldPos: any, currentZoom: number, currentOffset: Point, effectiveCharWidth: number, effectiveCharHeight: number, cssWidth: number, cssHeight: number, shiftPressed: boolean = false) => {
@@ -2836,6 +2842,25 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Clipboard Flash ===
+        if (clipboardFlashBounds.size > 0) {
+            const recentItem = engine.clipboardItems[0];
+            if (recentItem) {
+                const flashKey = `flash_${recentItem.startX},${recentItem.startY}`;
+                if (clipboardFlashBounds.has(flashKey)) {
+                    const { startX, endX, startY, endY } = recentItem;
+
+                    // Draw cyan flash box
+                    const topLeft = engine.worldToScreen(startX, startY, currentZoom, currentOffset);
+                    const bottomRight = engine.worldToScreen(endX + 1, endY + 1, currentZoom, currentOffset);
+
+                    // Fill only
+                    ctx.fillStyle = 'rgba(0, 128, 128, 0.4)';
+                    ctx.fillRect(topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
+                }
+            }
+        }
+
         // === Render Mouse Hover Preview ===
         if (mouseWorldPos && showCursor && !shiftDragStartPos) {
             drawHoverPreview(ctx, mouseWorldPos, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight, cssWidth, cssHeight, isShiftPressed);
@@ -3125,7 +3150,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
+    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
 
 
     // --- Drawing Loop Effect ---

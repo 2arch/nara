@@ -1418,7 +1418,8 @@ export function useWorldEngine({
     const {
         isLoading: isLoadingWorld,
         isSaving: isSavingWorld,
-        error: worldPersistenceError
+        error: worldPersistenceError,
+        clearWorldData
     } = useWorldSave(
         shouldEnableWorldSave ? worldId : null,
         worldData,
@@ -2836,6 +2837,11 @@ export function useWorldEngine({
                     setWorldData({});
                     setChatData({});
                     setSearchData({});
+                    clearLightModeData();
+                    // Clear client-side data
+                    setClipboardItems([]);
+                    setStagedImageData([]);
+                    setHostData(null);
                     // Reset cursor to origin
                     setCursorPos({ x: 0, y: 0 });
                     // Clear any selections
@@ -2845,6 +2851,12 @@ export function useWorldEngine({
                     setClusterLabels([]);
                     setTextFrames([]);
                     setHierarchicalFrames(null);
+                    // Clear Firebase data (canonical + all client channels)
+                    if (clearWorldData) {
+                        clearWorldData().catch(err => {
+                            logger.error('Failed to clear Firebase data:', err);
+                        });
+                    }
                     setDialogueWithRevert("Canvas cleared", setDialogueText);
                 } else if (exec.command === 'cam') {
                     const newMode = exec.args[0];
@@ -5590,63 +5602,121 @@ export function useWorldEngine({
     const handleCanvasClick = useCallback((canvasRelativeX: number, canvasRelativeY: number, clearSelection: boolean = false, shiftKey: boolean = false, metaKey: boolean = false, ctrlKey: boolean = false): void => {
         const newCursorPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
 
-        // === Cmd+Click to Add Bound to Clipboard ===
+        // === Cmd+Click to Add Text Block to Clipboard ===
         if ((metaKey || ctrlKey) && !shiftKey) {
-            // Check if clicking on a bound
-            for (const key in worldData) {
-                if (key.startsWith('bound_')) {
-                    try {
-                        const boundData = JSON.parse(worldData[key] as string);
-                        const { startX, endX, startY, endY, maxY, title, color } = boundData;
 
-                        // Check if click is within this bound
-                        if (newCursorPos.x >= startX && newCursorPos.x <= endX &&
-                            newCursorPos.y >= startY && newCursorPos.y <= (maxY || endY)) {
+            // Find connected text block at cursor position
+            const findTextBlock = (startPos: Point): Point[] => {
+                const visited = new Set<string>();
+                const textPositions: Point[] = [];
+                const queue: Point[] = [startPos];
 
-                            // Extract text content from this bound region
-                            const content: string[] = [];
-                            for (let y = startY; y <= (maxY || endY); y++) {
-                                let line = '';
-                                for (let x = startX; x <= endX; x++) {
-                                    const cellKey = `${x},${y}`;
-                                    const char = worldData[cellKey];
-                                    if (typeof char === 'string') {
-                                        line += char;
-                                    } else if (char && typeof char === 'object' && 'char' in char) {
-                                        line += char.char;
-                                    } else {
-                                        line += ' ';
-                                    }
-                                }
-                                content.push(line.trimEnd());
+                while (queue.length > 0) {
+                    const pos = queue.shift()!;
+                    const key = `${pos.x},${pos.y}`;
+
+                    if (visited.has(key)) continue;
+                    visited.add(key);
+
+                    const charData = worldData[key];
+                    const char = charData ? getCharacter(charData) : '';
+
+                    if (char && char.trim() !== '') {
+                        textPositions.push(pos);
+
+                        // Check all 4 directions
+                        const directions = [
+                            { x: pos.x - 1, y: pos.y },
+                            { x: pos.x + 1, y: pos.y },
+                            { x: pos.x, y: pos.y - 1 },
+                            { x: pos.x, y: pos.y + 1 }
+                        ];
+
+                        for (const dir of directions) {
+                            const dirKey = `${dir.x},${dir.y}`;
+                            if (!visited.has(dirKey)) {
+                                queue.push(dir);
                             }
-
-                            // Create clipboard item
-                            const clipboardItem: ClipboardItem = {
-                                id: `${startX},${startY}-${Date.now()}`,
-                                content: content.join('\n'),
-                                startX,
-                                endX,
-                                startY,
-                                endY,
-                                maxY,
-                                title,
-                                color,
-                                timestamp: Date.now()
-                            };
-
-                            // Add to clipboard (prepend to keep most recent first)
-                            setClipboardItems(prev => [clipboardItem, ...prev]);
-
-                            // Visual feedback
-                            setDialogueWithRevert(`Added to clipboard: ${title || 'untitled'}`, setDialogueText);
-
-                            return; // Don't process regular click behavior
                         }
-                    } catch (e) {
-                        // Skip invalid bound data
+                    } else if (textPositions.length > 0) {
+                        // If we've found text and this is a space, check if it connects text
+                        const hasTextLeft = worldData[`${pos.x - 1},${pos.y}`] && !isImageData(worldData[`${pos.x - 1},${pos.y}`]) && getCharacter(worldData[`${pos.x - 1},${pos.y}`]).trim() !== '';
+                        const hasTextRight = worldData[`${pos.x + 1},${pos.y}`] && !isImageData(worldData[`${pos.x + 1},${pos.y}`]) && getCharacter(worldData[`${pos.x + 1},${pos.y}`]).trim() !== '';
+
+                        if (hasTextLeft || hasTextRight) {
+                            if (!visited.has(`${pos.x - 1},${pos.y}`)) queue.push({ x: pos.x - 1, y: pos.y });
+                            if (!visited.has(`${pos.x + 1},${pos.y}`)) queue.push({ x: pos.x + 1, y: pos.y });
+                        }
                     }
                 }
+
+                // If no text found, search nearby 3x3
+                if (textPositions.length === 0) {
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            const checkPos = { x: startPos.x + dx, y: startPos.y + dy };
+                            const checkKey = `${checkPos.x},${checkPos.y}`;
+                            const checkData = worldData[checkKey];
+
+                            if (checkData && !isImageData(checkData) && getCharacter(checkData).trim() !== '') {
+                                return findTextBlock(checkPos);
+                            }
+                        }
+                    }
+                    return [];
+                }
+
+                return textPositions;
+            };
+
+            const textBlock = findTextBlock(newCursorPos);
+
+            if (textBlock.length > 0) {
+                // Calculate bounding box
+                const minX = Math.min(...textBlock.map(p => p.x));
+                const maxX = Math.max(...textBlock.map(p => p.x));
+                const minY = Math.min(...textBlock.map(p => p.y));
+                const maxY = Math.max(...textBlock.map(p => p.y));
+
+                // Extract text content line by line
+                const content: string[] = [];
+                for (let y = minY; y <= maxY; y++) {
+                    let line = '';
+                    for (let x = minX; x <= maxX; x++) {
+                        const cellKey = `${x},${y}`;
+                        const char = worldData[cellKey];
+                        if (typeof char === 'string') {
+                            line += char;
+                        } else if (char && typeof char === 'object' && 'char' in char) {
+                            line += char.char;
+                        } else {
+                            line += ' ';
+                        }
+                    }
+                    content.push(line.trimEnd());
+                }
+
+                // Create clipboard item
+                const clipboardItem: ClipboardItem = {
+                    id: `${minX},${minY}-${Date.now()}`,
+                    content: content.join('\n'),
+                    startX: minX,
+                    endX: maxX,
+                    startY: minY,
+                    endY: maxY,
+                    maxY: maxY,
+                    title: undefined,
+                    color: undefined,
+                    timestamp: Date.now()
+                };
+
+                // Add to clipboard (prepend to keep most recent first)
+                setClipboardItems(prev => [clipboardItem, ...prev]);
+
+                // Visual feedback
+                setDialogueWithRevert(`Added to clipboard: ${content[0]?.substring(0, 20) || 'text'}...`, setDialogueText);
+
+                return; // Don't process regular click behavior
             }
         }
 
