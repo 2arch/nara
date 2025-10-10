@@ -24,7 +24,8 @@ export function useWorldSave(
     setLocalSettings: React.Dispatch<React.SetStateAction<WorldSettings>>,
     autoLoadData: boolean = true,
     currentStateName?: string | null,
-    userUid?: string | null // Add user UID parameter
+    userUid?: string | null, // Add user UID parameter
+    isReadOnly?: boolean // Read-only flag to prevent write attempts
 ) {
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -218,6 +219,11 @@ export function useWorldSave(
             return;
         }
 
+        // Skip saves in read-only mode
+        if (isReadOnly) {
+            return;
+        }
+
         // For blog posts, disable auto-save hook since state system handles saving
         if (isBlogs) {
             return;
@@ -300,11 +306,16 @@ export function useWorldSave(
                 clearTimeout(saveTimeoutRef.current);
             }
         };
-    }, [localWorldData, isLoading, worldId, clientDataRefPath, isBlogs]);
+    }, [localWorldData, isLoading, worldId, clientDataRefPath, isBlogs, isReadOnly]);
 
     // --- Periodic Merge: Client Channels → Canonical ---
     useEffect(() => {
         if (isLoading || !worldId || !usersBasePath || !worldDataRefPath) {
+            return;
+        }
+
+        // Skip merge in read-only mode
+        if (isReadOnly) {
             return;
         }
 
@@ -376,11 +387,16 @@ export function useWorldSave(
                 clearInterval(mergeIntervalRef.current);
             }
         };
-    }, [isLoading, worldId, usersBasePath, worldDataRefPath, isBlogs]);
+    }, [isLoading, worldId, usersBasePath, worldDataRefPath, isBlogs, isReadOnly]);
 
     // --- Save Settings on Change (Debounced) ---
     useEffect(() => {
         if (isLoading || !worldId || !settingsRefPath || !lastSyncedSettingsRef.current) {
+            return;
+        }
+
+        // Skip settings saves in read-only mode
+        if (isReadOnly) {
             return;
         }
 
@@ -435,7 +451,7 @@ export function useWorldSave(
                 clearTimeout(settingsSaveTimeoutRef.current);
             }
         };
-    }, [localSettings, isLoading, worldId, settingsRefPath]);
+    }, [localSettings, isLoading, worldId, settingsRefPath, isReadOnly]);
 
     return { isLoading, isSaving, error };
 }

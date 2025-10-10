@@ -309,8 +309,9 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           if (profile && profile.username) {
             console.log('Existing user found:', profile.username);
 
-            // Stay at "checking credentials..." and redirect immediately
-            // Disable modes
+            // Clear host text and disable modes
+            setHostData(null);
+
             if (setHostMode) {
               setHostMode({ isActive: false, currentInputType: null });
             }
@@ -534,7 +535,9 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           isActive: false // End flow - don't restart
         }));
 
-        // Disable host mode and chat mode to prevent restart
+        // Clear host text and disable modes
+        setHostData(null);
+
         if (setHostMode) {
           setHostMode({ isActive: false, currentInputType: null });
         }
@@ -636,7 +639,9 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           isActive: false
         }));
 
-        // Disable modes
+        // Clear host text and disable modes
+        setHostData(null);
+
         if (setHostMode) {
           setHostMode({ isActive: false, currentInputType: null });
         }

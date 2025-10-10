@@ -76,6 +76,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const [totalPannedDistance, setTotalPannedDistance] = useState<number>(0);
     const lastCenterCellRef = useRef<Point | null>(null);
     const lastDistanceMilestoneRef = useRef<number>(0);
+    const hasTriggeredSignupPromptRef = useRef<boolean>(false); // Track if we've already prompted signup
 
     // Track shift key state globally
     useEffect(() => {
@@ -102,105 +103,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         };
     }, []);
 
-    // Track viewport center cell position and calculate total panned distance
-    useEffect(() => {
-        const interval = setInterval(() => {
-            if (typeof window === 'undefined' || !canvasRef.current) return;
-
-            const { width: effectiveCharWidth, height: effectiveCharHeight } = engine.getEffectiveCharDims(engine.zoomLevel);
-            if (effectiveCharWidth <= 0 || effectiveCharHeight <= 0) return;
-
-            const viewportWidth = window.innerWidth;
-            const viewportHeight = window.innerHeight;
-
-            // Calculate center cell coordinate
-            const centerCellX = Math.round(engine.viewOffset.x + (viewportWidth / 2) / effectiveCharWidth);
-            const centerCellY = Math.round(engine.viewOffset.y + (viewportHeight / 2) / effectiveCharHeight);
-
-            if (lastCenterCellRef.current) {
-                const dx = centerCellX - lastCenterCellRef.current.x;
-                const dy = centerCellY - lastCenterCellRef.current.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-
-                if (distance > 0) {
-                    const newTotal = totalPannedDistance + distance;
-                    setTotalPannedDistance(newTotal);
-
-                    // Check for milestones
-                    const currentMilestone = Math.floor(newTotal / PAN_MILESTONE_INTERVAL);
-                    if (currentMilestone > lastDistanceMilestoneRef.current) {
-                        console.log(`Total panned distance milestone: ${currentMilestone * PAN_MILESTONE_INTERVAL} cells`);
-                        lastDistanceMilestoneRef.current = currentMilestone;
-                    }
-                }
-            }
-
-            lastCenterCellRef.current = { x: centerCellX, y: centerCellY };
-        }, 100); // Check every 100ms
-
-        return () => clearInterval(interval);
-    }, [engine.viewOffset, engine.zoomLevel, totalPannedDistance, PAN_MILESTONE_INTERVAL, engine]);
-
-    const router = useRouter();
-    
-    // Cache for background images to avoid reloading
-    const backgroundImageRef = useRef<HTMLImageElement | null>(null);
-    const backgroundImageUrlRef = useRef<string | null>(null);
-    
-    // Cache for uploaded images to avoid reloading
-    const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
-    
-    // Dialogue system
-    const { renderDialogue, renderDebugDialogue, renderNavDialogue, renderMonogramControls, handleNavClick } = useDialogue();
-    
-    // Debug dialogue system
-    const { debugText } = useDebugDialogue(engine);
-    
-    // Monogram system for psychedelic patterns - load from settings and sync changes
-    const monogramSystem = useMonogramSystem(
-        {
-            mode: hostModeEnabled ? 'perlin' : (engine.settings.monogramMode || 'clear'),
-            speed: 0.5,
-            complexity: 1.0,
-            colorShift: 0,
-            enabled: hostModeEnabled ? true : (engine.settings.monogramEnabled || false),
-            geometryType: 'octahedron',
-            interactiveTrails: true,
-            trailIntensity: 1.0,
-            trailFadeMs: 2000
-        },
-        (options) => {
-            // Save monogram mode and enabled state to settings when changed
-            engine.updateSettings({
-                monogramMode: options.mode,
-                monogramEnabled: options.enabled
-            });
-        }
-    );
-
-    // Monogram command handler
-    const handleMonogramCommand = useCallback((args: string[]) => {
-        if (args.length === 0) {
-            // Toggle monogram on/off (keeps current mode)
-            const newEnabled = !monogramSystem.options.enabled;
-            monogramSystem.updateOption('enabled', newEnabled);
-        } else if (args[0] === 'clear') {
-            // Set to clear mode (only trails, no background pattern)
-            monogramSystem.updateOption('mode', 'clear');
-            monogramSystem.updateOption('enabled', true);
-        } else if (args[0] === 'perlin') {
-            // Set to perlin mode (flowing noise pattern)
-            monogramSystem.updateOption('mode', 'perlin');
-            monogramSystem.updateOption('enabled', true);
-        }
-    }, [monogramSystem]);
-
-    // Register monogram command handler with engine
-    useEffect(() => {
-        engine.setMonogramCommandHandler(handleMonogramCommand);
-    }, [engine, handleMonogramCommand]);
-
-    // Zoom handler for host dialogue
+        // Zoom handler for host dialogue
     const handleZoom = useCallback((targetZoomMultiplier: number, centerPos: Point) => {
         const startZoom = engine.zoomLevel;
         const targetZoom = startZoom * targetZoomMultiplier;
@@ -225,7 +128,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         requestAnimationFrame(animateZoom);
     }, [engine]);
 
-    // Host dialogue system for onboarding
+        // Host dialogue system for onboarding
     const hostDialogue = useHostDialogue({
         setHostData: engine.setHostData,
         getViewportCenter: engine.getViewportCenter,
@@ -393,6 +296,131 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             }
         }
     }, [hostDialogue.isHostActive, hostDialogue.hostState.currentMessageId]);
+
+    // Track viewport center cell position and calculate total panned distance
+    useEffect(() => {
+        const interval = setInterval(() => {
+            if (typeof window === 'undefined' || !canvasRef.current) return;
+
+            const { width: effectiveCharWidth, height: effectiveCharHeight } = engine.getEffectiveCharDims(engine.zoomLevel);
+            if (effectiveCharWidth <= 0 || effectiveCharHeight <= 0) return;
+
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
+
+            // Calculate center cell coordinate
+            const centerCellX = Math.round(engine.viewOffset.x + (viewportWidth / 2) / effectiveCharWidth);
+            const centerCellY = Math.round(engine.viewOffset.y + (viewportHeight / 2) / effectiveCharHeight);
+
+            if (lastCenterCellRef.current) {
+                const dx = centerCellX - lastCenterCellRef.current.x;
+                const dy = centerCellY - lastCenterCellRef.current.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance > 0) {
+                    const newTotal = totalPannedDistance + distance;
+                    setTotalPannedDistance(newTotal);
+
+                    // Check for milestones
+                    const currentMilestone = Math.floor(newTotal / PAN_MILESTONE_INTERVAL);
+                    if (currentMilestone > lastDistanceMilestoneRef.current) {
+                        console.log(`Total panned distance milestone: ${currentMilestone * PAN_MILESTONE_INTERVAL} cells`);
+                        lastDistanceMilestoneRef.current = currentMilestone;
+                    }
+
+                    // Check for 2000 cell threshold - trigger signup for unauthenticated users
+                    if (newTotal >= 2000 && !hasTriggeredSignupPromptRef.current) {
+                        hasTriggeredSignupPromptRef.current = true;
+
+                        // Check if user is authenticated
+                        const { auth } = require('../firebase');
+                        const user = auth.currentUser;
+
+                        if (!user && hostDialogue && !hostDialogue.isHostActive) {
+                            console.log('2000 cells reached - triggering signup prompt for unauthenticated user');
+
+                            // Activate host mode in engine
+                            engine.setHostMode({ isActive: true, currentInputType: null });
+
+                            // Activate chat mode for input
+                            engine.setChatMode({
+                                isActive: true,
+                                currentInput: '',
+                                inputPositions: [],
+                                isProcessing: false
+                            });
+
+                            hostDialogue.startFlow('welcome');
+                        }
+                    }
+                }
+            }
+
+            lastCenterCellRef.current = { x: centerCellX, y: centerCellY };
+        }, 100); // Check every 100ms
+
+        return () => clearInterval(interval);
+    }, [engine.viewOffset, engine.zoomLevel, totalPannedDistance, PAN_MILESTONE_INTERVAL, engine, hostDialogue]);
+
+    const router = useRouter();
+    
+    // Cache for background images to avoid reloading
+    const backgroundImageRef = useRef<HTMLImageElement | null>(null);
+    const backgroundImageUrlRef = useRef<string | null>(null);
+    
+    // Cache for uploaded images to avoid reloading
+    const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
+    
+    // Dialogue system
+    const { renderDialogue, renderDebugDialogue, renderNavDialogue, renderMonogramControls, handleNavClick } = useDialogue();
+    
+    // Debug dialogue system
+    const { debugText } = useDebugDialogue(engine);
+    
+    // Monogram system for psychedelic patterns - load from settings and sync changes
+    const monogramSystem = useMonogramSystem(
+        {
+            mode: hostModeEnabled ? 'perlin' : (engine.settings.monogramMode || 'clear'),
+            speed: 0.5,
+            complexity: 1.0,
+            colorShift: 0,
+            enabled: hostModeEnabled ? true : (engine.settings.monogramEnabled || false),
+            geometryType: 'octahedron',
+            interactiveTrails: true,
+            trailIntensity: 1.0,
+            trailFadeMs: 2000
+        },
+        (options) => {
+            // Save monogram mode and enabled state to settings when changed
+            engine.updateSettings({
+                monogramMode: options.mode,
+                monogramEnabled: options.enabled
+            });
+        }
+    );
+
+    // Monogram command handler
+    const handleMonogramCommand = useCallback((args: string[]) => {
+        if (args.length === 0) {
+            // Toggle monogram on/off (keeps current mode)
+            const newEnabled = !monogramSystem.options.enabled;
+            monogramSystem.updateOption('enabled', newEnabled);
+        } else if (args[0] === 'clear') {
+            // Set to clear mode (only trails, no background pattern)
+            monogramSystem.updateOption('mode', 'clear');
+            monogramSystem.updateOption('enabled', true);
+        } else if (args[0] === 'perlin') {
+            // Set to perlin mode (flowing noise pattern)
+            monogramSystem.updateOption('mode', 'perlin');
+            monogramSystem.updateOption('enabled', true);
+        }
+    }, [monogramSystem]);
+
+    // Register monogram command handler with engine
+    useEffect(() => {
+        engine.setMonogramCommandHandler(handleMonogramCommand);
+    }, [engine, handleMonogramCommand]);
+
 
     // Controller system for handling keyboard inputs
     const { registerGroup, handleKeyDown: handleKeyDownFromController, getHelpText } = useControllerSystem();
@@ -3683,8 +3711,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     zIndex: 1
                 }}
             />
-            {/* Hidden input for mobile keyboard - only in write mode */}
-            {'ontouchstart' in window && !engine.isReadOnly && (
+            {/* Hidden input for mobile keyboard - only in write mode OR host mode */}
+            {'ontouchstart' in window && (!engine.isReadOnly || hostDialogue.isHostActive) && (
                 <input
                     ref={hiddenInputRef}
                     type="text"

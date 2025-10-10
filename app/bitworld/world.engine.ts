@@ -1015,6 +1015,9 @@ export function useWorldEngine({
         // Additional check to ensure userUid is not null/undefined before proceeding
         if (!userUid) return;
 
+        // Skip compilation sync in read-only mode
+        if (isReadOnly) return;
+
         // Clear any pending compilation
         if (compilationTimeoutRef.current) {
             clearTimeout(compilationTimeoutRef.current);
@@ -1089,7 +1092,7 @@ export function useWorldEngine({
                 clearTimeout(compilationTimeoutRef.current);
             }
         };
-    }, [worldData, worldId, compileTextStrings, currentStateName, getUserPath, userUid]);
+    }, [worldData, worldId, compileTextStrings, currentStateName, getUserPath, userUid, isReadOnly]);
 
     // === State Management Functions ===
     const saveState = useCallback(async (stateName: string): Promise<boolean> => {
@@ -1394,14 +1397,15 @@ export function useWorldEngine({
         isSaving: isSavingWorld,
         error: worldPersistenceError
     } = useWorldSave(
-        shouldEnableWorldSave ? worldId : null, 
-        worldData, 
-        setWorldData, 
-        settings, 
-        setSettings, 
-        true, 
-        currentStateName, 
-        userUid
+        shouldEnableWorldSave ? worldId : null,
+        worldData,
+        setWorldData,
+        settings,
+        setSettings,
+        true,
+        currentStateName,
+        userUid,
+        isReadOnly // Pass read-only flag to prevent write attempts
     ); // Only enable when userUid is available
 
     // === Apply spawn point or URL coordinates when settings load ===
@@ -2180,9 +2184,10 @@ export function useWorldEngine({
         }
 
         // === Read-Only Mode: Block writes on mobile, allow ephemeral typing on desktop ===
+        // Exception: Allow input when host mode is active (for signup/login flows)
         const isMobile = typeof window !== 'undefined' && 'ontouchstart' in window;
 
-        if (isReadOnly) {
+        if (isReadOnly && !hostMode.isActive) {
             // On mobile: block all typing (pan only)
             if (isMobile) {
                 const allowedKeys = [
