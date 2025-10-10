@@ -77,7 +77,7 @@ export default function Home() {
   });
 
   const engine = useWorldEngine({
-    worldId: null,
+    worldId: user ? 'home' : null, // Use 'home' for authenticated users, null for guests
     initialBackgroundColor: pathname === '/' ? hostColors.background : undefined,
     userUid: user?.uid || null,
     initialZoomLevel: pathname === '/' ? 1.6 : 1.0 // Zoomed in for host mode onboarding

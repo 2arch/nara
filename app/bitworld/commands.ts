@@ -79,6 +79,7 @@ interface UseCommandSystemProps {
     settings?: WorldSettings;
     getEffectiveCharDims: (zoom: number) => { width: number; height: number; fontSize: number; };
     zoomLevel: number;
+    saveSettingsToFirebase?: (settings: Partial<WorldSettings>) => Promise<void>;
 }
 
 // --- Command System Constants ---
@@ -101,7 +102,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, updateSettings, settings, getEffectiveCharDims, zoomLevel }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, updateSettings, settings, getEffectiveCharDims, zoomLevel, saveSettingsToFirebase }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const [commandState, setCommandState] = useState<CommandState>({
@@ -530,11 +531,15 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
 
             // Save color preferences to settings
             if (updateSettings) {
-                updateSettings({
+                const newSettings = {
                     backgroundColor: hexBgColor,
                     textColor: finalTextColor,
                     customBackground: undefined // Clear any AI background when setting solid color
-                });
+                };
+                updateSettings(newSettings);
+                if (saveSettingsToFirebase) {
+                    saveSettingsToFirebase(newSettings);
+                }
             }
         } else if (newMode === 'transparent') {
             const finalTextColor = textColor || '#FFFFFF'; // Default to white text for transparent background
@@ -552,11 +557,15 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
 
             // Save color preferences to settings
             if (updateSettings) {
-                updateSettings({
+                const newSettings = {
                     backgroundColor: undefined, // Transparent has no color
                     textColor: finalTextColor,
                     customBackground: undefined
-                });
+                };
+                updateSettings(newSettings);
+                if (saveSettingsToFirebase) {
+                    saveSettingsToFirebase(newSettings);
+                }
             }
         } else if (newMode === 'space') {
             const finalTextColor = textColor || '#FFFFFF'; // Default to white text for space background
@@ -574,11 +583,15 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
 
             // Save color preferences to settings
             if (updateSettings) {
-                updateSettings({
+                const newSettings = {
                     backgroundColor: undefined, // Space mode has no solid color
                     textColor: finalTextColor,
                     customBackground: undefined
-                });
+                };
+                updateSettings(newSettings);
+                if (saveSettingsToFirebase) {
+                    saveSettingsToFirebase(newSettings);
+                }
             }
         } else if (newMode === 'image' && bgColor) {
             // bgColor is actually the image URL/data for image mode
@@ -598,15 +611,19 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
 
             // Save AI-generated background to settings if prompt is provided
             if (updateSettings && aiPrompt) {
-                updateSettings({
+                const newSettings = {
                     backgroundColor: undefined,
                     textColor: finalTextColor,
                     customBackground: {
-                        type: 'ai-generated',
+                        type: 'ai-generated' as const,
                         content: bgColor,
                         prompt: aiPrompt
                     }
-                });
+                };
+                updateSettings(newSettings);
+                if (saveSettingsToFirebase) {
+                    saveSettingsToFirebase(newSettings);
+                }
             }
         } else if (newMode === 'video' && bgColor) {
             // bgColor is actually the video URL/data for video mode
@@ -626,15 +643,19 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
 
             // Save AI-generated video background to settings if prompt is provided
             if (updateSettings && aiPrompt) {
-                updateSettings({
+                const newSettings = {
                     backgroundColor: undefined,
                     textColor: finalTextColor,
                     customBackground: {
-                        type: 'ai-generated',
+                        type: 'ai-generated' as const,
                         content: bgColor,
                         prompt: aiPrompt
                     }
-                });
+                };
+                updateSettings(newSettings);
+                if (saveSettingsToFirebase) {
+                    saveSettingsToFirebase(newSettings);
+                }
             }
         } else if (newMode === 'stream') {
             // Stream mode for screen sharing
@@ -1368,10 +1389,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
 
                     // Save to settings and mark as custom text color
                     if (updateSettings) {
-                        updateSettings({
+                        const newSettings = {
                             textColor: finalTextColor,
                             hasCustomTextColor: true
-                        });
+                        };
+                        updateSettings(newSettings);
+                        if (saveSettingsToFirebase) {
+                            saveSettingsToFirebase(newSettings);
+                        }
                     }
 
                     const styleMsg = finalTextBackground ?

@@ -2974,9 +2974,18 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         canvasRef.current?.focus(); // Ensure focus for keyboard
 
-        // On mobile, focus the hidden input to trigger iOS keyboard only when host dialogue expects input
-        if ('ontouchstart' in window && hiddenInputRef.current && hostDialogue.isExpectingInput()) {
-            hiddenInputRef.current.focus();
+        // On mobile, focus the hidden input to trigger iOS keyboard
+        // - When host dialogue is active: only if expecting input
+        // - When host dialogue is NOT active: always focus for regular typing
+        if ('ontouchstart' in window && hiddenInputRef.current) {
+            if (hostDialogue.isHostActive) {
+                if (hostDialogue.isExpectingInput()) {
+                    hiddenInputRef.current.focus();
+                }
+            } else {
+                // Not in host mode - focus for regular typing
+                hiddenInputRef.current.focus();
+            }
         }
     }, [engine, canvasSize, router, handleNavClick, handleCoordinateClick, handleColorFilterClick, handleSortModeClick, handleStateClick, handleIndexClick, hostDialogue]);
 
@@ -3423,9 +3432,16 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         } as React.MouseEvent<HTMLCanvasElement>;
                         handleCanvasClick(syntheticEvent);
 
-                        // Focus hidden input for iOS keyboard only when host dialogue expects input
-                        if (hiddenInputRef.current && hostDialogue.isExpectingInput()) {
-                            hiddenInputRef.current.focus();
+                        // Focus hidden input for iOS keyboard
+                        if (hiddenInputRef.current) {
+                            if (hostDialogue.isHostActive) {
+                                if (hostDialogue.isExpectingInput()) {
+                                    hiddenInputRef.current.focus();
+                                }
+                            } else {
+                                // Not in host mode - focus for regular typing
+                                hiddenInputRef.current.focus();
+                            }
                         }
                     }
                 }

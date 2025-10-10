@@ -273,14 +273,20 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       const flow = HOST_FLOWS[state.currentFlowId!];
       const checkingMessage = flow.messages['checking_user'];
 
-      // Show checking message
+      // Show checking message and lock the flow
       setHostData({
         text: checkingMessage.text,
         centerPos: getViewportCenter(),
         timestamp: Date.now()
       });
 
-      setState(prev => ({ ...prev, currentMessageId: 'checking_user', isProcessing: true }));
+      // Set a flag to prevent flow restart during auth
+      setState(prev => ({
+        ...prev,
+        currentMessageId: 'checking_user',
+        isProcessing: true,
+        isActive: false // Deactivate flow to prevent restart
+      }));
 
       // Try to sign in with existing credentials
       try {
@@ -302,21 +308,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
 
           if (profile && profile.username) {
             console.log('Existing user found:', profile.username);
-            // Show success message
-            setHostData({
-              text: `welcome back, ${profile.username}!`,
-              color: '#00AA00',
-              centerPos: getViewportCenter(),
-              timestamp: Date.now()
-            });
 
-            // End the flow
-            setState(prev => ({
-              ...prev,
-              isProcessing: false,
-              isActive: false
-            }));
-
+            // Stay at "checking credentials..." and redirect immediately
             // Disable modes
             if (setHostMode) {
               setHostMode({ isActive: false, currentInputType: null });
@@ -330,7 +323,7 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
               });
             }
 
-            // Redirect to their world
+            // Redirect to their world immediately
             if (onAuthSuccess) {
               onAuthSuccess(profile.username);
             }
@@ -356,7 +349,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           setState(prev => ({
             ...prev,
             currentMessageId: 'collect_username_welcome',
-            isProcessing: false
+            isProcessing: false,
+            isActive: true // Reactivate flow for username collection
           }));
 
           return true;
@@ -368,7 +362,11 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
             timestamp: Date.now()
           });
 
-          setState(prev => ({ ...prev, isProcessing: false }));
+          setState(prev => ({
+            ...prev,
+            isProcessing: false,
+            isActive: true // Reactivate flow so user can try again
+          }));
           return false;
         }
       } catch (error: any) {
@@ -381,7 +379,11 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           timestamp: Date.now()
         });
 
-        setState(prev => ({ ...prev, isProcessing: false }));
+        setState(prev => ({
+          ...prev,
+          isProcessing: false,
+          isActive: true // Reactivate flow so user can try again
+        }));
         return false;
       }
     }

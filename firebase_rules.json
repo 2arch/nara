@@ -34,23 +34,33 @@
       "$userId": {
         ".read": "auth != null && auth.uid == $userId",
         ".write": "auth != null && auth.uid == $userId",
-        
+
         "$stateName": {
           ".indexOn": ["public"],
-          
+
           ".read": "data.child('public').val() == true || (auth != null && auth.uid == $userId)",
           ".write": "auth != null && auth.uid == $userId",
-          
+
           "data": {
             ".read": "root.child('worlds').child($userId).child($stateName).child('public').val() == true || (auth != null && auth.uid == $userId)",
             ".write": "auth != null && auth.uid == $userId"
           },
-          
+
+          "users": {
+            ".read": "auth != null && auth.uid == $userId",
+            "$clientId": {
+              "data": {
+                ".read": "auth != null && auth.uid == $userId",
+                ".write": "auth != null && auth.uid == $userId"
+              }
+            }
+          },
+
           "settings": {
             ".read": "root.child('worlds').child($userId).child($stateName).child('public').val() == true || (auth != null && auth.uid == $userId)",
             ".write": "auth != null && auth.uid == $userId"
           },
-          
+
           "public": {
             ".read": true,
             ".write": "auth != null && auth.uid == $userId"

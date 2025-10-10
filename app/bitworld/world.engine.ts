@@ -767,6 +767,32 @@ export function useWorldEngine({
     // === Settings System ===
     const { settings, setSettings, updateSettings } = useWorldSettings();
     
+        // === Immediate Settings Save Function ===
+    const saveSettingsToFirebase = useCallback(async (newSettings: Partial<WorldSettings>) => {
+        // Allow null userUid (for global worlds like home/homeWorld)
+        if (!worldId) return;
+
+        try {
+            // Use currentStateName if available, otherwise use worldId
+            const pathToUse = currentStateName || worldId;
+            const finalPath = getUserPath(`${pathToUse}/settings`);
+            const settingsRef = ref(database, finalPath);
+
+            // Merge settings and filter out undefined values to prevent Firebase errors
+            const merged = { ...settings, ...newSettings };
+            const updatedSettings = Object.entries(merged).reduce((acc, [key, value]) => {
+                if (value !== undefined) {
+                    (acc as any)[key] = value;
+                }
+                return acc;
+            }, {} as WorldSettings);
+
+            await set(settingsRef, updatedSettings);
+        } catch (error) {
+            logger.error('Failed to save settings to Firebase:', error);
+        }
+    }, [worldId, settings, getUserPath, userUid, currentStateName]);
+
     // === Command System ===
     const {
         commandState,
@@ -805,7 +831,7 @@ export function useWorldEngine({
         setFullscreenMode,
         exitFullscreenMode,
         switchBackgroundMode,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, updateSettings, settings, getEffectiveCharDims, zoomLevel });
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, updateSettings, settings, getEffectiveCharDims, zoomLevel, saveSettingsToFirebase });
 
     // Generate search data when search pattern changes
     useEffect(() => {
@@ -1313,25 +1339,6 @@ export function useWorldEngine({
         });
     }, []);
 
-    // === Immediate Settings Save Function ===
-    const saveSettingsToFirebase = useCallback(async (newSettings: Partial<WorldSettings>) => {
-        if (!worldId || !userUid) return;
-        
-        try {
-            const settingsRef = ref(database, getUserPath(`${worldId}/settings`));
-            // Merge settings and filter out undefined values to prevent Firebase errors
-            const merged = { ...settings, ...newSettings };
-            const updatedSettings = Object.entries(merged).reduce((acc, [key, value]) => {
-                if (value !== undefined) {
-                    (acc as any)[key] = value;
-                }
-                return acc;
-            }, {} as WorldSettings);
-            await set(settingsRef, updatedSettings);
-        } catch (error) {
-            logger.error('Failed to save settings to Firebase:', error);
-        }
-    }, [worldId, settings, getUserPath, userUid]);
     
 
     
@@ -2392,12 +2399,10 @@ export function useWorldEngine({
                     const spawnPoint = { x: cursorPos.x, y: cursorPos.y };
 
                     // Update settings with spawn point
-                    if (updateSettings) {
-                        updateSettings({ spawnPoint });
-                        setDialogueWithRevert(`Spawn point set at (${spawnPoint.x}, ${spawnPoint.y})`, setDialogueText);
-                    } else {
-                        setDialogueWithRevert("Failed to set spawn point", setDialogueText);
-                    }
+                    const newSettings = { spawnPoint };
+                    updateSettings(newSettings);
+                    saveSettingsToFirebase(newSettings);
+                    setDialogueWithRevert(`Spawn point set at (${spawnPoint.x}, ${spawnPoint.y})`, setDialogueText);
                 } else if (exec.command === 'zoom') {
                     // Gradually zoom in by 30%
                     const startZoom = zoomLevel;
