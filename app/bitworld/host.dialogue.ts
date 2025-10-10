@@ -77,7 +77,6 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
 
         // Despawn labels if requested
         if (nextMessage.despawnLabels && setWorldData) {
-          console.log('Despawning labels for message:', nextMessage.id);
           setWorldData(prev => {
             const newData = { ...prev };
             // Remove all label_ keys
@@ -91,7 +90,6 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
         }
 
         // Spawn staged content if defined (only if not already spawned)
-        console.log('Checking spawn:', { hasSpawn: !!nextMessage.spawnContent, hasSetWorldData: !!setWorldData });
         if (nextMessage.spawnContent && setWorldData) {
           const content = nextMessage.spawnContent(centerPos);
 
@@ -101,11 +99,9 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           setWorldData(prev => {
             const labelsExist = labelKeys.some(key => key in prev);
             if (labelsExist) {
-              console.log('Labels already exist, skipping spawn for message:', nextMessage.id);
               return prev;
             }
 
-            console.log('Spawning content for message:', nextMessage.id, content);
             return {
               ...prev,
               ...content
@@ -185,11 +181,9 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       setWorldData(prev => {
         const labelsExist = labelKeys.some(key => key in prev);
         if (labelsExist) {
-          console.log('Labels already exist, skipping spawn for start message:', startMessage.id);
           return prev;
         }
 
-        console.log('Spawning content for start message:', startMessage.id, content);
         return {
           ...prev,
           ...content
@@ -292,9 +286,6 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       try {
         const { signInUser, getUserProfile } = await import('../firebase');
 
-        // Debug: Check collected data
-        console.log('Collected data for sign in:', newCollectedData);
-
         if (!newCollectedData.email || !newCollectedData.password) {
           console.error('Missing email or password:', { email: !!newCollectedData.email, password: !!newCollectedData.password });
           throw new Error('Missing credentials');
@@ -307,7 +298,6 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           const profile = await getUserProfile(result.user.uid);
 
           if (profile && profile.username) {
-            console.log('Existing user found:', profile.username);
 
             // Clear host text and disable modes
             setHostData(null);
@@ -349,8 +339,6 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
         // Sign in failed - check if it's wrong password or new user
         if (result.error && result.error.includes('invalid-credential')) {
           // This is a new user, continue to username collection
-          console.log('New user detected, continuing to username collection');
-
           const flow = HOST_FLOWS[state.currentFlowId!];
           const usernameMessage = flow.messages['collect_username_welcome'];
 

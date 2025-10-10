@@ -24,6 +24,7 @@ export interface CommandExecution {
     command: string;
     args: string[];
     commandStartPos: Point;
+    clipContent?: string; // For /clip command
 }
 
 // --- Mode System Types ---
@@ -79,11 +80,11 @@ interface UseCommandSystemProps {
     settings?: WorldSettings;
     getEffectiveCharDims: (zoom: number) => { width: number; height: number; fontSize: number; };
     zoomLevel: number;
-    saveSettingsToFirebase?: (settings: Partial<WorldSettings>) => Promise<void>;
+    clipboardItems?: Array<{id: string, content: string, startX: number, endX: number, startY: number, endY: number, timestamp: number}>;
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signin', 'signout', 'publish', 'unpublish', 'share', 'clear', 'cam', 'indent', 'bound', 'unbound', 'upload', 'spawn', 'monogram', 'stage'];
+const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signin', 'signout', 'publish', 'unpublish', 'share', 'clear', 'cam', 'indent', 'bound', 'unbound', 'upload', 'spawn', 'monogram', 'stage', 'clip'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro', 'Neureal'];
@@ -102,7 +103,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, updateSettings, settings, getEffectiveCharDims, zoomLevel, saveSettingsToFirebase }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [] }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const [commandState, setCommandState] = useState<CommandState>({
@@ -454,8 +455,21 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return ['upload', 'upload --bitmap'];
         }
 
+        if (lowerInput === 'clip') {
+            // Show clipboard entries
+            if (clipboardItems.length === 0) {
+                return ['clip'];
+            }
+            return clipboardItems.map((item, idx) => {
+                // Get first line of content, trimmed to max 50 chars
+                const firstLine = item.content.split('\n')[0].trim();
+                const preview = firstLine.length > 50 ? firstLine.substring(0, 50) + '...' : firstLine;
+                return `clip ${idx} ${preview}`;
+            });
+        }
+
         return AVAILABLE_COMMANDS.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
-    }, [getAllLabels, getAllBounds, availableStates]);
+    }, [getAllLabels, getAllBounds, availableStates, clipboardItems]);
 
     // Mode switching functionality
     const switchMode = useCallback((newMode: CanvasMode) => {
@@ -537,9 +551,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     customBackground: undefined // Clear any AI background when setting solid color
                 };
                 updateSettings(newSettings);
-                if (saveSettingsToFirebase) {
-                    saveSettingsToFirebase(newSettings);
-                }
             }
         } else if (newMode === 'transparent') {
             const finalTextColor = textColor || '#FFFFFF'; // Default to white text for transparent background
@@ -563,9 +574,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     customBackground: undefined
                 };
                 updateSettings(newSettings);
-                if (saveSettingsToFirebase) {
-                    saveSettingsToFirebase(newSettings);
-                }
             }
         } else if (newMode === 'space') {
             const finalTextColor = textColor || '#FFFFFF'; // Default to white text for space background
@@ -589,9 +597,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     customBackground: undefined
                 };
                 updateSettings(newSettings);
-                if (saveSettingsToFirebase) {
-                    saveSettingsToFirebase(newSettings);
-                }
             }
         } else if (newMode === 'image' && bgColor) {
             // bgColor is actually the image URL/data for image mode
@@ -621,9 +626,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     }
                 };
                 updateSettings(newSettings);
-                if (saveSettingsToFirebase) {
-                    saveSettingsToFirebase(newSettings);
-                }
             }
         } else if (newMode === 'video' && bgColor) {
             // bgColor is actually the video URL/data for video mode
@@ -653,9 +655,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     }
                 };
                 updateSettings(newSettings);
-                if (saveSettingsToFirebase) {
-                    saveSettingsToFirebase(newSettings);
-                }
             }
         } else if (newMode === 'stream') {
             // Stream mode for screen sharing
@@ -1394,9 +1393,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                             hasCustomTextColor: true
                         };
                         updateSettings(newSettings);
-                        if (saveSettingsToFirebase) {
-                            saveSettingsToFirebase(newSettings);
-                        }
                     }
 
                     const styleMsg = finalTextBackground ?
@@ -1746,13 +1742,47 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 hasNavigated: false
             });
             setCommandData({});
-            
+
             // Return command execution for world engine to handle clearing the canvas
             return {
                 command: 'clear',
                 args: [],
                 commandStartPos: commandState.commandStartPos
             };
+        }
+
+        if (commandToExecute.startsWith('clip')) {
+            const parts = commandToExecute.split(' ');
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            // If user selected a specific clipboard entry
+            if (parts.length > 1) {
+                const clipIndex = parseInt(parts[1]);
+                if (!isNaN(clipIndex) && clipIndex >= 0 && clipIndex < clipboardItems.length) {
+                    const clipItem = clipboardItems[clipIndex];
+                    // Return command execution for world engine to paste clipboard content
+                    return {
+                        command: 'clip',
+                        args: [clipIndex.toString()],
+                        commandStartPos: commandState.commandStartPos,
+                        clipContent: clipItem.content
+                    };
+                }
+            }
+
+            // No selection or invalid index
+            setDialogueWithRevert("No clipboard item selected", setDialogueText);
+            return null;
         }
 
         if (commandToExecute.startsWith('cam')) {

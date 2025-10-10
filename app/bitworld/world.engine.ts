@@ -792,32 +792,6 @@ export function useWorldEngine({
 
     // === Settings System ===
     const { settings, setSettings, updateSettings } = useWorldSettings();
-    
-        // === Immediate Settings Save Function ===
-    const saveSettingsToFirebase = useCallback(async (newSettings: Partial<WorldSettings>) => {
-        // Allow null userUid (for global worlds like home/homeWorld)
-        if (!worldId) return;
-
-        try {
-            // Use currentStateName if available, otherwise use worldId
-            const pathToUse = currentStateName || worldId;
-            const finalPath = getUserPath(`${pathToUse}/settings`);
-            const settingsRef = ref(database, finalPath);
-
-            // Merge settings and filter out undefined values to prevent Firebase errors
-            const merged = { ...settings, ...newSettings };
-            const updatedSettings = Object.entries(merged).reduce((acc, [key, value]) => {
-                if (value !== undefined) {
-                    (acc as any)[key] = value;
-                }
-                return acc;
-            }, {} as WorldSettings);
-
-            await set(settingsRef, updatedSettings);
-        } catch (error) {
-            logger.error('Failed to save settings to Firebase:', error);
-        }
-    }, [worldId, settings, getUserPath, userUid, currentStateName]);
 
     // === Command System ===
     const {
@@ -857,7 +831,7 @@ export function useWorldEngine({
         setFullscreenMode,
         exitFullscreenMode,
         switchBackgroundMode,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, updateSettings, settings, getEffectiveCharDims, zoomLevel, saveSettingsToFirebase });
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems });
 
     // Generate search data when search pattern changes
     useEffect(() => {
@@ -2280,11 +2254,9 @@ export function useWorldEngine({
                     if (exec.args[0] === 'on') {
                         const newSettings = { isDebugVisible: true };
                         updateSettings(newSettings);
-                        saveSettingsToFirebase(newSettings);
                     } else if (exec.args[0] === 'off') {
                         const newSettings = { isDebugVisible: false };
                         updateSettings(newSettings);
-                        saveSettingsToFirebase(newSettings);
                     } else {
                         setDialogueWithRevert("Usage: /debug [on|off] - Toggle debug information display", setDialogueText);
                     }
@@ -2328,16 +2300,14 @@ export function useWorldEngine({
                             // Set to maximum value to effectively disable distance filtering
                             const newSettings = { labelProximityThreshold: 999999 };
                             updateSettings(newSettings);
-                            saveSettingsToFirebase(newSettings);
                             setDialogueWithRevert("Label distance filtering disabled", setDialogueText);
                         } else {
                             const distance = parseInt(distanceStr, 10);
-                            
+
                             if (!isNaN(distance) && distance > 0) {
                                 // Update the labelProximityThreshold setting
                                 const newSettings = { labelProximityThreshold: distance };
                                 updateSettings(newSettings);
-                                saveSettingsToFirebase(newSettings);
                                 setDialogueWithRevert(`Label distance threshold set to ${distance}`, setDialogueText);
                             } else {
                                 setDialogueWithRevert("Invalid distance. Please provide a positive number or 'off'.", setDialogueText);
@@ -2654,7 +2624,6 @@ export function useWorldEngine({
                     // Update settings with spawn point
                     const newSettings = { spawnPoint };
                     updateSettings(newSettings);
-                    saveSettingsToFirebase(newSettings);
                     setDialogueWithRevert(`Spawn point set at (${spawnPoint.x}, ${spawnPoint.y})`, setDialogueText);
                 } else if (exec.command === 'stage') {
                     // Stage a 5x5 grid of ephemeral images from URL at cursor position
@@ -2858,6 +2827,35 @@ export function useWorldEngine({
                         });
                     }
                     setDialogueWithRevert("Canvas cleared", setDialogueText);
+                } else if (exec.command === 'clip') {
+                    // Paste clipboard content at cursor
+                    if (exec.clipContent) {
+                        const lines = exec.clipContent.split('\n');
+                        const startX = cursorPos.x;
+                        const startY = cursorPos.y;
+
+                        // Place text line by line
+                        for (let i = 0; i < lines.length; i++) {
+                            const line = lines[i];
+                            for (let j = 0; j < line.length; j++) {
+                                const char = line[j];
+                                const key = `${startX + j},${startY + i}`;
+                                setWorldData(prev => ({
+                                    ...prev,
+                                    [key]: { char, color: textColor }
+                                }));
+                            }
+                        }
+
+                        // Move cursor to end of pasted content
+                        const lastLine = lines[lines.length - 1];
+                        setCursorPos({
+                            x: startX + lastLine.length,
+                            y: startY + lines.length - 1
+                        });
+
+                        setDialogueWithRevert(`Pasted clipboard item`, setDialogueText);
+                    }
                 } else if (exec.command === 'cam') {
                     const newMode = exec.args[0];
                     let modeText = '';
@@ -3219,12 +3217,10 @@ export function useWorldEngine({
                         setDialogueWithRevert(`No bounded region found at cursor position`, setDialogueText);
                     }
                 } else if (exec.command === 'list') {
-                    console.log('LIST COMMAND RECEIVED!', exec);
                     logger.debug('List command execution:', exec);
 
                     // Create scrollable list from selection
                     const selection = getNormalizedSelection();
-                    console.log('Selection:', selection);
 
                     if (selection) {
                         // Calculate visible height from selection size (full selection, no title bar)
@@ -3238,7 +3234,6 @@ export function useWorldEngine({
                             color = exec.args[0];
                         }
 
-                        console.log('Creating list with visibleHeight:', visibleHeight, '(from selection)', 'color:', color);
 
                         // Capture existing content in selection region as initial list content
                         const initialContent: ListContent = {};
@@ -3264,7 +3259,6 @@ export function useWorldEngine({
                         // Start with just the captured content - no pre-allocation
                         const capturedLines = lineIndex;
 
-                        console.log('Captured content lines:', capturedLines);
 
                         // Create list metadata
                         const listKey = `list_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -3277,15 +3271,12 @@ export function useWorldEngine({
                             color: color
                         };
 
-                        console.log('List data:', listData);
-                        console.log('List key:', listKey);
 
                         // Store list and content
                         let newWorldData = { ...worldData };
                         newWorldData[listKey] = JSON.stringify(listData);
                         newWorldData[`${listKey}_content`] = JSON.stringify(initialContent);
 
-                        console.log('Storing list in worldData');
 
                         // Clear the selection area (content now in list storage)
                         for (let y = selection.startY; y <= selection.endY; y++) {
@@ -3296,13 +3287,11 @@ export function useWorldEngine({
 
                         setWorldData(newWorldData);
                         setDialogueWithRevert(`List created with ${lineIndex} lines (${visibleHeight} visible)`, setDialogueText);
-                        console.log('List creation complete!');
 
                         // Clear selection
                         setSelectionStart(null);
                         setSelectionEnd(null);
                     } else {
-                        console.log('No selection found!');
                         setDialogueWithRevert(`No region selected. Select an area first, then use /list [visibleHeight] [color]`, setDialogueText);
                     }
                 } else if (exec.command === 'unlist') {
@@ -3312,7 +3301,6 @@ export function useWorldEngine({
                     let foundList = false;
                     let newWorldData = { ...worldData };
 
-                    console.log('Unlist command - cursor position:', cursorX, cursorY);
 
                     // Look through all list_ entries to find one that contains the cursor
                     for (const key in worldData) {
@@ -3329,7 +3317,6 @@ export function useWorldEngine({
                                     delete newWorldData[key];
                                     delete newWorldData[`${key}_content`];
                                     foundList = true;
-                                    console.log('Removing list:', key, listData);
                                 }
                             } catch (e) {
                                 console.error('Error parsing list data:', key, e);
@@ -3341,7 +3328,6 @@ export function useWorldEngine({
                         setWorldData(newWorldData);
                         setDialogueWithRevert(`List removed`, setDialogueText);
                     } else {
-                        console.log('No list found at cursor position');
                         setDialogueWithRevert(`No list found at cursor position`, setDialogueText);
                     }
                 } else if (exec.command === 'glitch') {
@@ -4281,7 +4267,6 @@ export function useWorldEngine({
                                         updatedContent[i] = '';
                                     }
                                 }
-                                console.log('Auto-growing list from', totalLines, 'to', totalLines + 20, 'lines');
                             }
 
                             // Save updated content
@@ -5107,11 +5092,6 @@ export function useWorldEngine({
                             const cursorCol = cursorPos.x - listData.startX;
                             const listWidth = listData.endX - listData.startX + 1;
 
-                            console.log('=== LIST TYPING ===');
-                            console.log('List width:', listWidth);
-                            console.log('Current line:', currentLine, '(length:', currentLine.length + ')');
-                            console.log('Cursor col:', cursorCol);
-                            console.log('Character being typed:', key);
 
                             // Auto-grow: Add empty lines if typing near the end
                             const totalLines = Object.keys(content).length;
@@ -5123,14 +5103,12 @@ export function useWorldEngine({
                                         updatedContent[i] = '';
                                     }
                                 }
-                                console.log('Auto-growing list from', totalLines, 'to', totalLines + 20, 'lines');
                             }
 
                             // Check if inserting this character would exceed width
                             const wouldExceedWidth = currentLine.length >= listWidth;
 
                             if (wouldExceedWidth) {
-                                console.log('Would exceed width - wrapping BEFORE inserting character');
 
                                 // Need to wrap current line first, THEN insert character on next line
                                 // Find wrap point in current line
@@ -5155,8 +5133,6 @@ export function useWorldEngine({
                                 const nextLineContent = (updatedContent[contentLineIndex + 1] || content[contentLineIndex + 1] || '').trimEnd();
                                 updatedContent[contentLineIndex + 1] = overflow + key + nextLineContent;
 
-                                console.log('Wrapped line:', lineBeforeWrap);
-                                console.log('Next line with overflow + char:', updatedContent[contentLineIndex + 1]);
 
                                 // Save and move cursor to next line
                                 setWorldData(prev => ({
@@ -5178,7 +5154,6 @@ export function useWorldEngine({
                                     setCursorPos({ x: listData.startX + newCursorCol, y: cursorPos.y });
                                 }
                             } else {
-                                console.log('Normal insert - no wrap needed');
 
                                 // Insert character normally
                                 const newLine = currentLine.substring(0, cursorCol) + key + currentLine.substring(cursorCol);
@@ -5209,10 +5184,7 @@ export function useWorldEngine({
                                         }
                                     }
                                     if (wrapPoint === 0) {
-                                        console.log('No space found - hard wrapping at', listWidth);
                                         wrapPoint = listWidth;
-                                    } else {
-                                        console.log('Found space at', wrapPoint - 1, '- wrapping after it');
                                     }
 
                                     // Split current line
@@ -5239,7 +5211,6 @@ export function useWorldEngine({
                                     // Trim the next line to remove trailing spaces that might have been left from previous reflows
                                     const nextLineContent = (updatedContent[reflowLineIndex + 1] || content[reflowLineIndex + 1] || '').trimEnd();
                                     currentReflowLine = overflow + nextLineContent;
-                                    console.log(`Reflowing line ${reflowLineIndex}: overflow="${overflow}" + nextLine="${nextLineContent}" = "${currentReflowLine}" (${currentReflowLine.length} chars)`);
 
                                     // Move to next line
                                     reflowLineIndex++;
@@ -5248,12 +5219,6 @@ export function useWorldEngine({
                                 // Update the last line after reflow loop (this line is <= listWidth)
                                 updatedContent[reflowLineIndex] = currentReflowLine;
 
-                                console.log('=== REFLOW COMPLETE ===');
-                                console.log('Total lines after reflow:', reflowLineIndex + 1);
-                                console.log('Updated content:');
-                                for (let i = contentLineIndex; i <= reflowLineIndex && i < contentLineIndex + 5; i++) {
-                                    console.log(`Line ${i}:`, updatedContent[i] || '(empty)', `(length: ${(updatedContent[i] || '').length})`);
-                                }
 
                                 // Auto-grow if needed
                                 if (reflowLineIndex >= totalLinesBeforeWrap - 10) {
@@ -5619,6 +5584,9 @@ export function useWorldEngine({
                     visited.add(key);
 
                     const charData = worldData[key];
+                    // Skip if this is image data
+                    if (isImageData(charData)) continue;
+
                     const char = charData ? getCharacter(charData) : '';
 
                     if (char && char.trim() !== '') {
@@ -5640,8 +5608,10 @@ export function useWorldEngine({
                         }
                     } else if (textPositions.length > 0) {
                         // If we've found text and this is a space, check if it connects text
-                        const hasTextLeft = worldData[`${pos.x - 1},${pos.y}`] && !isImageData(worldData[`${pos.x - 1},${pos.y}`]) && getCharacter(worldData[`${pos.x - 1},${pos.y}`]).trim() !== '';
-                        const hasTextRight = worldData[`${pos.x + 1},${pos.y}`] && !isImageData(worldData[`${pos.x + 1},${pos.y}`]) && getCharacter(worldData[`${pos.x + 1},${pos.y}`]).trim() !== '';
+                        const leftData = worldData[`${pos.x - 1},${pos.y}`];
+                        const rightData = worldData[`${pos.x + 1},${pos.y}`];
+                        const hasTextLeft = leftData && !isImageData(leftData) && getCharacter(leftData).trim() !== '';
+                        const hasTextRight = rightData && !isImageData(rightData) && getCharacter(rightData).trim() !== '';
 
                         if (hasTextLeft || hasTextRight) {
                             if (!visited.has(`${pos.x - 1},${pos.y}`)) queue.push({ x: pos.x - 1, y: pos.y });
@@ -5696,10 +5666,21 @@ export function useWorldEngine({
                     content.push(line.trimEnd());
                 }
 
+                const contentString = content.join('\n');
+
+                // Check if this content already exists in clipboard
+                const existingItem = clipboardItems.find(item => item.content === contentString);
+
+                if (existingItem) {
+                    // Already in clipboard, just show feedback
+                    setDialogueWithRevert(`Already in clipboard: ${content[0]?.substring(0, 20) || 'text'}...`, setDialogueText);
+                    return; // Don't process regular click behavior
+                }
+
                 // Create clipboard item
                 const clipboardItem: ClipboardItem = {
                     id: `${minX},${minY}-${Date.now()}`,
-                    content: content.join('\n'),
+                    content: contentString,
                     startX: minX,
                     endX: maxX,
                     startY: minY,
@@ -5783,7 +5764,7 @@ export function useWorldEngine({
             setCursorPos(newCursorPos);
             setLastEnterX(null); // Reset Enter X tracking when clicking
         }
-    }, [zoomLevel, viewOffset, screenToWorld, selectionStart, selectionEnd, chatMode, worldData, setDialogueText]);
+    }, [zoomLevel, viewOffset, screenToWorld, selectionStart, selectionEnd, chatMode, worldData, setDialogueText, clipboardItems, getCharacter, isImageData]);
 
     const handleCanvasWheel = useCallback((deltaX: number, deltaY: number, canvasRelativeX: number, canvasRelativeY: number, ctrlOrMetaKey: boolean): void => {
         // First, check if mouse is over a list (unless zooming with ctrl/meta)

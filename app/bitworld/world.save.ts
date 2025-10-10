@@ -309,9 +309,24 @@ export function useWorldSave(
 
                 // Write to client-specific channel with timestamp
                 const updates: Record<string, any> = {};
+
+                // Add/update all current keys
                 for (const [key, value] of Object.entries(cleanWorldData)) {
                     updates[`${clientDataRefPath}/${key}`] = {
                         value,
+                        timestamp: serverTimestamp()
+                    };
+                }
+
+                // Mark deleted keys with deletion tombstones
+                const lastSyncedKeys = Object.keys(lastSyncedDataRef.current || {});
+                const currentKeys = Object.keys(cleanWorldData);
+                const deletedKeys = lastSyncedKeys.filter(key => !currentKeys.includes(key));
+
+                for (const key of deletedKeys) {
+                    // Write deletion marker with timestamp for conflict resolution
+                    updates[`${clientDataRefPath}/${key}`] = {
+                        deleted: true,
                         timestamp: serverTimestamp()
                     };
                 }
@@ -366,35 +381,64 @@ export function useWorldSave(
                 const timestamps: Record<string, number> = {};
 
                 // Collect all data from all client channels
+                const deletedKeys = new Set<string>();
+
                 for (const clientId in allClientsData) {
                     const clientData = allClientsData[clientId]?.data;
                     if (!clientData) continue;
 
                     for (const [key, entry] of Object.entries(clientData as Record<string, any>)) {
                         const entryTimestamp = entry?.timestamp || 0;
+                        const isDeleted = entry?.deleted === true;
                         const entryValue = entry?.value;
 
                         // Last-write-wins: keep entry with most recent timestamp
                         if (!timestamps[key] || entryTimestamp > timestamps[key]) {
                             timestamps[key] = entryTimestamp;
-                            mergedData[key] = entryValue;
+
+                            if (isDeleted) {
+                                // Mark as deleted - will be excluded from merge
+                                deletedKeys.add(key);
+                                delete mergedData[key]; // Remove if it was added before
+                            } else if (entryValue !== null && entryValue !== undefined) {
+                                // Valid data - add to merge
+                                mergedData[key] = entryValue;
+                                deletedKeys.delete(key); // Un-mark deletion if newer data arrived
+                            }
                         }
                     }
                 }
 
                 // Write merged data to canonical path
-                if (Object.keys(mergedData).length > 0) {
-                    try {
-                        const canonicalRef = ref(database, worldDataRefPath);
-                        await set(canonicalRef, mergedData);
-                    } catch (writeErr: any) {
-                        // Permission denied errors are expected when viewing other users' states
-                        // or when the state doesn't exist yet - silently skip
-                        if (writeErr.code === 'PERMISSION_DENIED' || writeErr.message?.includes('Permission denied')) {
-                            return; // Silently skip merge for read-only or non-existent states
+                try {
+                    const canonicalRef = ref(database, worldDataRefPath);
+                    await set(canonicalRef, mergedData);
+
+                    // Clean up tombstones from all client channels after successful merge
+                    const cleanupUpdates: Record<string, any> = {};
+                    for (const clientId in allClientsData) {
+                        const clientData = allClientsData[clientId]?.data;
+                        if (!clientData) continue;
+
+                        for (const [key, entry] of Object.entries(clientData as Record<string, any>)) {
+                            // Remove entries that are marked as deleted
+                            if (entry?.deleted === true) {
+                                cleanupUpdates[`${usersBasePath}/${clientId}/data/${key}`] = null;
+                            }
                         }
-                        throw writeErr; // Re-throw other errors
                     }
+
+                    // Execute cleanup if there are tombstones to remove
+                    if (Object.keys(cleanupUpdates).length > 0) {
+                        await update(ref(database), cleanupUpdates);
+                    }
+                } catch (writeErr: any) {
+                    // Permission denied errors are expected when viewing other users' states
+                    // or when the state doesn't exist yet - silently skip
+                    if (writeErr.code === 'PERMISSION_DENIED' || writeErr.message?.includes('Permission denied')) {
+                        return; // Silently skip merge for read-only or non-existent states
+                    }
+                    throw writeErr; // Re-throw other errors
                 }
             } catch (err: any) {
                 // Only log errors that aren't permission-related

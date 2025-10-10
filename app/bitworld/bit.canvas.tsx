@@ -325,7 +325,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                     // Check for milestones
                     const currentMilestone = Math.floor(newTotal / PAN_MILESTONE_INTERVAL);
                     if (currentMilestone > lastDistanceMilestoneRef.current) {
-                        console.log(`Total panned distance milestone: ${currentMilestone * PAN_MILESTONE_INTERVAL} cells`);
                         lastDistanceMilestoneRef.current = currentMilestone;
                     }
 
@@ -338,7 +337,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                         const user = auth.currentUser;
 
                         if (!user && hostDialogue && !hostDialogue.isHostActive) {
-                            console.log('2000 cells reached - triggering signup prompt for unauthenticated user');
 
                             // Activate host mode in engine
                             engine.setHostMode({ isActive: true, currentInputType: null });
@@ -1175,7 +1173,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         // Use intermediate offset if panning (mouse or touch), otherwise use engine's state
         const currentOffset = (isMiddleMouseDownRef.current || isTouchPanningRef.current) ? intermediatePanOffsetRef.current : engine.viewOffset;
-        const verticalTextOffset = 0;
+        const verticalTextOffset = 2; // Small offset to center text better in grid cells
 
         // --- Actual Drawing (Copied from previous `draw` function) ---
         ctx.save();
@@ -1614,10 +1612,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const thumbHeight = Math.max(1, Math.floor(scrollbarHeight * (visibleHeight / totalLines)));
                         const thumbY = scrollbarStartY + Math.floor((scrollbarHeight - thumbHeight) * scrollProgress);
 
-                        // Debug: Log thumb proportions
-                        const thumbPercent = Math.round((visibleHeight / totalLines) * 100);
-                        console.log(`Scrollbar: ${thumbHeight}/${scrollbarHeight} cells (${thumbPercent}% - ${totalLines} total lines)`);
-
                         // Render scrollbar thumb (only when scrollable)
                         for (let y = thumbY; y < thumbY + thumbHeight; y++) {
                             if (y >= startWorldY - 5 && y <= endWorldY + 5 && scrollbarX >= startWorldX - 5 && scrollbarX <= endWorldX + 5) {
@@ -1904,14 +1898,21 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         // O(1) lookup for bound text color using spatial index
                         const posKey = `${worldX},${worldY}`;
                         const boundInfo = boundsIndexRef.current?.get(posKey);
-                        
+
                         // Apply text color based on background
                         if (boundInfo) {
                             ctx.fillStyle = boundInfo.textColor;
                         } else {
                             ctx.fillStyle = (charStyle && charStyle.color) || engine.textColor;
                         }
+
+                        // Add subtle text shadow
+                        ctx.shadowColor = ctx.fillStyle as string;
+                        ctx.shadowBlur = 2;
+                        ctx.shadowOffsetX = 0;
+                        ctx.shadowOffsetY = 0;
                         ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                        ctx.shadowBlur = 0;
                     }
                 }
             }
@@ -2979,8 +2980,15 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     } else {
                         ctx.fillStyle = engine.textColor;
                     }
-                    
+
+                    // Add glowy effect to cursor
+                    ctx.shadowColor = ctx.fillStyle as string;
+                    ctx.shadowBlur = 8;
+                    ctx.shadowOffsetX = 0;
+                    ctx.shadowOffsetY = 0;
                     ctx.fillRect(cursorScreenPos.x, cursorScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                    ctx.shadowBlur = 0;
+
                     const charData = engine.worldData[key];
                     if (charData) {
                         const char = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
