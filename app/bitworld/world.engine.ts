@@ -76,7 +76,7 @@ export interface WorldEngine {
     chatData: WorldData;
     lightModeData: WorldData;
     hostData: { text: string; color?: string; centerPos: Point; timestamp?: number } | null; // Host messages rendered at fixed position with streaming
-    stagedImageData: ImageData | null; // Ephemeral staged images (cleared with Escape)
+    stagedImageData: ImageData[]; // Ephemeral staged images (cleared with Escape, supports multiple)
     searchData: WorldData;
     viewOffset: Point;
     cursorPos: Point;
@@ -160,6 +160,7 @@ export interface WorldEngine {
         currentInputType: import('./host.flows').InputType | null;
     }>>;
     setHostData: React.Dispatch<React.SetStateAction<{ text: string; color?: string; centerPos: Point; timestamp?: number } | null>>;
+    setStagedImageData: React.Dispatch<React.SetStateAction<ImageData[]>>;
     // Ephemeral text rendering for host dialogue
     addInstantAIResponse: (startPos: Point, text: string, options?: {
         wrapWidth?: number;
@@ -398,7 +399,7 @@ export function useWorldEngine({
     const [chatData, setChatData] = useState<WorldData>({});
     const [searchData, setSearchData] = useState<WorldData>({});
     const [hostData, setHostData] = useState<{ text: string; color?: string; centerPos: Point; timestamp?: number } | null>(null);
-    const [stagedImageData, setStagedImageData] = useState<ImageData | null>(null); // Ephemeral staged images
+    const [stagedImageData, setStagedImageData] = useState<ImageData[]>([]); // Ephemeral staged images (supports multiple)
 
     // === Agent System ===
     const [agentEnabled, setAgentEnabled] = useState<boolean>(false);
@@ -2237,9 +2238,9 @@ export function useWorldEngine({
         }
 
         // === Staged Image Clearing ===
-        if (key === 'Escape' && stagedImageData) {
-            setStagedImageData(null);
-            setDialogueWithRevert("Staged image cleared", setDialogueText);
+        if (key === 'Escape' && stagedImageData.length > 0) {
+            setStagedImageData([]);
+            setDialogueWithRevert("Staged images cleared", setDialogueText);
             return true;
         }
 
@@ -2597,45 +2598,58 @@ export function useWorldEngine({
                     saveSettingsToFirebase(newSettings);
                     setDialogueWithRevert(`Spawn point set at (${spawnPoint.x}, ${spawnPoint.y})`, setDialogueText);
                 } else if (exec.command === 'stage') {
-                    // Stage an ephemeral image from URL at cursor position
+                    // Stage a 5x5 grid of ephemeral images from URL at cursor position
                     // Default image if no URL provided
                     const defaultImageUrl = 'https://d2w9rnfcy7mm78.cloudfront.net/40233614/original_0d11441860fbe41b13c3a9bf97c18e42.webp?1760119834?bc=0';
                     const imageUrl = exec.args.length > 0 ? exec.args[0] : defaultImageUrl;
 
-                    setDialogueWithRevert("Loading image...", setDialogueText);
+                    setDialogueWithRevert("Loading 5x5 grid...", setDialogueText);
 
                     // Load image to get dimensions
                     const img = new Image();
                     img.crossOrigin = 'anonymous';
 
                     img.onload = () => {
-                        // Default size: 40 cells wide, maintain aspect ratio
+                        // Default size per image: 40 cells wide, maintain aspect ratio
                         const defaultWidthInCells = 40;
                         const aspectRatio = img.height / img.width;
                         const defaultHeightInCells = Math.round(defaultWidthInCells * aspectRatio);
 
-                        // Calculate bounds from cursor position
-                        const startX = cursorPos.x;
-                        const startY = cursorPos.y;
-                        const endX = startX + defaultWidthInCells;
-                        const endY = startY + defaultHeightInCells;
+                        // Gap between images: 2 cells
+                        const gap = 2;
 
-                        // Create ephemeral image data
-                        const imageData: ImageData = {
-                            type: 'image',
-                            src: imageUrl,
-                            startX,
-                            startY,
-                            endX,
-                            endY,
-                            originalWidth: img.width,
-                            originalHeight: img.height
-                        };
+                        // Create 5x5 grid of images
+                        const gridSize = 5;
+                        const stagedImages: ImageData[] = [];
 
-                        // Store in ephemeral state (won't persist to Firebase)
-                        setStagedImageData(imageData);
+                        for (let row = 0; row < gridSize; row++) {
+                            for (let col = 0; col < gridSize; col++) {
+                                // Calculate position for this grid cell
+                                const startX = cursorPos.x + col * (defaultWidthInCells + gap);
+                                const startY = cursorPos.y + row * (defaultHeightInCells + gap);
+                                const endX = startX + defaultWidthInCells;
+                                const endY = startY + defaultHeightInCells;
 
-                        setDialogueWithRevert(`Image staged (ephemeral) - press Escape to clear`, setDialogueText);
+                                // Create image data for this grid cell
+                                const imageData: ImageData = {
+                                    type: 'image',
+                                    src: imageUrl,
+                                    startX,
+                                    startY,
+                                    endX,
+                                    endY,
+                                    originalWidth: img.width,
+                                    originalHeight: img.height
+                                };
+
+                                stagedImages.push(imageData);
+                            }
+                        }
+
+                        // Store all images in ephemeral state (won't persist to Firebase)
+                        setStagedImageData(stagedImages);
+
+                        setDialogueWithRevert(`5x5 grid staged (ephemeral) - press Escape to clear`, setDialogueText);
                     };
 
                     img.onerror = () => {
@@ -6123,6 +6137,7 @@ export function useWorldEngine({
         hostData,
         setHostData,
         stagedImageData, // Ephemeral staged images
+        setStagedImageData, // Update staged image (for moving/resizing)
         addInstantAIResponse,
         setWorldData,
         setMonogramCommandHandler: (handler: (args: string[]) => void) => {

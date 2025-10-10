@@ -762,6 +762,15 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     // Helper function to find image at a specific position
     
     const findImageAtPosition = useCallback((pos: Point): any => {
+        // First check staged images (ephemeral, higher priority)
+        for (const imageData of engine.stagedImageData) {
+            if (pos.x >= imageData.startX && pos.x <= imageData.endX &&
+                pos.y >= imageData.startY && pos.y <= imageData.endY) {
+                return imageData;
+            }
+        }
+
+        // Then check persistent images in worldData
         for (const key in engine.worldData) {
             if (key.startsWith('image_')) {
                 const imageData = engine.worldData[key];
@@ -1709,10 +1718,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
-        // === Render Staged Image (Ephemeral) ===
-        if (engine.stagedImageData) {
-            const imageData = engine.stagedImageData;
-
+        // === Render Staged Images (Ephemeral) ===
+        for (const imageData of engine.stagedImageData) {
             // Check if image is visible in current viewport
             const imageVisible = imageData.startX <= endWorldX && imageData.endX >= startWorldX &&
                                 imageData.startY <= endWorldY && imageData.endY >= startWorldY;
@@ -3378,22 +3385,42 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const imageAtPosition = findImageAtPosition(shiftDragStartPos);
                         
                         if (imageAtPosition) {
-                            
-                            // Find the original image key
-                            let imageKey = null;
-                            for (const key in engine.worldData) {
-                                if (key.startsWith('image_')) {
-                                    const data = engine.worldData[key];
-                                    if (engine.isImageData(data) && data === imageAtPosition) {
-                                        imageKey = key;
-                                        break;
+                            // Check if it's a staged image (ephemeral)
+                            const stagedImageIndex = engine.stagedImageData.findIndex(img => img === imageAtPosition);
+
+                            if (stagedImageIndex !== -1) {
+                                // Move staged image by updating its coordinates
+                                const newImageData = {
+                                    ...imageAtPosition,
+                                    startX: imageAtPosition.startX + distanceX,
+                                    startY: imageAtPosition.startY + distanceY,
+                                    endX: imageAtPosition.endX + distanceX,
+                                    endY: imageAtPosition.endY + distanceY
+                                };
+
+                                // Update the array with the moved image
+                                engine.setStagedImageData(prev => {
+                                    const newArray = [...prev];
+                                    newArray[stagedImageIndex] = newImageData;
+                                    return newArray;
+                                });
+                            } else {
+                                // Find the original image key in worldData
+                                let imageKey = null;
+                                for (const key in engine.worldData) {
+                                    if (key.startsWith('image_')) {
+                                        const data = engine.worldData[key];
+                                        if (engine.isImageData(data) && data === imageAtPosition) {
+                                            imageKey = key;
+                                            break;
+                                        }
                                     }
                                 }
-                            }
-                            
-                            if (imageKey) {
-                                // Use the engine's moveImage method
-                                engine.moveImage(imageKey, distanceX, distanceY);
+
+                                if (imageKey) {
+                                    // Use the engine's moveImage method
+                                    engine.moveImage(imageKey, distanceX, distanceY);
+                                }
                             }
                         } else {
                             // If no image, check for text block at start position
