@@ -8,6 +8,7 @@ import { useControllerSystem, createMonogramController, createCameraController, 
 import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchicalFrames, HierarchicalFrame, HierarchyLevel } from './bit.blocks';
 import { COLOR_MAP } from './commands';
 import { useHostDialogue } from './host.dialogue';
+import { setDialogueWithRevert } from './ai';
 
 // --- Constants --- (Copied and relevant ones kept)
 const GRID_COLOR = '#F2F2F233';
@@ -540,8 +541,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const handlePublishClick = useCallback(async (state: string) => {
         const isCurrentlyPublished = getStatePublishStatus(state);
         const action = isCurrentlyPublished ? 'Unpublishing' : 'Publishing';
-        engine.setDialogueText(`${action} state...`);
-        
+        setDialogueWithRevert(`${action} state...`, engine.setDialogueText);
+
         try {
             // Use the same Firebase logic as the /publish command
             const { database } = await import('@/app/firebase');
@@ -549,17 +550,17 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             const userUid = engine.userUid || 'anonymous';
             const stateRef = ref(database, `worlds/${userUid}/${state}/public`);
             await set(stateRef, !isCurrentlyPublished); // Toggle publish status
-            
+
             const statusText = isCurrentlyPublished ? 'private' : 'public';
-            engine.setDialogueText(`State "${state}" is now ${statusText}`);
-            
+            setDialogueWithRevert(`State "${state}" is now ${statusText}`, engine.setDialogueText);
+
             // Update cached status
             setStatePublishStatuses(prev => ({
                 ...prev,
                 [state]: !isCurrentlyPublished
             }));
         } catch (error: any) {
-            engine.setDialogueText(`Error ${action.toLowerCase()} state: ${error.message}`);
+            setDialogueWithRevert(`Error ${action.toLowerCase()} state: ${error.message}`, engine.setDialogueText);
         }
         
         engine.setIsNavVisible(false);

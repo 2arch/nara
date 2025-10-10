@@ -490,7 +490,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             const hexBgColor = (COLOR_MAP[bgColor.toLowerCase()] || bgColor).toUpperCase();
 
             if (!/^#[0-9A-F]{6}$/i.test(hexBgColor)) {
-                setDialogueText(`Invalid background color: ${bgColor}. Please use a name (e.g., white) or hex code (e.g., #1a1a1a).`);
+                setDialogueWithRevert(`Invalid background color: ${bgColor}. Please use a name (e.g., white) or hex code (e.g., #1a1a1a).`, setDialogueText);
                 return false;
             }
             
@@ -501,7 +501,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 // User specified text color - validate it
                 const hexTextColor = (COLOR_MAP[textColor.toLowerCase()] || textColor).toUpperCase();
                 if (!/^#[0-9A-F]{6}$/i.test(hexTextColor)) {
-                    setDialogueText(`Invalid text color: ${textColor}. Please use a name (e.g., white) or hex code (e.g., #1a1a1a).`);
+                    setDialogueWithRevert(`Invalid text color: ${textColor}. Please use a name (e.g., white) or hex code (e.g., #1a1a1a).`, setDialogueText);
                     return false;
                 }
                 finalTextColor = hexTextColor;
@@ -525,7 +525,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 // User specified text background - validate it
                 const hexTextBg = (COLOR_MAP[textBg.toLowerCase()] || textBg).toUpperCase();
                 if (!/^#[0-9A-F]{6}$/i.test(hexTextBg)) {
-                    setDialogueText(`Invalid text background: ${textBg}. Please use a name (e.g., white) or hex code (e.g., #1a1a1a).`);
+                    setDialogueWithRevert(`Invalid text background: ${textBg}. Please use a name (e.g., white) or hex code (e.g., #1a1a1a).`, setDialogueText);
                     return false;
                 }
                 finalTextBg = hexTextBg;
@@ -1165,20 +1165,20 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 
                 if (prompt.trim()) {
                     // 'bg clear' with a prompt - generate AI image
-                    setDialogueText("Generating background image...");
+                    setDialogueWithRevert("Generating background image...", setDialogueText);
                     generateImage(prompt).then((imageUrl) => {
                         if (imageUrl && (imageUrl.startsWith('data:') || imageUrl.startsWith('http'))) {
                             // Validate that we have a proper image URL/data URL
                             switchBackgroundMode('image', imageUrl, textColorParam, textBgParam, prompt);
-                            setDialogueText(`"${prompt}"`);
+                            setDialogueWithRevert(`"${prompt}"`, setDialogueText);
                         } else {
                             // Fallback to space background if image generation fails or returns invalid data
                             switchBackgroundMode('space', undefined, textColorParam, textBgParam);
-                            setDialogueText("Image generation not available, using space background.");
+                            setDialogueWithRevert("Image generation not available, using space background.", setDialogueText);
                         }
                     }).catch(() => {
                         switchBackgroundMode('space', undefined, textColorParam, textBgParam);
-                        setDialogueText("Image generation failed, using space background.");
+                        setDialogueWithRevert("Image generation failed, using space background.", setDialogueText);
                     });
                 } else {
                     // 'bg clear' without prompt - show space background
@@ -1220,25 +1220,25 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 
                 if (prompt.trim()) {
                     // 'bg live' with a prompt - generate AI video
-                    setDialogueText("Generating background video...");
+                    setDialogueWithRevert("Generating background video...", setDialogueText);
                     generateVideo(prompt).then((videoUrl) => {
                         if (videoUrl && (videoUrl.startsWith('data:') || videoUrl.startsWith('http'))) {
                             // Validate that we have a proper video URL/data URL
                             switchBackgroundMode('video', videoUrl, textColorParam, textBgParam, prompt);
-                            setDialogueText(`"${prompt}"`);
+                            setDialogueWithRevert(`"${prompt}"`, setDialogueText);
                         } else {
                             // Fallback to space background if video generation fails or returns invalid data
                             switchBackgroundMode('space', undefined, textColorParam, textBgParam);
-                            setDialogueText("Video generation not available, using space background.");
+                            setDialogueWithRevert("Video generation not available, using space background.", setDialogueText);
                         }
                     }).catch(() => {
                         switchBackgroundMode('space', undefined, textColorParam, textBgParam);
-                        setDialogueText("Video generation failed, using space background.");
+                        setDialogueWithRevert("Video generation failed, using space background.", setDialogueText);
                     });
                 } else {
                     // 'bg live' without prompt - show space background
                     switchBackgroundMode('space', undefined, param2, param3);
-                    setDialogueText("Video generation requires a prompt. Use: /bg live 'your prompt'");
+                    setDialogueWithRevert("Video generation requires a prompt. Use: /bg live 'your prompt'", setDialogueText);
                 }
             } else if (bgArg === 'web') {
                 // Handle web screen sharing with optional text color and background
@@ -1271,8 +1271,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                             textColor: validTextColor,
                             textBackground: validTextBg,
                         }));
-                        setDialogueText("Screen sharing active");
-                        
+                        setDialogueWithRevert("Screen sharing active", setDialogueText);
+
                         // Listen for stream end
                         stream.getVideoTracks()[0].onended = () => {
                             backgroundStreamRef.current = undefined;
@@ -1284,14 +1284,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                                 textColor: '#000000',
                                 textBackground: undefined,
                             }));
-                            setDialogueText("Screen sharing ended");
+                            setDialogueWithRevert("Screen sharing ended", setDialogueText);
                         };
                     }).catch((err) => {
                         console.error('Error accessing screen share:', err);
-                        setDialogueText("Screen sharing cancelled or not available");
+                        setDialogueWithRevert("Screen sharing cancelled or not available", setDialogueText);
                     });
                 } else {
-                    setDialogueText("Screen sharing not supported in this browser");
+                    setDialogueWithRevert("Screen sharing not supported in this browser", setDialogueText);
                 }
             } else if (bgArg) {
                 // Format: /bg {backgroundColor} {textColor} {textBackground}
@@ -1334,7 +1334,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 } else {
                     const hexColor = (COLOR_MAP[colorArg.toLowerCase()] || colorArg).toUpperCase();
                     if (!/^#[0-9A-F]{6}$/i.test(hexColor)) {
-                        setDialogueText(`Invalid color: ${colorArg}. Use hex code (e.g., #FF0000) or name (e.g., red, blue).`);
+                        setDialogueWithRevert(`Invalid color: ${colorArg}. Use hex code (e.g., #FF0000) or name (e.g., red, blue).`, setDialogueText);
                         // Clear command mode
                         setCommandState({
                             isActive: false,
@@ -1357,7 +1357,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     } else {
                         const hexBackground = (COLOR_MAP[backgroundArg.toLowerCase()] || backgroundArg).toUpperCase();
                         if (!/^#[0-9A-F]{6}$/i.test(hexBackground)) {
-                            setDialogueText(`Invalid background color: ${backgroundArg}. Use hex code or name.`);
+                            setDialogueWithRevert(`Invalid background color: ${backgroundArg}. Use hex code or name.`, setDialogueText);
                             // Clear command mode
                             setCommandState({
                                 isActive: false,
@@ -1398,7 +1398,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     const styleMsg = finalTextBackground ?
                         `Global text: ${finalTextColor} on ${finalTextBackground}` :
                         `Global text color: ${finalTextColor}`;
-                    setDialogueText(styleMsg);
+                    setDialogueWithRevert(styleMsg, setDialogueText);
                 } else {
                     // Update the persistent text style for individual character styling only
                     setModeState(prev => ({
@@ -1412,7 +1412,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     const styleMsg = finalTextBackground ?
                         `Text style: ${finalTextColor} on ${finalTextBackground}` :
                         `Text color: ${finalTextColor}`;
-                    setDialogueText(styleMsg);
+                    setDialogueWithRevert(styleMsg, setDialogueText);
                 }
             } else {
                 // Reset to default text style
@@ -1459,11 +1459,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     }));
                     setDialogueWithRevert(`Font changed to: ${selectedFont}`, setDialogueText);
                 } else {
-                    setDialogueText(`Font not found. Available fonts: ${FONT_COMMANDS.join(', ')}`);
+                    setDialogueWithRevert(`Font not found. Available fonts: ${FONT_COMMANDS.join(', ')}`, setDialogueText);
                 }
             } else {
                 // No font specified - show available fonts
-                setDialogueText(`Available fonts: ${FONT_COMMANDS.join(', ')}`);
+                setDialogueWithRevert(`Available fonts: ${FONT_COMMANDS.join(', ')}`, setDialogueText);
             }
             
             // Clear command mode
@@ -1595,7 +1595,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             
             // Don't execute if user selected a placeholder (shouldn't happen now)
             if (args.length === 1 && args[0] === '<name>') {
-                setDialogueText("Please specify a state name");
+                setDialogueWithRevert("Please specify a state name", setDialogueText);
                 return null;
             }
             
@@ -1813,9 +1813,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     commandStartPos: commandState.commandStartPos
                 };
             } else if (!cameraMode) {
-                setDialogueText(`Current camera mode: ${modeState.cameraMode}`);
+                setDialogueWithRevert(`Current camera mode: ${modeState.cameraMode}`, setDialogueText);
             } else {
-                setDialogueText(`Unknown camera mode. Available: ${CAMERA_COMMANDS.join(', ')}`);
+                setDialogueWithRevert(`Unknown camera mode. Available: ${CAMERA_COMMANDS.join(', ')}`, setDialogueText);
             }
             
             // Clear command mode
@@ -2027,7 +2027,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
 
         if (commandToExecute.startsWith('pro')) {
             // Direct redirect to Stripe checkout
-            setDialogueText("Redirecting to checkout...");
+            setDialogueWithRevert("Redirecting to checkout...", setDialogueText);
 
             // Get current user and create checkout session
             import('firebase/auth').then(({ onAuthStateChanged }) => {
@@ -2048,14 +2048,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                                 if (data.url) {
                                     window.location.href = data.url;
                                 } else {
-                                    setDialogueText('Checkout failed. Please try again.');
+                                    setDialogueWithRevert('Checkout failed. Please try again.', setDialogueText);
                                 }
                             })
                             .catch(() => {
-                                setDialogueText('Checkout failed. Please try again.');
+                                setDialogueWithRevert('Checkout failed. Please try again.', setDialogueText);
                             });
                         } else {
-                            setDialogueText('Please sign in first.');
+                            setDialogueWithRevert('Please sign in first.', setDialogueText);
                         }
                     });
                 });

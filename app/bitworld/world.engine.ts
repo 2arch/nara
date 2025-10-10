@@ -5488,7 +5488,7 @@ export function useWorldEngine({
                 setChatData({
                     [`${cursorAfterDelete.x},${cursorAfterDelete.y}`]: key
                 });
-                setDialogueText("Chat mode activated. Enter: ephemeral response, Cmd+Enter: permanent response, Shift+Enter: new line. Use /exit to leave.");
+                setDialogueWithRevert("Chat mode activated. Enter: ephemeral response, Cmd+Enter: permanent response, Shift+Enter: new line. Use /exit to leave.", setDialogueText);
             } else {
                 // Air mode (default): Normal text input to worldData
                 nextWorldData = { ...dataToDeleteFrom }; // Start with data after potential deletion
