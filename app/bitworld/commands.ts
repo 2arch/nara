@@ -83,7 +83,7 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'clear', 'cam', 'indent', 'bound', 'unbound', 'upload', 'spawn', 'monogram'];
+const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'share', 'clear', 'cam', 'indent', 'bound', 'unbound', 'upload', 'spawn', 'monogram'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro', 'Neureal'];
@@ -1668,6 +1668,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         }
 
         if (commandToExecute.startsWith('publish')) {
+            // Parse arguments for --region flag
+            const parts = commandToExecute.split(/\s+/);
+            const hasRegionFlag = parts.includes('--region');
+
             // Clear command mode
             setCommandState({
                 isActive: false,
@@ -1678,11 +1682,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 hasNavigated: false
             });
             setCommandData({});
-            
+
             // Return command execution for world engine to handle
             return {
                 command: 'publish',
-                args: [],
+                args: hasRegionFlag ? ['--region'] : [],
                 commandStartPos: commandState.commandStartPos
             };
         }
@@ -2186,6 +2190,22 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             setCommandData({});
 
             return { command: 'monogram', args, commandStartPos: commandState.commandStartPos };
+        }
+
+        // Handle share command - always publishes with region coordinates
+        if (commandToExecute.startsWith('share')) {
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            return { command: 'share', args: [], commandStartPos: commandState.commandStartPos };
         }
 
         // Clear command mode for other commands

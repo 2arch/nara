@@ -285,8 +285,11 @@ export function useWorldSave(
                 await update(ref(database), updates);
                 lastSyncedDataRef.current = { ...localWorldData };
             } catch (err: any) {
-                logger.error("Firebase: Error saving data to client channel:", err);
-                setError(`Failed to save world data: ${err.message}`);
+                // Silently skip permission errors (viewing other users' states or new states)
+                if (err.code !== 'PERMISSION_DENIED' && !err.message?.includes('Permission denied')) {
+                    logger.error("Firebase: Error saving data to client channel:", err);
+                    setError(`Failed to save world data: ${err.message}`);
+                }
             } finally {
                 setIsSaving(false);
             }
@@ -342,11 +345,23 @@ export function useWorldSave(
 
                 // Write merged data to canonical path
                 if (Object.keys(mergedData).length > 0) {
-                    const canonicalRef = ref(database, worldDataRefPath);
-                    await set(canonicalRef, mergedData);
+                    try {
+                        const canonicalRef = ref(database, worldDataRefPath);
+                        await set(canonicalRef, mergedData);
+                    } catch (writeErr: any) {
+                        // Permission denied errors are expected when viewing other users' states
+                        // or when the state doesn't exist yet - silently skip
+                        if (writeErr.code === 'PERMISSION_DENIED' || writeErr.message?.includes('Permission denied')) {
+                            return; // Silently skip merge for read-only or non-existent states
+                        }
+                        throw writeErr; // Re-throw other errors
+                    }
                 }
             } catch (err: any) {
-                logger.error("Firebase: Error during merge:", err);
+                // Only log errors that aren't permission-related
+                if (err.code !== 'PERMISSION_DENIED' && !err.message?.includes('Permission denied')) {
+                    logger.error("Firebase: Error during merge:", err);
+                }
             }
         };
 

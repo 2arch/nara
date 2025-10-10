@@ -1316,6 +1316,44 @@ export function useWorldEngine({
         });
     }, [worldId, currentStateName, getUserPath, userUid]);
 
+    // Initialize new state if it doesn't exist
+    useEffect(() => {
+        if (!currentStateName || !userUid || !worldId) return;
+
+        const checkAndInitializeState = async () => {
+            try {
+                // Check if state exists
+                const stateRef = ref(database, getUserPath(`${currentStateName}`));
+                const snapshot = await get(stateRef);
+
+                // If state doesn't exist and we have write permission (we're the owner), initialize it
+                if (!snapshot.exists()) {
+                    // Only initialize if worldData is empty (fresh state)
+                    if (Object.keys(worldData).length === 0) {
+                        logger.debug(`Initializing new state: ${currentStateName}`);
+                        // Create minimal state structure
+                        const initialStateData = {
+                            worldData: {},
+                            settings: settings,
+                            timestamp: Date.now(),
+                            cursorPos: { x: 0, y: 0 },
+                            viewOffset: { x: 0, y: 0 },
+                            zoomLevel: 1
+                        };
+                        await set(stateRef, initialStateData);
+                    }
+                }
+            } catch (error: any) {
+                // Silently skip permission errors (we don't own this state)
+                if (error.code !== 'PERMISSION_DENIED' && !error.message?.includes('Permission denied')) {
+                    logger.error('Error checking/initializing state:', error);
+                }
+            }
+        };
+
+        checkAndInitializeState();
+    }, [currentStateName, userUid, worldId, getUserPath, settings, worldData]);
+
     // Helper function to detect if there's unsaved work
     const hasUnsavedWork = useCallback((): boolean => {
         return Object.keys(worldData).length > 0;
@@ -1363,41 +1401,82 @@ export function useWorldEngine({
         userUid
     ); // Only enable when userUid is available
 
-    // === Apply spawn point when settings load ===
+    // === Apply spawn point or URL coordinates when settings load ===
     const hasAppliedSpawnRef = useRef(false);
     useEffect(() => {
-        // Only apply spawn point once when settings first load
-        if (!hasAppliedSpawnRef.current && settings.spawnPoint && !isLoadingWorld) {
-            const spawnX = settings.spawnPoint.x;
-            const spawnY = settings.spawnPoint.y;
+        // Only apply once when settings first load
+        if (!hasAppliedSpawnRef.current && !isLoadingWorld) {
+            // Priority 1: URL coordinates (highest priority)
+            if (initialViewOffset && initialViewOffset.x !== 0 && initialViewOffset.y !== 0) {
+                const targetX = initialViewOffset.x;
+                const targetY = initialViewOffset.y;
 
-            // Center the spawn point in viewport by calculating offset
-            // Get effective character dimensions
-            const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
+                // Get effective character dimensions
+                const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(initialZoomLevel || zoomLevel);
 
-            if (effectiveCharWidth > 0 && effectiveCharHeight > 0 && typeof window !== 'undefined') {
-                const viewportWidth = window.innerWidth;
-                const viewportHeight = window.innerHeight;
+                if (effectiveCharWidth > 0 && effectiveCharHeight > 0 && typeof window !== 'undefined') {
+                    const viewportWidth = window.innerWidth;
+                    const viewportHeight = window.innerHeight;
 
-                // Calculate how many characters fit in viewport
-                const charsInViewportWidth = viewportWidth / effectiveCharWidth;
-                const charsInViewportHeight = viewportHeight / effectiveCharHeight;
+                    // Calculate how many characters fit in viewport
+                    const charsInViewportWidth = viewportWidth / effectiveCharWidth;
+                    const charsInViewportHeight = viewportHeight / effectiveCharHeight;
 
-                // Center spawn point by offsetting half the viewport
-                const centeredOffsetX = spawnX - (charsInViewportWidth / 2);
-                const centeredOffsetY = spawnY - (charsInViewportHeight / 2);
+                    // Center target coordinates by offsetting half the viewport
+                    const centeredOffsetX = targetX - (charsInViewportWidth / 2);
+                    const centeredOffsetY = targetY - (charsInViewportHeight / 2);
 
-                setCursorPos({ x: spawnX, y: spawnY });
-                setViewOffset({ x: centeredOffsetX, y: centeredOffsetY });
-            } else {
-                // Fallback if dimensions aren't available
-                setCursorPos({ x: spawnX, y: spawnY });
-                setViewOffset({ x: spawnX, y: spawnY });
+                    setCursorPos({ x: targetX, y: targetY });
+                    setViewOffset({ x: centeredOffsetX, y: centeredOffsetY });
+
+                    // Apply URL zoom if provided
+                    if (initialZoomLevel) {
+                        setZoomLevel(initialZoomLevel);
+                    }
+                } else {
+                    // Fallback if dimensions aren't available
+                    setCursorPos({ x: targetX, y: targetY });
+                    setViewOffset({ x: targetX, y: targetY });
+                    if (initialZoomLevel) {
+                        setZoomLevel(initialZoomLevel);
+                    }
+                }
+
+                hasAppliedSpawnRef.current = true;
             }
+            // Priority 2: Spawn point from settings
+            else if (settings.spawnPoint) {
+                const spawnX = settings.spawnPoint.x;
+                const spawnY = settings.spawnPoint.y;
 
-            hasAppliedSpawnRef.current = true;
+                // Center the spawn point in viewport by calculating offset
+                // Get effective character dimensions
+                const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
+
+                if (effectiveCharWidth > 0 && effectiveCharHeight > 0 && typeof window !== 'undefined') {
+                    const viewportWidth = window.innerWidth;
+                    const viewportHeight = window.innerHeight;
+
+                    // Calculate how many characters fit in viewport
+                    const charsInViewportWidth = viewportWidth / effectiveCharWidth;
+                    const charsInViewportHeight = viewportHeight / effectiveCharHeight;
+
+                    // Center spawn point by offsetting half the viewport
+                    const centeredOffsetX = spawnX - (charsInViewportWidth / 2);
+                    const centeredOffsetY = spawnY - (charsInViewportHeight / 2);
+
+                    setCursorPos({ x: spawnX, y: spawnY });
+                    setViewOffset({ x: centeredOffsetX, y: centeredOffsetY });
+                } else {
+                    // Fallback if dimensions aren't available
+                    setCursorPos({ x: spawnX, y: spawnY });
+                    setViewOffset({ x: spawnX, y: spawnY });
+                }
+
+                hasAppliedSpawnRef.current = true;
+            }
         }
-    }, [settings.spawnPoint, isLoadingWorld, zoomLevel, getEffectiveCharDims]);
+    }, [settings.spawnPoint, isLoadingWorld, zoomLevel, initialViewOffset, initialZoomLevel, getEffectiveCharDims]);
 
     // === Refs === (Keep refs for things not directly tied to re-renders or persistence)
     const charSizeCacheRef = useRef<{ [key: number]: { width: number; height: number; fontSize: number } }>({});
@@ -2251,16 +2330,84 @@ export function useWorldEngine({
                 } else if (exec.command === 'publish') {
                     // Publish current state
                     if (currentStateName) {
+                        const hasRegionFlag = exec.args.includes('--region');
+                        const hasSelection = selectionStart !== null && selectionEnd !== null;
+
                         setDialogueWithRevert("Publishing state...", setDialogueText);
                         publishState(currentStateName, true).then((success) => {
                             if (success) {
-                                setDialogueWithRevert(`State "${currentStateName}" published successfully`, setDialogueText);
+                                // Generate base URL
+                                const baseUrl = `${window.location.origin}/@${username}/${currentStateName}`;
+
+                                // If --region flag or has selection, include coordinates
+                                if (hasRegionFlag || hasSelection) {
+                                    let targetX, targetY;
+
+                                    if (hasSelection && selectionStart && selectionEnd) {
+                                        // Use center of selection
+                                        const normalized = getNormalizedSelection();
+                                        if (normalized) {
+                                            targetX = Math.floor((normalized.startX + normalized.endX) / 2);
+                                            targetY = Math.floor((normalized.startY + normalized.endY) / 2);
+                                        }
+                                    } else {
+                                        // Use cursor position
+                                        targetX = cursorPos.x;
+                                        targetY = cursorPos.y;
+                                    }
+
+                                    if (targetX !== undefined && targetY !== undefined) {
+                                        const urlWithCoords = `${baseUrl}?x=${targetX}&y=${targetY}&zoom=${zoomLevel.toFixed(2)}`;
+                                        navigator.clipboard.writeText(urlWithCoords).then(() => {
+                                            setDialogueWithRevert(`Published with region link copied to clipboard`, setDialogueText);
+                                        });
+                                    }
+                                } else {
+                                    // Regular publish without coordinates
+                                    navigator.clipboard.writeText(baseUrl).then(() => {
+                                        setDialogueWithRevert(`State "${currentStateName}" published, link copied`, setDialogueText);
+                                    });
+                                }
                             } else {
                                 setDialogueWithRevert(`Failed to publish state "${currentStateName}"`, setDialogueText);
                             }
                         });
                     } else {
                         setDialogueWithRevert("No current state to publish", setDialogueText);
+                    }
+                } else if (exec.command === 'share') {
+                    // Share current view - always publishes with coordinates and zoom
+                    if (currentStateName) {
+                        setDialogueWithRevert("Publishing and generating share link...", setDialogueText);
+                        publishState(currentStateName, true).then((success) => {
+                            if (success) {
+                                const baseUrl = `${window.location.origin}/@${username}/${currentStateName}`;
+                                let targetX, targetY;
+
+                                // Check if there's an active selection
+                                if (selectionStart !== null && selectionEnd !== null) {
+                                    // Use center of selection
+                                    const normalized = getNormalizedSelection();
+                                    if (normalized) {
+                                        targetX = Math.floor((normalized.startX + normalized.endX) / 2);
+                                        targetY = Math.floor((normalized.startY + normalized.endY) / 2);
+                                    }
+                                } else {
+                                    // Use cursor position
+                                    targetX = cursorPos.x;
+                                    targetY = cursorPos.y;
+                                }
+
+                                const urlWithCoords = `${baseUrl}?x=${targetX}&y=${targetY}&zoom=${zoomLevel.toFixed(2)}`;
+                                navigator.clipboard.writeText(urlWithCoords).then(() => {
+                                    setDialogueWithRevert(`Share link copied to clipboard`, setDialogueText);
+                                });
+                            } else {
+                                setDialogueWithRevert(`Failed to publish state "${currentStateName}"`, setDialogueText);
+                            }
+                        });
+                    } else {
+                        setDialogueWithRevert("No current state to share", setDialogueText);
                     }
                 } else if (exec.command === 'unpublish') {
                     // Unpublish current state

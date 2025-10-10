@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect, useCallback } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { useWorldEngine } from '../../bitworld/world.engine';
 import { BitCanvas } from '../../bitworld/bit.canvas';
 import Grid3DBackground from '../../bitworld/canvas.grid3d';
@@ -15,17 +15,31 @@ export default function UserState() {
   const [uidLookupLoading, setUidLookupLoading] = useState(true);
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const username = decodeURIComponent(params.username as string).replace('@', '');
   const slug = params.slug as string[];
   const stateName = slug?.[0] || 'default';
-  
+
+  // Parse URL coordinate parameters
+  const urlX = searchParams.get('x');
+  const urlY = searchParams.get('y');
+  const urlZoom = searchParams.get('zoom');
+
+  // Calculate initial view offset and zoom from URL params
+  const initialViewOffset = (urlX && urlY && typeof window !== 'undefined') ? {
+    x: parseInt(urlX),
+    y: parseInt(urlY)
+  } : undefined;
+
+  const initialZoomLevel = urlZoom ? parseFloat(urlZoom) : undefined;
+
   // Listen for authentication state changes
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
       setAuthLoading(false);
     });
-    
+
     return () => unsubscribe();
   }, []);
 
@@ -48,13 +62,15 @@ export default function UserState() {
       setUidLookupLoading(false);
     }
   }, [username]);
-  
-  const engine = useWorldEngine({ 
-    worldId: stateName, 
+
+  const engine = useWorldEngine({
+    worldId: stateName,
     // initialBackgroundColor: '#000',
     userUid: targetUserUid, // Use the target user's UID, not the authenticated user's UID
     username: username,
-    initialStateName: stateName
+    initialStateName: stateName,
+    initialViewOffset: initialViewOffset,
+    initialZoomLevel: initialZoomLevel
   });
 
   // Simple cursor blink effect
