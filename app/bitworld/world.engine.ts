@@ -2246,7 +2246,7 @@ export function useWorldEngine({
 
         // === Command Handling (Early Priority) ===
         if (enableCommands && !isReadOnly) {
-            const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos);
+            const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos, ctrlKey, metaKey);
             if (commandResult && typeof commandResult === 'object') {
                 // It's a command execution object - handle it
                 const exec = commandResult as CommandExecution;

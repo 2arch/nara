@@ -2267,12 +2267,84 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         };
     }, [pendingCommand]);
 
+    // Handle pasting text into command mode
+    const pasteIntoCommand = useCallback(async (): Promise<{ success: boolean; newLength: number }> => {
+        if (!commandState.isActive) return { success: false, newLength: 0 };
+
+        try {
+            const clipText = await navigator.clipboard.readText();
+            // Replace newlines with spaces to keep command on one line
+            const processedText = clipText.replace(/[\r\n]+/g, ' ').trim();
+
+            if (!processedText) return { success: false, newLength: 0 };
+
+            let newLength = 0;
+
+            // Add each character to the command input
+            setCommandState(prev => {
+                const newInput = prev.input + processedText;
+                newLength = newInput.length;
+                const newMatchedCommands = matchCommands(newInput);
+
+                // Update command display at original command start position
+                const newCommandData: WorldData = {};
+                const commandText = `/${newInput}`;
+
+                // Draw command text at original command start position
+                for (let i = 0; i < commandText.length; i++) {
+                    const key = `${prev.commandStartPos.x + i},${prev.commandStartPos.y}`;
+                    newCommandData[key] = commandText[i];
+                }
+
+                // Draw autocomplete suggestions below
+                newMatchedCommands.forEach((command, index) => {
+                    const suggestionY = prev.commandStartPos.y + 1 + index;
+                    for (let i = 0; i < command.length; i++) {
+                        const key = `${prev.commandStartPos.x + i},${suggestionY}`;
+                        newCommandData[key] = command[i];
+                    }
+                });
+
+                setCommandData(newCommandData);
+
+                return {
+                    ...prev,
+                    input: newInput,
+                    matchedCommands: newMatchedCommands,
+                    selectedIndex: Math.min(prev.selectedIndex, newMatchedCommands.length - 1),
+                };
+            });
+
+            return { success: true, newLength };
+        } catch (err) {
+            console.warn('Could not paste into command:', err);
+            return { success: false, newLength: 0 };
+        }
+    }, [commandState.isActive, matchCommands]);
+
     // Handle keyboard events for command mode
     const handleKeyDown = useCallback((
-        key: string, 
+        key: string,
         cursorPos: Point,
-        setCursorPos: (pos: Point | ((prev: Point) => Point)) => void
+        setCursorPos: (pos: Point | ((prev: Point) => Point)) => void,
+        ctrlKey: boolean = false,
+        metaKey: boolean = false
     ): boolean | CommandExecution | null => {
+        // Handle paste in command mode (Cmd+V or Ctrl+V)
+        if (commandState.isActive && key === 'v' && (ctrlKey || metaKey)) {
+            pasteIntoCommand().then(result => {
+                if (result.success) {
+                    // Move cursor to end of pasted content
+                    // newLength is the input length, +1 for the '/'
+                    setCursorPos({
+                        x: commandState.commandStartPos.x + result.newLength + 1,
+                        y: commandState.commandStartPos.y
+                    });
+                }
+            });
+            return true;
+        }
+
         if (!commandState.isActive) {
             // Check if starting command mode with '/'
             if (key === '/') {
@@ -2372,7 +2444,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         }
 
         return false;
-    }, [commandState.isActive, startCommand, executeCommand, navigateUp, navigateDown, handleBackspace, addCharacter]);
+    }, [commandState, startCommand, executeCommand, navigateUp, navigateDown, handleBackspace, addCharacter, pasteIntoCommand]);
 
     // Select a command from dropdown (for click handling)
     const selectCommand = useCallback((selectedCommand: string) => {
