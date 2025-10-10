@@ -312,6 +312,19 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
             // Clear host text and disable modes
             setHostData(null);
 
+            // Clean up all labels spawned during dialogue
+            if (setWorldData) {
+              setWorldData(prev => {
+                const newData = { ...prev };
+                Object.keys(newData).forEach(key => {
+                  if (key.startsWith('label_')) {
+                    delete newData[key];
+                  }
+                });
+                return newData;
+              });
+            }
+
             if (setHostMode) {
               setHostMode({ isActive: false, currentInputType: null });
             }
@@ -538,6 +551,19 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
         // Clear host text and disable modes
         setHostData(null);
 
+        // Clean up all labels spawned during dialogue
+        if (setWorldData) {
+          setWorldData(prev => {
+            const newData = { ...prev };
+            Object.keys(newData).forEach(key => {
+              if (key.startsWith('label_')) {
+                delete newData[key];
+              }
+            });
+            return newData;
+          });
+        }
+
         if (setHostMode) {
           setHostMode({ isActive: false, currentInputType: null });
         }
@@ -641,6 +667,19 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
 
         // Clear host text and disable modes
         setHostData(null);
+
+        // Clean up all labels spawned during dialogue
+        if (setWorldData) {
+          setWorldData(prev => {
+            const newData = { ...prev };
+            Object.keys(newData).forEach(key => {
+              if (key.startsWith('label_')) {
+                delete newData[key];
+              }
+            });
+            return newData;
+          });
+        }
 
         if (setHostMode) {
           setHostMode({ isActive: false, currentInputType: null });

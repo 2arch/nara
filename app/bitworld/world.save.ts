@@ -25,7 +25,9 @@ export function useWorldSave(
     autoLoadData: boolean = true,
     currentStateName?: string | null,
     userUid?: string | null, // Add user UID parameter
-    isReadOnly?: boolean // Read-only flag to prevent write attempts
+    isReadOnly?: boolean, // Read-only flag to prevent write attempts
+    localClipboard?: any[], // Clipboard items
+    setLocalClipboard?: React.Dispatch<React.SetStateAction<any[]>> // Clipboard setter
 ) {
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -34,8 +36,10 @@ export function useWorldSave(
     // Store the last version of data known to be saved or received from Firebase
     const lastSyncedDataRef = useRef<WorldData | null>(null);
     const lastSyncedSettingsRef = useRef<WorldSettings | null>(null);
+    const lastSyncedClipboardRef = useRef<any[] | null>(null);
     const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const settingsSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const clipboardSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const mergeIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
     // Ephemeral client ID for this session
@@ -77,6 +81,12 @@ export function useWorldSave(
             (isBlogs ? null : getWorldPath(`${worldId}/settings`))) :
         null;
 
+    const clipboardRefPath = worldId ?
+        (currentStateName ?
+            (isBlogs ? `worlds/blog/posts/${currentStateName}/clipboard` : getWorldPath(`${currentStateName}/clipboard`)) :
+            (isBlogs ? null : getWorldPath(`${worldId}/clipboard`))) :
+        null;
+
     // --- Load Initial Data & Settings ---
     useEffect(() => {
         if (!worldId) {
@@ -96,6 +106,7 @@ export function useWorldSave(
 
         const dataPath = worldDataRefPath;
         const settingsPath = settingsRefPath;
+        const clipboardPath = clipboardRefPath;
 
         if (!dataPath || !settingsPath) {
             setIsLoading(false);
@@ -104,6 +115,7 @@ export function useWorldSave(
 
         const dataRef = ref(database, dataPath);
         const settingsRef = ref(database, settingsPath);
+        const clipboardRef = clipboardPath ? ref(database, clipboardPath) : null;
 
         const handleError = (err: Error) => {
             // For public viewing, permission errors are expected and should not be logged as errors
@@ -147,7 +159,21 @@ export function useWorldSave(
             }
         };
 
+        const handleClipboard = (snapshot: DataSnapshot) => {
+            const clipboard = snapshot.val() as any[] | null;
+            if (setLocalClipboard) {
+                if (clipboard) {
+                    setLocalClipboard(clipboard);
+                    lastSyncedClipboardRef.current = [...clipboard];
+                } else {
+                    // Initialize empty clipboard if none exists
+                    lastSyncedClipboardRef.current = [];
+                }
+            }
+        };
+
         const settingsUnsubscribe = onValue(settingsRef, handleSettings, handleError);
+        const clipboardUnsubscribe = clipboardRef ? onValue(clipboardRef, handleClipboard, handleError) : null;
 
         const dataListeners = [
             onChildAdded(dataRef, (snapshot) => {
@@ -207,11 +233,13 @@ export function useWorldSave(
         return () => {
             clearTimeout(timeoutId);
             settingsUnsubscribe();
+            if (clipboardUnsubscribe) clipboardUnsubscribe();
             dataListeners.forEach(unsubscribe => unsubscribe());
             if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
             if (settingsSaveTimeoutRef.current) clearTimeout(settingsSaveTimeoutRef.current);
+            if (clipboardSaveTimeoutRef.current) clearTimeout(clipboardSaveTimeoutRef.current);
         };
-    }, [worldId, userUid, currentStateName, autoLoadData, isBlogs, worldDataRefPath, settingsRefPath, setLocalWorldData, setLocalSettings]);
+    }, [worldId, userUid, currentStateName, autoLoadData, isBlogs, worldDataRefPath, settingsRefPath, clipboardRefPath, setLocalWorldData, setLocalSettings, setLocalClipboard]);
 
     // --- Save Data to Client Channel (Debounced) ---
     useEffect(() => {
@@ -452,6 +480,70 @@ export function useWorldSave(
             }
         };
     }, [localSettings, isLoading, worldId, settingsRefPath, isReadOnly]);
+
+    // --- Save Clipboard on Change (Debounced) ---
+    useEffect(() => {
+        if (isLoading || !worldId || !clipboardRefPath || !lastSyncedClipboardRef.current || !localClipboard) {
+            return;
+        }
+
+        // Skip clipboard saves in read-only mode
+        if (isReadOnly) {
+            return;
+        }
+
+        if (clipboardSaveTimeoutRef.current) {
+            clearTimeout(clipboardSaveTimeoutRef.current);
+        }
+
+        if (JSON.stringify(localClipboard) === JSON.stringify(lastSyncedClipboardRef.current)) {
+            return;
+        }
+
+        clipboardSaveTimeoutRef.current = setTimeout(async () => {
+            if (!worldId || !clipboardRefPath) return;
+
+            setIsSaving(true);
+            setError(null);
+            const dbRef = ref(database, clipboardRefPath);
+
+            try {
+                // Clean clipboard array - remove undefined values recursively
+                const cleanObject = (obj: any): any => {
+                    if (obj === null || typeof obj !== 'object') {
+                        return obj;
+                    }
+
+                    if (Array.isArray(obj)) {
+                        return obj.map(cleanObject);
+                    }
+
+                    return Object.entries(obj).reduce((acc, [key, value]) => {
+                        if (value !== undefined) {
+                            acc[key] = typeof value === 'object' ? cleanObject(value) : value;
+                        }
+                        return acc;
+                    }, {} as any);
+                };
+
+                const cleanClipboard = cleanObject(localClipboard);
+
+                await set(dbRef, cleanClipboard);
+                lastSyncedClipboardRef.current = [...localClipboard];
+            } catch (err: any) {
+                logger.error("Firebase: Error saving clipboard:", err);
+                setError(`Failed to save clipboard: ${err.message}`);
+            } finally {
+                setIsSaving(false);
+            }
+        }, SAVE_DEBOUNCE_DELAY);
+
+        return () => {
+            if (clipboardSaveTimeoutRef.current) {
+                clearTimeout(clipboardSaveTimeoutRef.current);
+            }
+        };
+    }, [localClipboard, isLoading, worldId, clipboardRefPath, isReadOnly]);
 
     return { isLoading, isSaving, error };
 }

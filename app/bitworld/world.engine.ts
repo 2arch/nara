@@ -59,6 +59,19 @@ export interface ListContent {
     [lineIndex: number]: string;
 }
 
+export interface ClipboardItem {
+    id: string;
+    content: string; // The text content from the bound
+    startX: number;
+    endX: number;
+    startY: number;
+    endY: number;
+    maxY?: number;
+    title?: string;
+    color?: string;
+    timestamp: number;
+}
+
 export interface WorldData { [key: string]: string | StyledCharacter | ImageData; }
 export interface Point { x: number; y: number; }
 
@@ -77,6 +90,7 @@ export interface WorldEngine {
     lightModeData: WorldData;
     hostData: { text: string; color?: string; centerPos: Point; timestamp?: number } | null; // Host messages rendered at fixed position with streaming
     stagedImageData: ImageData[]; // Ephemeral staged images (cleared with Escape, supports multiple)
+    clipboardItems: ClipboardItem[]; // Clipboard items from Cmd+click on bounds
     searchData: WorldData;
     viewOffset: Point;
     cursorPos: Point;
@@ -99,7 +113,7 @@ export interface WorldEngine {
     getEffectiveCharDims: (zoom: number) => { width: number; height: number; fontSize: number; };
     screenToWorld: (screenX: number, screenY: number, currentZoom: number, currentOffset: Point) => Point;
     worldToScreen: (worldX: number, worldY: number, currentZoom: number, currentOffset: Point) => Point;
-    handleCanvasClick: (canvasRelativeX: number, canvasRelativeY: number, clearSelection?: boolean, shiftKey?: boolean) => void;
+    handleCanvasClick: (canvasRelativeX: number, canvasRelativeY: number, clearSelection?: boolean, shiftKey?: boolean, metaKey?: boolean, ctrlKey?: boolean) => void;
     handleCanvasWheel: (deltaX: number, deltaY: number, canvasRelativeX: number, canvasRelativeY: number, ctrlOrMetaKey: boolean) => void;
     handlePanStart: (clientX: number, clientY: number) => PanStartInfo | null;
     handlePanMove: (clientX: number, clientY: number, panStartInfo: PanStartInfo) => Point;
@@ -172,6 +186,8 @@ export interface WorldEngine {
     setWorldData: React.Dispatch<React.SetStateAction<WorldData>>;
     // Monogram command callback
     setMonogramCommandHandler: (handler: (args: string[]) => void) => void;
+    // Host dialogue flow callback
+    setHostDialogueHandler: (handler: () => void) => void;
     // Text compilation access
     getCompiledText: () => { [lineY: number]: string };
     compiledTextCache: { [lineY: number]: string }; // Direct access to compiled text cache for real-time updates
@@ -321,6 +337,9 @@ export function useWorldEngine({
 
     // Monogram command handler ref
     const monogramCommandHandlerRef = useRef<((args: string[]) => void) | null>(null);
+
+    // Host dialogue handler ref
+    const hostDialogueHandlerRef = useRef<(() => void) | null>(null);
     
     // Auto-clear temporary dialogue messages
     useAutoDialogue(dialogueText, setDialogueText);
@@ -400,6 +419,7 @@ export function useWorldEngine({
     const [searchData, setSearchData] = useState<WorldData>({});
     const [hostData, setHostData] = useState<{ text: string; color?: string; centerPos: Point; timestamp?: number } | null>(null);
     const [stagedImageData, setStagedImageData] = useState<ImageData[]>([]); // Ephemeral staged images (supports multiple)
+    const [clipboardItems, setClipboardItems] = useState<ClipboardItem[]>([]); // Clipboard items from Cmd+click on bounds
 
     // === Agent System ===
     const [agentEnabled, setAgentEnabled] = useState<boolean>(false);
@@ -1408,7 +1428,9 @@ export function useWorldEngine({
         true,
         currentStateName,
         userUid,
-        isReadOnly // Pass read-only flag to prevent write attempts
+        isReadOnly, // Pass read-only flag to prevent write attempts
+        clipboardItems, // Clipboard items
+        setClipboardItems // Clipboard setter
     ); // Only enable when userUid is available
 
     // === Apply spawn point or URL coordinates when settings load ===
@@ -2210,10 +2232,7 @@ export function useWorldEngine({
                 }
             }
             // On desktop: allow typing but make it ephemeral (handled below)
-            // Block commands though
-            if (key === '/') {
-                return true; // Block command mode in read-only
-            }
+            // Allow commands in read-only mode - we'll gate specific commands later
         }
 
         // === Search Clearing ===
@@ -2245,11 +2264,17 @@ export function useWorldEngine({
         }
 
         // === Command Handling (Early Priority) ===
-        if (enableCommands && !isReadOnly) {
+        if (enableCommands) {
             const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos, ctrlKey, metaKey);
             if (commandResult && typeof commandResult === 'object') {
                 // It's a command execution object - handle it
                 const exec = commandResult as CommandExecution;
+
+                // In read-only mode, only allow signin and share commands
+                if (isReadOnly && exec.command !== 'signin' && exec.command !== 'share') {
+                    setDialogueWithRevert("Only /signin and /share commands available in read-only mode", setDialogueText);
+                    return true;
+                }
                 if (exec.command === 'debug') {
                     if (exec.args[0] === 'on') {
                         const newSettings = { isDebugVisible: true };
@@ -2364,6 +2389,13 @@ export function useWorldEngine({
                     } else {
                         setDialogueWithRevert("Monogram control not available", setDialogueText);
                     }
+                } else if (exec.command === 'signin') {
+                    // Trigger sign in flow via callback
+                    if (hostDialogueHandlerRef.current) {
+                        hostDialogueHandlerRef.current();
+                    } else {
+                        setDialogueWithRevert("Sign in flow not available", setDialogueText);
+                    }
                 } else if (exec.command === 'signout') {
                     // Sign out from Firebase
                     signOut(auth).then(() => {
@@ -2423,36 +2455,62 @@ export function useWorldEngine({
                         setDialogueWithRevert("No current state to publish", setDialogueText);
                     }
                 } else if (exec.command === 'share') {
-                    // Share current view - always publishes with coordinates and zoom
+                    // Share current view
                     if (currentStateName) {
-                        setDialogueWithRevert("Publishing and generating share link...", setDialogueText);
-                        publishState(currentStateName, true).then((success) => {
-                            if (success) {
-                                const baseUrl = `${window.location.origin}/@${username}/${currentStateName}`;
-                                let targetX, targetY;
+                        // In read-only mode or when not logged in, just generate link without publishing
+                        if (isReadOnly || !userUid) {
+                            const baseUrl = window.location.href.split('?')[0]; // Current URL without query params
+                            let targetX, targetY;
 
-                                // Check if there's an active selection
-                                if (selectionStart !== null && selectionEnd !== null) {
-                                    // Use center of selection
-                                    const normalized = getNormalizedSelection();
-                                    if (normalized) {
-                                        targetX = Math.floor((normalized.startX + normalized.endX) / 2);
-                                        targetY = Math.floor((normalized.startY + normalized.endY) / 2);
-                                    }
-                                } else {
-                                    // Use cursor position
-                                    targetX = cursorPos.x;
-                                    targetY = cursorPos.y;
+                            // Check if there's an active selection
+                            if (selectionStart !== null && selectionEnd !== null) {
+                                // Use center of selection
+                                const normalized = getNormalizedSelection();
+                                if (normalized) {
+                                    targetX = Math.floor((normalized.startX + normalized.endX) / 2);
+                                    targetY = Math.floor((normalized.startY + normalized.endY) / 2);
                                 }
-
-                                const urlWithCoords = `${baseUrl}?v=${targetX}.${targetY}.${zoomLevel.toFixed(2)}`;
-                                navigator.clipboard.writeText(urlWithCoords).then(() => {
-                                    setDialogueWithRevert(`Share link copied to clipboard`, setDialogueText);
-                                });
                             } else {
-                                setDialogueWithRevert(`Failed to publish state "${currentStateName}"`, setDialogueText);
+                                // Use cursor position
+                                targetX = cursorPos.x;
+                                targetY = cursorPos.y;
                             }
-                        });
+
+                            const urlWithCoords = `${baseUrl}?v=${targetX}.${targetY}.${zoomLevel.toFixed(2)}`;
+                            navigator.clipboard.writeText(urlWithCoords).then(() => {
+                                setDialogueWithRevert(`Share link copied to clipboard`, setDialogueText);
+                            });
+                        } else {
+                            // Logged in and can publish: normal publish flow
+                            setDialogueWithRevert("Publishing and generating share link...", setDialogueText);
+                            publishState(currentStateName, true).then((success) => {
+                                if (success) {
+                                    const baseUrl = `${window.location.origin}/@${username}/${currentStateName}`;
+                                    let targetX, targetY;
+
+                                    // Check if there's an active selection
+                                    if (selectionStart !== null && selectionEnd !== null) {
+                                        // Use center of selection
+                                        const normalized = getNormalizedSelection();
+                                        if (normalized) {
+                                            targetX = Math.floor((normalized.startX + normalized.endX) / 2);
+                                            targetY = Math.floor((normalized.startY + normalized.endY) / 2);
+                                        }
+                                    } else {
+                                        // Use cursor position
+                                        targetX = cursorPos.x;
+                                        targetY = cursorPos.y;
+                                    }
+
+                                    const urlWithCoords = `${baseUrl}?v=${targetX}.${targetY}.${zoomLevel.toFixed(2)}`;
+                                    navigator.clipboard.writeText(urlWithCoords).then(() => {
+                                        setDialogueWithRevert(`Share link copied to clipboard`, setDialogueText);
+                                    });
+                                } else {
+                                    setDialogueWithRevert(`Failed to publish state "${currentStateName}"`, setDialogueText);
+                                }
+                            });
+                        }
                     } else {
                         setDialogueWithRevert("No current state to share", setDialogueText);
                     }
@@ -5529,8 +5587,68 @@ export function useWorldEngine({
         // setCursorPos, setWorldData, setSelectionStart, setSelectionEnd // Setters are stable, no need to list
     ]);
 
-    const handleCanvasClick = useCallback((canvasRelativeX: number, canvasRelativeY: number, clearSelection: boolean = false, shiftKey: boolean = false): void => {
+    const handleCanvasClick = useCallback((canvasRelativeX: number, canvasRelativeY: number, clearSelection: boolean = false, shiftKey: boolean = false, metaKey: boolean = false, ctrlKey: boolean = false): void => {
         const newCursorPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
+
+        // === Cmd+Click to Add Bound to Clipboard ===
+        if ((metaKey || ctrlKey) && !shiftKey) {
+            // Check if clicking on a bound
+            for (const key in worldData) {
+                if (key.startsWith('bound_')) {
+                    try {
+                        const boundData = JSON.parse(worldData[key] as string);
+                        const { startX, endX, startY, endY, maxY, title, color } = boundData;
+
+                        // Check if click is within this bound
+                        if (newCursorPos.x >= startX && newCursorPos.x <= endX &&
+                            newCursorPos.y >= startY && newCursorPos.y <= (maxY || endY)) {
+
+                            // Extract text content from this bound region
+                            const content: string[] = [];
+                            for (let y = startY; y <= (maxY || endY); y++) {
+                                let line = '';
+                                for (let x = startX; x <= endX; x++) {
+                                    const cellKey = `${x},${y}`;
+                                    const char = worldData[cellKey];
+                                    if (typeof char === 'string') {
+                                        line += char;
+                                    } else if (char && typeof char === 'object' && 'char' in char) {
+                                        line += char.char;
+                                    } else {
+                                        line += ' ';
+                                    }
+                                }
+                                content.push(line.trimEnd());
+                            }
+
+                            // Create clipboard item
+                            const clipboardItem: ClipboardItem = {
+                                id: `${startX},${startY}-${Date.now()}`,
+                                content: content.join('\n'),
+                                startX,
+                                endX,
+                                startY,
+                                endY,
+                                maxY,
+                                title,
+                                color,
+                                timestamp: Date.now()
+                            };
+
+                            // Add to clipboard (prepend to keep most recent first)
+                            setClipboardItems(prev => [clipboardItem, ...prev]);
+
+                            // Visual feedback
+                            setDialogueWithRevert(`Added to clipboard: ${title || 'untitled'}`, setDialogueText);
+
+                            return; // Don't process regular click behavior
+                        }
+                    } catch (e) {
+                        // Skip invalid bound data
+                    }
+                }
+            }
+        }
 
         // Check if clicking in a glitched region - block cursor movement if so
         let isInGlitchedRegion = false;
@@ -5595,7 +5713,7 @@ export function useWorldEngine({
             setCursorPos(newCursorPos);
             setLastEnterX(null); // Reset Enter X tracking when clicking
         }
-    }, [zoomLevel, viewOffset, screenToWorld, selectionStart, selectionEnd, chatMode]);
+    }, [zoomLevel, viewOffset, screenToWorld, selectionStart, selectionEnd, chatMode, worldData, setDialogueText]);
 
     const handleCanvasWheel = useCallback((deltaX: number, deltaY: number, canvasRelativeX: number, canvasRelativeY: number, ctrlOrMetaKey: boolean): void => {
         // First, check if mouse is over a list (unless zooming with ctrl/meta)
@@ -6138,10 +6256,14 @@ export function useWorldEngine({
         setHostData,
         stagedImageData, // Ephemeral staged images
         setStagedImageData, // Update staged image (for moving/resizing)
+        clipboardItems, // Clipboard items from Cmd+click on bounds
         addInstantAIResponse,
         setWorldData,
         setMonogramCommandHandler: (handler: (args: string[]) => void) => {
             monogramCommandHandlerRef.current = handler;
+        },
+        setHostDialogueHandler: (handler: () => void) => {
+            hostDialogueHandlerRef.current = handler;
         },
         // Agent system
         agentEnabled,

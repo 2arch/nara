@@ -61,6 +61,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const [isShiftPressed, setIsShiftPressed] = useState<boolean>(false);
     const [shiftDragStartPos, setShiftDragStartPos] = useState<Point | null>(null);
     const [selectedImageKey, setSelectedImageKey] = useState<string | null>(null);
+    const [clipboardFlashBounds, setClipboardFlashBounds] = useState<Map<string, number>>(new Map()); // boundKey -> timestamp
     const lastCursorPosRef = useRef<Point | null>(null);
     const lastEnterPressRef = useRef<number>(0);
     const [isPasswordVisible, setIsPasswordVisible] = useState<boolean>(false);
@@ -420,6 +421,60 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     useEffect(() => {
         engine.setMonogramCommandHandler(handleMonogramCommand);
     }, [engine, handleMonogramCommand]);
+
+    // Host dialogue flow handler
+    const handleHostDialogueFlow = useCallback(() => {
+        // Activate host mode
+        engine.setHostMode({ isActive: true, currentInputType: null });
+
+        // Activate chat mode for input
+        engine.setChatMode({
+            isActive: true,
+            currentInput: '',
+            inputPositions: [],
+            isProcessing: false
+        });
+
+        // Start the welcome flow (handles authentication)
+        hostDialogue.startFlow('welcome');
+    }, [engine, hostDialogue]);
+
+    // Register host dialogue handler with engine
+    useEffect(() => {
+        engine.setHostDialogueHandler(handleHostDialogueFlow);
+    }, [engine, handleHostDialogueFlow]);
+
+    // Track clipboard additions for visual feedback
+    const prevClipboardLengthRef = useRef(0);
+    useEffect(() => {
+        const currentLength = engine.clipboardItems.length;
+
+        // If clipboard length increased, a new item was added
+        if (currentLength > prevClipboardLengthRef.current) {
+            const newItem = engine.clipboardItems[0]; // Most recent is first
+            if (newItem) {
+                const boundKey = `bound_${newItem.startX},${newItem.startY}`;
+                const timestamp = Date.now();
+
+                setClipboardFlashBounds(prev => {
+                    const updated = new Map(prev);
+                    updated.set(boundKey, timestamp);
+                    return updated;
+                });
+
+                // Remove flash after 800ms
+                setTimeout(() => {
+                    setClipboardFlashBounds(prev => {
+                        const updated = new Map(prev);
+                        updated.delete(boundKey);
+                        return updated;
+                    });
+                }, 800);
+            }
+        }
+
+        prevClipboardLengthRef.current = currentLength;
+    }, [engine.clipboardItems]);
 
 
     // Controller system for handling keyboard inputs
@@ -787,12 +842,34 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     }, [engine]);
 
 
+    // Helper to check if worldPos is within a clipboard-flashed bound
+    const isInClipboardFlashBound = useCallback((worldPos: Point): string | null => {
+        for (const [boundKey, timestamp] of clipboardFlashBounds.entries()) {
+            try {
+                const boundData = JSON.parse(engine.worldData[boundKey] as string);
+                const { startX, endX, startY, endY, maxY } = boundData;
+                const renderEndY = (maxY !== null && maxY !== undefined) ? maxY : endY;
+
+                if (worldPos.x >= startX && worldPos.x <= endX &&
+                    worldPos.y >= startY && worldPos.y <= renderEndY) {
+                    return boundKey;
+                }
+            } catch (e) {
+                // Skip invalid bound data
+            }
+        }
+        return null;
+    }, [clipboardFlashBounds, engine.worldData]);
+
     // --- Cursor Preview Functions ---
     const drawHoverPreview = useCallback((ctx: CanvasRenderingContext2D, worldPos: any, currentZoom: number, currentOffset: Point, effectiveCharWidth: number, effectiveCharHeight: number, cssWidth: number, cssHeight: number, shiftPressed: boolean = false) => {
         // Only show preview if different from current cursor position
         if (worldPos.x === engine.cursorPos.x && worldPos.y === engine.cursorPos.y && !worldPos.subY) return;
 
         const screenPos = engine.worldToScreen(worldPos.x, worldPos.y, currentZoom, currentOffset);
+
+        // Check if we're in a clipboard-flashed bound
+        const flashingBoundKey = isInClipboardFlashBound(worldPos);
 
         // Check if we're in a glitched region
         const subY = worldPos.subY !== undefined ? worldPos.subY : 0;
@@ -853,13 +930,21 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         } else if (hasDirectText || isWithinTextBlock) {
 
             // Draw overlay for the entire text block using text accent color
-            ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
-            
+            // If we're in a clipboard-flashed bound, multiply with cyan
+            let overlayColor: string;
+            if (flashingBoundKey) {
+                // Multiply gray with cyan: rgba(128,128,128) * rgba(0,255,255) = rgba(0,128,128)
+                overlayColor = `rgba(0, 128, 128, 0.4)`; // Cyan-tinted gray
+            } else {
+                overlayColor = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
+            }
+            ctx.fillStyle = overlayColor;
+
             for (const blockPos of textBlock) {
                 const blockScreenPos = engine.worldToScreen(blockPos.x, blockPos.y, currentZoom, currentOffset);
-                
+
                 // Only draw if visible on screen
-                if (blockScreenPos.x >= -effectiveCharWidth && blockScreenPos.x <= cssWidth && 
+                if (blockScreenPos.x >= -effectiveCharWidth && blockScreenPos.x <= cssWidth &&
                     blockScreenPos.y >= -effectiveCharHeight && blockScreenPos.y <= cssHeight) {
                     ctx.fillRect(blockScreenPos.x, blockScreenPos.y, effectiveCharWidth, effectiveCharHeight);
                 }
@@ -916,7 +1001,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 ctx.fillRect(screenPos.x, adjustedScreenY, effectiveCharWidth, previewHeight);
             }
         }
-    }, [engine, findImageAtPosition]);
+    }, [engine, findImageAtPosition, isInClipboardFlashBound]);
 
     // Helper function to find connected text block (including spaces)
     const findTextBlock = useCallback((startPos: Point, worldData: any, engine: any): Point[] => {
@@ -3140,9 +3225,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         
         // Set flag to prevent trail creation from click movement
         isClickMovementRef.current = true;
-        
+
         // Pass to engine's regular click handler
-        engine.handleCanvasClick(clickX, clickY, false, e.shiftKey);
+        engine.handleCanvasClick(clickX, clickY, false, e.shiftKey, e.metaKey, e.ctrlKey);
 
         canvasRef.current?.focus(); // Ensure focus for keyboard
 
@@ -3260,7 +3345,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 // Track shift+drag start position and clear any existing selection
                 isSelectingMouseDownRef.current = false; // Ensure selection is disabled
                 // Clear any existing selection by using the engine's click handler with clearSelection=true
-                engine.handleCanvasClick(x, y, true);
+                engine.handleCanvasClick(x, y, true, e.shiftKey, e.metaKey, e.ctrlKey);
                 const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
                 setShiftDragStartPos({
                     x: Math.floor(worldPos.x),

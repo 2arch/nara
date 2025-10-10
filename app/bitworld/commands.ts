@@ -83,7 +83,7 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signout', 'publish', 'unpublish', 'share', 'clear', 'cam', 'indent', 'bound', 'unbound', 'upload', 'spawn', 'monogram', 'stage'];
+const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signin', 'signout', 'publish', 'unpublish', 'share', 'clear', 'cam', 'indent', 'bound', 'unbound', 'upload', 'spawn', 'monogram', 'stage'];
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Apercu Pro', 'Neureal'];
@@ -1826,6 +1826,26 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return null;
         }
 
+        if (commandToExecute.startsWith('signin')) {
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            // Return command execution for world engine to handle signin flow
+            return {
+                command: 'signin',
+                args: [],
+                commandStartPos: commandState.commandStartPos
+            };
+        }
+
         if (commandToExecute.startsWith('signout')) {
             // Clear command mode
             setCommandState({
@@ -1837,7 +1857,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 hasNavigated: false
             });
             setCommandData({});
-            
+
             // Return command execution for world engine to handle the actual sign out
             return {
                 command: 'signout',
