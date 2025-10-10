@@ -233,6 +233,7 @@ export interface WorldEngine {
     cycleGridMode: () => void;
     artefactsEnabled: boolean;
     artifactType: import('./commands').ArtifactType;
+    isReadOnly: boolean; // Read-only mode for observers
 }
 
 // --- Hook Input ---
@@ -248,6 +249,7 @@ interface UseWorldEngineProps {
     enableCommands?: boolean; // Enable/disable command system (default: true)
     initialStateName?: string | null; // Initial state name from URL
     onMonogramCommand?: (args: string[]) => void; // Callback for monogram commands
+    isReadOnly?: boolean; // Read-only mode (observer/viewer)
 }
 
 
@@ -293,6 +295,7 @@ export function useWorldEngine({
     username,            // Username for routing
     initialStateName = null, // Initial state name from URL
     onMonogramCommand,   // Callback for monogram commands
+    isReadOnly = false,  // Read-only mode (default to writeable)
 }: UseWorldEngineProps): WorldEngine {
     // === Router ===
     const router = useRouter();
@@ -2176,6 +2179,35 @@ export function useWorldEngine({
             return true;
         }
 
+        // === Read-Only Mode: Block writes on mobile, allow ephemeral typing on desktop ===
+        const isMobile = typeof window !== 'undefined' && 'ontouchstart' in window;
+
+        if (isReadOnly) {
+            // On mobile: block all typing (pan only)
+            if (isMobile) {
+                const allowedKeys = [
+                    'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+                    'PageUp', 'PageDown', 'Home', 'End',
+                    'Escape', 'Tab'
+                ];
+
+                // Allow pan shortcuts (Ctrl/Cmd + arrows)
+                if (isMod && (key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight')) {
+                    return false; // Let pan handler process it
+                }
+
+                // Block everything except allowed navigation
+                if (!allowedKeys.includes(key)) {
+                    return true; // Block and prevent default
+                }
+            }
+            // On desktop: allow typing but make it ephemeral (handled below)
+            // Block commands though
+            if (key === '/') {
+                return true; // Block command mode in read-only
+            }
+        }
+
         // === Search Clearing ===
         if (key === 'Escape' && isSearchActive) {
             clearSearch();
@@ -2198,7 +2230,7 @@ export function useWorldEngine({
         }
 
         // === Command Handling (Early Priority) ===
-        if (enableCommands) {
+        if (enableCommands && !isReadOnly) {
             const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos);
             if (commandResult && typeof commandResult === 'object') {
                 // It's a command execution object - handle it
@@ -2357,7 +2389,7 @@ export function useWorldEngine({
                                     }
 
                                     if (targetX !== undefined && targetY !== undefined) {
-                                        const urlWithCoords = `${baseUrl}?x=${targetX}&y=${targetY}&zoom=${zoomLevel.toFixed(2)}`;
+                                        const urlWithCoords = `${baseUrl}?v=${targetX}.${targetY}.${zoomLevel.toFixed(2)}`;
                                         navigator.clipboard.writeText(urlWithCoords).then(() => {
                                             setDialogueWithRevert(`Published with region link copied to clipboard`, setDialogueText);
                                         });
@@ -2398,7 +2430,7 @@ export function useWorldEngine({
                                     targetY = cursorPos.y;
                                 }
 
-                                const urlWithCoords = `${baseUrl}?x=${targetX}&y=${targetY}&zoom=${zoomLevel.toFixed(2)}`;
+                                const urlWithCoords = `${baseUrl}?v=${targetX}.${targetY}.${zoomLevel.toFixed(2)}`;
                                 navigator.clipboard.writeText(urlWithCoords).then(() => {
                                     setDialogueWithRevert(`Share link copied to clipboard`, setDialogueText);
                                 });
@@ -6071,5 +6103,6 @@ export function useWorldEngine({
         cycleGridMode,
         artefactsEnabled,
         artifactType,
+        isReadOnly, // Read-only mode flag
     };
 }

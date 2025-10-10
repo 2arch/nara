@@ -20,18 +20,39 @@ export default function UserState() {
   const slug = params.slug as string[];
   const stateName = slug?.[0] || 'default';
 
-  // Parse URL coordinate parameters
-  const urlX = searchParams.get('x');
-  const urlY = searchParams.get('y');
-  const urlZoom = searchParams.get('zoom');
+  // Parse URL coordinate parameters (supports both new and legacy formats)
+  const viewParam = searchParams.get('v'); // New format: v=x.y.zoom
+  const urlX = searchParams.get('x'); // Legacy format
+  const urlY = searchParams.get('y'); // Legacy format
+  const urlZoom = searchParams.get('zoom'); // Legacy format
 
-  // Calculate initial view offset and zoom from URL params
-  const initialViewOffset = (urlX && urlY && typeof window !== 'undefined') ? {
-    x: parseInt(urlX),
-    y: parseInt(urlY)
-  } : undefined;
+  // Parse view parameter (dot-separated: x.y.zoom)
+  let initialViewOffset: { x: number; y: number } | undefined;
+  let initialZoomLevel: number | undefined;
 
-  const initialZoomLevel = urlZoom ? parseFloat(urlZoom) : undefined;
+  if (viewParam) {
+    const parts = viewParam.split('.');
+    if (parts.length >= 2) {
+      const x = parseInt(parts[0]);
+      const y = parseInt(parts[1]);
+      const zoom = parts.length >= 3 ? parseFloat(parts.slice(2).join('.')) : undefined; // Handle zoom like 1.00
+
+      if (!isNaN(x) && !isNaN(y)) {
+        initialViewOffset = { x, y };
+        if (zoom && !isNaN(zoom)) {
+          initialZoomLevel = zoom;
+        }
+      }
+    }
+  }
+  // Fallback to legacy format
+  else if (urlX && urlY && typeof window !== 'undefined') {
+    initialViewOffset = {
+      x: parseInt(urlX),
+      y: parseInt(urlY)
+    };
+    initialZoomLevel = urlZoom ? parseFloat(urlZoom) : undefined;
+  }
 
   // Listen for authentication state changes
   useEffect(() => {
@@ -63,6 +84,9 @@ export default function UserState() {
     }
   }, [username]);
 
+  // Detect if current user is the owner
+  const isOwner = user && targetUserUid && user.uid === targetUserUid;
+
   const engine = useWorldEngine({
     worldId: stateName,
     // initialBackgroundColor: '#000',
@@ -70,7 +94,8 @@ export default function UserState() {
     username: username,
     initialStateName: stateName,
     initialViewOffset: initialViewOffset,
-    initialZoomLevel: initialZoomLevel
+    initialZoomLevel: initialZoomLevel,
+    isReadOnly: !isOwner // Pass read-only flag
   });
 
   // Simple cursor blink effect

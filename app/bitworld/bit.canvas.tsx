@@ -65,6 +65,18 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const lastEnterPressRef = useRef<number>(0);
     const [isPasswordVisible, setIsPasswordVisible] = useState<boolean>(false);
 
+    // Pan distance monitoring
+    const [panDistance, setPanDistance] = useState<number>(0);
+    const [isPanning, setIsPanning] = useState<boolean>(false);
+    const panStartPosRef = useRef<Point | null>(null);
+    const lastPanMilestoneRef = useRef<number>(0); // Track last logged milestone
+    const PAN_MILESTONE_INTERVAL = 25; // Log every 25 cells
+
+    // Viewport center tracking for total distance
+    const [totalPannedDistance, setTotalPannedDistance] = useState<number>(0);
+    const lastCenterCellRef = useRef<Point | null>(null);
+    const lastDistanceMilestoneRef = useRef<number>(0);
+
     // Track shift key state globally
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -89,6 +101,46 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             window.removeEventListener('keyup', handleKeyUp);
         };
     }, []);
+
+    // Track viewport center cell position and calculate total panned distance
+    useEffect(() => {
+        const interval = setInterval(() => {
+            if (typeof window === 'undefined' || !canvasRef.current) return;
+
+            const { width: effectiveCharWidth, height: effectiveCharHeight } = engine.getEffectiveCharDims(engine.zoomLevel);
+            if (effectiveCharWidth <= 0 || effectiveCharHeight <= 0) return;
+
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
+
+            // Calculate center cell coordinate
+            const centerCellX = Math.round(engine.viewOffset.x + (viewportWidth / 2) / effectiveCharWidth);
+            const centerCellY = Math.round(engine.viewOffset.y + (viewportHeight / 2) / effectiveCharHeight);
+
+            if (lastCenterCellRef.current) {
+                const dx = centerCellX - lastCenterCellRef.current.x;
+                const dy = centerCellY - lastCenterCellRef.current.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance > 0) {
+                    const newTotal = totalPannedDistance + distance;
+                    setTotalPannedDistance(newTotal);
+
+                    // Check for milestones
+                    const currentMilestone = Math.floor(newTotal / PAN_MILESTONE_INTERVAL);
+                    if (currentMilestone > lastDistanceMilestoneRef.current) {
+                        console.log(`Total panned distance milestone: ${currentMilestone * PAN_MILESTONE_INTERVAL} cells`);
+                        lastDistanceMilestoneRef.current = currentMilestone;
+                    }
+                }
+            }
+
+            lastCenterCellRef.current = { x: centerCellX, y: centerCellY };
+        }, 100); // Check every 100ms
+
+        return () => clearInterval(interval);
+    }, [engine.viewOffset, engine.zoomLevel, totalPannedDistance, PAN_MILESTONE_INTERVAL, engine]);
+
     const router = useRouter();
     
     // Cache for background images to avoid reloading
@@ -2847,6 +2899,18 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             });
         }
 
+        // === Render Pan Distance Monitor ===
+        if (isPanning && panDistance > 0) {
+            ctx.save();
+            ctx.font = `14px ${fontFamily}`;
+            ctx.fillStyle = '#808080';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            const panText = `Pan: ${panDistance} cells`;
+            ctx.fillText(panText, cssWidth / 2, 40); // Top center
+            ctx.restore();
+        }
+
         // === Render Debug Dialogue ===
         if (engine.settings.isDebugVisible) {
             renderDebugDialogue({
@@ -3075,6 +3139,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const info = engine.handlePanStart(e.clientX, e.clientY);
             panStartInfoRef.current = info;
             intermediatePanOffsetRef.current = { ...engine.viewOffset }; // Clone to avoid reference issues
+            panStartPosRef.current = { ...engine.viewOffset }; // Track starting position for distance
+            setIsPanning(true);
+            setPanDistance(0);
+            lastPanMilestoneRef.current = 0; // Reset milestone tracker
             if (canvasRef.current) canvasRef.current.style.cursor = 'grabbing';
         } else if (e.button === 0) { // Left mouse button
             const x = e.clientX - rect.left;
@@ -3156,6 +3224,15 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         if (isMiddleMouseDownRef.current && panStartInfoRef.current) {
             // Handle panning move
             intermediatePanOffsetRef.current = engine.handlePanMove(e.clientX, e.clientY, panStartInfoRef.current);
+
+            // Calculate pan distance (for display only)
+            if (panStartPosRef.current) {
+                const dx = intermediatePanOffsetRef.current.x - panStartPosRef.current.x;
+                const dy = intermediatePanOffsetRef.current.y - panStartPosRef.current.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const roundedDistance = Math.round(distance);
+                setPanDistance(roundedDistance);
+            }
         } else if (isSelectingMouseDownRef.current && !shiftDragStartPos) { // Check mouse down ref and not shift+dragging
             // Handle selection move
             engine.handleSelectionMove(x, y); // Update engine's selection end
@@ -3167,7 +3244,14 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             isMiddleMouseDownRef.current = false;
             engine.handlePanEnd(intermediatePanOffsetRef.current); // Commit final offset
             panStartInfoRef.current = null;
+            panStartPosRef.current = null;
             if (canvasRef.current) canvasRef.current.style.cursor = 'text';
+
+            // Clear pan distance after a delay
+            setTimeout(() => {
+                setIsPanning(false);
+                setPanDistance(0);
+            }, 1000);
         }
 
         if (e.button === 0) { // Left mouse button
@@ -3316,6 +3400,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const info = engine.handlePanStart(centerClientX, centerClientY);
             panStartInfoRef.current = info;
             intermediatePanOffsetRef.current = { ...engine.viewOffset };
+            panStartPosRef.current = { ...engine.viewOffset }; // Track starting position for distance
+            setIsPanning(true);
+            setPanDistance(0);
+            lastPanMilestoneRef.current = 0; // Reset milestone tracker
 
             // Calculate initial pinch distance
             const dx = touches[1].x - touches[0].x;
@@ -3349,6 +3437,15 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const centerClientY = (touches[0].clientY + touches[1].clientY) / 2;
             const newOffset = engine.handlePanMove(centerClientX, centerClientY, panStartInfoRef.current);
             intermediatePanOffsetRef.current = newOffset;
+
+            // Calculate pan distance (for display only)
+            if (panStartPosRef.current) {
+                const dx = newOffset.x - panStartPosRef.current.x;
+                const dy = newOffset.y - panStartPosRef.current.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const roundedDistance = Math.round(distance);
+                setPanDistance(roundedDistance);
+            }
 
             // Pinch-to-zoom - use canvas-relative coordinates
             const dx = touches[1].x - touches[0].x;
@@ -3402,7 +3499,14 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             isTouchPanningRef.current = false;
             engine.handlePanEnd(intermediatePanOffsetRef.current);
             panStartInfoRef.current = null;
+            panStartPosRef.current = null;
             lastPinchDistanceRef.current = null;
+
+            // Clear pan distance after a delay
+            setTimeout(() => {
+                setIsPanning(false);
+                setPanDistance(0);
+            }, 1000);
         } else if (isTouchSelectingRef.current) {
             // End single-touch selection
             isTouchSelectingRef.current = false;
@@ -3579,31 +3683,34 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     zIndex: 1
                 }}
             />
-            <input
-                ref={hiddenInputRef}
-                type="text"
-                style={{
-                    position: 'absolute',
-                    opacity: 0,
-                    pointerEvents: 'none',
-                    left: -9999,
-                    top: -9999
-                }}
-                onKeyDown={(e) => {
-                    // Forward key events to canvas handler
-                    const syntheticEvent = {
-                        ...e,
-                        preventDefault: () => e.preventDefault(),
-                        stopPropagation: () => e.stopPropagation(),
-                        key: e.key,
-                        shiftKey: e.shiftKey,
-                        ctrlKey: e.ctrlKey,
-                        metaKey: e.metaKey,
-                        altKey: e.altKey
-                    } as any;
-                    handleCanvasKeyDown(syntheticEvent);
-                }}
-            />
+            {/* Hidden input for mobile keyboard - only in write mode */}
+            {'ontouchstart' in window && !engine.isReadOnly && (
+                <input
+                    ref={hiddenInputRef}
+                    type="text"
+                    style={{
+                        position: 'absolute',
+                        opacity: 0,
+                        pointerEvents: 'none',
+                        left: -9999,
+                        top: -9999
+                    }}
+                    onKeyDown={(e) => {
+                        // Forward key events to canvas handler
+                        const syntheticEvent = {
+                            ...e,
+                            preventDefault: () => e.preventDefault(),
+                            stopPropagation: () => e.stopPropagation(),
+                            key: e.key,
+                            shiftKey: e.shiftKey,
+                            ctrlKey: e.ctrlKey,
+                            metaKey: e.metaKey,
+                            altKey: e.altKey
+                        } as any;
+                        handleCanvasKeyDown(syntheticEvent);
+                    }}
+                />
+            )}
         </>
     );
 }
