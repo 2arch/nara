@@ -8,8 +8,11 @@ import type { WorldData } from './world.engine'; // Adjust path if needed
 import type { WorldSettings } from './settings';
 
 // Debounce delay for saving (in milliseconds)
-const SAVE_DEBOUNCE_DELAY = 100;
-const MERGE_INTERVAL = 500; // Merge every 500ms
+const SAVE_DEBOUNCE_DELAY = 10; // Instant saves
+const MERGE_INTERVAL = 100; // Merge every 100ms for instant updates
+
+// Enable direct saves (bypass client channel system)
+const USE_DIRECT_SAVES = true;
 
 // Generate unique ephemeral client ID
 function generateClientId(): string {
@@ -281,7 +284,11 @@ export function useWorldSave(
         }
 
         saveTimeoutRef.current = setTimeout(async () => {
-            if (!worldId || !clientDataRefPath) return;
+            if (!worldId) return;
+
+            // Use direct path if enabled, otherwise use client channel
+            const savePath = USE_DIRECT_SAVES ? worldDataRefPath : clientDataRefPath;
+            if (!savePath) return;
 
             setIsSaving(true);
             setError(null);
@@ -307,32 +314,39 @@ export function useWorldSave(
 
                 const cleanWorldData = cleanObject(localWorldData);
 
-                // Write to client-specific channel with timestamp
-                const updates: Record<string, any> = {};
+                if (USE_DIRECT_SAVES) {
+                    // Direct save - write entire data to canonical path
+                    const dataRef = ref(database, savePath);
+                    await set(dataRef, cleanWorldData);
+                    lastSyncedDataRef.current = { ...localWorldData };
+                } else {
+                    // Client channel save with timestamps
+                    const updates: Record<string, any> = {};
 
-                // Add/update all current keys
-                for (const [key, value] of Object.entries(cleanWorldData)) {
-                    updates[`${clientDataRefPath}/${key}`] = {
-                        value,
-                        timestamp: serverTimestamp()
-                    };
+                    // Add/update all current keys
+                    for (const [key, value] of Object.entries(cleanWorldData)) {
+                        updates[`${savePath}/${key}`] = {
+                            value,
+                            timestamp: serverTimestamp()
+                        };
+                    }
+
+                    // Mark deleted keys with deletion tombstones
+                    const lastSyncedKeys = Object.keys(lastSyncedDataRef.current || {});
+                    const currentKeys = Object.keys(cleanWorldData);
+                    const deletedKeys = lastSyncedKeys.filter(key => !currentKeys.includes(key));
+
+                    for (const key of deletedKeys) {
+                        // Write deletion marker with timestamp for conflict resolution
+                        updates[`${savePath}/${key}`] = {
+                            deleted: true,
+                            timestamp: serverTimestamp()
+                        };
+                    }
+
+                    await update(ref(database), updates);
+                    lastSyncedDataRef.current = { ...localWorldData };
                 }
-
-                // Mark deleted keys with deletion tombstones
-                const lastSyncedKeys = Object.keys(lastSyncedDataRef.current || {});
-                const currentKeys = Object.keys(cleanWorldData);
-                const deletedKeys = lastSyncedKeys.filter(key => !currentKeys.includes(key));
-
-                for (const key of deletedKeys) {
-                    // Write deletion marker with timestamp for conflict resolution
-                    updates[`${clientDataRefPath}/${key}`] = {
-                        deleted: true,
-                        timestamp: serverTimestamp()
-                    };
-                }
-
-                await update(ref(database), updates);
-                lastSyncedDataRef.current = { ...localWorldData };
             } catch (err: any) {
                 // Silently skip permission errors (viewing other users' states or new states)
                 if (err.code !== 'PERMISSION_DENIED' && !err.message?.includes('Permission denied')) {
@@ -349,11 +363,16 @@ export function useWorldSave(
                 clearTimeout(saveTimeoutRef.current);
             }
         };
-    }, [localWorldData, isLoading, worldId, clientDataRefPath, isBlogs, isReadOnly]);
+    }, [localWorldData, isLoading, worldId, clientDataRefPath, worldDataRefPath, isBlogs, isReadOnly]);
 
     // --- Periodic Merge: Client Channels → Canonical ---
     useEffect(() => {
         if (isLoading || !worldId || !usersBasePath || !worldDataRefPath) {
+            return;
+        }
+
+        // Skip merge when using direct saves
+        if (USE_DIRECT_SAVES) {
             return;
         }
 

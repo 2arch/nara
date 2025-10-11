@@ -105,6 +105,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         };
     }, []);
 
+
         // Zoom handler for host dialogue
     const handleZoom = useCallback((targetZoomMultiplier: number, centerPos: Point) => {
         const startZoom = engine.zoomLevel;
@@ -1499,6 +1500,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+
         // === Render Bounded Region Backgrounds ===
         for (const key in engine.worldData) {
             if (key.startsWith('bound_')) {
@@ -1909,7 +1911,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                         // Add subtle text shadow
                         ctx.shadowColor = ctx.fillStyle as string;
-                        ctx.shadowBlur = 2;
+                        ctx.shadowBlur = 0;
                         ctx.shadowOffsetX = 0;
                         ctx.shadowOffsetY = 0;
                         ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
@@ -1951,6 +1953,66 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         // Draw text using background color (inverse of accent)
                         if (char.trim() !== '') {
                             ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                            ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                        }
+                    }
+                }
+            }
+        }
+
+        // === Render LaTeX Data (Blue Background, White Text) ===
+        for (const key in engine.latexData) {
+            const [xStr, yStr] = key.split(',');
+            const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
+            if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                const charData = engine.latexData[key];
+
+                // Skip image data - only process text characters
+                if (engine.isImageData(charData)) {
+                    continue;
+                }
+
+                const char = typeof charData === 'string' ? charData : charData.char;
+                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                    if (char) {
+                        // Draw blue background for LaTeX mode
+                        ctx.fillStyle = '#4A90E2'; // Nice blue color
+                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+
+                        // Draw white text
+                        if (char.trim() !== '') {
+                            ctx.fillStyle = '#FFFFFF';
+                            ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                        }
+                    }
+                }
+            }
+        }
+
+        // === Render SMILES Data (Green Background, White Text) ===
+        for (const key in engine.smilesData) {
+            const [xStr, yStr] = key.split(',');
+            const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
+            if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                const charData = engine.smilesData[key];
+
+                // Skip image data - only process text characters
+                if (engine.isImageData(charData)) {
+                    continue;
+                }
+
+                const char = typeof charData === 'string' ? charData : charData.char;
+                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                    if (char) {
+                        // Draw green background for SMILES mode
+                        ctx.fillStyle = '#50C878'; // Emerald green color
+                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+
+                        // Draw white text
+                        if (char.trim() !== '') {
+                            ctx.fillStyle = '#FFFFFF';
                             ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
                         }
                     }
@@ -2984,7 +3046,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                     // Add glowy effect to cursor
                     ctx.shadowColor = ctx.fillStyle as string;
-                    ctx.shadowBlur = 8;
+                    ctx.shadowBlur = 0;
                     ctx.shadowOffsetX = 0;
                     ctx.shadowOffsetY = 0;
                     ctx.fillRect(cursorScreenPos.x, cursorScreenPos.y, effectiveCharWidth, effectiveCharHeight);
