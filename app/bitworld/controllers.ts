@@ -242,3 +242,20 @@ export function createGridController(gridSystem: any): ControllerGroup {
         ]
     };
 }
+
+// --- Tape Recorder Controller ---
+export function createTapeController(toggleRecording: () => void): ControllerGroup {
+    return {
+        name: 'tape',
+        description: 'Canvas Recorder Controls',
+        enabled: true,
+        bindings: [
+            {
+                key: 'e',
+                ctrlOrMeta: true,
+                description: 'Toggle recording (start/stop & download)',
+                action: toggleRecording
+            }
+        ]
+    };
+}

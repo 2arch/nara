@@ -82,6 +82,7 @@ interface UseCommandSystemProps {
     getEffectiveCharDims: (zoom: number) => { width: number; height: number; fontSize: number; };
     zoomLevel: number;
     clipboardItems?: Array<{id: string, content: string, startX: number, endX: number, startY: number, endY: number, timestamp: number}>;
+    toggleRecording?: () => Promise<void> | void;
 }
 
 // --- Command System Constants ---
@@ -95,6 +96,8 @@ const AVAILABLE_COMMANDS = [
     'mode', 'bg', 'text', 'font', 'indent',
     // State Management
     'state', 'random', 'clear',
+    // Recording & Capture
+    'tape',
     // Sharing & Publishing
     'publish', 'unpublish', 'share', 'spawn', 'stage', 'monogram',
     // Account
@@ -133,7 +136,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [] }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const [commandState, setCommandState] = useState<CommandState>({
@@ -1865,14 +1868,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         if (commandToExecute.startsWith('cam')) {
             const parts = commandToExecute.split(' ');
             const cameraMode = parts[1];
-            
+
             if (CAMERA_COMMANDS.includes(cameraMode)) {
                 // Update camera mode in state
                 setModeState(prev => ({
                     ...prev,
                     cameraMode: cameraMode as CameraMode
                 }));
-                
+
                 // Return command execution to let world engine calculate initial offset
                 setCommandData({});
                 setCommandState({
@@ -1884,7 +1887,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 originalCursorPos: { x: 0, y: 0 },
                     hasNavigated: false
                 });
-                
+
                 return {
                     command: 'cam',
                     args: [cameraMode],
@@ -1895,7 +1898,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             } else {
                 setDialogueWithRevert(`Unknown camera mode. Available: ${CAMERA_COMMANDS.join(', ')}`, setDialogueText);
             }
-            
+
             // Clear command mode
             setCommandState({
                 isActive: false,
@@ -1907,7 +1910,30 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 hasNavigated: false
             });
             setCommandData({});
-            
+
+            return null;
+        }
+
+        if (commandToExecute.startsWith('tape')) {
+            // Toggle tape recording
+            if (toggleRecording) {
+                toggleRecording();
+            } else {
+                setDialogueWithRevert("Tape recording not available", setDialogueText);
+            }
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
             return null;
         }
 

@@ -4,11 +4,12 @@ import { useRouter } from 'next/navigation';
 import type { WorldData, Point, WorldEngine, PanStartInfo } from './world.engine'; // Adjust path as needed
 import { useDialogue, useDebugDialogue } from './dialogue';
 import { useMonogramSystem } from './monogram';
-import { useControllerSystem, createMonogramController, createCameraController, createGridController } from './controllers';
+import { useControllerSystem, createMonogramController, createCameraController, createGridController, createTapeController } from './controllers';
 import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchicalFrames, HierarchicalFrame, HierarchyLevel } from './bit.blocks';
 import { COLOR_MAP } from './commands';
 import { useHostDialogue } from './host.dialogue';
 import { setDialogueWithRevert } from './ai';
+import { CanvasRecorder } from './tape';
 
 // --- Constants --- (Copied and relevant ones kept)
 const GRID_COLOR = '#F2F2F233';
@@ -79,6 +80,50 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const lastCenterCellRef = useRef<Point | null>(null);
     const lastDistanceMilestoneRef = useRef<number>(0);
     const hasTriggeredSignupPromptRef = useRef<boolean>(false); // Track if we've already prompted signup
+
+    // Canvas recorder for /tape command
+    const recorderRef = useRef<CanvasRecorder | null>(null);
+
+    // Initialize canvas recorder
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (canvas && !recorderRef.current) {
+            recorderRef.current = new CanvasRecorder(canvas, 60); // 60fps for smooth recordings
+        }
+    }, []);
+
+    // Toggle tape recording
+    const toggleRecording = useCallback(async () => {
+        if (!recorderRef.current) return;
+
+        if (recorderRef.current.getIsRecording()) {
+            // Stop recording and download
+            await recorderRef.current.stop();
+            engine.setDialogueText('Recording stopped. Downloading...');
+        } else {
+            // Start recording
+            recorderRef.current.start();
+            engine.setDialogueText('Recording started. Press Cmd+E to stop.');
+        }
+    }, [engine]);
+
+    // Register tape recording callback with engine for /tape command
+    useEffect(() => {
+        engine.setTapeRecordingCallback(toggleRecording);
+    }, [engine, toggleRecording]);
+
+    // Reset input focus when entering command mode to disable IME
+    useEffect(() => {
+        if (engine.commandState.isActive && hiddenInputRef.current) {
+            // Blur and refocus to reset IME state
+            hiddenInputRef.current.blur();
+            setTimeout(() => {
+                if (hiddenInputRef.current) {
+                    hiddenInputRef.current.focus();
+                }
+            }, 0);
+        }
+    }, [engine.commandState.isActive]);
 
     // Track shift key state globally
     useEffect(() => {
@@ -651,7 +696,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         registerGroup(createMonogramController(monogramSystem));
         registerGroup(createCameraController(engine));
         registerGroup(createGridController({ cycleGridMode: engine.cycleGridMode }));
-    }, [registerGroup, engine.cycleGridMode]);
+        registerGroup(createTapeController(toggleRecording));
+    }, [registerGroup, engine.cycleGridMode, toggleRecording]);
     
     // Enhanced debug text without monogram info - only calculate if debug is visible
     const enhancedDebugText = engine.settings.isDebugVisible ? `${debugText}
@@ -3245,6 +3291,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Capture frame for tape recorder (before UI overlays) ===
+        if (recorderRef.current) {
+            recorderRef.current.captureFrame();
+        }
+
         // === Render Nav Dialogue ===
         if (engine.isNavVisible) {
             renderNavDialogue({
@@ -3310,7 +3361,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 monogramText: monogramControlsText
             });
         }
-
 
         ctx.restore();
         // --- End Drawing ---
@@ -4107,6 +4157,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     autoCorrect="off"
                     autoCapitalize="off"
                     spellCheck="false"
+                    lang="en"
+                    inputMode={engine.commandState.isActive ? "latin" : "text"}
                     style={{
                         position: 'absolute',
                         opacity: 0,

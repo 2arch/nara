@@ -324,7 +324,7 @@ export async function chatWithAI(message: string, useCache: boolean = true): Pro
                                 cachedContent: cachedContentName,
                                 maxOutputTokens: 50,
                                 temperature: 0.9,
-                                systemInstruction: 'Be brutally concise. Maximum 2 sentences total.'
+                                systemInstruction: 'When responding, please respond without wasting words. Brevity is effective communication, responses should match the initial query in length without leaning into superfluous reflection to maximize focus, without any meta commentary on the personal preference. Respond in all lower case. when canvas context is provided, use it to inform your response but keep replies brief and conversational.'
                             }
                         }),
                         new Promise((_, reject) => {
@@ -335,8 +335,8 @@ export async function chatWithAI(message: string, useCache: boolean = true): Pro
                     ]);
                 } else {
                     // Fallback to old method if caching fails
-                    const contextContent = `Canvas context: ${currentWorldContext.compiledText}\nLabels: ${currentWorldContext.labels.map(l => l.text).join(', ')}\n\nUser: ${message}\n\nLead with a sharp question. Be brutally concise.`;
-                    
+                    const contextContent = `User query: ${message}\n\nCanvas context (for reference): ${currentWorldContext.compiledText}\nLabels: ${currentWorldContext.labels.map(l => l.text).join(', ')}`;
+
                     response = await Promise.race([
                         ai.models.generateContent({
                             model: 'gemini-2.5-flash-lite',
@@ -344,7 +344,7 @@ export async function chatWithAI(message: string, useCache: boolean = true): Pro
                             config: {
                                 maxOutputTokens: 50,
                                 temperature: 0.9,
-                                systemInstruction: 'Be brutally concise. Maximum 2 sentences total.'
+                                systemInstruction: 'When responding, please respond without wasting words. Brevity is effective communication, responses should match the initial query in length without leaning into superfluous reflection to maximize focus, without any meta commentary on the personal preference. Respond in all lower case. when canvas context is provided, use it to inform your response but keep replies brief and conversational.'
                             }
                         }),
                         new Promise((_, reject) => {
@@ -363,27 +363,25 @@ export async function chatWithAI(message: string, useCache: boolean = true): Pro
                 useCache = false;
             }
         }
-        
+
         // If not using cache or cache failed
         if (!useCache || !response) {
             // Check for abort again
             if (abortController.signal.aborted) {
                 throw new Error('AI operation was interrupted');
             }
-            
+
             response = await Promise.race([
                 ai.models.generateContent({
                     model: 'gemini-2.5-flash-lite',
                     contents: `Previous conversation:
 ${conversationContext}
 
-User: ${message}
-
-Be brutally concise. Maximum 2 sentences total.`,
+User: ${message}`,
                     config: {
                         maxOutputTokens: 75,
                         temperature: 0.9,
-                        systemInstruction: 'Be brutally concise. Maximum 2 sentences total.'
+                        systemInstruction: 'When responding, please respond without wasting words. Brevity is effective communication, responses should match the initial query in length without leaning into superfluous reflection to maximize focus, without any meta commentary on the personal preference. Respond in all lower case. when canvas context is provided, use it to inform your response but keep replies brief and conversational.'
                     }
                 }),
                 new Promise((_, reject) => {
@@ -394,7 +392,7 @@ Be brutally concise. Maximum 2 sentences total.`,
             ]);
         }
 
-        const aiResponse = (response as any).text?.trim() || 'I could not process that message.';
+        const aiResponse = ((response as any).text?.trim() || 'I could not process that message.').toLowerCase();
 
         // Add AI response to history
         chatHistory.push({
@@ -472,7 +470,7 @@ This context represents the current state of the canvas/world that the user is w
                 contents: worldContextContent,
                 systemInstruction: {
                     role: 'system',
-                    parts: [{ text: 'You are a concise ambient navigator. Be brutally concise. No explanations.' }]
+                    parts: [{ text: 'When responding, please respond without wasting words. Brevity is effective communication, responses should match the initial query in length without leaning into superfluous reflection to maximize focus, without any meta commentary on the personal preference. Respond in all lower case. when canvas context is provided, use it to inform your response but keep replies brief and conversational.' }]
                 },
                 ttl: '3600s', // 1 hour cache
                 displayName: 'World Context Cache'

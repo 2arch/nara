@@ -144,6 +144,8 @@ export interface WorldEngine {
     isBlock: (x: number, y: number) => boolean;
     dialogueText: string;
     setDialogueText: (text: string) => void;
+    setTapeRecordingCallback: (callback: () => Promise<void> | void) => void;
+    tapeRecordingCallback: (() => Promise<void> | void) | null;
     chatMode: {
         isActive: boolean;
         currentInput: string;
@@ -370,6 +372,7 @@ export function useWorldEngine({
     const [focusedBoundKey, setFocusedBoundKey] = useState<string | null>(null); // Track which bound is focused
     const [boundCycleIndex, setBoundCycleIndex] = useState<number>(0); // Track which bound to cycle to next
     const [dialogueText, setDialogueText] = useState('');
+    const tapeRecordingCallbackRef = useRef<(() => Promise<void> | void) | null>(null);
 
     // Double ESC detection for AI interruption
     const lastEscTimeRef = useRef<number | null>(null);
@@ -633,6 +636,11 @@ export function useWorldEngine({
         }
         return bounds;
     }, [worldData]);
+
+    // Tape recording callback setter
+    const setTapeRecordingCallback = useCallback((callback: () => Promise<void> | void) => {
+        tapeRecordingCallbackRef.current = callback;
+    }, []);
 
     // === Character Dimensions Calculation ===
     const getEffectiveCharDims = useCallback((zoom: number): { width: number; height: number; fontSize: number } => {
@@ -918,7 +926,7 @@ export function useWorldEngine({
         setFullscreenMode,
         exitFullscreenMode,
         switchBackgroundMode,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems });
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined });
 
     // Generate search data when search pattern changes
     useEffect(() => {
@@ -4548,6 +4556,10 @@ export function useWorldEngine({
                         }
                     }
                     setWorldData(newWorldData);
+
+                    // Move cursor to next line after AI response
+                    const nextCursorY = responseStartPos.y + wrappedLines.length + 1;
+                    setCursorPos({ x: chatStartPos.x, y: nextCursorY });
                 }).catch((error) => {
                     logger.error('Error in context-aware chat:', error);
                     setDialogueWithRevert("Could not process message", setDialogueText);
@@ -6940,6 +6952,8 @@ export function useWorldEngine({
         navOriginPosition,
         dialogueText,
         setDialogueText,
+        setTapeRecordingCallback,
+        tapeRecordingCallback: tapeRecordingCallbackRef.current,
         chatMode,
         setChatMode,
         clearChatData: () => setChatData({}),
