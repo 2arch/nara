@@ -2462,7 +2462,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         // === Render Waypoint Arrows for Ephemeral Labels (lightModeData) ===
         // Skip if we have staged artifacts active (staged artifacts use lightModeData but shouldn't trigger arrows)
-        if (engine.stagedImageData.length === 0) {
+        // Also skip if lightModeData is substantial (likely from staged template, not ephemeral labels)
+        const lightModeDataSize = Object.keys(engine.lightModeData).length;
+        if (engine.stagedImageData.length === 0 && lightModeDataSize < 100) {
             // Check lightModeData for label patterns (ephemeral labels from host mode)
             const ephemeralLabels: Map<string, { x: number, y: number, text: string, color: string }> = new Map();
 

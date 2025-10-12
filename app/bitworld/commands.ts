@@ -2186,9 +2186,18 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         }
 
         if (commandToExecute.startsWith('stage')) {
-            // Parse: /stage <url>
+            // Parse: /stage [--up] [<url>]
             const parts = commandToExecute.split(/\s+/);
-            const url = parts[1];
+            const hasUpFlag = parts.includes('--up');
+
+            let args: string[] = [];
+            if (hasUpFlag) {
+                // --up flag: open file picker for template
+                args = ['--up'];
+            } else if (parts[1]) {
+                // Regular usage: /stage <url>
+                args = [parts[1]];
+            }
 
             // Clear command mode
             setCommandState({
@@ -2205,7 +2214,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             // Return command execution for world engine to handle image staging
             return {
                 command: 'stage',
-                args: url ? [url] : [],
+                args,
                 commandStartPos: commandState.commandStartPos
             };
         }

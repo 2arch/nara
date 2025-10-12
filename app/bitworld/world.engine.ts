@@ -2780,6 +2780,50 @@ export function useWorldEngine({
                     updateSettings(newSettings);
                     setDialogueWithRevert(`Spawn point set at (${spawnPoint.x}, ${spawnPoint.y})`, setDialogueText);
                 } else if (exec.command === 'stage') {
+                    // Check if using template file (--up flag)
+                    const hasUpFlag = exec.args.length > 0 && exec.args[0] === '--up';
+
+                    if (hasUpFlag) {
+                        // Open file picker for .nara or .stage template
+                        const input = document.createElement('input');
+                        input.type = 'file';
+                        input.accept = '.nara,.stage,.json';
+
+                        input.onchange = (e) => {
+                            const file = (e.target as HTMLInputElement).files?.[0];
+                            if (!file) return;
+
+                            setDialogueWithRevert(`Loading ${file.name}...`, setDialogueText);
+
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                                const templateContent = event.target?.result as string;
+
+                                import('./stage.parser').then(({ parseAndRenderTemplate }) => {
+                                    parseAndRenderTemplate(templateContent, cursorPos)
+                                        .then(({ textData, imageData }) => {
+                                            setLightModeData(textData);
+                                            setStagedImageData(imageData);
+                                            setDialogueWithRevert(`Template staged: ${file.name}`, setDialogueText);
+                                        })
+                                        .catch((error) => {
+                                            setDialogueWithRevert(`Failed to parse template: ${error.message}`, setDialogueText);
+                                        });
+                                });
+                            };
+
+                            reader.onerror = () => {
+                                setDialogueWithRevert('Failed to read template file', setDialogueText);
+                            };
+
+                            reader.readAsText(file);
+                        };
+
+                        input.click();
+                        return true; // Command handled
+                    }
+
+                    // Original hardcoded template behavior
                     // Stage a structured artifact with image + text regions
                     // Default image if no URL provided
                     const defaultImageUrl = 'https://d2w9rnfcy7mm78.cloudfront.net/40233614/original_0d11441860fbe41b13c3a9bf97c18e42.webp?1760119834?bc=0';
