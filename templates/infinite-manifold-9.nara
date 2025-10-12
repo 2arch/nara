@@ -1,0 +1,106 @@
+{
+  "version": "1.0.0",
+  "type": "stage",
+  "name": "infinite-manifold",
+  "description": "Procedurally generated postcard template",
+  "parameters": {
+    "imageUrl": {
+      "type": "string",
+      "default": "https://picsum.photos/500/400",
+      "description": "URL of the image to display"
+    },
+    "cursorPos": {
+      "type": "point",
+      "description": "Position where the stage will be rendered"
+    }
+  },
+  "layout": {
+    "imageWidth": 35,
+    "spacing": {
+      "titleAboveImage": 2,
+      "captionBelowImage": 2,
+      "sidebarFromImage": 3,
+      "footerBelowCaption": 2
+    }
+  },
+  "regions": [
+    {
+      "id": "title",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY - 2"
+      },
+      "content": {
+        "static": "STRUCTURE",
+        "transform": null
+      },
+      "layout": {
+        "alignment": "center",
+        "width": 35
+      }
+    },
+    {
+      "id": "main-image",
+      "type": "image",
+      "position": {
+        "x": "startX",
+        "y": "startY"
+      },
+      "source": "imageUrl"
+    },
+    {
+      "id": "caption",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY + imageHeight + 2"
+      },
+      "content": {
+        "generator": "bogus",
+        "wordCount": 8
+      },
+      "layout": {
+        "wrap": true,
+        "width": 35
+      }
+    },
+    {
+      "id": "label-1497",
+      "type": "text",
+      "position": {
+        "x": "startX + 1",
+        "y": "startY + -2"
+      },
+      "content": {
+        "static": "MATRIX"
+      }
+    }
+  ],
+  "textGenerator": {
+    "name": "bogus",
+    "dictionary": [
+      "prismatic",
+      "algorithm",
+      "flux",
+      "throughput",
+      "latency",
+      "evolve",
+      "system",
+      "synthesize",
+      "organic",
+      "vector",
+      "reflect",
+      "ambient",
+      "substrate",
+      "entropy",
+      "digital"
+    ]
+  },
+  "storage": {
+    "text": "lightModeData",
+    "images": "stagedImageData",
+    "ephemeral": true,
+    "clearKey": "Escape"
+  }
+}

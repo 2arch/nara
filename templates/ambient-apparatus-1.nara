@@ -1,0 +1,171 @@
+{
+  "version": "1.0.0",
+  "type": "stage",
+  "name": "ambient-apparatus",
+  "description": "Procedurally generated postcard template",
+  "parameters": {
+    "imageUrl": {
+      "type": "string",
+      "default": "https://picsum.photos/400/300",
+      "description": "URL of the image to display"
+    },
+    "cursorPos": {
+      "type": "point",
+      "description": "Position where the stage will be rendered"
+    }
+  },
+  "layout": {
+    "imageWidth": 35,
+    "spacing": {
+      "titleAboveImage": 2,
+      "captionBelowImage": 2,
+      "sidebarFromImage": 3,
+      "footerBelowCaption": 2
+    }
+  },
+  "regions": [
+    {
+      "id": "title",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY - 2"
+      },
+      "content": {
+        "static": "RADIANT",
+        "transform": null
+      },
+      "layout": {
+        "alignment": "center",
+        "width": 35
+      }
+    },
+    {
+      "id": "main-image",
+      "type": "image",
+      "position": {
+        "x": "startX",
+        "y": "startY"
+      },
+      "source": "imageUrl"
+    },
+    {
+      "id": "caption",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY + imageHeight + 2"
+      },
+      "content": {
+        "generator": "bogus",
+        "wordCount": 19
+      },
+      "layout": {
+        "wrap": true,
+        "width": 35
+      }
+    },
+    {
+      "id": "sidebar",
+      "type": "composite",
+      "position": {
+        "x": "startX + imageWidth + 3",
+        "y": "startY"
+      },
+      "components": [
+        {
+          "id": "sidebar-header",
+          "type": "text",
+          "position": {
+            "x": "sidebarX",
+            "y": "sidebarStartY"
+          },
+          "content": {
+            "static": "CONTEXT"
+          }
+        },
+        {
+          "id": "sidebar-divider",
+          "type": "text",
+          "position": {
+            "x": "sidebarX",
+            "y": "sidebarStartY + 1"
+          },
+          "content": {
+            "repeat": "\u2500",
+            "count": 35
+          }
+        },
+        {
+          "id": "sidebar-body",
+          "type": "text",
+          "position": {
+            "x": "sidebarX",
+            "y": "sidebarStartY + 2"
+          },
+          "content": {
+            "generator": "bogus",
+            "wordCount": 19
+          },
+          "layout": {
+            "wrap": true,
+            "width": 35
+          }
+        }
+      ]
+    },
+    {
+      "id": "label-6009",
+      "type": "text",
+      "position": {
+        "x": "startX + 13",
+        "y": "startY + 1"
+      },
+      "content": {
+        "static": "SUBSTRATE"
+      }
+    },
+    {
+      "id": "label-5020",
+      "type": "text",
+      "position": {
+        "x": "startX + 18",
+        "y": "startY + 21"
+      },
+      "content": {
+        "static": "DIGITAL"
+      }
+    }
+  ],
+  "textGenerator": {
+    "name": "bogus",
+    "dictionary": [
+      "infinite",
+      "latency",
+      "vector",
+      "kernel",
+      "temporal",
+      "cosmic",
+      "apparatus",
+      "coherence",
+      "synthesize",
+      "spatial",
+      "digital",
+      "transmit",
+      "topology",
+      "oscillate",
+      "system",
+      "algorithm",
+      "network",
+      "decode",
+      "field",
+      "mechanism"
+    ]
+  },
+  "storage": {
+    "text": "lightModeData",
+    "images": "stagedImageData",
+    "ephemeral": false,
+    "clearKey": "Escape"
+  }
+}

@@ -2020,6 +2020,39 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render IME Composition Preview (with underline) ===
+        if (engine.isComposing && engine.compositionText && engine.compositionStartPos) {
+            const startPos = engine.compositionStartPos;
+
+            for (let i = 0; i < engine.compositionText.length; i++) {
+                const char = engine.compositionText[i];
+                const worldX = startPos.x + i;
+                const worldY = startPos.y;
+
+                if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+
+                    if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                        screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+
+                        if (char && char.trim() !== '') {
+                            // Render character with text color
+                            ctx.fillStyle = engine.textColor;
+                            ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+
+                            // Draw underline to indicate composition state
+                            ctx.strokeStyle = engine.textColor;
+                            ctx.lineWidth = 2;
+                            ctx.beginPath();
+                            ctx.moveTo(screenPos.x, screenPos.y + effectiveCharHeight - 2);
+                            ctx.lineTo(screenPos.x + effectiveCharWidth, screenPos.y + effectiveCharHeight - 2);
+                            ctx.stroke();
+                        }
+                    }
+                }
+            }
+        }
+
         // === Render Search Data (Purple Background, White Text) ===
         for (const key in engine.searchData) {
             const [xStr, yStr] = key.split(',');
@@ -3352,18 +3385,16 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         // Pass to engine's regular click handler
         engine.handleCanvasClick(clickX, clickY, false, e.shiftKey, e.metaKey, e.ctrlKey);
 
-        canvasRef.current?.focus(); // Ensure focus for keyboard
-
-        // On mobile, focus the hidden input to trigger iOS keyboard
+        // Focus hidden input to capture IME composition events (all platforms) and trigger keyboard (mobile)
         // - When host dialogue is active: only if expecting input
         // - When host dialogue is NOT active: always focus for regular typing
-        if ('ontouchstart' in window && hiddenInputRef.current) {
+        if (hiddenInputRef.current) {
             if (hostDialogue.isHostActive) {
                 if (hostDialogue.isExpectingInput()) {
                     hiddenInputRef.current.focus();
                 }
             } else {
-                // Not in host mode - focus for regular typing
+                // Not in host mode - focus for regular typing and IME
                 hiddenInputRef.current.focus();
             }
         }
@@ -3892,6 +3923,18 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         touchHasMovedRef.current = false;
     }, [engine, handleCanvasClick]);
 
+    // === IME Composition Handlers ===
+    const handleCompositionStart = useCallback((e: React.CompositionEvent<HTMLCanvasElement>) => {
+        engine.handleCompositionStart();
+    }, [engine]);
+
+    const handleCompositionUpdate = useCallback((e: React.CompositionEvent<HTMLCanvasElement>) => {
+        engine.handleCompositionUpdate(e.data || '');
+    }, [engine]);
+
+    const handleCompositionEnd = useCallback((e: React.CompositionEvent<HTMLCanvasElement>) => {
+        engine.handleCompositionEnd(e.data || '');
+    }, [engine]);
 
     const handleCanvasKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
         // Host mode: check if we're on a non-input message that needs manual advancement
@@ -4005,6 +4048,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 onMouseUp={handleCanvasMouseUp}
                 onMouseLeave={handleCanvasMouseLeave}
                 onKeyDown={handleCanvasKeyDown}
+                onCompositionStart={handleCompositionStart}
+                onCompositionUpdate={handleCompositionUpdate}
+                onCompositionEnd={handleCompositionEnd}
                 onTouchStart={handleTouchStart}
                 onTouchMove={handleTouchMove}
                 onTouchEnd={handleTouchEnd}
@@ -4019,17 +4065,23 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     zIndex: 1
                 }}
             />
-            {/* Hidden input for mobile keyboard - only in write mode OR host mode */}
-            {'ontouchstart' in window && (!engine.isReadOnly || hostDialogue.isHostActive) && (
+            {/* Hidden input for IME composition and mobile keyboard - only in write mode OR host mode */}
+            {(!engine.isReadOnly || hostDialogue.isHostActive) && (
                 <input
                     ref={hiddenInputRef}
                     type="text"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck="false"
                     style={{
                         position: 'absolute',
                         opacity: 0,
                         pointerEvents: 'none',
                         left: -9999,
-                        top: -9999
+                        top: -9999,
+                        width: 1,
+                        height: 1
                     }}
                     onKeyDown={(e) => {
                         // Forward key events to canvas handler
@@ -4044,6 +4096,19 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             altKey: e.altKey
                         } as any;
                         handleCanvasKeyDown(syntheticEvent);
+                    }}
+                    onCompositionStart={(e) => {
+                        handleCompositionStart(e as any);
+                    }}
+                    onCompositionUpdate={(e) => {
+                        handleCompositionUpdate(e as any);
+                    }}
+                    onCompositionEnd={(e) => {
+                        handleCompositionEnd(e as any);
+                        // Clear the input after composition
+                        if (hiddenInputRef.current) {
+                            hiddenInputRef.current.value = '';
+                        }
                     }}
                 />
             )}

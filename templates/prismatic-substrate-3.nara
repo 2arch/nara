@@ -1,0 +1,148 @@
+{
+  "version": "1.0.0",
+  "type": "stage",
+  "name": "prismatic-substrate",
+  "description": "Procedurally generated banner template",
+  "parameters": {
+    "imageUrl": {
+      "type": "string",
+      "default": "https://picsum.photos/400/300",
+      "description": "URL of the image to display"
+    },
+    "cursorPos": {
+      "type": "point",
+      "description": "Position where the stage will be rendered"
+    }
+  },
+  "layout": {
+    "imageWidth": 80,
+    "spacing": {
+      "titleAboveImage": 1,
+      "captionBelowImage": 1,
+      "sidebarFromImage": 3,
+      "footerBelowCaption": 2
+    }
+  },
+  "regions": [
+    {
+      "id": "title",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY - 1"
+      },
+      "content": {
+        "static": "SPATIAL COSMIC CIRCUIT",
+        "transform": "uppercase"
+      },
+      "layout": {
+        "alignment": "center",
+        "width": 80
+      }
+    },
+    {
+      "id": "main-image",
+      "type": "image",
+      "position": {
+        "x": "startX",
+        "y": "startY"
+      },
+      "source": "imageUrl"
+    },
+    {
+      "id": "caption",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY + imageHeight + 1"
+      },
+      "content": {
+        "generator": "bogus",
+        "wordCount": 12
+      },
+      "layout": {
+        "wrap": true,
+        "width": 80
+      }
+    },
+    {
+      "id": "sidebar",
+      "type": "composite",
+      "position": {
+        "x": "startX + imageWidth + 3",
+        "y": "startY"
+      },
+      "components": [
+        {
+          "id": "sidebar-header",
+          "type": "text",
+          "position": {
+            "x": "sidebarX",
+            "y": "sidebarStartY"
+          },
+          "content": {
+            "static": "INFO"
+          }
+        },
+        {
+          "id": "sidebar-divider",
+          "type": "text",
+          "position": {
+            "x": "sidebarX",
+            "y": "sidebarStartY + 1"
+          },
+          "content": {
+            "repeat": "\u2500",
+            "count": 31
+          }
+        },
+        {
+          "id": "sidebar-body",
+          "type": "text",
+          "position": {
+            "x": "sidebarX",
+            "y": "sidebarStartY + 2"
+          },
+          "content": {
+            "generator": "bogus",
+            "wordCount": 26
+          },
+          "layout": {
+            "wrap": true,
+            "width": 31
+          }
+        }
+      ]
+    }
+  ],
+  "textGenerator": {
+    "name": "bogus",
+    "dictionary": [
+      "interface",
+      "cascade",
+      "arcane",
+      "grid",
+      "spatial",
+      "emerge",
+      "substrate",
+      "synthetic",
+      "flux",
+      "protocol",
+      "throughput",
+      "decode",
+      "resonance",
+      "fractal",
+      "eigen",
+      "radiant",
+      "organic",
+      "converge",
+      "transform"
+    ]
+  },
+  "storage": {
+    "text": "worldData",
+    "images": "stagedImageData",
+    "ephemeral": false,
+    "clearKey": "Escape"
+  }
+}

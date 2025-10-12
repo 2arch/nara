@@ -1,0 +1,199 @@
+{
+  "version": "1.0.0",
+  "type": "stage",
+  "name": "fractal-topology",
+  "description": "Procedurally generated card template",
+  "parameters": {
+    "imageUrl": {
+      "type": "string",
+      "default": "https://picsum.photos/600/400",
+      "description": "URL of the image to display"
+    },
+    "cursorPos": {
+      "type": "point",
+      "description": "Position where the stage will be rendered"
+    }
+  },
+  "layout": {
+    "imageWidth": 30,
+    "spacing": {
+      "titleAboveImage": 1,
+      "captionBelowImage": 1,
+      "sidebarFromImage": 2,
+      "footerBelowCaption": 2
+    }
+  },
+  "regions": [
+    {
+      "id": "title",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY - 1"
+      },
+      "content": {
+        "static": "MANIFOLD",
+        "transform": null
+      },
+      "layout": {
+        "alignment": "center",
+        "width": 30
+      }
+    },
+    {
+      "id": "main-image",
+      "type": "image",
+      "position": {
+        "x": "startX",
+        "y": "startY"
+      },
+      "source": "imageUrl"
+    },
+    {
+      "id": "caption",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY + imageHeight + 1"
+      },
+      "content": {
+        "generator": "bogus",
+        "wordCount": 11
+      },
+      "layout": {
+        "wrap": true,
+        "width": 30
+      }
+    },
+    {
+      "id": "sidebar",
+      "type": "composite",
+      "position": {
+        "x": "startX + imageWidth + 2",
+        "y": "startY"
+      },
+      "components": [
+        {
+          "id": "sidebar-header",
+          "type": "text",
+          "position": {
+            "x": "sidebarX",
+            "y": "sidebarStartY"
+          },
+          "content": {
+            "static": "NOTES"
+          }
+        },
+        {
+          "id": "sidebar-divider",
+          "type": "text",
+          "position": {
+            "x": "sidebarX",
+            "y": "sidebarStartY + 1"
+          },
+          "content": {
+            "repeat": "\u2500",
+            "count": 25
+          }
+        },
+        {
+          "id": "sidebar-body",
+          "type": "text",
+          "position": {
+            "x": "sidebarX",
+            "y": "sidebarStartY + 2"
+          },
+          "content": {
+            "generator": "bogus",
+            "wordCount": 18
+          },
+          "layout": {
+            "wrap": true,
+            "width": 25
+          }
+        }
+      ]
+    },
+    {
+      "id": "footer",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY + imageHeight + 5"
+      },
+      "content": {
+        "generator": "bogus",
+        "wordCount": 2,
+        "prefix": "\u2014 ",
+        "suffix": " \u2014"
+      },
+      "layout": {
+        "alignment": "center",
+        "width": 30
+      }
+    },
+    {
+      "id": "label-7942",
+      "type": "text",
+      "position": {
+        "x": "startX + 12",
+        "y": "startY + 21"
+      },
+      "content": {
+        "static": "INTERFACE"
+      }
+    },
+    {
+      "id": "label-9931",
+      "type": "text",
+      "position": {
+        "x": "startX + 13",
+        "y": "startY + -1"
+      },
+      "content": {
+        "static": "NETWORK"
+      }
+    },
+    {
+      "id": "label-5694",
+      "type": "text",
+      "position": {
+        "x": "startX + 12",
+        "y": "startY + 0"
+      },
+      "content": {
+        "static": "SUBLIME"
+      }
+    }
+  ],
+  "textGenerator": {
+    "name": "bogus",
+    "dictionary": [
+      "iterate",
+      "spatial",
+      "structure",
+      "temporal",
+      "oscillate",
+      "aggregate",
+      "radiant",
+      "modulate",
+      "scalar",
+      "network",
+      "grid",
+      "vector",
+      "topology",
+      "crystalline",
+      "prismatic",
+      "infinite",
+      "evolve",
+      "flux",
+      "transform"
+    ]
+  },
+  "storage": {
+    "text": "worldData",
+    "images": "stagedImageData",
+    "ephemeral": true,
+    "clearKey": "Escape"
+  }
+}

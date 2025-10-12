@@ -284,6 +284,13 @@ export interface WorldEngine {
     artefactsEnabled: boolean;
     artifactType: import('./commands').ArtifactType;
     isReadOnly: boolean; // Read-only mode for observers
+    // IME composition support
+    isComposing: boolean;
+    compositionText: string;
+    compositionStartPos: Point | null;
+    handleCompositionStart: () => void;
+    handleCompositionUpdate: (text: string) => void;
+    handleCompositionEnd: (text: string) => void;
 }
 
 // --- Hook Input ---
@@ -357,6 +364,7 @@ export function useWorldEngine({
     // === State ===
     const [worldData, setWorldData] = useState<WorldData>(initialWorldData);
     const [cursorPos, setCursorPos] = useState<Point>(initialCursorPos);
+    const cursorPosRef = useRef<Point>(initialCursorPos); // Ref for synchronous cursor position access
     const [viewOffset, setViewOffset] = useState<Point>(initialViewOffset);
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
     const [focusedBoundKey, setFocusedBoundKey] = useState<string | null>(null); // Track which bound is focused
@@ -375,7 +383,12 @@ export function useWorldEngine({
     
     // Auto-clear temporary dialogue messages
     useAutoDialogue(dialogueText, setDialogueText);
-    
+
+    // Keep cursorPosRef synchronized with cursorPos state
+    useEffect(() => {
+        cursorPosRef.current = cursorPos;
+    }, [cursorPos]);
+
     // Effect to detect when cursor is on a bounded region
     useEffect(() => {
         let foundBoundKey: string | null = null;
@@ -483,6 +496,13 @@ export function useWorldEngine({
     const [hostData, setHostData] = useState<{ text: string; color?: string; centerPos: Point; timestamp?: number } | null>(null);
     const [stagedImageData, setStagedImageData] = useState<ImageData[]>([]); // Ephemeral staged images (supports multiple)
     const [clipboardItems, setClipboardItems] = useState<ClipboardItem[]>([]); // Clipboard items from Cmd+click on bounds
+
+    // === IME Composition State ===
+    const [isComposing, setIsComposing] = useState<boolean>(false);
+    const [compositionText, setCompositionText] = useState<string>('');
+    const [compositionStartPos, setCompositionStartPos] = useState<Point | null>(null);
+    const compositionStartPosRef = useRef<Point | null>(null); // Ref for synchronous access
+    const justTypedCharRef = useRef<boolean>(false); // Track if we just typed a character before composition starts
 
     // === Agent System ===
     const [agentEnabled, setAgentEnabled] = useState<boolean>(false);
@@ -5133,6 +5153,11 @@ export function useWorldEngine({
         }
         // --- List-specific Backspace handling ---
         else if (key === 'Backspace') {
+            // During IME composition, let the native IME handle backspace
+            if (isComposing) {
+                return true;
+            }
+
             // Check if cursor is in a list first (and no selection active)
             if (!currentSelectionActive) {
                 const listAt = findListAt(cursorPos.x, cursorPos.y);
@@ -5536,7 +5561,7 @@ export function useWorldEngine({
              moved = true; // Set moved to true to trigger selection update/clear logic
         }
         // --- Typing ---
-        else if (!isMod && key.length === 1) { // Basic check for printable chars
+        else if (!isMod && key.length === 1 && !isComposing) { // Basic check for printable chars, skip during IME composition
             // Check if cursor is in a list - handle list editing separately
             const listAt = findListAt(cursorPos.x, cursorPos.y);
             if (listAt) {
@@ -6003,9 +6028,15 @@ export function useWorldEngine({
                     // Store plain character (backward compatibility)
                     nextWorldData[currentKey] = key;
                 }
-                
+
                 worldDataChanged = true; // Mark that synchronous data change occurred
                 setLastEnterX(null); // Reset Enter X tracking when typing
+
+                // Mark that we just typed a character (for IME composition logic)
+                // But not for space, since space ends composition
+                if (key !== ' ') {
+                    justTypedCharRef.current = true;
+                }
             }
         }
         // --- Other ---
@@ -6016,6 +6047,8 @@ export function useWorldEngine({
         // === Update State ===
         if (moved) {
             setCursorPos(nextCursorPos);
+            // Update ref synchronously so IME composition handlers see the latest position
+            cursorPosRef.current = nextCursorPos;
 
             // Camera tracking modes
             updateCameraTracking(nextCursorPos);
@@ -6465,11 +6498,112 @@ export function useWorldEngine({
     const handleSelectionEnd = useCallback((): void => {
         // Simply mark selection process as ended
         setIsSelecting(false);
-        
+
         // We keep the selection intact regardless
         // The selection will be cleared in other functions if needed
         // This allows the selection to persist after mouse up
     }, []);
+
+    // === IME Composition Handlers ===
+    const handleCompositionStart = useCallback((): void => {
+        setIsComposing(true);
+
+        const currentPos = { ...cursorPosRef.current };
+        let startPos: Point;
+
+        // Only back up if we just typed a character (trigger character for composition)
+        if (justTypedCharRef.current) {
+            // Back up one position to where the trigger character was written
+            startPos = { x: currentPos.x - 1, y: currentPos.y };
+
+            // Remove the trigger character at the start position
+            setWorldData(prev => {
+                const newWorldData = { ...prev };
+                const triggerKey = `${startPos.x},${startPos.y}`;
+                delete newWorldData[triggerKey];
+                return newWorldData;
+            });
+
+            // Move cursor back to where composition should start
+            setCursorPos(startPos);
+            cursorPosRef.current = startPos;
+
+            // Reset the flag
+            justTypedCharRef.current = false;
+        } else {
+            // No trigger character, start composition at current position
+            startPos = currentPos;
+            // Clear the flag anyway to be safe
+            justTypedCharRef.current = false;
+        }
+
+        setCompositionStartPos(startPos);
+        compositionStartPosRef.current = startPos;
+        setCompositionText('');
+    }, []);
+
+    const handleCompositionUpdate = useCallback((text: string): void => {
+        setCompositionText(text);
+    }, []);
+
+    const handleCompositionEnd = useCallback((text: string): void => {
+        // Use ref to get the most up-to-date start position synchronously
+        const startPos = compositionStartPosRef.current || cursorPosRef.current;
+
+        // Clear composition state FIRST to remove preview immediately
+        setIsComposing(false);
+        setCompositionText('');
+        setCompositionStartPos(null);
+        compositionStartPosRef.current = null;
+
+        if (!text) {
+            return;
+        }
+        // Calculate final cursor position after placing all characters
+        const finalCursorPos = { x: startPos.x + text.length, y: startPos.y };
+
+        // Place each character from the composed text using functional setState
+        setWorldData(prev => {
+            const newWorldData = { ...prev };
+            let currentPos = { ...startPos };
+
+            for (const char of text) {
+                const key = `${currentPos.x},${currentPos.y}`;
+
+                // Check if current text style is different from global defaults
+                const hasCustomStyle = currentTextStyle.color !== textColor || currentTextStyle.background !== undefined;
+
+                if (hasCustomStyle) {
+                    // Store styled character
+                    const style: { color?: string; background?: string } = {
+                        color: currentTextStyle.color
+                    };
+                    if (currentTextStyle.background !== undefined) {
+                        style.background = currentTextStyle.background;
+                    }
+
+                    newWorldData[key] = {
+                        char: char,
+                        style: style
+                    };
+                } else {
+                    // Store plain character
+                    newWorldData[key] = char;
+                }
+
+                currentPos.x++;
+            }
+
+            return newWorldData;
+        });
+
+        // Update cursor position to after the composed text
+        setCursorPos(finalCursorPos);
+        cursorPosRef.current = finalCursorPos;
+
+        // Clear the flag to ensure it doesn't persist
+        justTypedCharRef.current = false;
+    }, [currentTextStyle, textColor]);
 
     const deleteCharacter = useCallback((x: number, y: number): void => {
         const key = `${x},${y}`;
@@ -6850,5 +6984,12 @@ export function useWorldEngine({
         artefactsEnabled,
         artifactType,
         isReadOnly, // Read-only mode flag
+        // IME composition support
+        isComposing,
+        compositionText,
+        compositionStartPos,
+        handleCompositionStart,
+        handleCompositionUpdate,
+        handleCompositionEnd,
     };
 }

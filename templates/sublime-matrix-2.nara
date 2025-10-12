@@ -1,0 +1,107 @@
+{
+  "version": "1.0.0",
+  "type": "stage",
+  "name": "sublime-matrix",
+  "description": "Procedurally generated banner template",
+  "parameters": {
+    "imageUrl": {
+      "type": "string",
+      "default": "https://source.unsplash.com/random/500x400",
+      "description": "URL of the image to display"
+    },
+    "cursorPos": {
+      "type": "point",
+      "description": "Position where the stage will be rendered"
+    }
+  },
+  "layout": {
+    "imageWidth": 80,
+    "spacing": {
+      "titleAboveImage": 1,
+      "captionBelowImage": 1,
+      "sidebarFromImage": 3,
+      "footerBelowCaption": 2
+    }
+  },
+  "regions": [
+    {
+      "id": "title",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY - 1"
+      },
+      "content": {
+        "static": "INFINITE",
+        "transform": null
+      },
+      "layout": {
+        "alignment": "left",
+        "width": 80
+      }
+    },
+    {
+      "id": "main-image",
+      "type": "image",
+      "position": {
+        "x": "startX",
+        "y": "startY"
+      },
+      "source": "imageUrl"
+    },
+    {
+      "id": "caption",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY + imageHeight + 1"
+      },
+      "content": {
+        "generator": "bogus",
+        "wordCount": 8
+      },
+      "layout": {
+        "wrap": true,
+        "width": 80
+      }
+    },
+    {
+      "id": "label-6026",
+      "type": "text",
+      "position": {
+        "x": "startX + 16",
+        "y": "startY + 22"
+      },
+      "content": {
+        "static": "NETWORK"
+      }
+    }
+  ],
+  "textGenerator": {
+    "name": "bogus",
+    "dictionary": [
+      "architecture",
+      "structure",
+      "matrix",
+      "manifold",
+      "entropy",
+      "evolve",
+      "decode",
+      "latency",
+      "coherence",
+      "framework",
+      "kinetic",
+      "system",
+      "protocol",
+      "gradient",
+      "converge",
+      "fractal"
+    ]
+  },
+  "storage": {
+    "text": "worldData",
+    "images": "stagedImageData",
+    "ephemeral": false,
+    "clearKey": "Escape"
+  }
+}

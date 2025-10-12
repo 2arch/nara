@@ -1,0 +1,181 @@
+{
+  "version": "1.0.0",
+  "type": "stage",
+  "name": "spatial-grid",
+  "description": "Procedurally generated poster template",
+  "parameters": {
+    "imageUrl": {
+      "type": "string",
+      "default": "https://picsum.photos/400/300",
+      "description": "URL of the image to display"
+    },
+    "cursorPos": {
+      "type": "point",
+      "description": "Position where the stage will be rendered"
+    }
+  },
+  "layout": {
+    "imageWidth": 40,
+    "spacing": {
+      "titleAboveImage": 2,
+      "captionBelowImage": 2,
+      "sidebarFromImage": 4,
+      "footerBelowCaption": 3
+    }
+  },
+  "regions": [
+    {
+      "id": "title",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY - 2"
+      },
+      "content": {
+        "static": "MANIFOLD PRISMATIC",
+        "transform": null
+      },
+      "layout": {
+        "alignment": "center",
+        "width": 40
+      }
+    },
+    {
+      "id": "main-image",
+      "type": "image",
+      "position": {
+        "x": "startX",
+        "y": "startY"
+      },
+      "source": "imageUrl"
+    },
+    {
+      "id": "caption",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY + imageHeight + 2"
+      },
+      "content": {
+        "generator": "bogus",
+        "wordCount": 17
+      },
+      "layout": {
+        "wrap": true,
+        "width": 40
+      }
+    },
+    {
+      "id": "sidebar",
+      "type": "composite",
+      "position": {
+        "x": "startX + imageWidth + 4",
+        "y": "startY"
+      },
+      "components": [
+        {
+          "id": "sidebar-header",
+          "type": "text",
+          "position": {
+            "x": "sidebarX",
+            "y": "sidebarStartY"
+          },
+          "content": {
+            "static": "DATA"
+          }
+        },
+        {
+          "id": "sidebar-divider",
+          "type": "text",
+          "position": {
+            "x": "sidebarX",
+            "y": "sidebarStartY + 1"
+          },
+          "content": {
+            "repeat": "\u2500",
+            "count": 30
+          }
+        },
+        {
+          "id": "sidebar-body",
+          "type": "text",
+          "position": {
+            "x": "sidebarX",
+            "y": "sidebarStartY + 2"
+          },
+          "content": {
+            "generator": "bogus",
+            "wordCount": 27
+          },
+          "layout": {
+            "wrap": true,
+            "width": 30
+          }
+        }
+      ]
+    },
+    {
+      "id": "footer",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY + imageHeight + 7"
+      },
+      "content": {
+        "generator": "bogus",
+        "wordCount": 3,
+        "prefix": "\u2014 ",
+        "suffix": " \u2014"
+      },
+      "layout": {
+        "alignment": "center",
+        "width": 40
+      }
+    },
+    {
+      "id": "label-6743",
+      "type": "text",
+      "position": {
+        "x": "startX + 18",
+        "y": "startY + 27"
+      },
+      "content": {
+        "static": "INTERFACE"
+      }
+    }
+  ],
+  "textGenerator": {
+    "name": "bogus",
+    "dictionary": [
+      "cascade",
+      "tensor",
+      "neural",
+      "grid",
+      "protocol",
+      "entropy",
+      "temporal",
+      "laplace",
+      "organic",
+      "infinite",
+      "interface",
+      "fractal",
+      "ethereal",
+      "synthesize",
+      "latency",
+      "network",
+      "sublime",
+      "system",
+      "protocol",
+      "fourier",
+      "oscillate",
+      "apparatus",
+      "converge"
+    ]
+  },
+  "storage": {
+    "text": "lightModeData",
+    "images": "stagedImageData",
+    "ephemeral": true,
+    "clearKey": "Escape"
+  }
+}

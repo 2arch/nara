@@ -1,0 +1,112 @@
+{
+  "version": "1.0.0",
+  "type": "stage",
+  "name": "infinite-mechanism",
+  "description": "Procedurally generated postcard template",
+  "parameters": {
+    "imageUrl": {
+      "type": "string",
+      "default": "https://picsum.photos/400/300",
+      "description": "URL of the image to display"
+    },
+    "cursorPos": {
+      "type": "point",
+      "description": "Position where the stage will be rendered"
+    }
+  },
+  "layout": {
+    "imageWidth": 35,
+    "spacing": {
+      "titleAboveImage": 2,
+      "captionBelowImage": 2,
+      "sidebarFromImage": 3,
+      "footerBelowCaption": 2
+    }
+  },
+  "regions": [
+    {
+      "id": "title",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY - 2"
+      },
+      "content": {
+        "static": "MANIFOLD",
+        "transform": null
+      },
+      "layout": {
+        "alignment": "center",
+        "width": 35
+      }
+    },
+    {
+      "id": "main-image",
+      "type": "image",
+      "position": {
+        "x": "startX",
+        "y": "startY"
+      },
+      "source": "imageUrl"
+    },
+    {
+      "id": "caption",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY + imageHeight + 2"
+      },
+      "content": {
+        "generator": "bogus",
+        "wordCount": 20
+      },
+      "layout": {
+        "wrap": true,
+        "width": 35
+      }
+    },
+    {
+      "id": "label-9007",
+      "type": "text",
+      "position": {
+        "x": "startX + 4",
+        "y": "startY + 12"
+      },
+      "content": {
+        "static": "FRACTAL"
+      }
+    }
+  ],
+  "textGenerator": {
+    "name": "bogus",
+    "dictionary": [
+      "eigen",
+      "laplace",
+      "transform",
+      "organic",
+      "coupling",
+      "neural",
+      "kernel",
+      "decode",
+      "interference",
+      "distribute",
+      "quantum",
+      "digital",
+      "substrate",
+      "modulate",
+      "transmit",
+      "protocol",
+      "structure",
+      "radiant",
+      "resonate",
+      "prismatic",
+      "fourier"
+    ]
+  },
+  "storage": {
+    "text": "worldData",
+    "images": "stagedImageData",
+    "ephemeral": false,
+    "clearKey": "Escape"
+  }
+}

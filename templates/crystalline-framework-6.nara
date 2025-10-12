@@ -1,0 +1,138 @@
+{
+  "version": "1.0.0",
+  "type": "stage",
+  "name": "crystalline-framework",
+  "description": "Procedurally generated banner template",
+  "parameters": {
+    "imageUrl": {
+      "type": "string",
+      "default": "https://source.unsplash.com/random/500x400",
+      "description": "URL of the image to display"
+    },
+    "cursorPos": {
+      "type": "point",
+      "description": "Position where the stage will be rendered"
+    }
+  },
+  "layout": {
+    "imageWidth": 80,
+    "spacing": {
+      "titleAboveImage": 1,
+      "captionBelowImage": 1,
+      "sidebarFromImage": 3,
+      "footerBelowCaption": 2
+    }
+  },
+  "regions": [
+    {
+      "id": "title",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY - 1"
+      },
+      "content": {
+        "static": "MEMBRANE MECHANISM",
+        "transform": "uppercase"
+      },
+      "layout": {
+        "alignment": "left",
+        "width": 80
+      }
+    },
+    {
+      "id": "main-image",
+      "type": "image",
+      "position": {
+        "x": "startX",
+        "y": "startY"
+      },
+      "source": "imageUrl"
+    },
+    {
+      "id": "sidebar",
+      "type": "composite",
+      "position": {
+        "x": "startX + imageWidth + 3",
+        "y": "startY"
+      },
+      "components": [
+        {
+          "id": "sidebar-header",
+          "type": "text",
+          "position": {
+            "x": "sidebarX",
+            "y": "sidebarStartY"
+          },
+          "content": {
+            "static": "DATA"
+          }
+        },
+        {
+          "id": "sidebar-divider",
+          "type": "text",
+          "position": {
+            "x": "sidebarX",
+            "y": "sidebarStartY + 1"
+          },
+          "content": {
+            "repeat": "\u2500",
+            "count": 27
+          }
+        },
+        {
+          "id": "sidebar-body",
+          "type": "text",
+          "position": {
+            "x": "sidebarX",
+            "y": "sidebarStartY + 2"
+          },
+          "content": {
+            "generator": "bogus",
+            "wordCount": 21
+          },
+          "layout": {
+            "wrap": true,
+            "width": 27
+          }
+        }
+      ]
+    }
+  ],
+  "textGenerator": {
+    "name": "bogus",
+    "dictionary": [
+      "infinite",
+      "evolve",
+      "topology",
+      "structure",
+      "sublime",
+      "field",
+      "temporal",
+      "circuit",
+      "propagate",
+      "laplace",
+      "organic",
+      "interface",
+      "fractal",
+      "coupling",
+      "emerge",
+      "cosmic",
+      "oscillate",
+      "network",
+      "manifold",
+      "coherence",
+      "synthesize",
+      "gradient",
+      "vector",
+      "neural",
+      "protocol"
+    ]
+  },
+  "storage": {
+    "text": "lightModeData",
+    "images": "stagedImageData",
+    "ephemeral": true,
+    "clearKey": "Escape"
+  }
+}

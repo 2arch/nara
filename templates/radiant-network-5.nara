@@ -1,0 +1,116 @@
+{
+  "version": "1.0.0",
+  "type": "stage",
+  "name": "radiant-network",
+  "description": "Procedurally generated poster template",
+  "parameters": {
+    "imageUrl": {
+      "type": "string",
+      "default": "https://picsum.photos/500/400",
+      "description": "URL of the image to display"
+    },
+    "cursorPos": {
+      "type": "point",
+      "description": "Position where the stage will be rendered"
+    }
+  },
+  "layout": {
+    "imageWidth": 40,
+    "spacing": {
+      "titleAboveImage": 2,
+      "captionBelowImage": 2,
+      "sidebarFromImage": 4,
+      "footerBelowCaption": 3
+    }
+  },
+  "regions": [
+    {
+      "id": "title",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY - 2"
+      },
+      "content": {
+        "static": "LATTICE FRAMEWORK",
+        "transform": "uppercase"
+      },
+      "layout": {
+        "alignment": "left",
+        "width": 40
+      }
+    },
+    {
+      "id": "main-image",
+      "type": "image",
+      "position": {
+        "x": "startX",
+        "y": "startY"
+      },
+      "source": "imageUrl"
+    },
+    {
+      "id": "caption",
+      "type": "text",
+      "position": {
+        "x": "startX",
+        "y": "startY + imageHeight + 2"
+      },
+      "content": {
+        "generator": "bogus",
+        "wordCount": 13
+      },
+      "layout": {
+        "wrap": true,
+        "width": 40
+      }
+    },
+    {
+      "id": "label-5324",
+      "type": "text",
+      "position": {
+        "x": "startX + 16",
+        "y": "startY + -3"
+      },
+      "content": {
+        "static": "ETHEREAL"
+      }
+    }
+  ],
+  "textGenerator": {
+    "name": "bogus",
+    "dictionary": [
+      "digital",
+      "tensor",
+      "cascade",
+      "mechanism",
+      "topology",
+      "oscillate",
+      "transmit",
+      "sublime",
+      "decode",
+      "coherence",
+      "neural",
+      "aggregate",
+      "quantum",
+      "vector",
+      "modulate",
+      "circuit",
+      "protocol",
+      "system",
+      "organic",
+      "radiant",
+      "cosmic",
+      "grid",
+      "kernel",
+      "fourier",
+      "spatial"
+    ]
+  },
+  "storage": {
+    "text": "lightModeData",
+    "images": "stagedImageData",
+    "ephemeral": false,
+    "clearKey": "Escape"
+  }
+}
