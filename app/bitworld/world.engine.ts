@@ -881,6 +881,7 @@ export function useWorldEngine({
         isSearchActive,
         clearSearch,
         clearLightModeData,
+        setLightModeData,
         cameraMode,
         isIndentEnabled,
         isMoveMode,
@@ -2383,10 +2384,11 @@ export function useWorldEngine({
             return true;
         }
 
-        // === Staged Image Clearing ===
-        if (key === 'Escape' && stagedImageData.length > 0) {
+        // === Staged Artifact Clearing ===
+        if (key === 'Escape' && (stagedImageData.length > 0 || Object.keys(lightModeData).length > 0)) {
             setStagedImageData([]);
-            setDialogueWithRevert("Staged images cleared", setDialogueText);
+            clearLightModeData();
+            setDialogueWithRevert("Staged artifact cleared", setDialogueText);
             return true;
         }
 
@@ -2778,58 +2780,154 @@ export function useWorldEngine({
                     updateSettings(newSettings);
                     setDialogueWithRevert(`Spawn point set at (${spawnPoint.x}, ${spawnPoint.y})`, setDialogueText);
                 } else if (exec.command === 'stage') {
-                    // Stage a 5x5 grid of ephemeral images from URL at cursor position
+                    // Stage a structured artifact with image + text regions
                     // Default image if no URL provided
                     const defaultImageUrl = 'https://d2w9rnfcy7mm78.cloudfront.net/40233614/original_0d11441860fbe41b13c3a9bf97c18e42.webp?1760119834?bc=0';
                     const imageUrl = exec.args.length > 0 ? exec.args[0] : defaultImageUrl;
 
-                    setDialogueWithRevert("Loading 5x5 grid...", setDialogueText);
+                    setDialogueWithRevert("Staging artifact...", setDialogueText);
+
+                    // Bogus text generator
+                    const generateBogusText = (length: number): string => {
+                        const words = ['lorem', 'ipsum', 'dolor', 'sit', 'amet', 'consectetur', 'adipiscing', 'elit', 'sed', 'do', 'eiusmod', 'tempor', 'incididunt', 'ut', 'labore', 'et', 'dolore', 'magna', 'aliqua'];
+                        let result = '';
+                        for (let i = 0; i < length; i++) {
+                            result += words[Math.floor(Math.random() * words.length)] + ' ';
+                        }
+                        return result.trim();
+                    };
 
                     // Load image to get dimensions
                     const img = new Image();
                     img.crossOrigin = 'anonymous';
 
                     img.onload = () => {
-                        // Default size per image: 40 cells wide, maintain aspect ratio
-                        const defaultWidthInCells = 40;
+                        // Image dimensions: 40 cells wide
+                        const imageWidthInCells = 40;
                         const aspectRatio = img.height / img.width;
-                        const defaultHeightInCells = Math.round(defaultWidthInCells * aspectRatio);
+                        const imageHeightInCells = Math.round(imageWidthInCells * aspectRatio);
 
-                        // Gap between images: 2 cells
-                        const gap = 2;
+                        const startX = cursorPos.x;
+                        const startY = cursorPos.y;
 
-                        // Create 5x5 grid of images
-                        const gridSize = 5;
+                        // Create structured artifact
+                        const stagedData: any = {};
                         const stagedImages: ImageData[] = [];
 
-                        for (let row = 0; row < gridSize; row++) {
-                            for (let col = 0; col < gridSize; col++) {
-                                // Calculate position for this grid cell
-                                const startX = cursorPos.x + col * (defaultWidthInCells + gap);
-                                const startY = cursorPos.y + row * (defaultHeightInCells + gap);
-                                const endX = startX + defaultWidthInCells;
-                                const endY = startY + defaultHeightInCells;
+                        // === TITLE (above image) ===
+                        const titleText = generateBogusText(3).toUpperCase();
+                        let titleY = startY - 3;
+                        for (let i = 0; i < titleText.length; i++) {
+                            const key = `${startX + i},${titleY}`;
+                            stagedData[key] = titleText[i];
+                        }
 
-                                // Create image data for this grid cell
-                                const imageData: ImageData = {
-                                    type: 'image',
-                                    src: imageUrl,
-                                    startX,
-                                    startY,
-                                    endX,
-                                    endY,
-                                    originalWidth: img.width,
-                                    originalHeight: img.height
-                                };
+                        // === MAIN IMAGE ===
+                        const imageData: ImageData = {
+                            type: 'image',
+                            src: imageUrl,
+                            startX,
+                            startY,
+                            endX: startX + imageWidthInCells,
+                            endY: startY + imageHeightInCells,
+                            originalWidth: img.width,
+                            originalHeight: img.height
+                        };
+                        stagedImages.push(imageData);
 
-                                stagedImages.push(imageData);
+                        // === CAPTION (below image) ===
+                        const captionText = generateBogusText(8);
+                        let captionY = startY + imageHeightInCells + 2;
+                        const captionWidth = imageWidthInCells;
+
+                        // Word wrap caption
+                        const captionWords = captionText.split(' ');
+                        let currentLine = '';
+                        let lineY = captionY;
+
+                        for (const word of captionWords) {
+                            const testLine = currentLine ? `${currentLine} ${word}` : word;
+                            if (testLine.length <= captionWidth) {
+                                currentLine = testLine;
+                            } else {
+                                // Write current line
+                                for (let i = 0; i < currentLine.length; i++) {
+                                    const key = `${startX + i},${lineY}`;
+                                    stagedData[key] = currentLine[i];
+                                }
+                                lineY++;
+                                currentLine = word;
+                            }
+                        }
+                        // Write final line
+                        if (currentLine) {
+                            for (let i = 0; i < currentLine.length; i++) {
+                                const key = `${startX + i},${lineY}`;
+                                stagedData[key] = currentLine[i];
                             }
                         }
 
-                        // Store all images in ephemeral state (won't persist to Firebase)
+                        // === SIDEBAR TEXT (right of image) ===
+                        const sidebarX = startX + imageWidthInCells + 3;
+                        const sidebarWidth = 30;
+                        const sidebarStartY = startY;
+
+                        // Sidebar header
+                        const sidebarHeader = 'NOTES';
+                        for (let i = 0; i < sidebarHeader.length; i++) {
+                            const key = `${sidebarX + i},${sidebarStartY}`;
+                            stagedData[key] = sidebarHeader[i];
+                        }
+
+                        // Sidebar divider
+                        const dividerY = sidebarStartY + 1;
+                        for (let i = 0; i < sidebarWidth; i++) {
+                            const key = `${sidebarX + i},${dividerY}`;
+                            stagedData[key] = '-';
+                        }
+
+                        // Sidebar body text (multiple lines)
+                        const sidebarText = generateBogusText(40);
+                        const sidebarWords = sidebarText.split(' ');
+                        let sidebarLine = '';
+                        let sidebarLineY = dividerY + 2;
+
+                        for (const word of sidebarWords) {
+                            const testLine = sidebarLine ? `${sidebarLine} ${word}` : word;
+                            if (testLine.length <= sidebarWidth) {
+                                sidebarLine = testLine;
+                            } else {
+                                // Write line
+                                for (let i = 0; i < sidebarLine.length; i++) {
+                                    const key = `${sidebarX + i},${sidebarLineY}`;
+                                    stagedData[key] = sidebarLine[i];
+                                }
+                                sidebarLineY++;
+                                sidebarLine = word;
+                            }
+                        }
+                        // Write final line
+                        if (sidebarLine) {
+                            for (let i = 0; i < sidebarLine.length; i++) {
+                                const key = `${sidebarX + i},${sidebarLineY}`;
+                                stagedData[key] = sidebarLine[i];
+                            }
+                        }
+
+                        // === FOOTER (centered below everything) ===
+                        const footerY = startY + imageHeightInCells + 5;
+                        const footerText = '— ' + generateBogusText(2) + ' —';
+                        const footerStartX = startX + Math.floor((imageWidthInCells - footerText.length) / 2);
+                        for (let i = 0; i < footerText.length; i++) {
+                            const key = `${footerStartX + i},${footerY}`;
+                            stagedData[key] = footerText[i];
+                        }
+
+                        // Store in ephemeral light mode data (text) and staged images
+                        setLightModeData(stagedData);
                         setStagedImageData(stagedImages);
 
-                        setDialogueWithRevert(`5x5 grid staged (ephemeral) - press Escape to clear`, setDialogueText);
+                        setDialogueWithRevert(`Artifact staged (ephemeral) - press Escape to clear`, setDialogueText);
                     };
 
                     img.onerror = () => {

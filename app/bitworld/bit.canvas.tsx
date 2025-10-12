@@ -2074,8 +2074,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
                 
                 const char = typeof charData === 'string' ? charData : charData.char;
+                const charStyle = typeof charData === 'object' && 'style' in charData ? charData.style : undefined;
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                    // Check if this is a category label (special background marker)
+                    const isCategoryLabel = charStyle?.background === 'category-label';
+
                     // Check if mouse is hovering over this command line
                     const isHovered = mouseWorldPos && Math.floor(mouseWorldPos.y) === worldY && worldY > engine.commandState.commandStartPos.y;
 
@@ -2103,7 +2107,27 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     }
 
                     // Draw background for command data
-                    if (worldY === engine.commandState.commandStartPos.y) {
+                    if (isCategoryLabel) {
+                        // Category label - flip colors with alpha matching command suggestions
+                        const bgHex = (engine.backgroundColor || '#FFFFFF').replace('#', '');
+                        const bgR = parseInt(bgHex.substring(0, 2), 16);
+                        const bgG = parseInt(bgHex.substring(2, 4), 16);
+                        const bgB = parseInt(bgHex.substring(4, 6), 16);
+
+                        if (isHovered) {
+                            // Hovered category label - use 90% opacity (same as hovered suggestions)
+                            ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
+                        } else if (engine.commandState.isActive && worldY === engine.commandState.commandStartPos.y + 1 + engine.commandState.selectedIndex) {
+                            // Selected category label - use 80% opacity (same as selected suggestions)
+                            ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.8)`;
+                        } else {
+                            // Other category labels - use 60% opacity (same as other suggestions)
+                            ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.6)`;
+                        }
+                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        // Text uses text color
+                        ctx.fillStyle = engine.textColor;
+                    } else if (worldY === engine.commandState.commandStartPos.y) {
                         // Command line (typed command) - use text color at full opacity
                         ctx.fillStyle = engine.textColor;
                         ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
@@ -2437,7 +2461,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         // === Render Waypoint Arrows for Ephemeral Labels (lightModeData) ===
-        {
+        // Skip if we have staged artifacts active (staged artifacts use lightModeData but shouldn't trigger arrows)
+        if (engine.stagedImageData.length === 0) {
             // Check lightModeData for label patterns (ephemeral labels from host mode)
             const ephemeralLabels: Map<string, { x: number, y: number, text: string, color: string }> = new Map();
 
@@ -2536,7 +2561,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     }
                 }
             });
-        }
+        } // Close stagedImageData check
 
         // === Render Waypoint Arrows for Off-Screen Bounds ===
         if (!engine.isNavVisible) {

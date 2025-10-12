@@ -11,6 +11,7 @@ export interface CommandState {
     matchedCommands: string[];
     selectedIndex: number;
     commandStartPos: Point;
+    originalCursorPos: Point; // Store original cursor position to restore on Escape
     hasNavigated: boolean; // Track if user has used arrow keys to navigate
 }
 
@@ -84,12 +85,41 @@ interface UseCommandSystemProps {
 }
 
 // --- Command System Constants ---
-const AVAILABLE_COMMANDS = ['label', 'mode', 'debug', 'chat', 'bg', 'nav', 'search', 'state', 'random', 'text', 'font', 'signin', 'signout', 'publish', 'unpublish', 'share', 'clear', 'cam', 'indent', 'bound', 'unbound', 'upload', 'spawn', 'monogram', 'stage', 'clip', 'latex', 'smiles'];
+// Commands organized by category for logical ordering
+const AVAILABLE_COMMANDS = [
+    // Navigation & View
+    'nav', 'search', 'cam', 'full',
+    // Content Creation
+    'label', 'bound', 'unbound', 'clip', 'upload', 'sci',
+    // Styling & Display
+    'mode', 'bg', 'text', 'font', 'indent',
+    // State Management
+    'state', 'random', 'clear',
+    // Sharing & Publishing
+    'publish', 'unpublish', 'share', 'spawn', 'stage', 'monogram',
+    // Account
+    'signin', 'signout',
+    // Debug
+    'debug', 'chat'
+];
+
+// Category mapping for visual organization
+const COMMAND_CATEGORIES: { [category: string]: string[] } = {
+    'nav': ['nav', 'search', 'cam', 'full'],
+    'create': ['label', 'bound', 'unbound', 'clip', 'upload', 'sci'],
+    'style': ['mode', 'bg', 'text', 'font', 'indent'],
+    'state': ['state', 'random', 'clear'],
+    'share': ['publish', 'unpublish', 'share', 'spawn', 'stage', 'monogram'],
+    'account': ['signin', 'signout'],
+    'debug': ['debug', 'chat']
+};
+
 const MODE_COMMANDS = ['default', 'air', 'chat'];
 const BG_COMMANDS = ['clear', 'live', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Neureal'];
 const NAV_COMMANDS: string[] = [];
 const CAMERA_COMMANDS = ['default', 'focus'];
+const SCI_COMMANDS = ['smiles', 'latex'];
 
 // Standardized color mapping used throughout the application
 export const COLOR_MAP: { [name: string]: string } = {
@@ -112,6 +142,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         matchedCommands: [],
         selectedIndex: 0,
         commandStartPos: { x: 0, y: 0 },
+        originalCursorPos: { x: 0, y: 0 },
         hasNavigated: false
     });
     
@@ -437,6 +468,18 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     .map(camera => `cam ${camera}`);
             }
             return CAMERA_COMMANDS.map(camera => `cam ${camera}`);
+        }
+
+        if (lowerInput === 'sci') {
+            const parts = input.toLowerCase().split(' ');
+            if (parts.length > 1) {
+                // Show sci subcommands that match the second part
+                const sciInput = parts[1];
+                return SCI_COMMANDS
+                    .filter(sci => sci.startsWith(sciInput))
+                    .map(sci => `sci ${sci}`);
+            }
+            return SCI_COMMANDS.map(sci => `sci ${sci}`);
         }
 
         if (lowerInput === 'upload') {
@@ -939,20 +982,37 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         // Initialize command display
         const newCommandData: WorldData = {};
         const commandText = '/';
-        
+
         // Draw initial '/' at cursor position
         const key = `${cursorPos.x},${cursorPos.y}`;
         newCommandData[key] = '/';
-        
-        // Draw all available commands below
-        AVAILABLE_COMMANDS.forEach((command, index) => {
-            const suggestionY = cursorPos.y + 1 + index;
-            for (let i = 0; i < command.length; i++) {
-                const key = `${cursorPos.x + i},${suggestionY}`;
-                newCommandData[key] = command[i];
-            }
+
+        // Draw all available commands below with category labels
+        let currentY = cursorPos.y + 1;
+        Object.entries(COMMAND_CATEGORIES).forEach(([categoryName, commands]) => {
+            commands.forEach((command, indexInCategory) => {
+                // Draw category label to the left of first command in category with lighter background
+                if (indexInCategory === 0) {
+                    for (let i = 0; i < categoryName.length; i++) {
+                        const labelKey = `${cursorPos.x - categoryName.length + i},${currentY}`;
+                        newCommandData[labelKey] = {
+                            char: categoryName[i],
+                            style: {
+                                background: 'category-label' // Special marker for category labels
+                            }
+                        };
+                    }
+                }
+
+                // Draw command
+                for (let i = 0; i < command.length; i++) {
+                    const cmdKey = `${cursorPos.x + i},${currentY}`;
+                    newCommandData[cmdKey] = command[i];
+                }
+                currentY++;
+            });
         });
-        
+
         setCommandData(newCommandData);
         setCommandState({
             isActive: true,
@@ -960,6 +1020,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             matchedCommands: AVAILABLE_COMMANDS,
             selectedIndex: 0,
             commandStartPos: { x: cursorPos.x, y: cursorPos.y },
+            originalCursorPos: { x: cursorPos.x, y: cursorPos.y }, // Store original position
             hasNavigated: false
         });
     }, []);
@@ -1011,6 +1072,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1113,6 +1175,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1309,6 +1372,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1342,6 +1406,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                             matchedCommands: [],
                             selectedIndex: 0,
                             commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                             hasNavigated: false
                         });
                         setCommandData({});
@@ -1365,6 +1430,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                                 matchedCommands: [],
                                 selectedIndex: 0,
                                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                                 hasNavigated: false
                             });
                             setCommandData({});
@@ -1433,6 +1499,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1473,6 +1540,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1488,6 +1556,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1570,6 +1639,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1585,6 +1655,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1636,6 +1707,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1675,6 +1747,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1695,6 +1768,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1719,6 +1793,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1739,6 +1814,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1761,6 +1837,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1804,6 +1881,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     matchedCommands: [],
                     selectedIndex: 0,
                     commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                     hasNavigated: false
                 });
                 
@@ -1825,6 +1903,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1849,6 +1928,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1864,6 +1944,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1884,6 +1965,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1905,6 +1987,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1927,6 +2010,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1947,6 +2031,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1969,6 +2054,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -1998,6 +2084,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -2013,6 +2100,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -2068,6 +2156,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -2083,6 +2172,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -2107,6 +2197,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -2127,6 +2218,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -2147,6 +2239,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -2167,6 +2260,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -2217,6 +2311,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -2233,6 +2328,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -2259,6 +2355,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -2275,11 +2372,54 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
 
             return { command: 'share', args: [], commandStartPos: commandState.commandStartPos };
+        }
+
+        // Handle sci command - shows subcategories for scientific notation
+        if (commandToExecute.startsWith('sci')) {
+            const parts = commandToExecute.split(' ');
+            const subCommand = parts[1];
+
+            if (subCommand === 'latex') {
+                // User selected latex from sci menu
+                // Clear command mode and propagate /latex
+                setCommandState({
+                    isActive: false,
+                    input: '',
+                    matchedCommands: [],
+                    selectedIndex: 0,
+                    commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                    hasNavigated: false
+                });
+                setCommandData({});
+
+                return { command: 'latex', args: [], commandStartPos: commandState.commandStartPos };
+            } else if (subCommand === 'smiles') {
+                // User selected smiles from sci menu
+                // Clear command mode and propagate /smiles
+                setCommandState({
+                    isActive: false,
+                    input: '',
+                    matchedCommands: [],
+                    selectedIndex: 0,
+                    commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                    hasNavigated: false
+                });
+                setCommandData({});
+
+                return { command: 'smiles', args: [], commandStartPos: commandState.commandStartPos };
+            } else {
+                // Just 'sci' with no subcommand - do nothing, keep showing subcategories
+                // This shouldn't normally execute since we're just navigating categories
+                return null;
+            }
         }
 
         // Handle latex command - activates LaTeX input mode
@@ -2291,6 +2431,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -2307,6 +2448,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
@@ -2321,6 +2463,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             matchedCommands: [],
             selectedIndex: 0,
             commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
             hasNavigated: false
         });
         setCommandData({});
@@ -2448,16 +2591,20 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         } else if (key === 'Enter') {
             return executeCommand();
         } else if (key === 'Escape') {
-            // Exit command mode without executing
+            // Exit command mode without executing and restore cursor to original position
+            const originalPos = commandState.originalCursorPos;
             setCommandState({
                 isActive: false,
                 input: '',
                 matchedCommands: [],
                 selectedIndex: 0,
                 commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
                 hasNavigated: false
             });
             setCommandData({});
+            // Restore cursor to original position
+            setCursorPos(originalPos);
             return true;
         } else if (key === 'ArrowUp') {
             navigateUp();
@@ -2470,20 +2617,24 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             if (commandState.matchedCommands.length >= 1) {
                 const selectedCommand = commandState.matchedCommands[commandState.selectedIndex];
                 if (selectedCommand) {
+                    // Check if this is a command with subcommands (has a space in it)
+                    const hasSubcommand = selectedCommand.includes(' ');
+
                     // Update input to the selected/completed command
                     setCommandState(prev => {
-                        const newMatchedCommands = matchCommands(selectedCommand);
-                        
+                        // Only try to expand further if the command has subcommands
+                        const newMatchedCommands = hasSubcommand ? matchCommands(selectedCommand) : [selectedCommand];
+
                         // Update command display
                         const newCommandData: WorldData = {};
                         const commandText = `/${selectedCommand}`;
-                        
+
                         // Draw command text at original command start position
                         for (let i = 0; i < commandText.length; i++) {
                             const key = `${prev.commandStartPos.x + i},${prev.commandStartPos.y}`;
                             newCommandData[key] = commandText[i];
                         }
-                        
+
                         // Draw autocomplete suggestions below (if any)
                         newMatchedCommands.forEach((command, index) => {
                             const suggestionY = prev.commandStartPos.y + 1 + index;
@@ -2492,9 +2643,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                                 newCommandData[key] = command[i];
                             }
                         });
-                        
+
                         setCommandData(newCommandData);
-                        
+
                         return {
                             ...prev,
                             input: selectedCommand,
@@ -2502,7 +2653,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                             selectedIndex: 0
                         };
                     });
-                    
+
                     // Move cursor to end of completed command
                     setCursorPos({
                         x: commandState.commandStartPos.x + selectedCommand.length + 1, // +1 for the '/'
@@ -2596,6 +2747,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         isSearchActive: modeState.isSearchActive,
         clearSearch: () => setModeState(prev => ({ ...prev, searchPattern: '', isSearchActive: false })),
         clearLightModeData: () => setModeState(prev => ({ ...prev, lightModeData: {} })),
+        setLightModeData: (data: WorldData) => setModeState(prev => ({ ...prev, lightModeData: data })),
         cameraMode: modeState.cameraMode,
         isIndentEnabled: modeState.isIndentEnabled,
         isMoveMode: modeState.isMoveMode,
