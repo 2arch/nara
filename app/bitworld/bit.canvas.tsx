@@ -1905,6 +1905,17 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
+
+            // Skip positions that are currently being used for IME composition preview
+            if (engine.isComposing && engine.compositionStartPos && engine.compositionText) {
+                const compStartX = engine.compositionStartPos.x;
+                const compEndX = compStartX + engine.compositionText.length - 1;
+                const compY = engine.compositionStartPos.y;
+                if (worldY === compY && worldX >= compStartX && worldX <= compEndX) {
+                    continue;
+                }
+            }
+
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.worldData[key];
                 const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';

@@ -499,10 +499,13 @@ export function useWorldEngine({
 
     // === IME Composition State ===
     const [isComposing, setIsComposing] = useState<boolean>(false);
+    const isComposingRef = useRef<boolean>(false); // Ref for synchronous access
     const [compositionText, setCompositionText] = useState<string>('');
     const [compositionStartPos, setCompositionStartPos] = useState<Point | null>(null);
     const compositionStartPosRef = useRef<Point | null>(null); // Ref for synchronous access
     const justTypedCharRef = useRef<boolean>(false); // Track if we just typed a character before composition starts
+    const preCompositionCursorPosRef = useRef<Point | null>(null); // Track cursor position before backing up
+    const justCancelledCompositionRef = useRef<boolean>(false); // Track if we just cancelled composition with backspace
 
     // === Agent System ===
     const [agentEnabled, setAgentEnabled] = useState<boolean>(false);
@@ -5154,7 +5157,13 @@ export function useWorldEngine({
         // --- List-specific Backspace handling ---
         else if (key === 'Backspace') {
             // During IME composition, let the native IME handle backspace
-            if (isComposing) {
+            if (isComposingRef.current) {
+                return true;
+            }
+
+            // Skip this backspace if we just cancelled composition (to prevent deleting previous character)
+            if (justCancelledCompositionRef.current) {
+                justCancelledCompositionRef.current = false;
                 return true;
             }
 
@@ -5561,7 +5570,7 @@ export function useWorldEngine({
              moved = true; // Set moved to true to trigger selection update/clear logic
         }
         // --- Typing ---
-        else if (!isMod && key.length === 1 && !isComposing) { // Basic check for printable chars, skip during IME composition
+        else if (!isMod && key.length === 1 && !isComposingRef.current) { // Basic check for printable chars, skip during IME composition
             // Check if cursor is in a list - handle list editing separately
             const listAt = findListAt(cursorPos.x, cursorPos.y);
             if (listAt) {
@@ -6507,8 +6516,12 @@ export function useWorldEngine({
     // === IME Composition Handlers ===
     const handleCompositionStart = useCallback((): void => {
         setIsComposing(true);
+        isComposingRef.current = true; // Update ref synchronously
 
         const currentPos = { ...cursorPosRef.current };
+        // Save the original cursor position in case composition is cancelled
+        preCompositionCursorPosRef.current = { ...currentPos };
+
         let startPos: Point;
 
         // Only back up if we just typed a character (trigger character for composition)
@@ -6552,11 +6565,17 @@ export function useWorldEngine({
 
         // Clear composition state FIRST to remove preview immediately
         setIsComposing(false);
+        isComposingRef.current = false; // Update ref synchronously
         setCompositionText('');
         setCompositionStartPos(null);
         compositionStartPosRef.current = null;
 
         if (!text) {
+            // Composition was cancelled (e.g., backspace emptied it)
+            // Keep cursor at composition start position (where the trigger was)
+            // Mark that we just cancelled composition so next backspace is skipped
+            justCancelledCompositionRef.current = true;
+            preCompositionCursorPosRef.current = null;
             return;
         }
         // Calculate final cursor position after placing all characters
@@ -6601,8 +6620,10 @@ export function useWorldEngine({
         setCursorPos(finalCursorPos);
         cursorPosRef.current = finalCursorPos;
 
-        // Clear the flag to ensure it doesn't persist
+        // Clear the refs
         justTypedCharRef.current = false;
+        preCompositionCursorPosRef.current = null;
+        justCancelledCompositionRef.current = false;
     }, [currentTextStyle, textColor]);
 
     const deleteCharacter = useCallback((x: number, y: number): void => {
