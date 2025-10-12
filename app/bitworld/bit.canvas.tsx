@@ -1177,6 +1177,27 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         const currentOffset = (isMiddleMouseDownRef.current || isTouchPanningRef.current) ? intermediatePanOffsetRef.current : engine.viewOffset;
         const verticalTextOffset = 2; // Small offset to center text better in grid cells
 
+        // Helper function to detect Korean characters (Hangul syllables: U+AC00 to U+D7AF)
+        const isKoreanChar = (char: string): boolean => {
+            if (!char || char.length === 0) return false;
+            const code = char.charCodeAt(0);
+            return code >= 0xAC00 && code <= 0xD7AF;
+        };
+
+        // Helper function to render text with proper scaling for Korean characters
+        const renderText = (ctx: CanvasRenderingContext2D, char: string, x: number, y: number) => {
+            if (isKoreanChar(char)) {
+                // Scale Korean characters to fit monospace cell (about 0.8x)
+                ctx.save();
+                ctx.translate(x, y);
+                ctx.scale(0.8, 1);
+                ctx.fillText(char, 0, 0);
+                ctx.restore();
+            } else {
+                ctx.fillText(char, x, y);
+            }
+        };
+
         // --- Actual Drawing (Copied from previous `draw` function) ---
         ctx.save();
         ctx.scale(dpr, dpr);
@@ -1340,7 +1361,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 ctx.globalAlpha = opacity;
                             }
                             ctx.fillStyle = color; // Use character's color or default
-                            ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                            renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
                             if (opacity < 1.0) {
                                 ctx.globalAlpha = 1.0; // Reset alpha
                             }
@@ -1439,7 +1460,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                                 // Render the character
                                 ctx.fillStyle = hostColor;
-                                ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                                renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
                             }
                         }
                     }
@@ -1492,7 +1513,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     ? hostColor + '80'
                                     : hostColor.replace('rgb', 'rgba').replace(')', ', 0.5)');
                                 ctx.fillStyle = dimmedColor;
-                                ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                                renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
                             }
                         }
                     }
@@ -1914,7 +1935,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         ctx.shadowBlur = 0;
                         ctx.shadowOffsetX = 0;
                         ctx.shadowOffsetY = 0;
-                        ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                        renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
                         ctx.shadowBlur = 0;
                     }
                 }
@@ -1953,7 +1974,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         // Draw text using background color (inverse of accent)
                         if (char.trim() !== '') {
                             ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
-                            ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                            renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
                         }
                     }
                 }
@@ -1983,7 +2004,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         // Draw white text
                         if (char.trim() !== '') {
                             ctx.fillStyle = '#FFFFFF';
-                            ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                            renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
                         }
                     }
                 }
@@ -2013,40 +2034,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         // Draw white text
                         if (char.trim() !== '') {
                             ctx.fillStyle = '#FFFFFF';
-                            ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
-                        }
-                    }
-                }
-            }
-        }
-
-        // === Render IME Composition Preview (with underline) ===
-        if (engine.isComposing && engine.compositionText && engine.compositionStartPos) {
-            const startPos = engine.compositionStartPos;
-
-            for (let i = 0; i < engine.compositionText.length; i++) {
-                const char = engine.compositionText[i];
-                const worldX = startPos.x + i;
-                const worldY = startPos.y;
-
-                if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-
-                    if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
-                        screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-
-                        if (char && char.trim() !== '') {
-                            // Render character with text color
-                            ctx.fillStyle = engine.textColor;
-                            ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
-
-                            // Draw underline to indicate composition state
-                            ctx.strokeStyle = engine.textColor;
-                            ctx.lineWidth = 2;
-                            ctx.beginPath();
-                            ctx.moveTo(screenPos.x, screenPos.y + effectiveCharHeight - 2);
-                            ctx.lineTo(screenPos.x + effectiveCharWidth, screenPos.y + effectiveCharHeight - 2);
-                            ctx.stroke();
+                            renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
                         }
                     }
                 }
@@ -2072,10 +2060,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         // Draw purple background
                         ctx.fillStyle = '#800080';
                         ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                        
+
                         // Draw white text
                         ctx.fillStyle = '#FFFFFF';
-                        ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                        renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
                     }
                 }
             }
@@ -2225,7 +2213,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                     // Draw text (only if not a space)
                     if (char && char.trim() !== '') {
-                        ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                        renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
                     }
 
                     // Draw color swatch for color-related commands (only on first character of suggestion line)
@@ -3113,10 +3101,44 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     ctx.shadowBlur = 0;
 
                     const charData = engine.worldData[key];
-                    if (charData) {
+                    if (charData && !engine.isComposing) {
+                        // Don't render the character at cursor position when composing - show preview instead
                         const char = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
                         ctx.fillStyle = CURSOR_TEXT_COLOR;
-                        ctx.fillText(char, cursorScreenPos.x, cursorScreenPos.y + verticalTextOffset);
+                        renderText(ctx, char, cursorScreenPos.x, cursorScreenPos.y + verticalTextOffset);
+                    }
+
+                    // === Render IME Composition Preview (on cursor) ===
+                    if (engine.isComposing && engine.compositionText && engine.compositionStartPos) {
+                        const startPos = engine.compositionStartPos;
+
+                        for (let i = 0; i < engine.compositionText.length; i++) {
+                            const char = engine.compositionText[i];
+                            const worldX = startPos.x + i;
+                            const worldY = startPos.y;
+
+                            if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+
+                                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                                    screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+
+                                    if (char && char.trim() !== '') {
+                                        // Render character with cursor text color (so it shows on cursor background)
+                                        ctx.fillStyle = CURSOR_TEXT_COLOR;
+                                        renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
+
+                                        // Draw underline to indicate composition state
+                                        ctx.strokeStyle = CURSOR_TEXT_COLOR;
+                                        ctx.lineWidth = 2;
+                                        ctx.beginPath();
+                                        ctx.moveTo(screenPos.x, screenPos.y + effectiveCharHeight - 2);
+                                        ctx.lineTo(screenPos.x + effectiveCharWidth, screenPos.y + effectiveCharHeight - 2);
+                                        ctx.stroke();
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -3207,7 +3229,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 if (charData) {
                     const char = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
                     ctx.fillStyle = '#FFFFFF'; // White text on pink background
-                    ctx.fillText(char, agentScreenPos.x, agentScreenPos.y + verticalTextOffset);
+                    renderText(ctx, char, agentScreenPos.x, agentScreenPos.y + verticalTextOffset);
                 }
             }
         }
