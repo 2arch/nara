@@ -50,9 +50,10 @@ interface BitCanvasProps {
     isVerifyingEmail?: boolean; // Flag to indicate email verification in progress
     hostTextColor?: string; // Text color for host mode
     hostBackgroundColor?: string; // Host background color to save as initial world setting
+    onPanDistanceChange?: (distance: number) => void; // Callback for pan distance tracking
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, isVerifyingEmail = false, hostTextColor, hostBackgroundColor }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -485,14 +486,19 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                     const newTotal = totalPannedDistance + distance;
                     setTotalPannedDistance(newTotal);
 
+                    // Notify parent component of pan distance change
+                    if (onPanDistanceChange) {
+                        onPanDistanceChange(newTotal);
+                    }
+
                     // Check for milestones
                     const currentMilestone = Math.floor(newTotal / PAN_MILESTONE_INTERVAL);
                     if (currentMilestone > lastDistanceMilestoneRef.current) {
                         lastDistanceMilestoneRef.current = currentMilestone;
                     }
 
-                    // Check for 1000 cell threshold - trigger signup for unauthenticated users
-                    if (newTotal >= 1000 && !hasTriggeredSignupPromptRef.current) {
+                    // Check for 100 cell threshold - trigger signup for unauthenticated users
+                    if (newTotal >= 100 && !hasTriggeredSignupPromptRef.current) {
                         hasTriggeredSignupPromptRef.current = true;
                         console.log('Pan threshold reached:', newTotal, 'cells');
 

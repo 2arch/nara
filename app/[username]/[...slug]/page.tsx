@@ -19,6 +19,7 @@ export default function UserState() {
   const [authLoading, setAuthLoading] = useState(true);
   const [targetUserUid, setTargetUserUid] = useState<string | null>(null);
   const [uidLookupLoading, setUidLookupLoading] = useState(true);
+  const [panDistance, setPanDistance] = useState(0);
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
@@ -114,6 +115,11 @@ export default function UserState() {
     isReadOnly: !isOwner // Pass read-only flag
   });
 
+  // Handle authentication success for pan-triggered signup
+  const handleAuthSuccess = useCallback((newUsername: string) => {
+    router.push(`/@${newUsername}`);
+  }, [router]);
+
   // Simple cursor blink effect
   useEffect(() => {
     const interval = setInterval(() => {
@@ -144,11 +150,14 @@ export default function UserState() {
     );
   }
 
+  const SIGNUP_THRESHOLD = 100;
+  const progress = Math.min((panDistance / SIGNUP_THRESHOLD) * 100, 100);
+
   return (
     <div className="w-screen relative" style={{height: '100dvh'}}>
       {/* Render Grid3DBackground when space mode is active */}
       {engine.backgroundMode === 'space' && (
-        <Grid3DBackground 
+        <Grid3DBackground
           viewOffset={engine.viewOffset}
           zoomLevel={engine.zoomLevel}
           gridMode={engine.gridMode}
@@ -158,7 +167,7 @@ export default function UserState() {
           compiledTextCache={engine.compiledTextCache}
         />
       )}
-      
+
       <BitCanvas
         engine={engine}
         cursorColorAlternate={cursorAlternate}
@@ -166,7 +175,43 @@ export default function UserState() {
         monogramEnabled={true}
         dialogueEnabled={true}
         fontFamily={engine.fontFamily}
+        hostModeEnabled={!isOwner}
+        onAuthSuccess={handleAuthSuccess}
+        onPanDistanceChange={setPanDistance}
       />
+
+      {/* Pan distance indicator (only for visitors) */}
+      {!isOwner && !user && panDistance > 0 && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          padding: '12px 16px',
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          color: '#fff',
+          fontFamily: 'monospace',
+          fontSize: '12px',
+          borderRadius: '4px',
+          zIndex: 9999
+        }}>
+          <div>Pan: {Math.floor(panDistance)} / {SIGNUP_THRESHOLD} cells</div>
+          <div style={{
+            width: '200px',
+            height: '4px',
+            backgroundColor: 'rgba(255, 255, 255, 0.2)',
+            borderRadius: '2px',
+            marginTop: '8px',
+            overflow: 'hidden'
+          }}>
+            <div style={{
+              width: `${progress}%`,
+              height: '100%',
+              backgroundColor: '#F0FF6A',
+              transition: 'width 0.3s ease'
+            }} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
