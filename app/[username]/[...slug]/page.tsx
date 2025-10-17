@@ -20,6 +20,39 @@ export default function UserState() {
   const slug = params.slug as string[];
   const stateName = slug?.[0] || 'default';
 
+  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
+  const [screenshotOpacity, setScreenshotOpacity] = useState(1);
+  const hasLoadedScreenshot = React.useRef<boolean>(false);
+
+  // Load screenshot for loading screen (so Embedly screenshots capture it)
+  useEffect(() => {
+    if (hasLoadedScreenshot.current) return;
+    if (!username || !stateName) return;
+
+    const loadScreenshot = async () => {
+      try {
+        hasLoadedScreenshot.current = true;
+        const uid = await getUidByUsername(username);
+        if (!uid) return;
+
+        const { ref, get } = await import('firebase/database');
+        const { database } = await import('../../firebase');
+
+        const screenshotPath = `worlds/${uid}/${stateName}/screenshot`;
+        const screenshotRef = ref(database, screenshotPath);
+        const snapshot = await get(screenshotRef);
+
+        if (snapshot.exists()) {
+          setScreenshotUrl(snapshot.val());
+        }
+      } catch (error) {
+        console.error('Error loading screenshot:', error);
+      }
+    };
+
+    loadScreenshot();
+  }, [username, stateName]);
+
   // Parse URL coordinate parameters (supports both new and legacy formats)
   const viewParam = searchParams.get('v'); // New format: v=x.y.zoom
   const urlX = searchParams.get('x'); // Legacy format
@@ -106,10 +139,44 @@ export default function UserState() {
     return () => clearInterval(interval);
   }, []);
 
+  // Fade out screenshot once canvas is loaded
+  useEffect(() => {
+    if (!engine.isLoadingWorld && screenshotUrl) {
+      // Small delay to ensure canvas is rendered, then fade out
+      const timer = setTimeout(() => {
+        setScreenshotOpacity(0);
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [engine.isLoadingWorld, screenshotUrl]);
+
   if (authLoading || uidLookupLoading || engine.isLoadingWorld) {
     return (
-      <div className="w-screen flex items-center justify-center" style={{height: '100dvh'}}>
-        <div>Loading...</div>
+      <div
+        className="w-screen"
+        style={{
+          height: '100dvh',
+          position: 'relative',
+          backgroundColor: screenshotUrl ? 'transparent' : '#000'
+        }}
+      >
+        {screenshotUrl && (
+          <img
+            src={screenshotUrl}
+            alt="Preview"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              opacity: screenshotOpacity,
+              transition: 'opacity 0.3s ease-out',
+              pointerEvents: screenshotOpacity === 0 ? 'none' : 'auto'
+            }}
+          />
+        )}
       </div>
     );
   }

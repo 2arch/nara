@@ -109,6 +109,6 @@ export class CanvasRecorder {
   }
 
   getFrameCount(): number {
-    return this.recordedFrames.length;
+    return this.recordedChunks.length;
   }
 }

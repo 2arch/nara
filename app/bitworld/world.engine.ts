@@ -4,8 +4,9 @@ import { useWorldSave } from './world.save'; // Import the new hook
 import { useCommandSystem, CommandState, CommandExecution, BackgroundMode, COLOR_MAP } from './commands'; // Import command system
 import { getSmartIndentation, calculateWordDeletion, extractLineCharacters, detectTextBlocks, findClosestBlock, extractAllTextBlocks, groupTextBlocksIntoClusters, filterClustersForLabeling, generateTextBlockFrames, generateHierarchicalFrames, HierarchicalFrameSystem, HierarchicalFrame, HierarchyLevel, defaultDistanceConfig, DistanceBasedConfig } from './bit.blocks'; // Import block detection utilities
 import { useWorldSettings, WorldSettings } from './settings';
-import { set, ref } from 'firebase/database';
-import { database, auth } from '@/app/firebase';
+import { set, ref, increment, runTransaction } from 'firebase/database';
+import { database, auth, storage } from '@/app/firebase';
+import { ref as storageRef, uploadString, getDownloadURL } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 import { transformText, explainText, summarizeText, createSubtitleCycler, chatWithAI, clearChatHistory, setDialogueWithRevert, updateWorldContext, abortCurrentAI, isAIActive } from './ai';
@@ -146,6 +147,7 @@ export interface WorldEngine {
     setDialogueText: (text: string) => void;
     setTapeRecordingCallback: (callback: () => Promise<void> | void) => void;
     tapeRecordingCallback: (() => Promise<void> | void) | null;
+    setScreenshotCallback: (callback: () => Promise<string | null>) => void;
     chatMode: {
         isActive: boolean;
         currentInput: string;
@@ -640,6 +642,10 @@ export function useWorldEngine({
     // Tape recording callback setter
     const setTapeRecordingCallback = useCallback((callback: () => Promise<void> | void) => {
         tapeRecordingCallbackRef.current = callback;
+    }, []);
+
+    const setScreenshotCallback = useCallback((callback: () => Promise<string | null>) => {
+        captureScreenshotCallbackRef.current = callback;
     }, []);
 
     // === Character Dimensions Calculation ===
@@ -1363,15 +1369,52 @@ export function useWorldEngine({
         }
     }, [worldId, currentStateName, getUserPath, userUid]);
 
-    const publishState = useCallback(async (stateName: string, isPublic: boolean): Promise<boolean> => {
+    const captureScreenshotCallbackRef = useRef<(() => Promise<string | null>) | null>(null);
+
+    const publishState = useCallback(async (stateName: string, isPublic: boolean, captureScreenshot: boolean = true): Promise<boolean> => {
         if (!worldId || !userUid) return false;
-        
+
         try {
+            // Capture screenshot if publishing and callback is available
+            if (isPublic && captureScreenshot) {
+                console.log('📸 Screenshot capture requested for state:', stateName);
+                console.log('📸 Screenshot callback available:', !!captureScreenshotCallbackRef.current);
+
+                if (captureScreenshotCallbackRef.current) {
+                    try {
+                        console.log('📸 Calling screenshot callback...');
+                        const screenshotDataUrl = await captureScreenshotCallbackRef.current();
+                        console.log('📸 Screenshot captured, size:', screenshotDataUrl?.length || 0, 'characters');
+
+                        if (screenshotDataUrl) {
+                            // TEMPORARY: Store base64 directly in database until Storage CORS is configured
+                            // TODO: Switch to Firebase Storage once bucket is ready
+                            console.log('📸 Storing screenshot in database (base64)');
+
+                            const screenshotRef = ref(database, getUserPath(`${stateName}/screenshot`));
+                            await set(screenshotRef, screenshotDataUrl);
+                            console.log('✅ Screenshot stored successfully');
+                            logger.debug('Screenshot captured and stored for state:', stateName);
+                        } else {
+                            console.warn('⚠️ Screenshot callback returned null/empty');
+                        }
+                    } catch (error) {
+                        console.error('❌ Failed to capture screenshot:', error);
+                        logger.warn('Failed to capture screenshot:', error);
+                        // Continue with publishing even if screenshot fails
+                    }
+                } else {
+                    console.warn('⚠️ Screenshot callback not registered yet');
+                }
+            }
+
             // Set the public flag at the root level of the state (not in metadata)
             const publicRef = ref(database, getUserPath(`${stateName}/public`));
             await set(publicRef, isPublic);
+            console.log('✅ State published successfully:', stateName);
             return true;
         } catch (error) {
+            console.error('❌ Error updating state publish status:', error);
             logger.error('Error updating state publish status:', error);
             return false;
         }
@@ -1394,8 +1437,8 @@ export function useWorldEngine({
     // Load compiled text on mount
     useEffect(() => {
         if (!worldId || !userUid) return;
-        
-        const contentPath = currentStateName ? 
+
+        const contentPath = currentStateName ?
             getUserPath(`${currentStateName}/content`) :
             getUserPath(`${worldId}/content`);
         const compiledTextRef = ref(database, contentPath);
@@ -1413,6 +1456,31 @@ export function useWorldEngine({
             logger.error('Failed to load compiled text:', error);
         });
     }, [worldId, currentStateName, getUserPath, userUid]);
+
+    // Track page views for published pages
+    useEffect(() => {
+        // Only track views for published pages (read-only mode) with valid state
+        if (!isReadOnly || !userUid || !currentStateName) return;
+
+        const trackPageView = async () => {
+            try {
+                const viewsPath = getUserPath(`${currentStateName}/analytics/views`);
+                const viewsRef = ref(database, viewsPath);
+
+                // Use transaction to atomically increment the view counter
+                await runTransaction(viewsRef, (currentViews) => {
+                    return (currentViews || 0) + 1;
+                });
+
+                logger.debug('Page view tracked for:', currentStateName);
+            } catch (error) {
+                // Silently fail if analytics tracking fails (non-critical)
+                logger.debug('Failed to track page view:', error);
+            }
+        };
+
+        trackPageView();
+    }, [isReadOnly, userUid, currentStateName, getUserPath]);
 
     // Initialize new state if it doesn't exist
     useEffect(() => {
@@ -2161,16 +2229,90 @@ export function useWorldEngine({
         return false;
     }, [worldData, getNormalizedSelection]); // Removed clipboardRef dependency for now
 
+    // Word wrap helper: wraps text to fit within maxWidth, preserving paragraph breaks
+    const wordWrap = useCallback((text: string, maxWidth: number): string[] => {
+        const lines: string[] = [];
+        const paragraphs = text.split('\n');
+
+        for (const paragraph of paragraphs) {
+            if (paragraph.length === 0) {
+                lines.push('');
+                continue;
+            }
+
+            const words = paragraph.split(' ');
+            let currentLine = '';
+
+            for (const word of words) {
+                if (currentLine.length === 0) {
+                    // First word on the line
+                    if (word.length > maxWidth) {
+                        // Word is too long, break it
+                        let remaining = word;
+                        while (remaining.length > 0) {
+                            lines.push(remaining.substring(0, maxWidth));
+                            remaining = remaining.substring(maxWidth);
+                        }
+                    } else {
+                        currentLine = word;
+                    }
+                } else {
+                    // Check if adding this word (with space) would exceed width
+                    if (currentLine.length + 1 + word.length <= maxWidth) {
+                        currentLine += ' ' + word;
+                    } else {
+                        // Push current line and start new one
+                        lines.push(currentLine);
+                        if (word.length > maxWidth) {
+                            // Word is too long, break it
+                            let remaining = word;
+                            while (remaining.length > maxWidth) {
+                                lines.push(remaining.substring(0, maxWidth));
+                                remaining = remaining.substring(maxWidth);
+                            }
+                            currentLine = remaining;
+                        } else {
+                            currentLine = word;
+                        }
+                    }
+                }
+            }
+
+            // Push remaining line
+            if (currentLine.length > 0) {
+                lines.push(currentLine);
+            }
+        }
+
+        return lines;
+    }, []);
+
     // Define pasteText BEFORE handleKeyDown uses it
     const pasteText = useCallback(async (): Promise<boolean> => {
         try {
             const clipText = await navigator.clipboard.readText();
-            
+
             const selection = getNormalizedSelection();
             const pasteStartX = selection ? selection.startX : cursorPos.x;
             const pasteStartY = selection ? selection.startY : cursorPos.y;
 
-            const linesToPaste = clipText.split('\n');
+            let linesToPaste: string[];
+
+            // If there's a selection with width > 1, word wrap to fit within the box width
+            if (selection) {
+                const boxWidth = selection.endX - selection.startX + 1;
+                const boxHeight = selection.endY - selection.startY + 1;
+
+                // Only word wrap if it's a multi-cell selection (not a single cell)
+                if (boxWidth > 1 || boxHeight > 1) {
+                    linesToPaste = wordWrap(clipText, boxWidth);
+                } else {
+                    linesToPaste = clipText.split('\n');
+                }
+            } else {
+                linesToPaste = clipText.split('\n');
+            }
+
             const finalCursorX = pasteStartX + (linesToPaste[linesToPaste.length - 1]?.length || 0);
             const finalCursorY = pasteStartY + linesToPaste.length - 1;
 
@@ -2220,7 +2362,7 @@ export function useWorldEngine({
             logger.warn('Could not read from system clipboard or paste failed:', err);
             return false;
         }
-    }, [worldData, cursorPos, getNormalizedSelection]); // Removed deleteSelectedCharacters dependency, logic inlined
+    }, [worldData, cursorPos, getNormalizedSelection, wordWrap]);
 
     // Now define cutSelection, which depends on the above
     const cutSelection = useCallback(() => {
@@ -6954,6 +7096,7 @@ export function useWorldEngine({
         setDialogueText,
         setTapeRecordingCallback,
         tapeRecordingCallback: tapeRecordingCallbackRef.current,
+        setScreenshotCallback,
         chatMode,
         setChatMode,
         clearChatData: () => setChatData({}),

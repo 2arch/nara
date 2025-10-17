@@ -64,6 +64,25 @@
           "public": {
             ".read": true,
             ".write": "auth != null && auth.uid == $userId"
+          },
+
+          "screenshot": {
+            ".read": "root.child('worlds').child($userId).child($stateName).child('public').val() == true || (auth != null && auth.uid == $userId)",
+            ".write": "auth != null && auth.uid == $userId"
+          },
+
+          "thumbnails": {
+            "$shareId": {
+              ".read": "root.child('worlds').child($userId).child($stateName).child('public').val() == true",
+              ".write": true
+            }
+          },
+
+          "analytics": {
+            "views": {
+              ".read": "auth != null && auth.uid == $userId",
+              ".write": "root.child('worlds').child($userId).child($stateName).child('public').val() == true"
+            }
           }
         }
       }

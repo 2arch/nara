@@ -2,6 +2,7 @@
 import { initializeApp } from "firebase/app";
 import { getDatabase, connectDatabaseEmulator, ref, onValue, set, get, query, orderByChild, equalTo } from "firebase/database";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, User, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink } from "firebase/auth";
+import { getStorage } from "firebase/storage";
 import { logger } from './bitworld/logger';
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
@@ -19,6 +20,7 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
+const storage = getStorage(app);
 
 // Configure for Electron environment
 const dbConfig = {
@@ -391,4 +393,4 @@ export const incrementUserUsage = async (uid: string): Promise<boolean> => {
   }
 };
 
-export { database, app, auth };
+export { database, app, auth, storage };

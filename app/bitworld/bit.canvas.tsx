@@ -84,6 +84,12 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Canvas recorder for /tape command
     const recorderRef = useRef<CanvasRecorder | null>(null);
 
+    // Screenshot state for Open Graph previews
+    const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
+    const [showScreenshot, setShowScreenshot] = useState<boolean>(false);
+    const [isCanvasReady, setIsCanvasReady] = useState<boolean>(false);
+    const hasLoadedScreenshotRef = useRef<boolean>(false); // Prevent multiple loads
+
     // Initialize canvas recorder
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -107,10 +113,116 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         }
     }, [engine]);
 
+    // Capture canvas screenshot for Open Graph previews
+    const captureScreenshot = useCallback(async (): Promise<string | null> => {
+        console.log('📸 captureScreenshot called');
+        const canvas = canvasRef.current;
+        console.log('📸 Canvas element:', !!canvas);
+
+        if (!canvas) {
+            console.warn('⚠️ Canvas ref is null');
+            return null;
+        }
+
+        try {
+            console.log('📸 Capturing canvas as data URL...');
+
+            // Resize to max 1200px width for og:image (Twitter/OG standard)
+            const maxWidth = 1200;
+            const scale = Math.min(1, maxWidth / canvas.width);
+
+            if (scale < 1) {
+                // Create smaller canvas for compression
+                const smallCanvas = document.createElement('canvas');
+                smallCanvas.width = canvas.width * scale;
+                smallCanvas.height = canvas.height * scale;
+                const ctx = smallCanvas.getContext('2d');
+
+                if (ctx) {
+                    ctx.drawImage(canvas, 0, 0, smallCanvas.width, smallCanvas.height);
+
+                    // Convert to grayscale for smaller file size
+                    const imageData = ctx.getImageData(0, 0, smallCanvas.width, smallCanvas.height);
+                    const data = imageData.data;
+                    for (let i = 0; i < data.length; i += 4) {
+                        const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+                        data[i] = gray;     // red
+                        data[i + 1] = gray; // green
+                        data[i + 2] = gray; // blue
+                    }
+                    ctx.putImageData(imageData, 0, 0);
+
+                    // Use JPEG with 0.8 quality for smaller file size
+                    const dataUrl = smallCanvas.toDataURL('image/jpeg', 0.8);
+                    console.log('📸 Canvas captured (resized + grayscale), data URL length:', dataUrl.length);
+                    return dataUrl;
+                }
+            }
+
+            // Fallback: grayscale on original size
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = canvas.width;
+            tempCanvas.height = canvas.height;
+            const tempCtx = tempCanvas.getContext('2d');
+
+            if (tempCtx) {
+                tempCtx.drawImage(canvas, 0, 0);
+                const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+                const data = imageData.data;
+                for (let i = 0; i < data.length; i += 4) {
+                    const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+                    data[i] = gray;
+                    data[i + 1] = gray;
+                    data[i + 2] = gray;
+                }
+                tempCtx.putImageData(imageData, 0, 0);
+                const dataUrl = tempCanvas.toDataURL('image/jpeg', 0.8);
+                console.log('📸 Canvas captured (grayscale), data URL length:', dataUrl.length);
+                return dataUrl;
+            }
+
+            // Last fallback: color JPEG
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+            console.log('📸 Canvas captured (fallback), data URL length:', dataUrl.length);
+            return dataUrl;
+        } catch (error) {
+            console.error('❌ Failed to capture screenshot:', error);
+            return null;
+        }
+    }, []);
+
     // Register tape recording callback with engine for /tape command
     useEffect(() => {
         engine.setTapeRecordingCallback(toggleRecording);
     }, [engine, toggleRecording]);
+
+    // Register screenshot callback with engine for /publish command
+    const hasRegisteredScreenshotRef = useRef<boolean>(false);
+    useEffect(() => {
+        if (hasRegisteredScreenshotRef.current) return;
+        console.log('📸 Registering screenshot callback with engine');
+        engine.setScreenshotCallback(captureScreenshot);
+        hasRegisteredScreenshotRef.current = true;
+        console.log('✅ Screenshot callback registered');
+    }, [engine, captureScreenshot]);
+
+    // Screenshot loading is now handled by:
+    // 1. page.tsx for loading screen UX
+    // 2. layout.tsx og:image meta tags for crawlers (Embedly, etc.)
+
+    // Mark canvas as ready once worldData has loaded
+    useEffect(() => {
+        // Consider canvas ready once we have worldData or after a short delay
+        const timer = setTimeout(() => {
+            setIsCanvasReady(true);
+            // Fade out screenshot after canvas is ready
+            if (showScreenshot) {
+                setTimeout(() => setShowScreenshot(false), 100);
+            }
+        }, 500); // 500ms delay for canvas to render
+
+        return () => clearTimeout(timer);
+    }, [engine.worldData, showScreenshot]);
 
     // Reset input focus when entering command mode to disable IME
     useEffect(() => {
@@ -4148,6 +4260,32 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     zIndex: 1
                 }}
             />
+            {/* Screenshot overlay for Open Graph crawlers */}
+            {showScreenshot && screenshotUrl && (
+                <div
+                    style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        zIndex: 1000,
+                        pointerEvents: 'none',
+                        transition: 'opacity 300ms ease-out',
+                        opacity: showScreenshot ? 1 : 0,
+                    }}
+                >
+                    <img
+                        src={screenshotUrl}
+                        alt="Canvas preview"
+                        style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                        }}
+                    />
+                </div>
+            )}
             {/* Hidden input for IME composition and mobile keyboard - only in write mode OR host mode */}
             {(!engine.isReadOnly || hostDialogue.isHostActive) && (
                 <input
@@ -4158,7 +4296,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     autoCapitalize="off"
                     spellCheck="false"
                     lang="en"
-                    inputMode={engine.commandState.isActive ? "latin" : "text"}
+                    inputMode={engine.commandState.isActive ? "none" : "text"}
                     style={{
                         position: 'absolute',
                         opacity: 0,

@@ -2491,6 +2491,26 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return { command: 'smiles', args: [], commandStartPos: commandState.commandStartPos };
         }
 
+        // Handle upload command - opens file picker for image upload
+        if (commandToExecute.startsWith('upload')) {
+            const parts = commandToExecute.split(/\s+/);
+            const args = parts.slice(1); // Capture --bitmap flag if present
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            return { command: 'upload', args, commandStartPos: commandState.commandStartPos };
+        }
+
         // Clear command mode for other commands
         setCommandState({
             isActive: false,
