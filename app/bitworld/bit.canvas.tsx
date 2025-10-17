@@ -572,6 +572,21 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         }
     );
 
+    // Sync monogram state from Firebase settings when they load
+    useEffect(() => {
+        if (!hostModeEnabled && engine.settings.monogramMode !== undefined && engine.settings.monogramEnabled !== undefined) {
+            // Only update if different from current state
+            if (monogramSystem.options.mode !== engine.settings.monogramMode ||
+                monogramSystem.options.enabled !== engine.settings.monogramEnabled) {
+                monogramSystem.setOptions(prev => ({
+                    ...prev,
+                    mode: engine.settings.monogramMode || prev.mode,
+                    enabled: engine.settings.monogramEnabled ?? prev.enabled
+                }));
+            }
+        }
+    }, [engine.settings.monogramMode, engine.settings.monogramEnabled, hostModeEnabled, monogramSystem]);
+
     // Monogram command handler
     const handleMonogramCommand = useCallback((args: string[]) => {
         if (args.length === 0) {
