@@ -45,7 +45,7 @@ export const welcomeFlow: HostFlow = {
 
     'explain_nara': {
       id: 'explain_nara',
-      text: 'It may not look like an ordinary word processor. \n \n ',
+      text: 'Nara is a new medium for spatial writing. \n \n ',
       expectsInput: false,
       nextMessageId: 'explain_function',
       previousMessageId: 'welcome_message'
@@ -53,7 +53,7 @@ export const welcomeFlow: HostFlow = {
 
     'explain_function': {
       id: 'explain_function',
-      text: 'It\'s meant to provide a truly spatial, and lightning fast writing experience.',
+      text: 'It\'s meant to provide a unique, and intuitve writing experience.',
       expectsInput: false,
       nextMessageId: 'explain_user',
       previousMessageId: 'explain_nara'

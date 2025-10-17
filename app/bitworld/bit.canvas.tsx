@@ -408,9 +408,15 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
     // No animation - host text renders immediately (removed typing animation)
 
-    // Start host flow when enabled
+    // Track if initial host flow has been started (prevent restart after authentication)
+    const hasStartedInitialFlowRef = useRef(false);
+
+    // Start host flow when enabled (only once)
     useEffect(() => {
-        if (hostModeEnabled && initialHostFlow && !hostDialogue.isHostActive) {
+        if (hostModeEnabled && initialHostFlow && !hostDialogue.isHostActive && !hasStartedInitialFlowRef.current) {
+            // Mark as started to prevent restart after authentication completes
+            hasStartedInitialFlowRef.current = true;
+
             // Set host mode colors
             // The background is already set via initialBackgroundColor in page.tsx
             // Set text color if provided

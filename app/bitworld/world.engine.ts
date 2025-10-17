@@ -2557,7 +2557,8 @@ export function useWorldEngine({
         }
 
         // === Chat Mode Exit ===
-        if (key === 'Escape' && chatMode.isActive) {
+        // Don't allow ESC out of chat mode if in host mode (authentication) or read-only
+        if (key === 'Escape' && chatMode.isActive && !hostMode.isActive && !isReadOnly) {
             setChatMode({
                 isActive: false,
                 currentInput: '',
