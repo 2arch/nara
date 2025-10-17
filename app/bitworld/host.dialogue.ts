@@ -352,7 +352,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
             ...prev,
             currentMessageId: 'collect_username_welcome',
             isProcessing: false,
-            isActive: true // Reactivate flow for username collection
+            isActive: true, // Reactivate flow for username collection
+            collectedData: newCollectedData // Explicitly preserve email and password
           }));
 
           return true;
@@ -600,6 +601,24 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
         const { auth, database } = await import('../firebase');
         const { createUserWithEmailAndPassword, updateProfile } = await import('firebase/auth');
         const { ref, set } = await import('firebase/database');
+
+        // Use newCollectedData which has all accumulated data
+        // Validate email and password before creating account
+        if (!newCollectedData.email || !newCollectedData.password || !newCollectedData.username) {
+          console.error('Missing required fields:', {
+            email: !!newCollectedData.email,
+            password: !!newCollectedData.password,
+            username: !!newCollectedData.username,
+            allData: newCollectedData
+          });
+          throw new Error('Missing required information. Please try again.');
+        }
+
+        console.log('Creating account with:', {
+          email: newCollectedData.email,
+          username: newCollectedData.username,
+          hasPassword: !!newCollectedData.password
+        });
 
         // Create user with email and password
         const userCredential = await createUserWithEmailAndPassword(auth, newCollectedData.email, newCollectedData.password);

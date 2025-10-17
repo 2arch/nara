@@ -21,13 +21,23 @@ export default function UserState() {
   const stateName = slug?.[0] || 'default';
 
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
-  const [screenshotOpacity, setScreenshotOpacity] = useState(1);
   const hasLoadedScreenshot = React.useRef<boolean>(false);
+  const [isRubyBot, setIsRubyBot] = useState(false);
 
-  // Load screenshot for loading screen (so Embedly screenshots capture it)
+  // Detect Ruby bot (are.na scraper)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const userAgent = navigator.userAgent;
+    const isRuby = userAgent === 'Ruby' || userAgent.startsWith('Ruby/');
+    setIsRubyBot(isRuby);
+    console.log('🔍 User agent:', userAgent, '| Is Ruby bot:', isRuby);
+  }, []);
+
+  // Load screenshot ONLY for Ruby bot (are.na scraper)
   useEffect(() => {
     if (hasLoadedScreenshot.current) return;
     if (!username || !stateName) return;
+    if (!isRubyBot) return; // Only load for Ruby bot
 
     const loadScreenshot = async () => {
       try {
@@ -43,6 +53,7 @@ export default function UserState() {
         const snapshot = await get(screenshotRef);
 
         if (snapshot.exists()) {
+          console.log('✅ Screenshot loaded for Ruby bot');
           setScreenshotUrl(snapshot.val());
         }
       } catch (error) {
@@ -51,7 +62,7 @@ export default function UserState() {
     };
 
     loadScreenshot();
-  }, [username, stateName]);
+  }, [username, stateName, isRubyBot]);
 
   // Parse URL coordinate parameters (supports both new and legacy formats)
   const viewParam = searchParams.get('v'); // New format: v=x.y.zoom
@@ -139,17 +150,6 @@ export default function UserState() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fade out screenshot once canvas is loaded
-  useEffect(() => {
-    if (!engine.isLoadingWorld && screenshotUrl) {
-      // Small delay to ensure canvas is rendered, then fade out
-      const timer = setTimeout(() => {
-        setScreenshotOpacity(0);
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [engine.isLoadingWorld, screenshotUrl]);
-
   if (authLoading || uidLookupLoading || engine.isLoadingWorld) {
     return (
       <div
@@ -157,10 +157,11 @@ export default function UserState() {
         style={{
           height: '100dvh',
           position: 'relative',
-          backgroundColor: screenshotUrl ? 'transparent' : '#000'
+          backgroundColor: (screenshotUrl && isRubyBot) ? 'transparent' : '#000'
         }}
       >
-        {screenshotUrl && (
+        {/* Only show screenshot to Ruby bot (are.na scraper) */}
+        {screenshotUrl && isRubyBot && (
           <img
             src={screenshotUrl}
             alt="Preview"
@@ -171,9 +172,7 @@ export default function UserState() {
               width: '100%',
               height: '100%',
               objectFit: 'cover',
-              opacity: screenshotOpacity,
-              transition: 'opacity 0.3s ease-out',
-              pointerEvents: screenshotOpacity === 0 ? 'none' : 'auto'
+              opacity: 1
             }}
           />
         )}

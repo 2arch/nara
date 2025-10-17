@@ -1,9 +1,13 @@
 {
   "rules": {
+    "visitor-logs": {
+      ".read": "auth != null",
+      ".write": true
+    },
+
     "users": {
       ".indexOn": ["username"],
       ".read": true,
-      ".write": false,
       "$userId": {
         ".read": "auth != null && auth.uid == $userId",
         ".write": "auth != null && auth.uid == $userId",
