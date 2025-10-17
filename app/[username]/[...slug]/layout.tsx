@@ -33,8 +33,8 @@ export async function generateMetadata({ params }: LayoutProps): Promise<Metadat
     }
 
     // Generate metadata with og:image
-    const title = `${username}/${stateName} · Nara: Tools for Boundless Thinking`;
-    const description = `View ${username}'s ${stateName} on Nara. A tool for thinking, writing, and creating where ideas roam free across a boundless environment.`;
+    const title = `Nara · ${username}/${stateName}`;
+    const description = `view ${stateName} on Nara — a tool for thinking, writing, and creating across boundless space.`;
 
     return {
       title,

@@ -585,7 +585,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 }));
             }
         }
-    }, [engine.settings.monogramMode, engine.settings.monogramEnabled, hostModeEnabled, monogramSystem]);
+    }, [engine.settings.monogramMode, engine.settings.monogramEnabled, hostModeEnabled]);
 
     // Monogram command handler
     const handleMonogramCommand = useCallback((args: string[]) => {
