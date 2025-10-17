@@ -45,7 +45,7 @@ export const welcomeFlow: HostFlow = {
 
     'explain_nara': {
       id: 'explain_nara',
-      text: 'Nara is a new medium where you can express your thoughts non-linearly.',
+      text: 'It may not look like an ordinary word processor. \n \n ',
       expectsInput: false,
       nextMessageId: 'explain_function',
       previousMessageId: 'welcome_message'
@@ -53,7 +53,7 @@ export const welcomeFlow: HostFlow = {
 
     'explain_function': {
       id: 'explain_function',
-      text: 'Functionally, it\'s like any word processor. \n \n The only limit is your ability to harness the space to connect the dots.',
+      text: 'It\'s meant to provide a truly spatial, and lightning fast writing experience.',
       expectsInput: false,
       nextMessageId: 'explain_user',
       previousMessageId: 'explain_nara'
@@ -61,7 +61,7 @@ export const welcomeFlow: HostFlow = {
 
     'explain_user': {
       id: 'explain_user',
-      text: 'Feel free to explore around (use two fingers to pan).',
+      text: 'I\'ve added some markers to get you started. Take a look around! \n \n (use two fingers to pan)',
       expectsInput: false,
       nextMessageId: 'validate_user',
       previousMessageId: 'explain_function',
@@ -105,14 +105,14 @@ export const welcomeFlow: HostFlow = {
     },
     'validate_user': {
       id: 'validate_user',
-      text:  'You can also access the commands menu by toggling the "/" key.',
+      text:  'As you spend more time here, you\'ll find that the real limit is your ability to harness the space to connect the dots. \n \n We created a medium that helps you think better.',
       expectsInput: false,
       nextMessageId: 'welcome',
       previousMessageId: 'explain_user'
     },
     'welcome': {
       id: 'welcome',
-      text: 'Type your email and hit enter to get started!',
+      text: 'Type your email and hit enter to begin your journey. \n \n Welcome to Nara. It\'s great to see you.',
       expectsInput: true,
       inputType: 'email',
       inputValidator: (input: string) => {

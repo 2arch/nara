@@ -83,9 +83,13 @@ interface UseCommandSystemProps {
     zoomLevel: number;
     clipboardItems?: Array<{id: string, content: string, startX: number, endX: number, startY: number, endY: number, timestamp: number}>;
     toggleRecording?: () => Promise<void> | void;
+    isReadOnly?: boolean;
 }
 
 // --- Command System Constants ---
+// Commands available in read-only mode (not authenticated or not owner)
+const READ_ONLY_COMMANDS = ['signin', 'share'];
+
 // Commands organized by category for logical ordering
 const AVAILABLE_COMMANDS = [
     // Navigation & View
@@ -136,7 +140,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const [commandState, setCommandState] = useState<CommandState>({
@@ -221,7 +225,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
 
     // Utility function to match commands based on input
     const matchCommands = useCallback((input: string): string[] => {
-        if (!input) return AVAILABLE_COMMANDS;
+        const commandList = isReadOnly ? READ_ONLY_COMMANDS : AVAILABLE_COMMANDS;
+        if (!input) return commandList;
         const lowerInput = input.toLowerCase().split(' ')[0];
         
         // Special handling for mode command with subcommands
@@ -514,8 +519,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             });
         }
 
-        return AVAILABLE_COMMANDS.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
-    }, [getAllLabels, getAllBounds, availableStates, clipboardItems]);
+        return commandList.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
+    }, [getAllLabels, getAllBounds, availableStates, clipboardItems, isReadOnly]);
 
     // Mode switching functionality
     const switchMode = useCallback((newMode: CanvasMode) => {
@@ -1020,13 +1025,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         setCommandState({
             isActive: true,
             input: '',
-            matchedCommands: AVAILABLE_COMMANDS,
+            matchedCommands: isReadOnly ? READ_ONLY_COMMANDS : AVAILABLE_COMMANDS,
             selectedIndex: 0,
             commandStartPos: { x: cursorPos.x, y: cursorPos.y },
             originalCursorPos: { x: cursorPos.x, y: cursorPos.y }, // Store original position
             hasNavigated: false
         });
-    }, []);
+    }, [isReadOnly]);
 
     // Handle character input in command mode
     const addCharacter = useCallback((char: string) => {

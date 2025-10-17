@@ -485,13 +485,15 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                         lastDistanceMilestoneRef.current = currentMilestone;
                     }
 
-                    // Check for 2000 cell threshold - trigger signup for unauthenticated users
-                    if (newTotal >= 2000 && !hasTriggeredSignupPromptRef.current) {
+                    // Check for 1000 cell threshold - trigger signup for unauthenticated users
+                    if (newTotal >= 1000 && !hasTriggeredSignupPromptRef.current) {
                         hasTriggeredSignupPromptRef.current = true;
+                        console.log('Pan threshold reached:', newTotal, 'cells');
 
                         // Check if user is authenticated
                         const { auth } = require('../firebase');
                         const user = auth.currentUser;
+                        console.log('User auth status:', !!user, 'hostDialogue available:', !!hostDialogue);
 
                         if (!user && hostDialogue && !hostDialogue.isHostActive) {
 
@@ -1561,157 +1563,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
-        // === Render Host Data (Centered at Initial Position) ===
-        if (engine.hostData) {
-            const hostText = engine.hostData.text;
-            const hostColor = engine.hostData.color || engine.textColor;
-
-            // Intelligent wrap width based on viewport (same logic as addInstantAIResponse)
-            const BASE_FONT_SIZE = 16;
-            const BASE_CHAR_WIDTH = BASE_FONT_SIZE * 0.6;
-            const charWidth = effectiveCharWidth || BASE_CHAR_WIDTH;
-            const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
-            const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
-            const availableWidthChars = Math.floor(viewportWidth / charWidth);
-            const isPortrait = viewportHeight > viewportWidth;
-            const MARGIN_CHARS = isPortrait ? 2 : 8; // Smaller margins on mobile
-            const MAX_WIDTH_CHARS = 60;
-            const wrapWidth = Math.min(MAX_WIDTH_CHARS, availableWidthChars - (2 * MARGIN_CHARS));
-
-            // Text wrapping
-            const wrapText = (text: string, maxWidth: number): string[] => {
-                const paragraphs = text.split('\n');
-                const lines: string[] = [];
-                for (let i = 0; i < paragraphs.length; i++) {
-                    const paragraph = paragraphs[i].trim();
-                    if (paragraph === '') {
-                        lines.push('');
-                        continue;
-                    }
-                    const words = paragraph.split(' ');
-                    let currentLine = '';
-                    for (const word of words) {
-                        const testLine = currentLine ? `${currentLine} ${word}` : word;
-                        if (testLine.length <= maxWidth) {
-                            currentLine = testLine;
-                        } else {
-                            if (currentLine) {
-                                lines.push(currentLine);
-                                currentLine = word;
-                            } else {
-                                lines.push(word.substring(0, maxWidth));
-                                currentLine = word.substring(maxWidth);
-                            }
-                        }
-                    }
-                    if (currentLine) lines.push(currentLine);
-                }
-                return lines;
-            };
-
-            const wrappedLines = wrapText(hostText, wrapWidth);
-            const maxLineWidth = Math.max(...wrappedLines.map(line => line.length));
-            const totalHeight = wrappedLines.length;
-
-            // Position text: left-aligned on mobile (portrait), centered on desktop
-            let textStartX: number;
-            let textStartY: number;
-
-            if (isPortrait) {
-                // Left-aligned with margin on mobile
-                textStartX = Math.floor(engine.hostData.centerPos.x - (availableWidthChars / 2) + MARGIN_CHARS);
-                textStartY = Math.floor(engine.hostData.centerPos.y - totalHeight / 2);
-            } else {
-                // Centered on desktop
-                textStartX = Math.floor(engine.hostData.centerPos.x - maxLineWidth / 2);
-                textStartY = Math.floor(engine.hostData.centerPos.y - totalHeight / 2);
-            }
-
-            // Render all characters immediately (no typing effect)
-            let y = textStartY;
-            wrappedLines.forEach(line => {
-                for (let x = 0; x < line.length; x++) {
-                    const char = line[x];
-                    const worldX = textStartX + x;
-                    const worldY = y;
-
-                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                        if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
-                            screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-
-                            if (char && char.trim() !== '') {
-                                // Apply text background when monogram is enabled
-                                const textBackground = engine.currentTextStyle.background || (monogramSystem.options.enabled ? engine.backgroundColor : undefined);
-                                if (textBackground) {
-                                    ctx.fillStyle = textBackground;
-                                    ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                                }
-
-                                // Render the character
-                                ctx.fillStyle = hostColor;
-                                renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
-                            }
-                        }
-                    }
-                }
-                y++;
-            });
-
-            // Render context-specific hints for certain messages
-            const currentMessage = hostDialogue.getCurrentMessage();
-            const isMobile = typeof window !== 'undefined' && 'ontouchstart' in window;
-
-            let hintText: string | null = null;
-
-            // Show hint only for specific message IDs
-            if (currentMessage && !isMobile) {
-                if (currentMessage.id === 'welcome_message' && !currentMessage.expectsInput) {
-                    hintText = 'press any key to continue';
-                } else if (currentMessage.id === 'collect_password' && currentMessage.expectsInput) {
-                    hintText = 'press Tab to unhide password';
-                }
-            }
-
-            if (hintText) {
-                // Position hint at bottom of viewport, centered horizontally
-                const bottomScreenY = cssHeight - (4 * effectiveCharHeight); // 4 lines from bottom
-                const bottomWorldPos = engine.screenToWorld(cssWidth / 2, bottomScreenY, currentZoom, currentOffset);
-                const hintY = Math.floor(bottomWorldPos.y);
-                const hintStartX = Math.floor(engine.getViewportCenter().x - hintText.length / 2);
-
-                for (let x = 0; x < hintText.length; x++) {
-                    const char = hintText[x];
-                    const worldX = hintStartX + x;
-                    const worldY = hintY;
-
-                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                        if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
-                            screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-
-                            if (char && char.trim() !== '') {
-                                // Apply text background when monogram is enabled
-                                const textBackground = engine.currentTextStyle.background || (monogramSystem.options.enabled ? engine.backgroundColor : undefined);
-                                if (textBackground) {
-                                    ctx.fillStyle = textBackground;
-                                    ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                                }
-
-                                // Render the character in a dimmed color (50% opacity)
-                                const dimmedColor = hostColor.startsWith('#')
-                                    ? hostColor + '80'
-                                    : hostColor.replace('rgb', 'rgba').replace(')', ', 0.5)');
-                                ctx.fillStyle = dimmedColor;
-                                renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-
         // === Render Bounded Region Backgrounds ===
         for (const key in engine.worldData) {
             if (key.startsWith('bound_')) {
@@ -2138,6 +1989,210 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         ctx.shadowOffsetY = 0;
                         renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
                         ctx.shadowBlur = 0;
+                    }
+                }
+            }
+        }
+
+        // === Render Host Data (Centered at Initial Position) ===
+        if (engine.hostData) {
+            const hostText = engine.hostData.text;
+            const hostColor = engine.hostData.color || engine.textColor;
+
+            // Intelligent wrap width based on viewport (same logic as addInstantAIResponse)
+            const BASE_FONT_SIZE = 16;
+            const BASE_CHAR_WIDTH = BASE_FONT_SIZE * 0.6;
+            const charWidth = effectiveCharWidth || BASE_CHAR_WIDTH;
+            const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
+            const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
+            const availableWidthChars = Math.floor(viewportWidth / charWidth);
+            const isPortrait = viewportHeight > viewportWidth;
+            const MARGIN_CHARS = isPortrait ? 2 : 8; // Smaller margins on mobile
+            const MAX_WIDTH_CHARS = 60;
+            const wrapWidth = Math.min(MAX_WIDTH_CHARS, availableWidthChars - (2 * MARGIN_CHARS));
+
+            // Text wrapping
+            const wrapText = (text: string, maxWidth: number): string[] => {
+                const paragraphs = text.split('\n');
+                const lines: string[] = [];
+                for (let i = 0; i < paragraphs.length; i++) {
+                    const paragraph = paragraphs[i].trim();
+                    if (paragraph === '') {
+                        lines.push('');
+                        continue;
+                    }
+                    const words = paragraph.split(' ');
+                    let currentLine = '';
+                    for (const word of words) {
+                        const testLine = currentLine ? `${currentLine} ${word}` : word;
+                        if (testLine.length <= maxWidth) {
+                            currentLine = testLine;
+                        } else {
+                            if (currentLine) {
+                                lines.push(currentLine);
+                                currentLine = word;
+                            } else {
+                                lines.push(word.substring(0, maxWidth));
+                                currentLine = word.substring(maxWidth);
+                            }
+                        }
+                    }
+                    if (currentLine) lines.push(currentLine);
+                }
+                return lines;
+            };
+
+            const wrappedLines = wrapText(hostText, wrapWidth);
+            const maxLineWidth = Math.max(...wrappedLines.map(line => line.length));
+            const totalHeight = wrappedLines.length;
+
+            // Position text: left-aligned on mobile (portrait), centered on desktop
+            let textStartX: number;
+            let textStartY: number;
+
+            if (isPortrait) {
+                // Left-aligned with margin on mobile
+                textStartX = Math.floor(engine.hostData.centerPos.x - (availableWidthChars / 2) + MARGIN_CHARS);
+                textStartY = Math.floor(engine.hostData.centerPos.y - totalHeight / 2);
+            } else {
+                // Centered on desktop
+                textStartX = Math.floor(engine.hostData.centerPos.x - maxLineWidth / 2);
+                textStartY = Math.floor(engine.hostData.centerPos.y - totalHeight / 2);
+            }
+
+            // First pass: Render glow effect around text
+            const GLOW_RADIUS = 2; // How many cells away the glow extends
+            const glowAlphas = [0.6, 0.3]; // Alpha values for distance 1, 2
+
+            // Parse background color for alpha manipulation
+            const bgHex = (engine.backgroundColor || '#FFFFFF').replace('#', '');
+            const bgR = parseInt(bgHex.substring(0, 2), 16);
+            const bgG = parseInt(bgHex.substring(2, 4), 16);
+            const bgB = parseInt(bgHex.substring(4, 6), 16);
+
+            // Collect all text cell positions
+            const textCells = new Set<string>();
+            let y = textStartY;
+            wrappedLines.forEach(line => {
+                for (let x = 0; x < line.length; x++) {
+                    const char = line[x];
+                    if (char && char.trim() !== '') {
+                        textCells.add(`${textStartX + x},${y}`);
+                    }
+                }
+                y++;
+            });
+
+            // Render glow for each text cell
+            textCells.forEach(cellKey => {
+                const [cx, cy] = cellKey.split(',').map(Number);
+
+                // Render glow in surrounding cells
+                for (let dy = -GLOW_RADIUS; dy <= GLOW_RADIUS; dy++) {
+                    for (let dx = -GLOW_RADIUS; dx <= GLOW_RADIUS; dx++) {
+                        if (dx === 0 && dy === 0) continue; // Skip the text cell itself
+
+                        const glowX = cx + dx;
+                        const glowY = cy + dy;
+
+                        // Skip if this is also a text cell
+                        if (textCells.has(`${glowX},${glowY}`)) continue;
+
+                        const distance = Math.max(Math.abs(dx), Math.abs(dy)); // Chebyshev distance for square glow
+                        if (distance > GLOW_RADIUS) continue;
+
+                        const alpha = glowAlphas[distance - 1];
+                        if (!alpha) continue;
+
+                        if (glowX >= startWorldX - 5 && glowX <= endWorldX + 5 && glowY >= startWorldY - 5 && glowY <= endWorldY + 5) {
+                            const screenPos = engine.worldToScreen(glowX, glowY, currentZoom, currentOffset);
+                            if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                                screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+
+                                ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, ${alpha})`;
+                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Second pass: Render actual text with full background
+            y = textStartY;
+            wrappedLines.forEach(line => {
+                for (let x = 0; x < line.length; x++) {
+                    const char = line[x];
+                    const worldX = textStartX + x;
+                    const worldY = y;
+
+                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                        if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                            screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+
+                            if (char && char.trim() !== '') {
+                                // Apply background highlight for host text (full opacity)
+                                ctx.fillStyle = engine.backgroundColor;
+                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+
+                                // Render the character with host color
+                                ctx.fillStyle = hostColor;
+                                renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
+                            }
+                        }
+                    }
+                }
+                y++;
+            });
+
+            // Render context-specific hints for certain messages
+            const currentMessage = hostDialogue.getCurrentMessage();
+            const isMobile = typeof window !== 'undefined' && 'ontouchstart' in window;
+
+            let hintText: string | null = null;
+
+            // Show hint only for specific message IDs
+            if (currentMessage && !isMobile) {
+                if (currentMessage.id === 'welcome_message' && !currentMessage.expectsInput) {
+                    hintText = 'press any key to continue';
+                } else if (currentMessage.id === 'collect_password' && currentMessage.expectsInput) {
+                    hintText = 'press Tab to unhide password';
+                }
+            }
+
+            if (hintText) {
+                // Position hint at bottom of viewport, centered horizontally
+                const bottomScreenY = cssHeight - (4 * effectiveCharHeight); // 4 lines from bottom
+                const bottomWorldPos = engine.screenToWorld(cssWidth / 2, bottomScreenY, currentZoom, currentOffset);
+                const hintY = Math.floor(bottomWorldPos.y);
+                const hintStartX = Math.floor(engine.getViewportCenter().x - hintText.length / 2);
+
+                for (let x = 0; x < hintText.length; x++) {
+                    const char = hintText[x];
+                    const worldX = hintStartX + x;
+                    const worldY = hintY;
+
+                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                        if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                            screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+
+                            if (char && char.trim() !== '') {
+                                // Apply text background when monogram is enabled
+                                const textBackground = engine.currentTextStyle.background || (monogramSystem.options.enabled ? engine.backgroundColor : undefined);
+                                if (textBackground) {
+                                    ctx.fillStyle = textBackground;
+                                    ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                }
+
+                                // Render the character in a dimmed color (50% opacity)
+                                const dimmedColor = hostColor.startsWith('#')
+                                    ? hostColor + '80'
+                                    : hostColor.replace('rgb', 'rgba').replace(')', ', 0.5)');
+                                ctx.fillStyle = dimmedColor;
+                                renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
+                            }
+                        }
                     }
                 }
             }
