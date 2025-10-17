@@ -26,71 +26,15 @@ export default function UserState() {
   const slug = params.slug as string[];
   const stateName = slug?.[0] || 'default';
 
-  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
-  const hasLoadedScreenshot = React.useRef<boolean>(false);
-  const [isRubyBot, setIsRubyBot] = useState(false);
-
-  // Log all visits to Firebase for analysis
+  // Log all visits to Firebase for analysis (non-blocking, after canvas loads)
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    fetch(`/api/log-visit?url=${encodeURIComponent(window.location.href)}`).catch(() => {});
+    // Delay logging until after initial render
+    const timeoutId = setTimeout(() => {
+      fetch(`/api/log-visit?url=${encodeURIComponent(window.location.href)}`).catch(() => {});
+    }, 1000);
+    return () => clearTimeout(timeoutId);
   }, []);
-
-  // Detect headless browsers (used by screenshot services like are.na)
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const detectHeadless = () => {
-      const userAgent = navigator.userAgent;
-
-      // Check for common headless browser indicators
-      const isHeadlessUA = userAgent.includes('HeadlessChrome') ||
-                           userAgent.includes('Puppeteer') ||
-                           userAgent.includes('PhantomJS') ||
-                           userAgent === 'Ruby' ||
-                           userAgent.startsWith('Ruby/') ||
-                           userAgent.includes('Embedly');
-
-      // Check for headless Chrome/Chromium features
-      const isHeadlessChrome = !!(window.navigator as any).webdriver ||
-                               !(window as any).chrome ||
-                               !navigator.plugins ||
-                               navigator.plugins.length === 0;
-
-      return isHeadlessUA || isHeadlessChrome;
-    };
-
-    setIsRubyBot(detectHeadless());
-  }, []);
-
-  // Load screenshot for loading screen (always, since we can't reliably detect screenshot bots)
-  useEffect(() => {
-    if (hasLoadedScreenshot.current) return;
-    if (!username || !stateName) return;
-
-    const loadScreenshot = async () => {
-      try {
-        hasLoadedScreenshot.current = true;
-        const uid = await getUidByUsername(username);
-        if (!uid) return;
-
-        const { ref, get } = await import('firebase/database');
-        const { database } = await import('../../firebase');
-
-        const screenshotPath = `worlds/${uid}/${stateName}/screenshot`;
-        const screenshotRef = ref(database, screenshotPath);
-        const snapshot = await get(screenshotRef);
-
-        if (snapshot.exists()) {
-          setScreenshotUrl(snapshot.val());
-        }
-      } catch (error) {
-        // Silently fail for crawlers
-      }
-    };
-
-    loadScreenshot();
-  }, [username, stateName, isRubyBot]);
 
   // Parse URL coordinate parameters (supports both new and legacy formats)
   const viewParam = searchParams.get('v'); // New format: v=x.y.zoom
@@ -186,27 +130,9 @@ export default function UserState() {
         className="w-screen"
         style={{
           height: '100dvh',
-          position: 'relative',
-          backgroundColor: (screenshotUrl && isRubyBot) ? 'transparent' : '#000'
+          backgroundColor: '#000'
         }}
-      >
-        {/* Only show screenshot to Ruby bot (are.na scraper) */}
-        {screenshotUrl && isRubyBot && (
-          <img
-            src={screenshotUrl}
-            alt="Preview"
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-              opacity: 1
-            }}
-          />
-        )}
-      </div>
+      />
     );
   }
 

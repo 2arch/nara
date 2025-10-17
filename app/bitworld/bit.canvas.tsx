@@ -528,7 +528,24 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     
     // Cache for uploaded images to avoid reloading
     const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
-    
+
+    // Preload all images immediately when worldData changes (don't wait for viewport)
+    useEffect(() => {
+        for (const key in engine.worldData) {
+            if (key.startsWith('image_')) {
+                const imageData = engine.worldData[key];
+                if (engine.isImageData(imageData)) {
+                    // Only preload if not already cached
+                    if (!imageCache.current.has(imageData.src)) {
+                        const img = new Image();
+                        img.src = imageData.src;
+                        imageCache.current.set(imageData.src, img);
+                    }
+                }
+            }
+        }
+    }, [engine.worldData, engine.isImageData]);
+
     // Dialogue system
     const { renderDialogue, renderDebugDialogue, renderNavDialogue, renderMonogramControls, handleNavClick } = useDialogue();
     
@@ -1325,7 +1342,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         } = engine.getEffectiveCharDims(currentZoom);
         
         // Update bounds index if world data changed or focus changed
-        const currentBoundsData = JSON.stringify(Object.keys(engine.worldData).filter(k => k.startsWith('bound_'))) + '|' + engine.focusedBoundKey;
+        // Use cached boundKeys from engine instead of filtering on every frame
+        const currentBoundsData = JSON.stringify(engine.boundKeys) + '|' + engine.focusedBoundKey;
         if (currentBoundsData !== lastBoundsDataRef.current) {
             updateBoundsIndex();
             lastBoundsDataRef.current = currentBoundsData;
@@ -1474,6 +1492,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10);
             const worldY = parseInt(yStr, 10);
+
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.lightModeData[key];
 
@@ -2060,7 +2079,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         for (const key in engine.worldData) {
             // Skip block, label, bound, glitched, and image data - we render those separately
             if (key.startsWith('block_') || key.startsWith('label_') || key.startsWith('bound_') || key.startsWith('glitched_') || key.startsWith('image_')) continue;
-            
+
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
 
@@ -2117,7 +2136,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         for (const key in engine.chatData) {
             const [xStr, yStr] = key.split(',');
-            const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
+            const worldX = parseInt(xStr, 10);
+            const worldY = parseInt(yStr, 10);
+
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.chatData[key];
 
@@ -2153,7 +2174,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         // === Render LaTeX Data (Blue Background, White Text) ===
         for (const key in engine.latexData) {
             const [xStr, yStr] = key.split(',');
-            const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
+            const worldX = parseInt(xStr, 10);
+            const worldY = parseInt(yStr, 10);
+
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.latexData[key];
 
@@ -2183,7 +2206,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         // === Render SMILES Data (Green Background, White Text) ===
         for (const key in engine.smilesData) {
             const [xStr, yStr] = key.split(',');
-            const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
+            const worldX = parseInt(xStr, 10);
+            const worldY = parseInt(yStr, 10);
+
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.smilesData[key];
 
@@ -2213,15 +2238,17 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         // === Render Search Data (Purple Background, White Text) ===
         for (const key in engine.searchData) {
             const [xStr, yStr] = key.split(',');
-            const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
+            const worldX = parseInt(xStr, 10);
+            const worldY = parseInt(yStr, 10);
+
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.searchData[key];
-                
+
                 // Skip image data - only process text characters
                 if (engine.isImageData(charData)) {
                     continue;
                 }
-                
+
                 const char = typeof charData === 'string' ? charData : charData.char;
                 const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                 if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {

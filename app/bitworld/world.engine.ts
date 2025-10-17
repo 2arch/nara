@@ -251,6 +251,7 @@ export interface WorldEngine {
     toggleNavMode: () => void;
     getAllLabels: () => Array<{text: string, x: number, y: number, color: string}>;
     getAllBounds: () => Array<{startX: number, endX: number, startY: number, endY: number, color: string, title?: string}>;
+    boundKeys: string[]; // Cached list of bound_ keys for performance
     getSortedLabels: (sortMode: 'chronological' | 'closest' | 'farthest', originPos: Point) => Array<{text: string, x: number, y: number, color: string}>;
     getUniqueColors: () => string[];
     toggleColorFilter: (color: string) => void;
@@ -628,30 +629,33 @@ export function useWorldEngine({
         return labels;
     }, [worldData]);
 
+    // Cache bound keys to avoid filtering on every render
+    const boundKeys = useMemo(() => {
+        return Object.keys(worldData).filter(k => k.startsWith('bound_'));
+    }, [worldData]);
+
     const getAllBounds = useCallback(() => {
         const bounds: Array<{startX: number, endX: number, startY: number, endY: number, color: string, title?: string}> = [];
-        for (const key in worldData) {
-            if (key.startsWith('bound_')) {
-                try {
-                    const boundData = JSON.parse(worldData[key] as string);
-                    if (boundData.startX !== undefined && boundData.endX !== undefined &&
-                        boundData.startY !== undefined && boundData.endY !== undefined) {
-                        bounds.push({
-                            startX: boundData.startX,
-                            endX: boundData.endX,
-                            startY: boundData.startY,
-                            endY: boundData.endY,
-                            color: boundData.color || '#FFFF00',
-                            title: boundData.title
-                        });
-                    }
-                } catch (e) {
-                    // Skip invalid bound data
+        for (const key of boundKeys) {
+            try {
+                const boundData = JSON.parse(worldData[key] as string);
+                if (boundData.startX !== undefined && boundData.endX !== undefined &&
+                    boundData.startY !== undefined && boundData.endY !== undefined) {
+                    bounds.push({
+                        startX: boundData.startX,
+                        endX: boundData.endX,
+                        startY: boundData.startY,
+                        endY: boundData.endY,
+                        color: boundData.color || '#FFFF00',
+                        title: boundData.title
+                    });
                 }
+            } catch (e) {
+                // Skip invalid bound data
             }
         }
         return bounds;
-    }, [worldData]);
+    }, [worldData, boundKeys]);
 
     // Tape recording callback setter
     const setTapeRecordingCallback = useCallback((callback: () => Promise<void> | void) => {
@@ -1440,35 +1444,46 @@ export function useWorldEngine({
         return false;
     }, []);
 
-    // Load available states on component mount
+    // Load available states on component mount (deferred to not block initial render)
     useEffect(() => {
         if (userUid === undefined) return;
-        loadAvailableStates().then(states => {
-            setAvailableStates(states);
-        });
+
+        // Defer loading states until after initial render
+        const timeoutId = setTimeout(() => {
+            loadAvailableStates().then(states => {
+                setAvailableStates(states);
+            });
+        }, 1000);
+
+        return () => clearTimeout(timeoutId);
     }, [loadAvailableStates, userUid]);
     
-    // Load compiled text on mount
+    // Load compiled text on mount (deferred to not block initial render)
     useEffect(() => {
         if (!worldId || !userUid) return;
 
-        const contentPath = currentStateName ?
-            getUserPath(`${currentStateName}/content`) :
-            getUserPath(`${worldId}/content`);
-        const compiledTextRef = ref(database, contentPath);
-        get(compiledTextRef).then((snapshot) => {
-            const compiledText = snapshot.val();
-            if (compiledText) {
-                lastCompiledRef.current = compiledText;
-                setCompiledTextCache(compiledText);
-            }
-        }).catch(error => {
-            // For public viewing, permission errors are expected when accessing content
-            if (error instanceof Error && error.message && error.message.includes('Permission denied')) {
-                return;
-            }
-            logger.error('Failed to load compiled text:', error);
-        });
+        // Defer loading compiled text until after initial render
+        const timeoutId = setTimeout(() => {
+            const contentPath = currentStateName ?
+                getUserPath(`${currentStateName}/content`) :
+                getUserPath(`${worldId}/content`);
+            const compiledTextRef = ref(database, contentPath);
+            get(compiledTextRef).then((snapshot) => {
+                const compiledText = snapshot.val();
+                if (compiledText) {
+                    lastCompiledRef.current = compiledText;
+                    setCompiledTextCache(compiledText);
+                }
+            }).catch(error => {
+                // For public viewing, permission errors are expected when accessing content
+                if (error instanceof Error && error.message && error.message.includes('Permission denied')) {
+                    return;
+                }
+                logger.error('Failed to load compiled text:', error);
+            });
+        }, 1000);
+
+        return () => clearTimeout(timeoutId);
     }, [worldId, currentStateName, getUserPath, userUid]);
 
     // Track page views for published pages
@@ -1496,9 +1511,12 @@ export function useWorldEngine({
         trackPageView();
     }, [isReadOnly, userUid, currentStateName, getUserPath]);
 
-    // Initialize new state if it doesn't exist
+    // Initialize new state if it doesn't exist (skip for read-only viewers)
     useEffect(() => {
         if (!currentStateName || !userUid || !worldId) return;
+
+        // Skip initialization check for read-only viewers
+        if (isReadOnly) return;
 
         const checkAndInitializeState = async () => {
             try {
@@ -1532,7 +1550,7 @@ export function useWorldEngine({
         };
 
         checkAndInitializeState();
-    }, [currentStateName, userUid, worldId, getUserPath, settings, worldData]);
+    }, [currentStateName, userUid, worldId, getUserPath, settings, worldData, isReadOnly]);
 
     // Helper function to detect if there's unsaved work
     const hasUnsavedWork = useCallback((): boolean => {
@@ -7096,6 +7114,7 @@ export function useWorldEngine({
         getBlocksInRegion,
         getAllLabels,
         getAllBounds,
+        boundKeys, // Cached list of bound_ keys for performance
         getSortedLabels,
         getUniqueColors,
         toggleColorFilter,
