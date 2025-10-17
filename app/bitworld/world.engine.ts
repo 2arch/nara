@@ -375,7 +375,8 @@ export function useWorldEngine({
 }: UseWorldEngineProps): WorldEngine {
     // === Router ===
     const router = useRouter();
-    
+
+
     const [isSelecting, setIsSelecting] = useState(false);
     const [selectionStart, setSelectionStart] = useState<Point | null>(null);
     const [selectionEnd, setSelectionEnd] = useState<Point | null>(null);
@@ -3956,10 +3957,13 @@ export function useWorldEngine({
                                         }
                                     }
 
+                                    // Upload to Firebase Storage and get URL
+                                    const storageUrl = await uploadImageToStorage(finalSrc);
+
                                     // Create image data entry
                                     const imageData: ImageData = {
                                         type: 'image',
-                                        src: finalSrc,
+                                        src: storageUrl,
                                         startX: selection.startX,
                                         startY: selection.startY,
                                         endX: selection.endX,
@@ -4765,7 +4769,7 @@ export function useWorldEngine({
                     if (imageDataUrl) {
                         // Create an image element to get dimensions
                         const img = new Image();
-                        img.onload = () => {
+                        img.onload = async () => {
                             console.log('Image loaded, dimensions:', img.width, 'x', img.height);
                             const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
 
@@ -4774,10 +4778,13 @@ export function useWorldEngine({
                             const cellsHigh = Math.ceil(img.height / effectiveCharHeight);
                             console.log('Grid cells:', cellsWide, 'x', cellsHigh);
 
+                            // Upload to Firebase Storage and get URL
+                            const storageUrl = await uploadImageToStorage(imageDataUrl);
+
                             // Create image data structure
                             const imageData: ImageData = {
                                 type: 'image',
-                                src: imageDataUrl,
+                                src: storageUrl,
                                 startX: startPosition.x,
                                 startY: startPosition.y,
                                 endX: startPosition.x + cellsWide - 1,
@@ -4840,7 +4847,7 @@ export function useWorldEngine({
                     if (imageDataUrl) {
                         // Create an image element to get dimensions
                         const img = new Image();
-                        img.onload = () => {
+                        img.onload = async () => {
                             console.log('SMILES image loaded, dimensions:', img.width, 'x', img.height);
                             const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
 
@@ -4849,10 +4856,13 @@ export function useWorldEngine({
                             const cellsHigh = Math.ceil(img.height / effectiveCharHeight);
                             console.log('Grid cells:', cellsWide, 'x', cellsHigh);
 
+                            // Upload to Firebase Storage and get URL
+                            const storageUrl = await uploadImageToStorage(imageDataUrl);
+
                             // Create image data structure
                             const imageData: ImageData = {
                                 type: 'image',
-                                src: imageDataUrl,
+                                src: storageUrl,
                                 startX: startPosition.x,
                                 startY: startPosition.y,
                                 endX: startPosition.x + cellsWide - 1,
@@ -6700,6 +6710,33 @@ export function useWorldEngine({
         // The selection will be cleared in other functions if needed
         // This allows the selection to persist after mouse up
     }, []);
+
+        // Helper function to upload images to Firebase Storage
+    const uploadImageToStorage = useCallback(async (dataUrl: string): Promise<string> => {
+        if (!userUid || !currentStateName) {
+            // Fallback to base64 if no storage available
+            return dataUrl;
+        }
+
+        try {
+            // Generate unique filename
+            const timestamp = Date.now();
+            const random = Math.random().toString(36).substring(7);
+            const filename = `${timestamp}_${random}.png`;
+
+            // Upload to Firebase Storage
+            const imageRef = storageRef(storage, `worlds/${userUid}/${currentStateName}/images/${filename}`);
+            await uploadString(imageRef, dataUrl, 'data_url');
+
+            // Get public download URL
+            const downloadUrl = await getDownloadURL(imageRef);
+            return downloadUrl;
+        } catch (error) {
+            logger.error('Error uploading to Firebase Storage:', error);
+            // Fallback to base64 on error
+            return dataUrl;
+        }
+    }, [userUid, currentStateName]);
 
     // === IME Composition Handlers ===
     const handleCompositionStart = useCallback((): void => {

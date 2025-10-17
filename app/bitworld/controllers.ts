@@ -120,13 +120,7 @@ export function createMonogramController(monogramSystem: any): ControllerGroup {
             {
                 key: 'm',
                 ctrlOrMeta: true,
-                description: 'Toggle monogram on/off',
-                action: () => monogramSystem.toggleEnabled()
-            },
-            {
-                key: 'n',
-                ctrlOrMeta: true,
-                description: 'Cycle pattern mode',
+                description: 'Cycle pattern mode (off/mode1/mode2/...)',
                 action: () => monogramSystem.cycleMode()
             },
             {

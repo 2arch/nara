@@ -1114,12 +1114,25 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
         return pattern;
     }, [options, calculatePattern, getCharForIntensity, getColorFromPalette]);
 
-    // Cycle to next mode
+    // Cycle to next mode (including off state)
     const cycleMode = useCallback(() => {
         const modes: MonogramMode[] = ['clear', 'perlin'];
         setOptions(prev => {
+            // If currently disabled, enable with first mode
+            if (!prev.enabled) {
+                return { ...prev, enabled: true, mode: modes[0] };
+            }
+
+            // If currently enabled, find next mode
             const currentIndex = modes.indexOf(prev.mode);
-            const nextIndex = (currentIndex + 1) % modes.length;
+            const nextIndex = currentIndex + 1;
+
+            // If we've cycled through all modes, disable
+            if (nextIndex >= modes.length) {
+                return { ...prev, enabled: false };
+            }
+
+            // Otherwise, move to next mode
             return { ...prev, mode: modes[nextIndex] };
         });
     }, []);

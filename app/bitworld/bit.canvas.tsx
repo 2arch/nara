@@ -200,10 +200,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const hasRegisteredScreenshotRef = useRef<boolean>(false);
     useEffect(() => {
         if (hasRegisteredScreenshotRef.current) return;
-        console.log('📸 Registering screenshot callback with engine');
         engine.setScreenshotCallback(captureScreenshot);
         hasRegisteredScreenshotRef.current = true;
-        console.log('✅ Screenshot callback registered');
     }, [engine, captureScreenshot]);
 
     // Screenshot loading is now handled by:

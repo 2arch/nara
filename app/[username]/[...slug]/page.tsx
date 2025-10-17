@@ -122,9 +122,9 @@ export default function UserState() {
     return () => clearInterval(interval);
   }, []);
 
-  // Only block on UID lookup and world loading - auth happens in background
+  // Only block on UID lookup - canvas renders immediately, worldData loads in after
   // Firebase security rules will kick unauthenticated users if world is private
-  if (uidLookupLoading || engine.isLoadingWorld) {
+  if (uidLookupLoading) {
     return (
       <div
         className="w-screen"
