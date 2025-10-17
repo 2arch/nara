@@ -9,10 +9,24 @@ import { database, auth, storage } from '@/app/firebase';
 import { ref as storageRef, uploadString, getDownloadURL } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
-import { transformText, explainText, summarizeText, createSubtitleCycler, chatWithAI, clearChatHistory, setDialogueWithRevert, updateWorldContext, abortCurrentAI, isAIActive } from './ai';
+// Import lightweight AI utilities (no GenAI dependency)
+import { createSubtitleCycler, setDialogueWithRevert, abortCurrentAI, isAIActive } from './ai.utils';
 import { logger } from './logger';
 import { useAutoDialogue } from './dialogue';
 import { get } from 'firebase/database';
+
+// Lazy-load heavy AI functions
+const loadAI = async () => {
+    const ai = await import('./ai');
+    return {
+        transformText: ai.transformText,
+        explainText: ai.explainText,
+        summarizeText: ai.summarizeText,
+        chatWithAI: ai.chatWithAI,
+        clearChatHistory: ai.clearChatHistory,
+        updateWorldContext: ai.updateWorldContext
+    };
+};
 
 // --- Constants --- (Copied and relevant ones kept)
 const BASE_FONT_SIZE = 16;
@@ -4105,7 +4119,7 @@ export function useWorldEngine({
                         setChatMode(prev => ({ ...prev, isProcessing: true }));
                         setDialogueWithRevert("Processing...", setDialogueText);
                         
-                        chatWithAI(chatMode.currentInput.trim()).then((response) => {
+                        loadAI().then(ai => ai.chatWithAI(chatMode.currentInput.trim())).then((response) => {
                             // Show response in dialogue system
                             createSubtitleCycler(response, setDialogueText);
                             
@@ -4192,8 +4206,8 @@ export function useWorldEngine({
                     if (chatMode.currentInput.trim() && !chatMode.isProcessing) {
                         setChatMode(prev => ({ ...prev, isProcessing: true }));
                         setDialogueWithRevert("Processing...", setDialogueText);
-                        
-                        chatWithAI(chatMode.currentInput.trim()).then((response) => {
+
+                        loadAI().then(ai => ai.chatWithAI(chatMode.currentInput.trim())).then((response) => {
                             // Show response in dialogue system (subtitle-style)
                             createSubtitleCycler(response, setDialogueText);
                             
@@ -4361,7 +4375,7 @@ export function useWorldEngine({
                         
                         if (selectedText && instructions) {
                             setDialogueWithRevert("Processing transformation...", setDialogueText);
-                            transformText(selectedText, instructions).then((result) => {
+                            loadAI().then(ai => ai.transformText(selectedText, instructions)).then((result) => {
                                 createSubtitleCycler(result, setDialogueText);
                             }).catch(() => {
                                 setDialogueWithRevert(`Could not transform text`, setDialogueText);
@@ -4372,7 +4386,7 @@ export function useWorldEngine({
                         const instructions = exec.args.length > 1 ? exec.args.slice(1).join(' ') : 'analysis';
                         
                         setDialogueWithRevert("Processing explanation...", setDialogueText);
-                        explainText(selectedText, instructions).then((result) => {
+                        loadAI().then(ai => ai.explainText(selectedText, instructions)).then((result) => {
                             createSubtitleCycler(result, setDialogueText);
                         }).catch(() => {
                             setDialogueWithRevert(`Could not explain text`, setDialogueText);
@@ -4382,7 +4396,7 @@ export function useWorldEngine({
                         const focus = exec.args.length > 1 ? exec.args.slice(1).join(' ') : undefined;
                         
                         setDialogueWithRevert("Processing summary...", setDialogueText);
-                        summarizeText(selectedText, focus).then((result) => {
+                        loadAI().then(ai => ai.summarizeText(selectedText, focus)).then((result) => {
                             createSubtitleCycler(result, setDialogueText);
                         }).catch(() => {
                             setDialogueWithRevert(`Could not summarize text`, setDialogueText);
@@ -4631,14 +4645,16 @@ export function useWorldEngine({
                     .join('\n');
                 
                 // Update world context first, then chat
-                updateWorldContext({
-                    compiledText: compiledTextString,
-                    labels: currentLabels,
-                    metadata: `Canvas viewport center: ${JSON.stringify(getViewportCenter())}, Current cursor: ${JSON.stringify(cursorPos)}`
-                });
-                
-                // Use world context for AI chat
-                chatWithAI(textToSend.trim(), true).then((response) => { // true = use context
+                loadAI().then(ai => {
+                    ai.updateWorldContext({
+                        compiledText: compiledTextString,
+                        labels: currentLabels,
+                        metadata: `Canvas viewport center: ${JSON.stringify(getViewportCenter())}, Current cursor: ${JSON.stringify(cursorPos)}`
+                    });
+
+                    // Use world context for AI chat
+                    return ai.chatWithAI(textToSend.trim(), true); // true = use context
+                }).then((response) => {
                     // Show response in dialogue system
                     createSubtitleCycler(response, setDialogueText);
                     

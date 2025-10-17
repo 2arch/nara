@@ -1,11 +1,17 @@
 "use client";
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { useWorldEngine } from '../../bitworld/world.engine';
 import { BitCanvas } from '../../bitworld/bit.canvas';
-import Grid3DBackground from '../../bitworld/canvas.grid3d';
 import { auth, getUidByUsername } from '../../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
+
+// Lazy load Grid3DBackground (Three.js) - only loads when backgroundMode === 'space'
+const Grid3DBackground = dynamic(
+  () => import('../../bitworld/canvas.grid3d'),
+  { ssr: false }
+);
 
 export default function UserState() {
   const [cursorAlternate, setCursorAlternate] = useState(false);
@@ -24,20 +30,43 @@ export default function UserState() {
   const hasLoadedScreenshot = React.useRef<boolean>(false);
   const [isRubyBot, setIsRubyBot] = useState(false);
 
-  // Detect Ruby bot (are.na scraper)
+  // Log all visits to Firebase for analysis
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const userAgent = navigator.userAgent;
-    const isRuby = userAgent === 'Ruby' || userAgent.startsWith('Ruby/');
-    setIsRubyBot(isRuby);
-    console.log('🔍 User agent:', userAgent, '| Is Ruby bot:', isRuby);
+    fetch(`/api/log-visit?url=${encodeURIComponent(window.location.href)}`).catch(() => {});
   }, []);
 
-  // Load screenshot ONLY for Ruby bot (are.na scraper)
+  // Detect headless browsers (used by screenshot services like are.na)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const detectHeadless = () => {
+      const userAgent = navigator.userAgent;
+
+      // Check for common headless browser indicators
+      const isHeadlessUA = userAgent.includes('HeadlessChrome') ||
+                           userAgent.includes('Puppeteer') ||
+                           userAgent.includes('PhantomJS') ||
+                           userAgent === 'Ruby' ||
+                           userAgent.startsWith('Ruby/') ||
+                           userAgent.includes('Embedly');
+
+      // Check for headless Chrome/Chromium features
+      const isHeadlessChrome = !!(window.navigator as any).webdriver ||
+                               !(window as any).chrome ||
+                               !navigator.plugins ||
+                               navigator.plugins.length === 0;
+
+      return isHeadlessUA || isHeadlessChrome;
+    };
+
+    setIsRubyBot(detectHeadless());
+  }, []);
+
+  // Load screenshot for loading screen (always, since we can't reliably detect screenshot bots)
   useEffect(() => {
     if (hasLoadedScreenshot.current) return;
     if (!username || !stateName) return;
-    if (!isRubyBot) return; // Only load for Ruby bot
 
     const loadScreenshot = async () => {
       try {
@@ -53,11 +82,10 @@ export default function UserState() {
         const snapshot = await get(screenshotRef);
 
         if (snapshot.exists()) {
-          console.log('✅ Screenshot loaded for Ruby bot');
           setScreenshotUrl(snapshot.val());
         }
       } catch (error) {
-        console.error('Error loading screenshot:', error);
+        // Silently fail for crawlers
       }
     };
 
@@ -150,7 +178,9 @@ export default function UserState() {
     return () => clearInterval(interval);
   }, []);
 
-  if (authLoading || uidLookupLoading || engine.isLoadingWorld) {
+  // Only block on UID lookup and world loading - auth happens in background
+  // Firebase security rules will kick unauthenticated users if world is private
+  if (uidLookupLoading || engine.isLoadingWorld) {
     return (
       <div
         className="w-screen"
