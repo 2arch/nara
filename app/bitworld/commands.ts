@@ -29,7 +29,7 @@ export interface CommandExecution {
 }
 
 // --- Mode System Types ---
-export type CanvasMode = 'default' | 'air' | 'chat';
+export type CanvasMode = 'default' | 'air' | 'chat' | 'plan';
 export type BackgroundMode = 'transparent' | 'color' | 'image' | 'video' | 'space' | 'stream';
 export type CameraMode = 'default' | 'focus';
 
@@ -106,8 +106,10 @@ const AVAILABLE_COMMANDS = [
     'publish', 'unpublish', 'share', 'spawn', 'stage', 'monogram',
     // Account
     'signin', 'signout',
+    // Modes
+    'plan', 'chat',
     // Debug
-    'debug', 'chat'
+    'debug'
 ];
 
 // Category mapping for visual organization
@@ -116,12 +118,14 @@ const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'create': ['label', 'bound', 'unbound', 'clip', 'upload', 'sci'],
     'style': ['mode', 'bg', 'text', 'font', 'indent'],
     'state': ['state', 'random', 'clear'],
+    'record': ['tape'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'stage', 'monogram'],
     'account': ['signin', 'signout'],
-    'debug': ['debug', 'chat']
+    'modes': ['plan', 'chat'],
+    'debug': ['debug']
 };
 
-const MODE_COMMANDS = ['default', 'air', 'chat'];
+const MODE_COMMANDS = ['default', 'air', 'chat', 'plan'];
 const BG_COMMANDS = ['clear', 'live', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Neureal'];
 const NAV_COMMANDS: string[] = [];
@@ -2007,6 +2011,26 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 args: [],
                 commandStartPos: commandState.commandStartPos
             };
+        }
+
+        if (commandToExecute.startsWith('plan')) {
+            // Enter plan mode directly
+            switchMode('plan');
+            setDialogueWithRevert("Plan mode: Select regions and press Enter to save", setDialogueText);
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            return null;
         }
 
         if (commandToExecute.startsWith('bound')) {

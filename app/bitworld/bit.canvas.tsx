@@ -65,6 +65,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const [isShiftPressed, setIsShiftPressed] = useState<boolean>(false);
     const [shiftDragStartPos, setShiftDragStartPos] = useState<Point | null>(null);
     const [selectedImageKey, setSelectedImageKey] = useState<string | null>(null);
+    const [selectedPlanKey, setSelectedPlanKey] = useState<string | null>(null);
     const [clipboardFlashBounds, setClipboardFlashBounds] = useState<Map<string, number>>(new Map()); // boundKey -> timestamp
     const lastCursorPosRef = useRef<Point | null>(null);
     const lastEnterPressRef = useRef<number>(0);
@@ -1049,6 +1050,89 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     }, [engine.worldData, engine.focusedBoundKey, engine.backgroundColor]);
     // Helper function to find image at a specific position
     
+        // Helper function to find connected text block (including spaces)
+    const findTextBlock = useCallback((startPos: Point, worldData: any, engine: any): Point[] => {
+        // Simple flood-fill to find all connected text
+        const visited = new Set<string>();
+        const textPositions: Point[] = [];
+        const queue: Point[] = [startPos];
+        
+        while (queue.length > 0) {
+            const pos = queue.shift()!;
+            const key = `${pos.x},${pos.y}`;
+            
+            if (visited.has(key)) continue;
+            visited.add(key);
+            
+            const charData = worldData[key];
+            const char = charData ? engine.getCharacter(charData) : '';
+            
+            // Include position if it has text
+            if (char && char.trim() !== '') {
+                textPositions.push(pos);
+                
+                // Check all 4 directions
+                const directions = [
+                    { x: pos.x - 1, y: pos.y },
+                    { x: pos.x + 1, y: pos.y },
+                    { x: pos.x, y: pos.y - 1 },
+                    { x: pos.x, y: pos.y + 1 }
+                ];
+                
+                for (const dir of directions) {
+                    const dirKey = `${dir.x},${dir.y}`;
+                    if (!visited.has(dirKey)) {
+                        queue.push(dir);
+                    }
+                }
+            } else if (textPositions.length > 0) {
+                // If we've found text and this is a space, check if it connects text
+                const hasTextLeft = worldData[`${pos.x - 1},${pos.y}`] && !engine.isImageData(worldData[`${pos.x - 1},${pos.y}`]) && engine.getCharacter(worldData[`${pos.x - 1},${pos.y}`]).trim() !== '';
+                const hasTextRight = worldData[`${pos.x + 1},${pos.y}`] && !engine.isImageData(worldData[`${pos.x + 1},${pos.y}`]) && engine.getCharacter(worldData[`${pos.x + 1},${pos.y}`]).trim() !== '';
+                
+                if (hasTextLeft || hasTextRight) {
+                    // Continue searching horizontally through spaces
+                    if (!visited.has(`${pos.x - 1},${pos.y}`)) queue.push({ x: pos.x - 1, y: pos.y });
+                    if (!visited.has(`${pos.x + 1},${pos.y}`)) queue.push({ x: pos.x + 1, y: pos.y });
+                }
+            }
+        }
+        
+        // If no text found at start position, search nearby
+        if (textPositions.length === 0) {
+            // Look for text in a 3x3 area around the click
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    const checkPos = { x: startPos.x + dx, y: startPos.y + dy };
+                    const checkKey = `${checkPos.x},${checkPos.y}`;
+                    const checkData = worldData[checkKey];
+                    
+                    if (checkData && !engine.isImageData(checkData) && engine.getCharacter(checkData).trim() !== '') {
+                        // Found text nearby, use that as start
+                        return findTextBlock(checkPos, worldData, engine);
+                    }
+                }
+            }
+            return [];
+        }
+        
+        // Calculate bounding box
+        const minX = Math.min(...textPositions.map(p => p.x));
+        const maxX = Math.max(...textPositions.map(p => p.x));
+        const minY = Math.min(...textPositions.map(p => p.y));
+        const maxY = Math.max(...textPositions.map(p => p.y));
+        
+        // Return all positions in bounding box
+        const block: Point[] = [];
+        for (let y = minY; y <= maxY; y++) {
+            for (let x = minX; x <= maxX; x++) {
+                block.push({ x, y });
+            }
+        }
+        
+        return block;
+    }, []);
+    
     const findImageAtPosition = useCallback((pos: Point): any => {
         // First check staged images (ephemeral, higher priority)
         for (const imageData of engine.stagedImageData) {
@@ -1074,6 +1158,154 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         return null;
     }, [engine]);
 
+    const findPlanAtPosition = useCallback((pos: Point): { key: string, data: any } | null => {
+        // Check all plan regions in worldData
+        for (const key in engine.worldData) {
+            if (key.startsWith('plan_')) {
+                try {
+                    const planData = JSON.parse(engine.worldData[key] as string);
+                    // Check if position is within plan bounds
+                    if (pos.x >= planData.startX && pos.x <= planData.endX &&
+                        pos.y >= planData.startY && pos.y <= planData.endY) {
+                        return { key, data: planData };
+                    }
+                } catch (e) {
+                    // Skip invalid plan data
+                }
+            }
+        }
+        return null;
+    }, [engine]);
+
+    // Helper to get chronological list of plan regions and text blocks
+    const getChronologicalItems = useCallback((): Array<{
+        type: 'plan' | 'textblock',
+        timestamp: number,
+        content: string,
+        bounds: { startX: number, startY: number, endX: number, endY: number }
+    }> => {
+        const items: Array<{
+            type: 'plan' | 'textblock',
+            timestamp: number,
+            content: string,
+            bounds: { startX: number, startY: number, endX: number, endY: number }
+        }> = [];
+
+        // Collect all plan regions
+        for (const key in engine.worldData) {
+            if (key.startsWith('plan_')) {
+                try {
+                    const planData = JSON.parse(engine.worldData[key] as string);
+
+                    // Extract text content within plan bounds
+                    let content = '';
+                    for (let y = planData.startY; y <= planData.endY; y++) {
+                        let rowContent = '';
+                        for (let x = planData.startX; x <= planData.endX; x++) {
+                            const cellKey = `${x},${y}`;
+                            const cellData = engine.worldData[cellKey];
+                            if (cellData && !engine.isImageData(cellData)) {
+                                const char = engine.getCharacter(cellData);
+                                rowContent += char || ' ';
+                            } else {
+                                rowContent += ' ';
+                            }
+                        }
+                        // Trim trailing spaces but preserve line structure
+                        if (content.length > 0 || rowContent.trim().length > 0) {
+                            content += rowContent.trimEnd() + '\n';
+                        }
+                    }
+
+                    items.push({
+                        type: 'plan',
+                        timestamp: planData.timestamp || 0,
+                        content: content.trim(),
+                        bounds: {
+                            startX: planData.startX,
+                            startY: planData.startY,
+                            endX: planData.endX,
+                            endY: planData.endY
+                        }
+                    });
+                } catch (e) {
+                    // Skip invalid plan data
+                }
+            }
+        }
+
+        // Collect all text blocks (excluding those already in plan regions)
+        const processedPositions = new Set<string>();
+
+        // Mark positions within plan regions as processed
+        for (const item of items) {
+            for (let y = item.bounds.startY; y <= item.bounds.endY; y++) {
+                for (let x = item.bounds.startX; x <= item.bounds.endX; x++) {
+                    processedPositions.add(`${x},${y}`);
+                }
+            }
+        }
+
+        // Find distinct text blocks
+        for (const key in engine.worldData) {
+            if (processedPositions.has(key)) continue;
+
+            const data = engine.worldData[key];
+            if (!data || engine.isImageData(data) || key.startsWith('plan_') || key.startsWith('image_')) continue;
+
+            const char = engine.getCharacter(data);
+            if (!char || char.trim() === '') continue;
+
+            // Found a text character - find its entire block
+            const [xStr, yStr] = key.split(',');
+            const startPos = { x: parseInt(xStr), y: parseInt(yStr) };
+
+            if (processedPositions.has(key)) continue;
+
+            const textBlock = findTextBlock(startPos, engine.worldData, engine);
+            if (textBlock.length === 0) continue;
+
+            // Mark all positions in this block as processed
+            textBlock.forEach(pos => processedPositions.add(`${pos.x},${pos.y}`));
+
+            // Extract text content
+            let content = '';
+            const minX = Math.min(...textBlock.map(p => p.x));
+            const maxX = Math.max(...textBlock.map(p => p.x));
+            const minY = Math.min(...textBlock.map(p => p.y));
+            const maxY = Math.max(...textBlock.map(p => p.y));
+
+            for (let y = minY; y <= maxY; y++) {
+                let rowContent = '';
+                for (let x = minX; x <= maxX; x++) {
+                    const cellKey = `${x},${y}`;
+                    const cellData = engine.worldData[cellKey];
+                    if (cellData && !engine.isImageData(cellData)) {
+                        const char = engine.getCharacter(cellData);
+                        rowContent += char || ' ';
+                    } else {
+                        rowContent += ' ';
+                    }
+                }
+                if (content.length > 0 || rowContent.trim().length > 0) {
+                    content += rowContent.trimEnd() + '\n';
+                }
+            }
+
+            // Use position as pseudo-timestamp for text blocks (no real timestamp)
+            const pseudoTimestamp = minY * 1000000 + minX;
+
+            items.push({
+                type: 'textblock',
+                timestamp: pseudoTimestamp,
+                content: content.trim(),
+                bounds: { startX: minX, startY: minY, endX: maxX, endY: maxY }
+            });
+        }
+
+        // Sort by timestamp (plan regions by actual timestamp, text blocks by position)
+        return items.sort((a, b) => a.timestamp - b.timestamp);
+    }, [engine, findTextBlock]);
 
     // Helper to check if worldPos is within a clipboard-flashed bound
     const isInClipboardFlashBound = useCallback((worldPos: Point): string | null => {
@@ -1242,89 +1474,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
     }, [engine, findImageAtPosition, isInClipboardFlashBound]);
 
-    // Helper function to find connected text block (including spaces)
-    const findTextBlock = useCallback((startPos: Point, worldData: any, engine: any): Point[] => {
-        // Simple flood-fill to find all connected text
-        const visited = new Set<string>();
-        const textPositions: Point[] = [];
-        const queue: Point[] = [startPos];
-        
-        while (queue.length > 0) {
-            const pos = queue.shift()!;
-            const key = `${pos.x},${pos.y}`;
-            
-            if (visited.has(key)) continue;
-            visited.add(key);
-            
-            const charData = worldData[key];
-            const char = charData ? engine.getCharacter(charData) : '';
-            
-            // Include position if it has text
-            if (char && char.trim() !== '') {
-                textPositions.push(pos);
-                
-                // Check all 4 directions
-                const directions = [
-                    { x: pos.x - 1, y: pos.y },
-                    { x: pos.x + 1, y: pos.y },
-                    { x: pos.x, y: pos.y - 1 },
-                    { x: pos.x, y: pos.y + 1 }
-                ];
-                
-                for (const dir of directions) {
-                    const dirKey = `${dir.x},${dir.y}`;
-                    if (!visited.has(dirKey)) {
-                        queue.push(dir);
-                    }
-                }
-            } else if (textPositions.length > 0) {
-                // If we've found text and this is a space, check if it connects text
-                const hasTextLeft = worldData[`${pos.x - 1},${pos.y}`] && !engine.isImageData(worldData[`${pos.x - 1},${pos.y}`]) && engine.getCharacter(worldData[`${pos.x - 1},${pos.y}`]).trim() !== '';
-                const hasTextRight = worldData[`${pos.x + 1},${pos.y}`] && !engine.isImageData(worldData[`${pos.x + 1},${pos.y}`]) && engine.getCharacter(worldData[`${pos.x + 1},${pos.y}`]).trim() !== '';
-                
-                if (hasTextLeft || hasTextRight) {
-                    // Continue searching horizontally through spaces
-                    if (!visited.has(`${pos.x - 1},${pos.y}`)) queue.push({ x: pos.x - 1, y: pos.y });
-                    if (!visited.has(`${pos.x + 1},${pos.y}`)) queue.push({ x: pos.x + 1, y: pos.y });
-                }
-            }
-        }
-        
-        // If no text found at start position, search nearby
-        if (textPositions.length === 0) {
-            // Look for text in a 3x3 area around the click
-            for (let dy = -1; dy <= 1; dy++) {
-                for (let dx = -1; dx <= 1; dx++) {
-                    const checkPos = { x: startPos.x + dx, y: startPos.y + dy };
-                    const checkKey = `${checkPos.x},${checkPos.y}`;
-                    const checkData = worldData[checkKey];
-                    
-                    if (checkData && !engine.isImageData(checkData) && engine.getCharacter(checkData).trim() !== '') {
-                        // Found text nearby, use that as start
-                        return findTextBlock(checkPos, worldData, engine);
-                    }
-                }
-            }
-            return [];
-        }
-        
-        // Calculate bounding box
-        const minX = Math.min(...textPositions.map(p => p.x));
-        const maxX = Math.max(...textPositions.map(p => p.x));
-        const minY = Math.min(...textPositions.map(p => p.y));
-        const maxY = Math.max(...textPositions.map(p => p.y));
-        
-        // Return all positions in bounding box
-        const block: Point[] = [];
-        for (let y = minY; y <= maxY; y++) {
-            for (let x = minX; x <= maxX; x++) {
-                block.push({ x, y });
-            }
-        }
-        
-        return block;
-    }, []);
-    
+
     const drawModeSpecificPreview = useCallback((ctx: CanvasRenderingContext2D, worldPos: Point, currentZoom: number, currentOffset: Point, effectiveCharWidth: number, effectiveCharHeight: number, effectiveFontSize: number) => {
         const screenPos = engine.worldToScreen(worldPos.x, worldPos.y, currentZoom, currentOffset);
         
@@ -3357,6 +3507,35 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
         }
 
+        // === Render Plan Regions ===
+        // Render saved plan regions with opaque sheen
+        for (const key in engine.worldData) {
+            if (key.startsWith('plan_')) {
+                try {
+                    const planData = JSON.parse(engine.worldData[key] as string);
+                    const { startX, endX, startY, endY } = planData;
+
+                    // Use semi-transparent overlay for plan regions
+                    const planColor = `rgba(${hexToRgb(engine.textColor)}, 0.15)`;
+                    ctx.fillStyle = planColor;
+
+                    // Fill each cell in the plan region
+                    for (let worldY = startY; worldY <= endY; worldY++) {
+                        for (let worldX = startX; worldX <= endX; worldX++) {
+                            const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+
+                            // Only draw if cell is visible on screen
+                            if (screenPos.x >= -effectiveCharWidth && screenPos.x <= cssWidth &&
+                                screenPos.y >= -effectiveCharHeight && screenPos.y <= cssHeight) {
+                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Skip invalid plan data
+                }
+            }
+        }
 
         // === Render Selection Area ===
         if (engine.selectionStart && engine.selectionEnd) {
@@ -3406,6 +3585,30 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     bottomRightScreen.x - topLeftScreen.x - lineWidth,
                     bottomRightScreen.y - topLeftScreen.y - lineWidth
                 );
+            }
+        }
+
+        // === Render Selected Plan Border ===
+        if (selectedPlanKey) {
+            try {
+                const selectedPlanData = JSON.parse(engine.worldData[selectedPlanKey] as string);
+                // Draw selection border around the selected plan region
+                const topLeftScreen = engine.worldToScreen(selectedPlanData.startX, selectedPlanData.startY, currentZoom, currentOffset);
+                const bottomRightScreen = engine.worldToScreen(selectedPlanData.endX + 1, selectedPlanData.endY + 1, currentZoom, currentOffset);
+
+                // Use text accent color for selection border
+                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
+                const lineWidth = 3; // Slightly thicker to indicate selection
+                ctx.lineWidth = lineWidth;
+                const halfWidth = lineWidth / 2;
+                ctx.strokeRect(
+                    topLeftScreen.x + halfWidth,
+                    topLeftScreen.y + halfWidth,
+                    bottomRightScreen.x - topLeftScreen.x - lineWidth,
+                    bottomRightScreen.y - topLeftScreen.y - lineWidth
+                );
+            } catch (e) {
+                // Skip invalid plan data
             }
         }
 
@@ -3462,6 +3665,27 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 ctx.fillRect(destScreenPos.x, destScreenPos.y, effectiveCharWidth, effectiveCharHeight);
                             }
                         }
+                    }
+                } else if (selectedPlanKey) {
+                    // Draw preview for plan region destination
+                    try {
+                        const planData = JSON.parse(engine.worldData[selectedPlanKey] as string);
+                        ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
+
+                        for (let y = planData.startY; y <= planData.endY; y++) {
+                            for (let x = planData.startX; x <= planData.endX; x++) {
+                                const destX = x + distanceX;
+                                const destY = y + distanceY;
+                                const destScreenPos = engine.worldToScreen(destX, destY, currentZoom, currentOffset);
+
+                                if (destScreenPos.x >= -effectiveCharWidth && destScreenPos.x <= cssWidth &&
+                                    destScreenPos.y >= -effectiveCharHeight && destScreenPos.y <= cssHeight) {
+                                    ctx.fillRect(destScreenPos.x, destScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Invalid plan data, skip preview
                     }
                 } else {
                     // Check if we have an active selection
@@ -3784,7 +4008,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
+    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, selectedPlanKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
 
 
     // --- Drawing Loop Effect ---
@@ -3971,13 +4195,28 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     isClickMovementRef.current = true;
                 }
             } else {
-                // Clear any image selection if clicking on empty space
-                setSelectedImageKey(null);
+                // If no text block or image found, check for plan region
+                const planAtPosition = findPlanAtPosition(snappedWorldPos);
+
+                if (planAtPosition) {
+                    // Clear any text selection and image selection, select the plan region
+                    engine.handleSelectionStart(0, 0);
+                    engine.handleSelectionEnd();
+                    setSelectedImageKey(null);
+                    setSelectedPlanKey(planAtPosition.key);
+
+                    // Set flag to prevent trail creation
+                    isClickMovementRef.current = true;
+                } else {
+                    // Clear any selections if clicking on empty space
+                    setSelectedImageKey(null);
+                    setSelectedPlanKey(null);
+                }
             }
         }
-        
+
         canvasRef.current?.focus(); // Ensure focus for keyboard
-    }, [engine, findTextBlock, findImageAtPosition]);
+    }, [engine, findTextBlock, findImageAtPosition, findPlanAtPosition]);
     
     const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -4029,8 +4268,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     engine.handleCanvasClick(x, y, true, false, e.metaKey, e.ctrlKey);
                 }
             } else {
-                // Clear image selection when starting regular selection
+                // Clear image and plan selections when starting regular selection
                 setSelectedImageKey(null);
+                setSelectedPlanKey(null);
 
                 // Regular selection start
                 isSelectingMouseDownRef.current = true; // Track mouse down state
@@ -4183,6 +4423,35 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     // Use the engine's moveImage method
                                     engine.moveImage(imageKey, distanceX, distanceY);
                                 }
+                            }
+                        } else if (selectedPlanKey) {
+                            // Check if we're moving a selected plan region
+                            try {
+                                const planData = JSON.parse(engine.worldData[selectedPlanKey] as string);
+
+                                // Create new plan region with shifted coordinates
+                                const newPlanData = {
+                                    startX: planData.startX + distanceX,
+                                    endX: planData.endX + distanceX,
+                                    startY: planData.startY + distanceY,
+                                    endY: planData.endY + distanceY,
+                                    timestamp: Date.now()
+                                };
+
+                                // Delete old plan and create new one with shifted position
+                                const newPlanKey = `plan_${newPlanData.startX},${newPlanData.startY}_${Date.now()}`;
+
+                                engine.setWorldData(prev => {
+                                    const newData = { ...prev };
+                                    delete newData[selectedPlanKey];
+                                    newData[newPlanKey] = JSON.stringify(newPlanData);
+                                    return newData;
+                                });
+
+                                // Update selected key to the new plan region
+                                setSelectedPlanKey(newPlanKey);
+                            } catch (e) {
+                                // Invalid plan data, skip move
                             }
                         } else {
                             // Check if we have an active selection to move
@@ -4588,13 +4857,27 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             return;
         }
 
+        // Handle plan region-specific keys before passing to engine
+        if (selectedPlanKey && e.key === 'Backspace') {
+            // Delete the selected plan region
+            engine.setWorldData(prev => {
+                const newData = { ...prev };
+                delete newData[selectedPlanKey];
+                return newData;
+            });
+            setSelectedPlanKey(null); // Clear selection
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+
         // Let engine handle all key input (including regular typing)
         const preventDefault = engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey, e.shiftKey);
         if (preventDefault) {
             e.preventDefault();
             e.stopPropagation();
         }
-    }, [engine, handleKeyDownFromController, selectedImageKey, hostDialogue]);
+    }, [engine, handleKeyDownFromController, selectedImageKey, selectedPlanKey, hostDialogue]);
 
     const hiddenInputRef = useRef<HTMLInputElement>(null);
 
@@ -4653,6 +4936,84 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     />
                 </div>
             )}
+            {/* Chronological tracker for text blocks and plan regions - HIDDEN */}
+            {/* {(() => {
+                const items = getChronologicalItems();
+                if (items.length === 0) return null;
+
+                return (
+                    <div
+                        style={{
+                            position: 'absolute',
+                            top: '20px',
+                            right: '20px',
+                            maxWidth: '300px',
+                            maxHeight: '80vh',
+                            overflowY: 'auto',
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            color: '#ffffff',
+                            padding: '12px',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                            fontFamily: 'monospace',
+                            zIndex: 100,
+                            pointerEvents: 'auto',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '8px'
+                        }}
+                    >
+                        <div style={{
+                            fontWeight: 'bold',
+                            marginBottom: '4px',
+                            fontSize: '13px',
+                            borderBottom: '1px solid rgba(255, 255, 255, 0.3)',
+                            paddingBottom: '4px'
+                        }}>
+                            Content Tracker
+                        </div>
+                        {items.map((item, index) => (
+                            <div
+                                key={index}
+                                style={{
+                                    padding: '8px',
+                                    backgroundColor: item.type === 'plan'
+                                        ? 'rgba(100, 150, 255, 0.2)'
+                                        : 'rgba(150, 150, 150, 0.1)',
+                                    borderRadius: '4px',
+                                    borderLeft: item.type === 'plan'
+                                        ? '3px solid rgba(100, 150, 255, 0.8)'
+                                        : '3px solid rgba(150, 150, 150, 0.5)',
+                                    wordBreak: 'break-word'
+                                }}
+                            >
+                                <div style={{
+                                    fontSize: '10px',
+                                    opacity: 0.7,
+                                    marginBottom: '4px',
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center'
+                                }}>
+                                    <span>{item.type === 'plan' ? '📋 PLAN' : '📝 TEXT'}</span>
+                                    <span>({item.bounds.endX - item.bounds.startX + 1}×{item.bounds.endY - item.bounds.startY + 1})</span>
+                                </div>
+                                <div style={{
+                                    whiteSpace: 'pre-wrap',
+                                    fontSize: '11px',
+                                    lineHeight: '1.4',
+                                    maxHeight: '100px',
+                                    overflowY: 'auto'
+                                }}>
+                                    {item.content.length > 200
+                                        ? item.content.substring(0, 200) + '...'
+                                        : item.content}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                );
+            })()} */}
             {/* Hidden input for IME composition and mobile keyboard - only in write mode OR host mode */}
             {(!engine.isReadOnly || hostDialogue.isHostActive) && (
                 <input

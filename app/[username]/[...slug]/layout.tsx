@@ -1,7 +1,4 @@
 import { Metadata } from 'next';
-import { getUidByUsername } from '../../firebase';
-import { get, ref } from 'firebase/database';
-import { database } from '../../firebase';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -16,48 +13,29 @@ export async function generateMetadata({ params }: LayoutProps): Promise<Metadat
   const username = decodeURIComponent(resolvedParams.username).replace('@', '');
   const stateName = resolvedParams.slug?.[0] || 'default';
 
-  try {
-    // Check if screenshot exists
-    const uid = await getUidByUsername(username);
-    let screenshotUrl: string | null = null;
+  // Generate metadata with potential screenshot URL
+  // The API route will return 404 if screenshot doesn't exist
+  const screenshotUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'https://nara.ws'}/api/screenshot/${username}/${stateName}`;
 
-    if (uid) {
-      const screenshotPath = `worlds/${uid}/${stateName}/screenshot`;
-      const screenshotRef = ref(database, screenshotPath);
-      const snapshot = await get(screenshotRef);
+  const title = `Nara · ${username}/${stateName}`;
+  const description = `view ${stateName} on Nara — a tool for thinking, writing, and creating across boundless space.`;
 
-      if (snapshot.exists()) {
-        // Use API route to serve screenshot
-        screenshotUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'https://nara.ws'}/api/screenshot/${username}/${stateName}`;
-      }
-    }
-
-    // Generate metadata with og:image
-    const title = `Nara · ${username}/${stateName}`;
-    const description = `view ${stateName} on Nara — a tool for thinking, writing, and creating across boundless space.`;
-
-    return {
+  return {
+    title,
+    description,
+    openGraph: {
       title,
       description,
-      openGraph: {
-        title,
-        description,
-        images: screenshotUrl ? [{ url: screenshotUrl }] : [],
-        type: 'website',
-      },
-      twitter: {
-        card: 'summary_large_image',
-        title,
-        description,
-        images: screenshotUrl ? [screenshotUrl] : [],
-      },
-    };
-  } catch (error) {
-    console.error('Error generating metadata:', error);
-    return {
-      title: `${username}/${stateName}`,
-    };
-  }
+      images: [{ url: screenshotUrl }],
+      type: 'website',
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: [screenshotUrl],
+    },
+  };
 }
 
 export default function UserStateLayout({ children }: LayoutProps) {

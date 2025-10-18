@@ -2576,6 +2576,28 @@ export function useWorldEngine({
             return true;
         }
 
+        // === Plan Mode Exit/Cancel ===
+        if (key === 'Escape' && currentMode === 'plan') {
+            // Check if there's a meaningful selection (not just cursor preview)
+            const hasMeaningfulSelection = selectionStart && selectionEnd &&
+                (selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y);
+
+            if (hasMeaningfulSelection) {
+                // Cancel the selection
+                setSelectionStart(null);
+                setSelectionEnd(null);
+                setDialogueWithRevert("Selection canceled", setDialogueText);
+                return true;
+            }
+
+            // Exit plan mode back to default
+            setSelectionStart(null);
+            setSelectionEnd(null);
+            switchMode('default');
+            setDialogueWithRevert("Plan mode exited", setDialogueText);
+            return true;
+        }
+
         // === Search Clearing ===
         if (key === 'Escape' && isSearchActive) {
             clearSearch();
@@ -4047,7 +4069,7 @@ export function useWorldEngine({
                                             // Update with Firebase URLs once upload complete
                                             setWorldData(prev => {
                                                 const existing = prev[imageKey];
-                                                if (existing && 'type' in existing && existing.type === 'image') {
+                                                if (existing && typeof existing === 'object' && 'type' in existing && existing.type === 'image') {
                                                     return {
                                                         ...prev,
                                                         [imageKey]: {
@@ -4715,6 +4737,38 @@ export function useWorldEngine({
                 setDialogueWithRevert("Please select some text first, then press Enter to execute the command", setDialogueText);
             }
             return false;
+        }
+        // === Plan Mode - Confirm Region ===
+        else if (key === 'Enter' && currentMode === 'plan' && selectionStart && selectionEnd) {
+            const minX = Math.floor(Math.min(selectionStart.x, selectionEnd.x));
+            const maxX = Math.floor(Math.max(selectionStart.x, selectionEnd.x));
+            const minY = Math.floor(Math.min(selectionStart.y, selectionEnd.y));
+            const maxY = Math.floor(Math.max(selectionStart.y, selectionEnd.y));
+
+            // Create plan region data
+            const planRegion = {
+                startX: minX,
+                endX: maxX,
+                startY: minY,
+                endY: maxY,
+                timestamp: Date.now()
+            };
+
+            // Store plan region in worldData with unique key
+            const planKey = `plan_${minX},${minY}_${Date.now()}`;
+            setWorldData(prev => ({
+                ...prev,
+                [planKey]: JSON.stringify(planRegion)
+            }));
+
+            // Clear the selection after saving
+            setSelectionStart(null);
+            setSelectionEnd(null);
+
+            const width = maxX - minX + 1;
+            const height = maxY - minY + 1;
+            setDialogueWithRevert(`Plan region saved (${width}×${height})`, setDialogueText);
+            return true;
         }
         // === Quick Chat (Cmd+Enter) ===
         else if (key === 'Enter' && metaKey && !chatMode.isActive) {
@@ -6853,10 +6907,15 @@ export function useWorldEngine({
         // Simply mark selection process as ended
         setIsSelecting(false);
 
+        // In plan mode, show prompt to confirm region with Enter
+        if (currentMode === 'plan' && selectionStart && selectionEnd) {
+            setDialogueWithRevert("Press Enter to confirm plan region, or Escape to cancel", setDialogueText);
+        }
+
         // We keep the selection intact regardless
         // The selection will be cleared in other functions if needed
         // This allows the selection to persist after mouse up
-    }, []);
+    }, [currentMode, selectionStart, selectionEnd, setDialogueText]);
 
         // Helper function to upload images to Firebase Storage
     const uploadImageToStorage = useCallback(async (dataUrl: string, mimeType: string = 'image/png'): Promise<string> => {
