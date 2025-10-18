@@ -3464,22 +3464,44 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         }
                     }
                 } else {
-                    // If no image, check for text block at start position
-                    const textBlock = findTextBlock(shiftDragStartPos, engine.worldData, engine);
+                    // Check if we have an active selection
+                    if (engine.selectionStart && engine.selectionEnd) {
+                        // Draw preview for selection bounds
+                        const minX = Math.floor(Math.min(engine.selectionStart.x, engine.selectionEnd.x));
+                        const maxX = Math.floor(Math.max(engine.selectionStart.x, engine.selectionEnd.x));
+                        const minY = Math.floor(Math.min(engine.selectionStart.y, engine.selectionEnd.y));
+                        const maxY = Math.floor(Math.max(engine.selectionStart.y, engine.selectionEnd.y));
 
-                    if (textBlock.length > 0) {
-                        // Draw preview rectangles for each destination position
-                        ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.3)`; // Preview matching text accent color
-                        
-                        for (const pos of textBlock) {
-                            const destX = pos.x + distanceX;
-                            const destY = pos.y + distanceY;
-                            const destScreenPos = engine.worldToScreen(destX, destY, currentZoom, currentOffset);
-                            
-                            // Only draw if visible on screen
-                            if (destScreenPos.x >= -effectiveCharWidth && destScreenPos.x <= cssWidth && 
-                                destScreenPos.y >= -effectiveCharHeight && destScreenPos.y <= cssHeight) {
-                                ctx.fillRect(destScreenPos.x, destScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
+
+                        for (let y = minY; y <= maxY; y++) {
+                            for (let x = minX; x <= maxX; x++) {
+                                const destX = x + distanceX;
+                                const destY = y + distanceY;
+                                const destScreenPos = engine.worldToScreen(destX, destY, currentZoom, currentOffset);
+
+                                if (destScreenPos.x >= -effectiveCharWidth && destScreenPos.x <= cssWidth &&
+                                    destScreenPos.y >= -effectiveCharHeight && destScreenPos.y <= cssHeight) {
+                                    ctx.fillRect(destScreenPos.x, destScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                }
+                            }
+                        }
+                    } else {
+                        // No selection - use text block detection (original behavior)
+                        const textBlock = findTextBlock(shiftDragStartPos, engine.worldData, engine);
+
+                        if (textBlock.length > 0) {
+                            ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
+
+                            for (const pos of textBlock) {
+                                const destX = pos.x + distanceX;
+                                const destY = pos.y + distanceY;
+                                const destScreenPos = engine.worldToScreen(destX, destY, currentZoom, currentOffset);
+
+                                if (destScreenPos.x >= -effectiveCharWidth && destScreenPos.x <= cssWidth &&
+                                    destScreenPos.y >= -effectiveCharHeight && destScreenPos.y <= cssHeight) {
+                                    ctx.fillRect(destScreenPos.x, destScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                }
                             }
                         }
                     }
@@ -3975,26 +3997,46 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         } else if (e.button === 0) { // Left mouse button
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
-            
+
             if (e.shiftKey) {
-                // Track shift+drag start position and clear any existing selection
-                isSelectingMouseDownRef.current = false; // Ensure selection is disabled
-                // Clear any existing selection by using the engine's click handler with clearSelection=true
-                engine.handleCanvasClick(x, y, true, e.shiftKey, e.metaKey, e.ctrlKey);
+                // Shift+drag: prioritize selection, fallback to text block
+                isSelectingMouseDownRef.current = false;
+
                 const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
                 setShiftDragStartPos({
                     x: Math.floor(worldPos.x),
                     y: Math.floor(worldPos.y)
                 });
+
+                // Check if we have a selection and clicking inside it
+                if (engine.selectionStart && engine.selectionEnd) {
+                    const minX = Math.floor(Math.min(engine.selectionStart.x, engine.selectionEnd.x));
+                    const maxX = Math.floor(Math.max(engine.selectionStart.x, engine.selectionEnd.x));
+                    const minY = Math.floor(Math.min(engine.selectionStart.y, engine.selectionEnd.y));
+                    const maxY = Math.floor(Math.max(engine.selectionStart.y, engine.selectionEnd.y));
+
+                    // Check if click is inside selection bounds
+                    if (worldPos.x >= minX && worldPos.x <= maxX && worldPos.y >= minY && worldPos.y <= maxY) {
+                        // Inside selection - don't call handleCanvasClick, just prepare to move
+                        // Selection will be preserved for the move operation
+                    } else {
+                        // Outside selection - clear it and prepare to move text block at click position
+                        // Don't pass shiftKey to avoid extending selection
+                        engine.handleCanvasClick(x, y, true, false, e.metaKey, e.ctrlKey);
+                    }
+                } else {
+                    // No selection - don't pass shiftKey to avoid any selection behavior
+                    engine.handleCanvasClick(x, y, true, false, e.metaKey, e.ctrlKey);
+                }
             } else {
                 // Clear image selection when starting regular selection
                 setSelectedImageKey(null);
-                
+
                 // Regular selection start
                 isSelectingMouseDownRef.current = true; // Track mouse down state
                 engine.handleSelectionStart(x, y); // Let the engine manage selection state
             }
-            
+
             canvasRef.current?.focus();
         }
     }, [engine]);
@@ -4143,44 +4185,75 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 }
                             }
                         } else {
-                            // If no image, check for text block at start position
-                            const textBlock = findTextBlock(shiftDragStartPos, engine.worldData, engine);
-                            
-                            if (textBlock.length > 0) {
-                            
-                            
-                            // Capture all character data from the text block
-                            const capturedChars: Array<{x: number, y: number, char: string}> = [];
-                            
-                            for (const pos of textBlock) {
-                                const key = `${pos.x},${pos.y}`;
-                                const data = engine.worldData[key];
-                                if (data) {
-                                    const char = engine.isImageData(data) ? '' : engine.getCharacter(data);
-                                    if (char) {
-                                        capturedChars.push({ x: pos.x, y: pos.y, char });
-                                    } else {
+                            // Check if we have an active selection to move
+                            if (engine.selectionStart && engine.selectionEnd) {
+                                // Move all characters in selection bounds
+                                const minX = Math.floor(Math.min(engine.selectionStart.x, engine.selectionEnd.x));
+                                const maxX = Math.floor(Math.max(engine.selectionStart.x, engine.selectionEnd.x));
+                                const minY = Math.floor(Math.min(engine.selectionStart.y, engine.selectionEnd.y));
+                                const maxY = Math.floor(Math.max(engine.selectionStart.y, engine.selectionEnd.y));
+
+                                const capturedChars: Array<{x: number, y: number, char: string}> = [];
+
+                                // Iterate through all cells in selection bounds
+                                for (let y = minY; y <= maxY; y++) {
+                                    for (let x = minX; x <= maxX; x++) {
+                                        const key = `${x},${y}`;
+                                        const data = engine.worldData[key];
+                                        if (data && !engine.isImageData(data)) {
+                                            const char = engine.getCharacter(data);
+                                            if (char) {
+                                                capturedChars.push({ x, y, char });
+                                            }
+                                        }
                                     }
-                                } else {
                                 }
-                            }
-                            
-                            
-                            if (capturedChars.length > 0) {
-                                // Prepare batch move data
-                                const moves = capturedChars.map(({ x, y, char }) => ({
-                                    fromX: x,
-                                    fromY: y,
-                                    toX: x + distanceX,
-                                    toY: y + distanceY,
-                                    char
-                                }));
-                                
-                                
-                                // Execute batch move
-                                engine.batchMoveCharacters(moves);
-                            }
-                            
+
+                                if (capturedChars.length > 0) {
+                                    const moves = capturedChars.map(({ x, y, char }) => ({
+                                        fromX: x,
+                                        fromY: y,
+                                        toX: x + distanceX,
+                                        toY: y + distanceY,
+                                        char
+                                    }));
+
+                                    engine.batchMoveCharacters(moves);
+
+                                    // Clear selection after successful move
+                                    engine.setSelectionStart(null);
+                                    engine.setSelectionEnd(null);
+                                }
+                            } else {
+                                // No selection - use text block detection (original behavior)
+                                const textBlock = findTextBlock(shiftDragStartPos, engine.worldData, engine);
+
+                                if (textBlock.length > 0) {
+                                    const capturedChars: Array<{x: number, y: number, char: string}> = [];
+
+                                    for (const pos of textBlock) {
+                                        const key = `${pos.x},${pos.y}`;
+                                        const data = engine.worldData[key];
+                                        if (data) {
+                                            const char = engine.isImageData(data) ? '' : engine.getCharacter(data);
+                                            if (char) {
+                                                capturedChars.push({ x: pos.x, y: pos.y, char });
+                                            }
+                                        }
+                                    }
+
+                                    if (capturedChars.length > 0) {
+                                        const moves = capturedChars.map(({ x, y, char }) => ({
+                                            fromX: x,
+                                            fromY: y,
+                                            toX: x + distanceX,
+                                            toY: y + distanceY,
+                                            char
+                                        }));
+
+                                        engine.batchMoveCharacters(moves);
+                                    }
+                                }
                             }
                         }
                     }
