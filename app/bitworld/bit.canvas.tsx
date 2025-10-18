@@ -4220,9 +4220,17 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                                     engine.batchMoveCharacters(moves);
 
-                                    // Clear selection after successful move
-                                    engine.setSelectionStart(null);
-                                    engine.setSelectionEnd(null);
+                                    // Clear selection after successful move by clicking at the new position
+                                    const rect = canvasRef.current?.getBoundingClientRect();
+                                    if (rect) {
+                                        const newCenterScreenPos = engine.worldToScreen(
+                                            minX + distanceX,
+                                            minY + distanceY,
+                                            engine.zoomLevel,
+                                            engine.viewOffset
+                                        );
+                                        engine.handleCanvasClick(newCenterScreenPos.x, newCenterScreenPos.y, true, false, false, false);
+                                    }
                                 }
                             } else {
                                 // No selection - use text block detection (original behavior)
