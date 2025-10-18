@@ -165,6 +165,7 @@ export default function Home() {
           isVerifyingEmail={isVerifyingEmail}
           hostTextColor={hostColors.text}
           hostBackgroundColor={hostColors.background}
+          hostDimBackground={false}
         />
       </div>
     );

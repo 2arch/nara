@@ -51,9 +51,10 @@ interface BitCanvasProps {
     hostTextColor?: string; // Text color for host mode
     hostBackgroundColor?: string; // Host background color to save as initial world setting
     onPanDistanceChange?: (distance: number) => void; // Callback for pan distance tracking
+    hostDimBackground?: boolean; // Whether to dim background when host dialogue appears
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -2008,6 +2009,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         // === Render Host Data (Centered at Initial Position) ===
         if (engine.hostData) {
+            // Dim surrounding content when host dialogue is active (only if enabled)
+            if (hostDimBackground) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                ctx.fillRect(0, 0, cssWidth, cssHeight);
+            }
+
             const hostText = engine.hostData.text;
             const hostColor = engine.hostData.color || engine.textColor;
 
@@ -2072,9 +2079,26 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 textStartY = Math.floor(engine.hostData.centerPos.y - totalHeight / 2);
             }
 
-            // First pass: Render glow effect around text
+            // First pass: Render glow effect with gentle pulse + violent flicker perturbation
             const GLOW_RADIUS = 2; // How many cells away the glow extends
-            const glowAlphas = [0.6, 0.3]; // Alpha values for distance 1, 2
+
+            // Base: Gentle sine wave pulse
+            const pulseSpeed = 0.001; // Slow, gentle pulse
+            const pulsePhase = (Date.now() * pulseSpeed) % (Math.PI * 2);
+            const basePulse = 0.6 + Math.sin(pulsePhase) * 0.2; // Oscillates 0.4 to 0.8
+
+            // Perturbation: Violent flickering noise (smaller but noticeable)
+            const flickerSpeed = 0.05; // Fast flicker
+            const time = Date.now() * flickerSpeed;
+            const flicker1 = Math.sin(time * 2.3) * 0.5 + 0.5; // Fast variation
+            const flicker2 = Math.sin(time * 4.7) * 0.5 + 0.5; // Rapid jitter
+            const randomNoise = Math.random(); // Random component
+
+            // Combine: base pulse with small violent perturbation layered on top
+            const flickerPerturbation = (flicker1 * 0.08 + flicker2 * 0.05 + randomNoise * 0.07);
+            const pulseIntensity = basePulse + flickerPerturbation;
+
+            const glowAlphas = [0.6 * pulseIntensity, 0.3 * pulseIntensity]; // Alpha values for distance 1, 2
 
             // Parse background color for alpha manipulation
             const bgHex = (engine.backgroundColor || '#FFFFFF').replace('#', '');
@@ -2099,9 +2123,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             textCells.forEach(cellKey => {
                 const [cx, cy] = cellKey.split(',').map(Number);
 
+                // Extended radius for cardinal directions (up, down, left, right)
+                const CARDINAL_EXTENSION = 1; // Extra cell in cardinal directions
+                const maxRadius = GLOW_RADIUS + CARDINAL_EXTENSION;
+
                 // Render glow in surrounding cells
-                for (let dy = -GLOW_RADIUS; dy <= GLOW_RADIUS; dy++) {
-                    for (let dx = -GLOW_RADIUS; dx <= GLOW_RADIUS; dx++) {
+                for (let dy = -maxRadius; dy <= maxRadius; dy++) {
+                    for (let dx = -maxRadius; dx <= maxRadius; dx++) {
                         if (dx === 0 && dy === 0) continue; // Skip the text cell itself
 
                         const glowX = cx + dx;
@@ -2110,10 +2138,23 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         // Skip if this is also a text cell
                         if (textCells.has(`${glowX},${glowY}`)) continue;
 
-                        const distance = Math.max(Math.abs(dx), Math.abs(dy)); // Chebyshev distance for square glow
-                        if (distance > GLOW_RADIUS) continue;
+                        // Check if on cardinal direction (straight up/down/left/right)
+                        const isCardinal = (dx === 0 || dy === 0);
 
-                        const alpha = glowAlphas[distance - 1];
+                        // Use extended radius for cardinals, normal for diagonals
+                        const effectiveRadius = isCardinal ? maxRadius : GLOW_RADIUS;
+
+                        const distance = Math.max(Math.abs(dx), Math.abs(dy)); // Chebyshev distance
+                        if (distance > effectiveRadius) continue;
+
+                        // Map distance to alpha (use standard glow values, fade for extended)
+                        let alpha;
+                        if (distance <= GLOW_RADIUS) {
+                            alpha = glowAlphas[distance - 1];
+                        } else {
+                            // Extended glow (only happens on cardinals) - very faint
+                            alpha = glowAlphas[GLOW_RADIUS - 1] * 0.3;
+                        }
                         if (!alpha) continue;
 
                         if (glowX >= startWorldX - 5 && glowX <= endWorldX + 5 && glowY >= startWorldY - 5 && glowY <= endWorldY + 5) {
@@ -2190,22 +2231,64 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
 
                             if (char && char.trim() !== '') {
-                                // Apply text background when monogram is enabled
-                                const textBackground = engine.currentTextStyle.background || (monogramSystem.options.enabled ? engine.backgroundColor : undefined);
-                                if (textBackground) {
-                                    ctx.fillStyle = textBackground;
-                                    ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                                }
-
-                                // Render the character in a dimmed color (50% opacity)
-                                const dimmedColor = hostColor.startsWith('#')
-                                    ? hostColor + '80'
-                                    : hostColor.replace('rgb', 'rgba').replace(')', ', 0.5)');
-                                ctx.fillStyle = dimmedColor;
+                                // Render the hint character in backgroundColor (no background, no glow)
+                                ctx.fillStyle = engine.backgroundColor;
                                 renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
                             }
                         }
                     }
+                }
+            }
+
+            // Check if host dialogue is off-screen and render arrow if needed
+            const hostCenterScreenPos = engine.worldToScreen(engine.hostData.centerPos.x, engine.hostData.centerPos.y, currentZoom, currentOffset);
+            const isHostVisible = hostCenterScreenPos.x >= 0 && hostCenterScreenPos.x <= cssWidth &&
+                                  hostCenterScreenPos.y >= 0 && hostCenterScreenPos.y <= cssHeight;
+
+            if (!isHostVisible) {
+                // Host dialogue is off-screen, draw arrow pointing to it
+                const viewportCenterScreen = {
+                    x: cssWidth / 2,
+                    y: cssHeight / 2
+                };
+
+                const intersection = getViewportEdgeIntersection(
+                    viewportCenterScreen.x, viewportCenterScreen.y,
+                    hostCenterScreenPos.x, hostCenterScreenPos.y,
+                    cssWidth, cssHeight
+                );
+
+                if (intersection) {
+                    const edgeBuffer = ARROW_MARGIN;
+                    let adjustedX = intersection.x;
+                    let adjustedY = intersection.y;
+
+                    // Clamp to viewport bounds with margin
+                    adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
+                    adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
+
+                    // Draw arrow with flickering glow effect (same flicker as text)
+                    const glowAlpha = pulseIntensity;
+
+                    // Render glow layers for arrow (larger to smaller) - only glow pulses
+                    const glowLayers = [
+                        { scale: 2.5, alpha: 0.15 * glowAlpha },
+                        { scale: 2.0, alpha: 0.25 * glowAlpha },
+                        { scale: 1.5, alpha: 0.35 * glowAlpha }
+                    ];
+
+                    glowLayers.forEach(layer => {
+                        const glowColor = `rgba(${bgR}, ${bgG}, ${bgB}, ${layer.alpha})`;
+                        ctx.save();
+                        ctx.translate(adjustedX, adjustedY);
+                        ctx.scale(layer.scale, layer.scale);
+                        ctx.translate(-adjustedX, -adjustedY);
+                        drawArrow(ctx, adjustedX, adjustedY, intersection.angle, glowColor);
+                        ctx.restore();
+                    });
+
+                    // Draw main arrow in solid backgroundColor (no pulsing)
+                    drawArrow(ctx, adjustedX, adjustedY, intersection.angle, engine.backgroundColor);
                 }
             }
         }
