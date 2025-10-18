@@ -128,28 +128,6 @@ export default function UserState() {
     return () => clearInterval(interval);
   }, []);
 
-  // Only block on UID lookup - canvas renders immediately, worldData loads in after
-  // Firebase security rules will kick unauthenticated users if world is private
-  if (uidLookupLoading) {
-    return (
-      <div
-        className="w-screen"
-        style={{
-          height: '100dvh',
-          backgroundColor: '#000'
-        }}
-      />
-    );
-  }
-
-  if (!targetUserUid) {
-    return (
-      <div className="w-screen flex items-center justify-center" style={{height: '100dvh'}}>
-        <div>User not found</div>
-      </div>
-    );
-  }
-
   const SIGNUP_THRESHOLD = 100;
   const progress = Math.min((panDistance / SIGNUP_THRESHOLD) * 100, 100);
 

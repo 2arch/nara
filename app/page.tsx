@@ -1,8 +1,7 @@
 "use client";
 import React, { useState, useEffect, useCallback } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useWorldEngine } from './bitworld/world.engine';
-import { BitHomeCanvas } from './bitworld/bit.home';
 import { BitCanvas } from './bitworld/bit.canvas';
 import { auth } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -14,15 +13,6 @@ export default function Home() {
   const [authLoading, setAuthLoading] = useState(true);
   const [isVerifyingEmail, setIsVerifyingEmail] = useState(false);
   const router = useRouter();
-  const pathname = usePathname();
-
-  // Control form display based on route
-  const showForm = pathname === '/signup' || pathname === '/login';
-  const isSignup = pathname === '/signup';
-  const isLogin = pathname === '/login';
-
-  // Always use host mode on home page (both authenticated and anonymous)
-  const shouldUseHostMode = pathname === '/' && !authLoading;
 
   // Check for email link sign-in on mount
   useEffect(() => {
@@ -55,8 +45,8 @@ export default function Home() {
       setUser(user);
       setAuthLoading(false);
 
-      // If user is authenticated and on home page, redirect to their world
-      if (user && pathname === '/') {
+      // If user is authenticated, redirect to their world
+      if (user) {
         const username = await getUsernameByUid(user.uid);
         if (username) {
           router.push(`/@${username}`);
@@ -65,7 +55,7 @@ export default function Home() {
     });
 
     return () => unsubscribe();
-  }, [pathname, router]);
+  }, [router]);
 
   // Dynamic colors based on time of day
   const [hostColors, setHostColors] = useState(() => {
@@ -77,43 +67,18 @@ export default function Home() {
   });
 
   const engine = useWorldEngine({
-    worldId: user ? 'home' : null, // Use 'home' for authenticated users, null for guests
-    initialBackgroundColor: pathname === '/' ? hostColors.background : undefined,
-    userUid: user?.uid || null,
-    initialZoomLevel: pathname === '/' ? 1.6 : 1.0 // Zoomed in for host mode onboarding
+    worldId: null, // Always null for home page (anonymous users)
+    initialBackgroundColor: hostColors.background,
+    userUid: null, // Always null for home page
+    initialZoomLevel: 1.6 // Zoomed in for host mode onboarding
   });
-
-  // Navigation handlers
-  const handleLoginClick = useCallback(() => {
-    // Navigate to login page
-    router.push('/login');
-  }, [router]);
-
-  const handleSignupClick = useCallback(() => {
-    // Update URL without unmounting component
-    router.push('/signup');
-  }, [router]);
-
-  const handleBackToHome = useCallback(() => {
-    // Return to home from signup mode
-    router.push('/');
-  }, [router]);
 
   const handleAuthSuccess = useCallback((username: string) => {
     // Navigate to user's homepage (background color already saved to Firebase)
     router.push(`/@${username}`);
   }, [router]);
 
-  const handleVisitClick = useCallback(async () => {
-    if (user) {
-      const username = await getUsernameByUid(user.uid);
-      if (username) {
-        router.push(`/@${username}`);
-      }
-    }
-  }, [router, user]);
-
-  // Simple cursor blink effect (like BitCanvas)
+  // Simple cursor blink effect
   useEffect(() => {
     const interval = setInterval(() => {
       setCursorAlternate(prev => !prev);
@@ -121,81 +86,25 @@ export default function Home() {
     return () => clearInterval(interval);
   }, []);
 
-  // Clear existing data when engine loads (removed - this was causing infinite loops)
+  // If coming from email verification, don't start normal flow
+  const initialFlow = isVerifyingEmail ? undefined : "welcome";
 
-  // Handle escape key to return to home from signup
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && showForm) {
-        handleBackToHome();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showForm, handleBackToHome]);
-
-  if (authLoading || engine.isLoadingWorld) {
-    return (
-      <div className="w-screen flex items-center justify-center" style={{backgroundColor: '#F8F8F0', height: '100dvh'}}>
-        <div style={{ fontFamily: 'monospace', fontSize: '14px', color: '#000' }}>
-          {authLoading ? 'loading...' : 'redirecting...'}
-        </div>
-      </div>
-    );
-  }
-
-  // Use host mode for anonymous users on home page
-  if (shouldUseHostMode) {
-    // If coming from email verification, don't start normal flow
-    const initialFlow = isVerifyingEmail ? undefined : "welcome";
-
-    return (
-      <div className="w-screen relative" style={{backgroundColor: '#F8F8F0', height: '100dvh'}}>
-        <BitCanvas
-          engine={engine}
-          cursorColorAlternate={cursorAlternate}
-          className="w-full h-full"
-          monogramEnabled={true}
-          dialogueEnabled={false}
-          hostModeEnabled={true}
-          initialHostFlow={initialFlow}
-          onAuthSuccess={handleAuthSuccess}
-          fontFamily={engine.fontFamily}
-          isVerifyingEmail={isVerifyingEmail}
-          hostTextColor={hostColors.text}
-          hostBackgroundColor={hostColors.background}
-          hostDimBackground={false}
-        />
-      </div>
-    );
-  }
-
-  // Use old form-based UI for /login and /signup routes
   return (
     <div className="w-screen relative" style={{backgroundColor: '#F8F8F0', height: '100dvh'}}>
-      <BitHomeCanvas
+      <BitCanvas
         engine={engine}
         cursorColorAlternate={cursorAlternate}
         className="w-full h-full"
         monogramEnabled={true}
-        showForm={showForm}
-        isSignup={isSignup}
-        taglineText={!showForm ? {
-          title: "nara web services",
-          subtitle: "intelligence, simplified."
-        } : undefined}
-        navButtons={!showForm ? (user ? {
-          onVisitClick: handleVisitClick,
-          isAuthenticated: true
-        } : {
-          onLoginClick: handleLoginClick,
-          onSignupClick: handleSignupClick,
-          isAuthenticated: false
-        }) : undefined}
-        onBackClick={showForm ? handleBackToHome : undefined}
+        dialogueEnabled={false}
+        hostModeEnabled={true}
+        initialHostFlow={initialFlow}
         onAuthSuccess={handleAuthSuccess}
         fontFamily={engine.fontFamily}
+        isVerifyingEmail={isVerifyingEmail}
+        hostTextColor={hostColors.text}
+        hostBackgroundColor={hostColors.background}
+        hostDimBackground={false}
       />
     </div>
   );

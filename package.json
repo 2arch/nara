@@ -19,6 +19,7 @@
     "@types/katex": "^0.16.7",
     "@types/three": "^0.175.0",
     "firebase": "^11.5.0",
+    "gifuct-js": "^2.1.2",
     "html2canvas": "^1.4.1",
     "katex": "^0.16.23",
     "next": "15.2.4",

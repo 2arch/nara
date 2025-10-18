@@ -542,17 +542,47 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Cache for uploaded images to avoid reloading
     const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
 
+    // Cache for parsed GIF frame data
+    const gifFrameCache = useRef<Map<string, { frames: HTMLImageElement[], delays: number[] }>>(new Map());
+
     // Preload all images immediately when worldData changes (don't wait for viewport)
     useEffect(() => {
+        const loadGIFFrames = (frameTiming: Array<{ url: string; delay: number }>, cacheKey: string) => {
+            if (gifFrameCache.current.has(cacheKey)) return; // Already cached
+
+            try {
+                const frameImages: HTMLImageElement[] = [];
+                const frameDelays: number[] = [];
+
+                for (const frame of frameTiming) {
+                    // Create image from URL
+                    const img = new Image();
+                    img.src = frame.url;
+                    frameImages.push(img);
+                    frameDelays.push(frame.delay);
+                }
+
+                // Cache all frames and delays
+                gifFrameCache.current.set(cacheKey, { frames: frameImages, delays: frameDelays });
+            } catch (error) {
+                console.error('Error loading GIF frames:', error);
+            }
+        };
+
         for (const key in engine.worldData) {
             if (key.startsWith('image_')) {
                 const imageData = engine.worldData[key];
                 if (engine.isImageData(imageData)) {
-                    // Only preload if not already cached
+                    // Preload main image
                     if (!imageCache.current.has(imageData.src)) {
                         const img = new Image();
                         img.src = imageData.src;
                         imageCache.current.set(imageData.src, img);
+                    }
+
+                    // Load GIF frames if animated
+                    if (imageData.isAnimated && imageData.frameTiming && !gifFrameCache.current.has(imageData.src)) {
+                        loadGIFFrames(imageData.frameTiming, imageData.src);
                     }
                 }
             }
@@ -1818,34 +1848,67 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         // Calculate screen positions
                         const startScreenPos = engine.worldToScreen(imageData.startX, imageData.startY, currentZoom, currentOffset);
                         const endScreenPos = engine.worldToScreen(imageData.endX + 1, imageData.endY + 1, currentZoom, currentOffset);
-                        
+
                         // Calculate target dimensions based on grid cells
                         const targetWidth = endScreenPos.x - startScreenPos.x;
                         const targetHeight = endScreenPos.y - startScreenPos.y;
-                        
-                        // Check if image is already cached
-                        let img = imageCache.current.get(imageData.src);
-                        if (!img) {
-                            // Create and cache new image
-                            img = new Image();
-                            img.onload = () => {
-                                // Image loaded, next frame will render it
-                            };
-                            img.src = imageData.src;
-                            imageCache.current.set(imageData.src, img);
+
+                        // Determine which image to use (animated GIF frame or static image)
+                        let img: HTMLImageElement | undefined;
+
+                        if (imageData.isAnimated && imageData.totalDuration && imageData.animationStartTime) {
+                            // Get parsed GIF frames from cache
+                            const gifData = gifFrameCache.current.get(imageData.src);
+
+                            if (gifData && gifData.frames.length > 0) {
+                                // Calculate elapsed time since animation started
+                                const elapsedMs = Date.now() - imageData.animationStartTime;
+
+                                // Calculate which frame to display (loop animation)
+                                const loopedTime = elapsedMs % imageData.totalDuration;
+                                let accumulatedTime = 0;
+                                let frameIndex = 0;
+
+                                for (let i = 0; i < gifData.delays.length; i++) {
+                                    accumulatedTime += gifData.delays[i];
+                                    if (loopedTime < accumulatedTime) {
+                                        frameIndex = i;
+                                        break;
+                                    }
+                                }
+
+                                // Use the current frame
+                                img = gifData.frames[frameIndex];
+
+                                // Fallback to first frame if current frame isn't loaded
+                                if (!img || !img.complete || img.naturalWidth === 0) {
+                                    img = gifData.frames[0];
+                                }
+                            } else {
+                                // GIF not parsed yet, use static image as fallback
+                                img = imageCache.current.get(imageData.src);
+                            }
+                        } else {
+                            // Static image
+                            img = imageCache.current.get(imageData.src);
+                            if (!img) {
+                                img = new Image();
+                                img.src = imageData.src;
+                                imageCache.current.set(imageData.src, img);
+                            }
                         }
-                        
+
                         // Only draw if image is fully loaded
-                        if (img.complete && img.naturalWidth > 0) {
+                        if (img && img.complete && img.naturalWidth > 0) {
                             // Calculate crop and fit dimensions
                             const aspectRatio = img.width / img.height;
                             const targetAspectRatio = targetWidth / targetHeight;
-                            
+
                             let drawWidth = targetWidth;
                             let drawHeight = targetHeight;
                             let offsetX = 0;
                             let offsetY = 0;
-                            
+
                             // Crop to fit - fill the entire target area
                             if (aspectRatio > targetAspectRatio) {
                                 // Image is wider than target - crop sides
@@ -1858,13 +1921,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 offsetY = (targetHeight - scaledHeight) / 2;
                                 drawHeight = scaledHeight;
                             }
-                            
+
                             // Use clipping to ensure image doesn't exceed target bounds
                             ctx.save();
                             ctx.beginPath();
                             ctx.rect(startScreenPos.x, startScreenPos.y, targetWidth, targetHeight);
                             ctx.clip();
-                            
+
                             // Draw the image
                             ctx.drawImage(
                                 img,
@@ -1873,7 +1936,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 drawWidth,
                                 drawHeight
                             );
-                            
+
                             ctx.restore();
                         }
                     }
@@ -1896,21 +1959,54 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const targetWidth = endScreenPos.x - startScreenPos.x;
                 const targetHeight = endScreenPos.y - startScreenPos.y;
 
-                // Check if image is cached
-                let img = imageCache.current.get(imageData.src);
-                if (!img) {
-                    // Create and cache new image
-                    img = new Image();
-                    img.crossOrigin = 'anonymous';
-                    img.onload = () => {
-                        // Force re-render when loaded
-                    };
-                    img.src = imageData.src;
-                    imageCache.current.set(imageData.src, img);
+                // Determine which image to use (animated GIF frame or static image)
+                let img: HTMLImageElement | undefined;
+
+                if (imageData.isAnimated && imageData.totalDuration && imageData.animationStartTime) {
+                    // Get parsed GIF frames from cache
+                    const gifData = gifFrameCache.current.get(imageData.src);
+
+                    if (gifData && gifData.frames.length > 0) {
+                        // Calculate elapsed time since animation started
+                        const elapsedMs = Date.now() - imageData.animationStartTime;
+
+                        // Calculate which frame to display (loop animation)
+                        const loopedTime = elapsedMs % imageData.totalDuration;
+                        let accumulatedTime = 0;
+                        let frameIndex = 0;
+
+                        for (let i = 0; i < gifData.delays.length; i++) {
+                            accumulatedTime += gifData.delays[i];
+                            if (loopedTime < accumulatedTime) {
+                                frameIndex = i;
+                                break;
+                            }
+                        }
+
+                        // Use the current frame
+                        img = gifData.frames[frameIndex];
+
+                        // Fallback to first frame if current frame isn't loaded
+                        if (!img || !img.complete || img.naturalWidth === 0) {
+                            img = gifData.frames[0];
+                        }
+                    } else {
+                        // GIF not parsed yet, use static image as fallback
+                        img = imageCache.current.get(imageData.src);
+                    }
+                } else {
+                    // Static image
+                    img = imageCache.current.get(imageData.src);
+                    if (!img) {
+                        img = new Image();
+                        img.crossOrigin = 'anonymous';
+                        img.src = imageData.src;
+                        imageCache.current.set(imageData.src, img);
+                    }
                 }
 
                 // Only draw if image is fully loaded
-                if (img.complete && img.naturalWidth > 0) {
+                if (img && img.complete && img.naturalWidth > 0) {
                     // Calculate crop and fit
                     const aspectRatio = img.width / img.height;
                     const targetAspectRatio = targetWidth / targetHeight;

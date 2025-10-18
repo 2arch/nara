@@ -14,6 +14,7 @@ import { createSubtitleCycler, setDialogueWithRevert, abortCurrentAI, isAIActive
 import { logger } from './logger';
 import { useAutoDialogue } from './dialogue';
 import { get } from 'firebase/database';
+import { parseGIFFromArrayBuffer, getCurrentFrame, isGIFUrl } from './gif.parser';
 
 // Lazy-load heavy AI functions
 const loadAI = async () => {
@@ -51,13 +52,18 @@ export interface StyledCharacter {
 
 export interface ImageData {
     type: 'image';
-    src: string; // Data URL or blob URL
+    src: string; // Data URL or blob URL (for GIFs, this is the first frame URL)
     startX: number;
     startY: number;
     endX: number;
     endY: number;
     originalWidth: number;
     originalHeight: number;
+    // GIF animation data (optional)
+    isAnimated?: boolean;
+    frameTiming?: Array<{ url: string; delay: number }>; // Frame URLs and delays
+    totalDuration?: number; // Total animation duration in ms
+    animationStartTime?: number; // Timestamp when animation started (for frame calculation)
 }
 
 export interface ListData {
@@ -3922,74 +3928,214 @@ export function useWorldEngine({
                         try {
                             setDialogueWithRevert(isBitmapMode ? "Processing bitmap..." : "Processing image...", setDialogueText);
 
-                            // Convert file to data URL
-                            const reader = new FileReader();
-                            reader.onload = async (event) => {
-                                const dataUrl = event.target?.result as string;
+                            // Check if file is a GIF
+                            const isGIF = file.type === 'image/gif' || file.name.toLowerCase().endsWith('.gif');
 
-                                // Create image to get dimensions
-                                const img = new Image();
-                                img.onload = async () => {
-                                    // Calculate selection dimensions
-                                    const selectionWidth = selection.endX - selection.startX + 1;
-                                    const selectionHeight = selection.endY - selection.startY + 1;
+                            if (isGIF && !isBitmapMode) {
+                                // Parse GIF and show immediately (optimistic), upload in background
+                                const arrayBufferReader = new FileReader();
+                                arrayBufferReader.onload = async (event) => {
+                                    const arrayBuffer = event.target?.result as ArrayBuffer;
 
-                                    let finalSrc = dataUrl;
+                                    try {
+                                        setDialogueWithRevert("Loading GIF...", setDialogueText);
 
-                                    if (isBitmapMode) {
-                                        try {
-                                            // Import bitmap processing utilities
-                                            const { processImageToBitmap } = await import('./image.bitmap');
+                                        const parsedGIF = parseGIFFromArrayBuffer(arrayBuffer);
 
-                                            // Use the larger of the two selection dimensions for grid size
-                                            const gridSize = Math.max(selectionWidth, selectionHeight);
-
-                                            // Process image to bitmap using current text color
-                                            const bitmapCanvas = processImageToBitmap(img, {
-                                                gridSize,
-                                                color: textColor
-                                            });
-
-                                            // Convert bitmap canvas to data URL
-                                            finalSrc = bitmapCanvas.toDataURL();
-                                        } catch (bitmapError) {
-                                            logger.error('Error processing bitmap:', bitmapError);
-                                            setDialogueWithRevert("Error processing bitmap, using original image", setDialogueText);
+                                        if (!parsedGIF || !parsedGIF.frames || parsedGIF.frames.length === 0) {
+                                            setDialogueWithRevert("Error parsing GIF, falling back to static image", setDialogueText);
+                                            // Fall back to regular image upload
+                                            const reader = new FileReader();
+                                            reader.onload = async (e) => {
+                                                const dataUrl = e.target?.result as string;
+                                                const img = new Image();
+                                                img.onload = async () => {
+                                                    const selectionWidth = selection.endX - selection.startX + 1;
+                                                    const selectionHeight = selection.endY - selection.startY + 1;
+                                                    const storageUrl = await uploadImageToStorage(dataUrl);
+                                                    const imageData: ImageData = {
+                                                        type: 'image',
+                                                        src: storageUrl,
+                                                        startX: selection.startX,
+                                                        startY: selection.startY,
+                                                        endX: selection.endX,
+                                                        endY: selection.endY,
+                                                        originalWidth: img.width,
+                                                        originalHeight: img.height
+                                                    };
+                                                    const imageKey = `image_${selection.startX},${selection.startY}`;
+                                                    setWorldData(prev => ({ ...prev, [imageKey]: imageData }));
+                                                    setSelectionStart(null);
+                                                    setSelectionEnd(null);
+                                                    setDialogueWithRevert(`Image uploaded to region (${selectionWidth}x${selectionHeight} cells)`, setDialogueText);
+                                                };
+                                                img.src = dataUrl;
+                                            };
+                                            reader.readAsDataURL(file);
+                                            return;
                                         }
+
+                                        // Calculate selection dimensions
+                                        const selectionWidth = selection.endX - selection.startX + 1;
+                                        const selectionHeight = selection.endY - selection.startY + 1;
+
+                                        // Convert frames to local data URLs immediately
+                                        const localFrameTiming: Array<{ url: string; delay: number }> = [];
+
+                                        for (let i = 0; i < parsedGIF.frames.length; i++) {
+                                            const frame = parsedGIF.frames[i];
+
+                                            // Create canvas to convert ImageData to data URL
+                                            const canvas = document.createElement('canvas');
+                                            canvas.width = frame.imageData.width;
+                                            canvas.height = frame.imageData.height;
+                                            const ctx = canvas.getContext('2d');
+
+                                            if (ctx) {
+                                                ctx.putImageData(frame.imageData, 0, 0);
+                                                const frameDataUrl = canvas.toDataURL('image/png');
+
+                                                localFrameTiming.push({
+                                                    url: frameDataUrl,
+                                                    delay: frame.delay
+                                                });
+                                            }
+                                        }
+
+                                        // Create image key
+                                        const imageKey = `image_${selection.startX},${selection.startY}`;
+
+                                        // Show GIF immediately with local data URLs (optimistic)
+                                        const optimisticImageData: ImageData = {
+                                            type: 'image',
+                                            src: localFrameTiming[0].url,
+                                            startX: selection.startX,
+                                            startY: selection.startY,
+                                            endX: selection.endX,
+                                            endY: selection.endY,
+                                            originalWidth: parsedGIF.width,
+                                            originalHeight: parsedGIF.height,
+                                            isAnimated: true,
+                                            frameTiming: localFrameTiming,
+                                            totalDuration: parsedGIF.totalDuration,
+                                            animationStartTime: Date.now()
+                                        };
+
+                                        setWorldData(prev => ({
+                                            ...prev,
+                                            [imageKey]: optimisticImageData
+                                        }));
+
+                                        // Clear selection immediately
+                                        setSelectionStart(null);
+                                        setSelectionEnd(null);
+
+                                        setDialogueWithRevert(`GIF loaded (${localFrameTiming.length} frames)`, setDialogueText);
+
+                                        // Upload to Firebase in background
+                                        (async () => {
+                                            const uploadedFrameTiming: Array<{ url: string; delay: number }> = [];
+
+                                            for (let i = 0; i < localFrameTiming.length; i++) {
+                                                const frameStorageUrl = await uploadImageToStorage(localFrameTiming[i].url);
+                                                uploadedFrameTiming.push({
+                                                    url: frameStorageUrl,
+                                                    delay: localFrameTiming[i].delay
+                                                });
+                                            }
+
+                                            // Update with Firebase URLs once upload complete
+                                            setWorldData(prev => {
+                                                const existing = prev[imageKey];
+                                                if (existing && 'type' in existing && existing.type === 'image') {
+                                                    return {
+                                                        ...prev,
+                                                        [imageKey]: {
+                                                            ...existing,
+                                                            src: uploadedFrameTiming[0].url,
+                                                            frameTiming: uploadedFrameTiming
+                                                        }
+                                                    };
+                                                }
+                                                return prev;
+                                            });
+                                        })();
+                                    } catch (error) {
+                                        logger.error('Error parsing GIF:', error);
+                                        setDialogueWithRevert("Error parsing GIF animation", setDialogueText);
                                     }
-
-                                    // Upload to Firebase Storage and get URL
-                                    const storageUrl = await uploadImageToStorage(finalSrc);
-
-                                    // Create image data entry
-                                    const imageData: ImageData = {
-                                        type: 'image',
-                                        src: storageUrl,
-                                        startX: selection.startX,
-                                        startY: selection.startY,
-                                        endX: selection.endX,
-                                        endY: selection.endY,
-                                        originalWidth: img.width,
-                                        originalHeight: img.height
-                                    };
-
-                                    // Store image with unique key
-                                    const imageKey = `image_${selection.startX},${selection.startY}`;
-                                    setWorldData(prev => ({
-                                        ...prev,
-                                        [imageKey]: imageData
-                                    }));
-
-                                    // Clear selection
-                                    setSelectionStart(null);
-                                    setSelectionEnd(null);
-
-                                    const modeText = isBitmapMode ? "Bitmap" : "Image";
-                                    setDialogueWithRevert(`${modeText} uploaded to region (${selectionWidth}x${selectionHeight} cells)`, setDialogueText);
                                 };
-                                img.src = dataUrl;
-                            };
-                            reader.readAsDataURL(file);
+                                arrayBufferReader.readAsArrayBuffer(file);
+                            } else {
+                                // Regular image upload (non-GIF or bitmap mode)
+                                const reader = new FileReader();
+                                reader.onload = async (event) => {
+                                    const dataUrl = event.target?.result as string;
+
+                                    // Create image to get dimensions
+                                    const img = new Image();
+                                    img.onload = async () => {
+                                        // Calculate selection dimensions
+                                        const selectionWidth = selection.endX - selection.startX + 1;
+                                        const selectionHeight = selection.endY - selection.startY + 1;
+
+                                        let finalSrc = dataUrl;
+
+                                        if (isBitmapMode) {
+                                            try {
+                                                // Import bitmap processing utilities
+                                                const { processImageToBitmap } = await import('./image.bitmap');
+
+                                                // Use the larger of the two selection dimensions for grid size
+                                                const gridSize = Math.max(selectionWidth, selectionHeight);
+
+                                                // Process image to bitmap using current text color
+                                                const bitmapCanvas = processImageToBitmap(img, {
+                                                    gridSize,
+                                                    color: textColor
+                                                });
+
+                                                // Convert bitmap canvas to data URL
+                                                finalSrc = bitmapCanvas.toDataURL();
+                                            } catch (bitmapError) {
+                                                logger.error('Error processing bitmap:', bitmapError);
+                                                setDialogueWithRevert("Error processing bitmap, using original image", setDialogueText);
+                                            }
+                                        }
+
+                                        // Upload to Firebase Storage and get URL
+                                        const storageUrl = await uploadImageToStorage(finalSrc);
+
+                                        // Create image data entry
+                                        const imageData: ImageData = {
+                                            type: 'image',
+                                            src: storageUrl,
+                                            startX: selection.startX,
+                                            startY: selection.startY,
+                                            endX: selection.endX,
+                                            endY: selection.endY,
+                                            originalWidth: img.width,
+                                            originalHeight: img.height
+                                        };
+
+                                        // Store image with unique key
+                                        const imageKey = `image_${selection.startX},${selection.startY}`;
+                                        setWorldData(prev => ({
+                                            ...prev,
+                                            [imageKey]: imageData
+                                        }));
+
+                                        // Clear selection
+                                        setSelectionStart(null);
+                                        setSelectionEnd(null);
+
+                                        const modeText = isBitmapMode ? "Bitmap" : "Image";
+                                        setDialogueWithRevert(`${modeText} uploaded to region (${selectionWidth}x${selectionHeight} cells)`, setDialogueText);
+                                    };
+                                    img.src = dataUrl;
+                                };
+                                reader.readAsDataURL(file);
+                            }
                         } catch (error) {
                             logger.error('Error uploading image:', error);
                             setDialogueWithRevert("Error uploading image", setDialogueText);
@@ -6713,17 +6859,18 @@ export function useWorldEngine({
     }, []);
 
         // Helper function to upload images to Firebase Storage
-    const uploadImageToStorage = useCallback(async (dataUrl: string): Promise<string> => {
+    const uploadImageToStorage = useCallback(async (dataUrl: string, mimeType: string = 'image/png'): Promise<string> => {
         if (!userUid || !currentStateName) {
             // Fallback to base64 if no storage available
             return dataUrl;
         }
 
         try {
-            // Generate unique filename
+            // Generate unique filename with correct extension
             const timestamp = Date.now();
             const random = Math.random().toString(36).substring(7);
-            const filename = `${timestamp}_${random}.png`;
+            const extension = mimeType === 'image/gif' ? 'gif' : 'png';
+            const filename = `${timestamp}_${random}.${extension}`;
 
             // Upload to Firebase Storage
             const imageRef = storageRef(storage, `worlds/${userUid}/${currentStateName}/images/${filename}`);

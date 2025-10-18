@@ -63,38 +63,13 @@ function AuthActionContent() {
     handleAuthAction();
   }, [searchParams, router]);
 
-  return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: '100vh',
-      backgroundColor: '#000000',
-      fontFamily: 'IBM Plex Mono, monospace',
-      fontSize: '14px',
-      color: '#FFFFFF'
-    }}>
-      {message}
-    </div>
-  );
+  // Render nothing - just redirect silently
+  return null;
 }
 
 export default function AuthActionPage() {
   return (
-    <Suspense fallback={
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '100vh',
-        backgroundColor: '#000000',
-        fontFamily: 'IBM Plex Mono, monospace',
-        fontSize: '14px',
-        color: '#FFFFFF'
-      }}>
-        loading...
-      </div>
-    }>
+    <Suspense fallback={null}>
       <AuthActionContent />
     </Suspense>
   );
