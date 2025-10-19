@@ -2659,7 +2659,7 @@ export function useWorldEngine({
 
         // === Command Handling (Early Priority) ===
         if (enableCommands) {
-            const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos, ctrlKey, metaKey);
+            const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos, ctrlKey, metaKey, shiftKey, altKey);
             if (commandResult && typeof commandResult === 'object') {
                 // It's a command execution object - handle it
                 const exec = commandResult as CommandExecution;
@@ -4845,55 +4845,167 @@ export function useWorldEngine({
                 setCursorPos({ x: cursorPos.x + 1, y: cursorPos.y });
                 return true;
             } else if (key === 'Backspace') {
-                if (chatMode.currentInput.length > 0) {
-                    // Check if we're deleting a newline character
-                    const lastChar = chatMode.currentInput[chatMode.currentInput.length - 1];
-                    const isNewline = lastChar === '\n';
+                if (metaKey) {
+                    // Cmd+Backspace: Delete entire line (current line of chat input)
+                    if (chatMode.currentInput.length > 0) {
+                        // Find the start of current line in the input
+                        const lines = chatMode.currentInput.split('\n');
+                        const currentLineIndex = lines.length - 1; // We're always at the last line in chat mode
 
-                    // Remove last character from chat input
-                    const newInput = chatMode.currentInput.slice(0, -1);
+                        // Remove the last line
+                        lines.pop();
+                        const newInput = lines.join('\n');
 
-                    if (isNewline) {
-                        // Backspacing over newline: just remove it from input string, keep positions unchanged
-                        // The cursor should move to end of previous line (after last visible character)
-                        const lastPos = chatMode.inputPositions[chatMode.inputPositions.length - 1];
+                        // Find positions to remove (all positions from the start of last line)
+                        const firstPosOfLine = chatMode.inputPositions.findIndex((pos, idx) => {
+                            // Count newlines up to this position
+                            const inputUpToHere = chatMode.currentInput.slice(0, idx);
+                            const newlinesCount = (inputUpToHere.match(/\n/g) || []).length;
+                            return newlinesCount === currentLineIndex;
+                        });
+
+                        const positionsToKeep = firstPosOfLine >= 0 ?
+                            chatMode.inputPositions.slice(0, firstPosOfLine) :
+                            [];
+
+                        // Clear chat data for removed positions
+                        setChatData(prev => {
+                            const newChatData = { ...prev };
+                            const positionsToRemove = firstPosOfLine >= 0 ?
+                                chatMode.inputPositions.slice(firstPosOfLine) :
+                                chatMode.inputPositions;
+
+                            positionsToRemove.forEach(pos => {
+                                delete newChatData[`${pos.x},${pos.y}`];
+                            });
+                            return newChatData;
+                        });
 
                         setChatMode(prev => ({
                             ...prev,
                             currentInput: newInput,
-                            // Don't remove any positions - newlines don't have positions
-                            inputPositions: prev.inputPositions
+                            inputPositions: positionsToKeep
                         }));
 
-                        // Move cursor to end of previous line (after last character)
-                        if (lastPos) {
+                        // Move cursor to end of previous line (if exists)
+                        if (positionsToKeep.length > 0) {
+                            const lastPos = positionsToKeep[positionsToKeep.length - 1];
                             setCursorPos({ x: lastPos.x + 1, y: lastPos.y });
+                        } else {
+                            // No more input, move to start
+                            const startPos = chatMode.inputPositions[0] || cursorPos;
+                            setCursorPos({ x: startPos.x, y: startPos.y });
                         }
-                    } else {
-                        // Regular character deletion
-                        const lastPos = chatMode.inputPositions[chatMode.inputPositions.length - 1];
+                    }
+                } else if (altKey) {
+                    // Option+Backspace: Delete last word
+                    if (chatMode.currentInput.length > 0) {
+                        // Split by whitespace and newlines, but preserve newlines in the structure
+                        const lastNewlineIndex = chatMode.currentInput.lastIndexOf('\n');
+                        const currentLine = lastNewlineIndex >= 0 ?
+                            chatMode.currentInput.slice(lastNewlineIndex + 1) :
+                            chatMode.currentInput;
 
-                        if (lastPos) {
-                            setChatMode(prev => ({
-                                ...prev,
-                                currentInput: newInput,
-                                inputPositions: prev.inputPositions.slice(0, -1)
-                            }));
+                        const words = currentLine.trim().split(/\s+/);
 
-                            // Remove from chatData
+                        if (words.length > 0 && currentLine.length > 0) {
+                            // Calculate how many characters to remove (last word + trailing spaces)
+                            const lastWord = words[words.length - 1];
+                            const charsToRemove = lastWord.length;
+
+                            // Remove trailing spaces before the word
+                            let additionalSpaces = 0;
+                            for (let i = chatMode.currentInput.length - charsToRemove - 1; i >= 0; i--) {
+                                if (chatMode.currentInput[i] === ' ' || chatMode.currentInput[i] === '\t') {
+                                    additionalSpaces++;
+                                } else {
+                                    break;
+                                }
+                            }
+
+                            const totalCharsToRemove = charsToRemove + additionalSpaces;
+                            const newInput = chatMode.currentInput.slice(0, -totalCharsToRemove);
+                            const positionsToKeep = chatMode.inputPositions.slice(0, -totalCharsToRemove);
+
+                            // Clear chat data for removed positions
                             setChatData(prev => {
                                 const newChatData = { ...prev };
-                                delete newChatData[`${lastPos.x},${lastPos.y}`];
+                                const positionsToRemove = chatMode.inputPositions.slice(-totalCharsToRemove);
+
+                                positionsToRemove.forEach(pos => {
+                                    delete newChatData[`${pos.x},${pos.y}`];
+                                });
                                 return newChatData;
                             });
 
-                            // Move cursor immediately for chat mode
-                            setCursorPos({ x: lastPos.x, y: lastPos.y });
+                            setChatMode(prev => ({
+                                ...prev,
+                                currentInput: newInput,
+                                inputPositions: positionsToKeep
+                            }));
+
+                            // Move cursor to end of new input
+                            if (positionsToKeep.length > 0) {
+                                const lastPos = positionsToKeep[positionsToKeep.length - 1];
+                                setCursorPos({ x: lastPos.x + 1, y: lastPos.y });
+                            } else {
+                                const startPos = chatMode.inputPositions[0] || cursorPos;
+                                setCursorPos({ x: startPos.x, y: startPos.y });
+                            }
                         }
                     }
                 } else {
-                    // No input to delete - just move cursor left (like regular backspace)
-                    setCursorPos({ x: cursorPos.x - 1, y: cursorPos.y });
+                    // Regular backspace
+                    if (chatMode.currentInput.length > 0) {
+                        // Check if we're deleting a newline character
+                        const lastChar = chatMode.currentInput[chatMode.currentInput.length - 1];
+                        const isNewline = lastChar === '\n';
+
+                        // Remove last character from chat input
+                        const newInput = chatMode.currentInput.slice(0, -1);
+
+                        if (isNewline) {
+                            // Backspacing over newline: just remove it from input string, keep positions unchanged
+                            // The cursor should move to end of previous line (after last visible character)
+                            const lastPos = chatMode.inputPositions[chatMode.inputPositions.length - 1];
+
+                            setChatMode(prev => ({
+                                ...prev,
+                                currentInput: newInput,
+                                // Don't remove any positions - newlines don't have positions
+                                inputPositions: prev.inputPositions
+                            }));
+
+                            // Move cursor to end of previous line (after last character)
+                            if (lastPos) {
+                                setCursorPos({ x: lastPos.x + 1, y: lastPos.y });
+                            }
+                        } else {
+                            // Regular character deletion
+                            const lastPos = chatMode.inputPositions[chatMode.inputPositions.length - 1];
+
+                            if (lastPos) {
+                                setChatMode(prev => ({
+                                    ...prev,
+                                    currentInput: newInput,
+                                    inputPositions: prev.inputPositions.slice(0, -1)
+                                }));
+
+                                // Remove from chatData
+                                setChatData(prev => {
+                                    const newChatData = { ...prev };
+                                    delete newChatData[`${lastPos.x},${lastPos.y}`];
+                                    return newChatData;
+                                });
+
+                                // Move cursor immediately for chat mode
+                                setCursorPos({ x: lastPos.x, y: lastPos.y });
+                            }
+                        }
+                    } else {
+                        // No input to delete - just move cursor left (like regular backspace)
+                        setCursorPos({ x: cursorPos.x - 1, y: cursorPos.y });
+                    }
                 }
                 return true;
             }

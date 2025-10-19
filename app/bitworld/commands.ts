@@ -2775,7 +2775,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         cursorPos: Point,
         setCursorPos: (pos: Point | ((prev: Point) => Point)) => void,
         ctrlKey: boolean = false,
-        metaKey: boolean = false
+        metaKey: boolean = false,
+        shiftKey: boolean = false,
+        altKey: boolean = false
     ): boolean | CommandExecution | null => {
         const isPermanent = metaKey || ctrlKey; // Track if Cmd/Ctrl+Enter
         // Handle paste in command mode (Cmd+V or Ctrl+V)
@@ -2886,9 +2888,78 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             }
             return true;
         } else if (key === 'Backspace') {
-            const result = handleBackspace();
-            if (result.shouldMoveCursor) {
-                setCursorPos(prev => ({ x: prev.x - 1, y: prev.y }));
+            if (metaKey) {
+                // Cmd+Backspace: Delete entire command input
+                setCommandState(prev => {
+                    const newCommandData: WorldData = {};
+                    // Keep only the '/' character
+                    newCommandData[`${prev.commandStartPos.x},${prev.commandStartPos.y}`] = '/';
+                    setCommandData(newCommandData);
+
+                    return {
+                        ...prev,
+                        input: '',
+                        matchedCommands: matchCommands(''),
+                        selectedIndex: 0
+                    };
+                });
+                // Move cursor to just after '/'
+                setCursorPos({
+                    x: commandState.commandStartPos.x + 1,
+                    y: commandState.commandStartPos.y
+                });
+            } else if (altKey) {
+                // Option+Backspace: Delete last word
+                const words = commandState.input.trim().split(/\s+/);
+                if (words.length > 0 && commandState.input.length > 0) {
+                    // Remove last word
+                    words.pop();
+                    const newInput = words.join(' ');
+
+                    setCommandState(prev => {
+                        const newMatchedCommands = matchCommands(newInput);
+
+                        // Update command display
+                        const newCommandData: WorldData = {};
+                        const commandText = `/${newInput}`;
+
+                        // Draw command text at original command start position
+                        for (let i = 0; i < commandText.length; i++) {
+                            const key = `${prev.commandStartPos.x + i},${prev.commandStartPos.y}`;
+                            newCommandData[key] = commandText[i];
+                        }
+
+                        // Draw autocomplete suggestions below (if any)
+                        newMatchedCommands.forEach((command, index) => {
+                            const suggestionY = prev.commandStartPos.y + 1 + index;
+                            for (let i = 0; i < command.length; i++) {
+                                const key = `${prev.commandStartPos.x + i},${suggestionY}`;
+                                newCommandData[key] = command[i];
+                            }
+                        });
+
+                        setCommandData(newCommandData);
+
+                        return {
+                            ...prev,
+                            input: newInput,
+                            matchedCommands: newMatchedCommands,
+                            selectedIndex: 0
+                        };
+                    });
+
+                    // Move cursor to end of new input
+                    setCursorPos({
+                        x: commandState.commandStartPos.x + newInput.length + 1, // +1 for the '/'
+                        y: commandState.commandStartPos.y
+                    });
+                }
+            } else {
+                // Regular backspace
+                const result = handleBackspace();
+                if (result.shouldMoveCursor) {
+                    setCursorPos(prev => ({ x: prev.x - 1, y: prev.y }));
+                }
             }
             return true;
         } else if (key.length === 1) {
