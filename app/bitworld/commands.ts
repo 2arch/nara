@@ -1225,17 +1225,19 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 isMultiWordDescriptive) {
                 setDialogueWithRevert("Generating background image...", setDialogueText);
 
-                generateImage(restOfInput.trim()).then((result) => {
+                generateImage(restOfInput.trim()).then(async (result) => {
                     if (result.imageData) {
-                        switchBackgroundMode('image', result.imageData, undefined, undefined, restOfInput.trim());
+                        // Upload to storage for persistence
+                        const storageUrl = await uploadImageToStorage(result.imageData);
+                        switchBackgroundMode('image', storageUrl, undefined, undefined, restOfInput.trim());
                         setDialogueWithRevert(`"${restOfInput.trim()}"`, setDialogueText);
                     } else {
-                        switchBackgroundMode('space', undefined, undefined, undefined);
-                        setDialogueWithRevert("Image generation failed, using space background.", setDialogueText);
+                        console.error('Image generation returned no imageData:', result);
+                        setDialogueWithRevert("Image generation failed", setDialogueText);
                     }
-                }).catch(() => {
-                    switchBackgroundMode('space', undefined, undefined, undefined);
-                    setDialogueWithRevert("Image generation failed, using space background.", setDialogueText);
+                }).catch((error) => {
+                    console.error('Image generation error:', error);
+                    setDialogueWithRevert(`Image generation failed: ${error.message || 'Unknown error'}`, setDialogueText);
                 });
 
                 // Clear command mode
@@ -1290,19 +1292,19 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 if (prompt.trim()) {
                     // 'bg clear' with a prompt - generate AI image
                     setDialogueWithRevert("Generating background image...", setDialogueText);
-                    generateImage(prompt).then((result) => {
+                    generateImage(prompt).then(async (result) => {
                         if (result.imageData) {
-                            // Validate that we have a proper image URL/data URL
-                            switchBackgroundMode('image', result.imageData, textColorParam, textBgParam, prompt);
+                            // Upload to storage for persistence
+                            const storageUrl = await uploadImageToStorage(result.imageData);
+                            switchBackgroundMode('image', storageUrl, textColorParam, textBgParam, prompt);
                             setDialogueWithRevert(`"${prompt}"`, setDialogueText);
                         } else {
-                            // Fallback to space background if image generation fails or returns invalid data
-                            switchBackgroundMode('space', undefined, textColorParam, textBgParam);
-                            setDialogueWithRevert("Image generation not available, using space background.", setDialogueText);
+                            console.error('Image generation returned no imageData:', result);
+                            setDialogueWithRevert("Image generation failed", setDialogueText);
                         }
-                    }).catch(() => {
-                        switchBackgroundMode('space', undefined, textColorParam, textBgParam);
-                        setDialogueWithRevert("Image generation failed, using space background.", setDialogueText);
+                    }).catch((error) => {
+                        console.error('Image generation error:', error);
+                        setDialogueWithRevert(`Image generation failed: ${error.message || 'Unknown error'}`, setDialogueText);
                     });
                 } else {
                     // 'bg clear' without prompt - show space background

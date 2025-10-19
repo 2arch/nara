@@ -4855,6 +4855,30 @@ export function useWorldEngine({
                         }
                     }
                 }
+
+                // Third priority: Auto-detect if cursor/text is over an image
+                if (!targetRegion) {
+                    for (const key in worldData) {
+                        if (key.startsWith('image_')) {
+                            const imgData = worldData[key];
+                            if (imgData && typeof imgData === 'object' && 'type' in imgData && imgData.type === 'image') {
+                                const img = imgData as any;
+                                // Check if cursor is within image bounds
+                                if (cursorPos.x >= img.startX && cursorPos.x <= img.endX &&
+                                    cursorPos.y >= img.startY && cursorPos.y <= img.endY) {
+                                    // Found image under cursor - use image bounds as target region
+                                    targetRegion = {
+                                        startX: img.startX,
+                                        endX: img.endX,
+                                        startY: img.startY,
+                                        endY: img.endY
+                                    };
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             if (targetRegion) {
@@ -4921,9 +4945,32 @@ export function useWorldEngine({
                                 // Calculate grid cell size based on current zoom
                                 const { width: charWidth, height: charHeight } = getEffectiveCharDims(zoomLevel);
 
-                                // Calculate how many cells the image spans
-                                const cellsWide = Math.ceil(img.width / charWidth);
-                                const cellsHigh = Math.ceil(img.height / charHeight);
+                                // Calculate target region dimensions in cells
+                                const regionCellsWide = targetRegion.endX - targetRegion.startX + 1;
+                                const regionCellsHigh = targetRegion.endY - targetRegion.startY + 1;
+
+                                // Calculate target region dimensions in pixels
+                                const regionPixelsWide = regionCellsWide * charWidth;
+                                const regionPixelsHigh = regionCellsHigh * charHeight;
+
+                                // Scale image to fit within the region while maintaining aspect ratio
+                                const imageAspect = img.width / img.height;
+                                const regionAspect = regionPixelsWide / regionPixelsHigh;
+
+                                let scaledWidth, scaledHeight;
+                                if (imageAspect > regionAspect) {
+                                    // Image is wider - fit to width
+                                    scaledWidth = regionPixelsWide;
+                                    scaledHeight = regionPixelsWide / imageAspect;
+                                } else {
+                                    // Image is taller - fit to height
+                                    scaledHeight = regionPixelsHigh;
+                                    scaledWidth = regionPixelsHigh * imageAspect;
+                                }
+
+                                // Calculate cell span based on scaled dimensions
+                                const cellsWide = Math.ceil(scaledWidth / charWidth);
+                                const cellsHigh = Math.ceil(scaledHeight / charHeight);
 
                                 // Upload to storage
                                 const storageUrl = await uploadImageToStorage(result.imageData!);
