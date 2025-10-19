@@ -160,6 +160,74 @@ export async function summarizeText(text: string, focus?: string): Promise<strin
     }
 }
 
+/**
+ * Generate or edit an image using Gemini's image generation model
+ * @param prompt - Text description for image generation or editing
+ * @param existingImage - Optional existing image data URL for image-to-image editing
+ * @returns Object containing imageData (base64 data URL) and optional text response
+ */
+export async function generateImage(
+    prompt: string,
+    existingImage?: string
+): Promise<{ imageData: string | null, text: string }> {
+    const abortController = createAIAbortController();
+
+    try {
+        if (abortController.signal.aborted) {
+            throw new Error('AI operation was interrupted');
+        }
+
+        // Prepare contents - either text-to-image or image-to-image
+        const contents: any[] = existingImage
+            ? [prompt, { inlineData: { data: existingImage.split(',')[1], mimeType: 'image/png' } }]
+            : [prompt];
+
+        const response = await Promise.race([
+            ai.models.generateContent({
+                model: 'gemini-2.5-flash-image',
+                contents,
+                config: {
+                    responseModalities: ["IMAGE", "TEXT"]
+                }
+            }),
+            new Promise((_, reject) => {
+                abortController.signal.addEventListener('abort', () => {
+                    reject(new Error('AI operation was interrupted'));
+                });
+            })
+        ]) as any;
+
+        // Extract image and text from response
+        let imageData: string | null = null;
+        let text = '';
+
+        if (response.candidates && response.candidates[0]?.content?.parts) {
+            for (const part of response.candidates[0].content.parts) {
+                if (part.inlineData) {
+                    // Convert to data URL
+                    const mimeType = part.inlineData.mimeType || 'image/png';
+                    imageData = `data:${mimeType};base64,${part.inlineData.data}`;
+                } else if (part.text) {
+                    text += part.text;
+                }
+            }
+        }
+
+        if (!imageData) {
+            throw new Error('No image generated in response');
+        }
+
+        return { imageData, text: text.trim() };
+    } catch (error) {
+        if (error instanceof Error && error.message === 'AI operation was interrupted') {
+            logger.debug('AI image generation was interrupted by user');
+            return { imageData: null, text: '[Interrupted]' };
+        }
+        logger.error('Error generating image:', error);
+        return { imageData: null, text: 'Could not generate image' };
+    }
+}
+
 // Chat history interface
 export interface ChatMessage {
     role: 'user' | 'model';
@@ -424,36 +492,6 @@ export function getChatHistory(): ChatMessage[] {
     return [...chatHistory];
 }
 
-/**
- * Generate an image from a text prompt using Google GenAI Imagen
- */
-export async function generateImage(prompt: string): Promise<string | null> {
-    try {
-        const response = await ai.models.generateImages({
-            model: 'imagen-3.0-generate-002',
-            prompt: prompt,
-            config: {
-                numberOfImages: 1,
-                includeRaiReason: true,
-            }
-        });
-
-        // Get the first generated image
-        const generatedImage = response.generatedImages?.[0];
-        if (generatedImage?.image?.imageBytes) {
-            // Convert base64 image bytes to data URL
-            const mimeType = generatedImage.image.mimeType || 'image/png';
-            const dataUrl = `data:${mimeType};base64,${generatedImage.image.imageBytes}`;
-            return dataUrl;
-        }
-
-        logger.warn('No image data received from generation');
-        return null;
-    } catch (error) {
-        logger.error('Error generating image:', error);
-        return null;
-    }
-}
 
 /**
  * Generate a video from a text prompt using Google GenAI Veo

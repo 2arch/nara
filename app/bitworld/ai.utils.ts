@@ -3,6 +3,28 @@
 
 const DEFAULT_TEXT = '';
 
+// Image generation intent detection patterns
+const IMAGE_PATTERNS = [
+    /\b(generate|create|make|draw|show|illustrate|visualize)\s+(me\s+)?(an?\s+)?(image|picture|photo|illustration|drawing|sketch)/i,
+    /\bwhat\s+would\s+\w+\s+look\s+like/i,
+    /\bdesign\s+(a|an)\s+(logo|poster|banner|icon|graphic)/i,
+    /\bturn\s+(this|that)\s+into\s+(an?\s+)?(image|picture)/i,
+    /\b(photorealistic|cartoon|minimalist|watercolor|pixel art|vector|sketch)/i,
+];
+
+/**
+ * Detect if user input indicates image generation intent
+ */
+export function detectImageIntent(input: string): { intent: 'text' | 'image', confidence: number } {
+    const text = input.toLowerCase();
+    const hasMatch = IMAGE_PATTERNS.some(pattern => pattern.test(text));
+
+    return {
+        intent: hasMatch ? 'image' : 'text',
+        confidence: hasMatch ? 0.95 : 0.0
+    };
+}
+
 // Global abort controller for interrupting AI operations
 let globalAbortController: AbortController | null = null;
 

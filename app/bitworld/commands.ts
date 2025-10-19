@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Point, WorldData } from './world.engine';
 import { generateImage, generateVideo, setDialogueWithRevert } from './ai';
+import { detectImageIntent } from './ai.utils';
 import type { WorldSettings } from './settings';
 
 // --- Command System Types ---
@@ -84,6 +85,11 @@ interface UseCommandSystemProps {
     clipboardItems?: Array<{id: string, content: string, startX: number, endX: number, startY: number, endY: number, timestamp: number}>;
     toggleRecording?: () => Promise<void> | void;
     isReadOnly?: boolean;
+    getNormalizedSelection?: () => { startX: number, endX: number, startY: number, endY: number } | null;
+    setWorldData?: (data: any) => void;
+    worldData?: any;
+    setSelectionStart?: (pos: { x: number, y: number } | null) => void;
+    setSelectionEnd?: (pos: { x: number, y: number } | null) => void;
 }
 
 // --- Command System Constants ---
@@ -144,7 +150,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const [commandState, setCommandState] = useState<CommandState>({
@@ -178,7 +184,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         },
         searchPattern: '', // No search pattern initially
         isSearchActive: false, // Search not active initially
-        cameraMode: typeof window !== 'undefined' && 'ontouchstart' in window ? 'focus' : 'default', // Focus mode on mobile, default on desktop
+        cameraMode: 'default', // Default camera mode for all devices
         isIndentEnabled: true, // Smart indentation enabled by default
         isMoveMode: false, // Move mode not active initially
         gridMode: 'dots', // Default grid mode
@@ -1176,6 +1182,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     } else {
                         // For other modes, switch mode in current context
                         switchMode(modeArg);
+                        if (modeArg === 'plan') {
+                            setDialogueWithRevert("Plan mode: Make selections and press Enter to save. Esc to exit.", setDialogueText);
+                        }
                     }
                 }
             }
@@ -1198,11 +1207,51 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         if (commandToExecute.startsWith('bg')) {
             const inputParts = commandState.input.trim().split(/\s+/);
             const bgArg = inputParts.length > 1 ? inputParts[1] : undefined;
-            
+
             // Extract optional parameters
             const param2 = inputParts.length > 2 ? inputParts[2] : undefined;
             const param3 = inputParts.length > 3 ? inputParts[3] : undefined;
-            const restOfInput = inputParts.slice(2).join(' '); // For AI prompts
+            const restOfInput = inputParts.slice(1).join(' '); // Everything after /bg
+
+            // Check if the input is descriptive text for image generation
+            const imageIntent = detectImageIntent(restOfInput);
+
+            // Also check if it's a multi-word descriptive phrase (not just command keywords)
+            const isMultiWordDescriptive = restOfInput.trim().split(/\s+/).length >= 3 &&
+                bgArg !== 'clear' && bgArg !== 'live' && bgArg !== 'web';
+
+            // If high confidence image intent OR multi-word descriptive phrase, generate image
+            if ((imageIntent.intent === 'image' && imageIntent.confidence > 0.8 && restOfInput.trim()) ||
+                isMultiWordDescriptive) {
+                setDialogueWithRevert("Generating background image...", setDialogueText);
+
+                generateImage(restOfInput.trim()).then((result) => {
+                    if (result.imageData) {
+                        switchBackgroundMode('image', result.imageData, undefined, undefined, restOfInput.trim());
+                        setDialogueWithRevert(`"${restOfInput.trim()}"`, setDialogueText);
+                    } else {
+                        switchBackgroundMode('space', undefined, undefined, undefined);
+                        setDialogueWithRevert("Image generation failed, using space background.", setDialogueText);
+                    }
+                }).catch(() => {
+                    switchBackgroundMode('space', undefined, undefined, undefined);
+                    setDialogueWithRevert("Image generation failed, using space background.", setDialogueText);
+                });
+
+                // Clear command mode
+                setCommandState({
+                    isActive: false,
+                    input: '',
+                    matchedCommands: [],
+                    selectedIndex: 0,
+                    commandStartPos: { x: 0, y: 0 },
+                    originalCursorPos: { x: 0, y: 0 },
+                    hasNavigated: false
+                });
+                setCommandData({});
+
+                return null;
+            }
 
             if (bgArg === 'clear') {
                 // Parse quoted prompt and color parameters
@@ -1241,10 +1290,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 if (prompt.trim()) {
                     // 'bg clear' with a prompt - generate AI image
                     setDialogueWithRevert("Generating background image...", setDialogueText);
-                    generateImage(prompt).then((imageUrl) => {
-                        if (imageUrl && (imageUrl.startsWith('data:') || imageUrl.startsWith('http'))) {
+                    generateImage(prompt).then((result) => {
+                        if (result.imageData) {
                             // Validate that we have a proper image URL/data URL
-                            switchBackgroundMode('image', imageUrl, textColorParam, textBgParam, prompt);
+                            switchBackgroundMode('image', result.imageData, textColorParam, textBgParam, prompt);
                             setDialogueWithRevert(`"${prompt}"`, setDialogueText);
                         } else {
                             // Fallback to space background if image generation fails or returns invalid data
@@ -2014,9 +2063,52 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         }
 
         if (commandToExecute.startsWith('plan')) {
-            // Enter plan mode directly
-            switchMode('plan');
-            setDialogueWithRevert("Plan mode: Select regions and press Enter to save", setDialogueText);
+            // /plan command - one-shot plan region creation from selection
+            // Check if there's already a selection
+            const existingSelection = getNormalizedSelection?.();
+
+            if (existingSelection) {
+                // Selection exists - create plan region immediately
+                const hasMeaningfulSelection =
+                    existingSelection.startX !== existingSelection.endX ||
+                    existingSelection.startY !== existingSelection.endY;
+
+                if (!hasMeaningfulSelection) {
+                    setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
+                } else if (setWorldData && worldData && setSelectionStart && setSelectionEnd) {
+                    // Create plan region data
+                    const planRegion = {
+                        startX: existingSelection.startX,
+                        endX: existingSelection.endX,
+                        startY: existingSelection.startY,
+                        endY: existingSelection.endY,
+                        timestamp: Date.now()
+                    };
+
+                    // Store plan region in worldData with unique key
+                    const planKey = `plan_${existingSelection.startX},${existingSelection.startY}_${Date.now()}`;
+                    const newWorldData = { ...worldData };
+                    newWorldData[planKey] = JSON.stringify(planRegion);
+                    setWorldData(newWorldData);
+
+                    const width = existingSelection.endX - existingSelection.startX + 1;
+                    const height = existingSelection.endY - existingSelection.startY + 1;
+                    setDialogueWithRevert(`Plan region saved (${width}×${height})`, setDialogueText);
+
+                    // Clear selection
+                    setSelectionStart(null);
+                    setSelectionEnd(null);
+                }
+            } else {
+                // No selection - set as pending command waiting for selection
+                setPendingCommand({
+                    command: 'plan',
+                    args: [],
+                    isWaitingForSelection: true
+                });
+
+                setDialogueWithRevert("Make a selection, then press Enter to save as plan region", setDialogueText);
+            }
 
             // Clear command mode
             setCommandState({

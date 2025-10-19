@@ -10,7 +10,7 @@ import { ref as storageRef, uploadString, getDownloadURL } from 'firebase/storag
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 // Import lightweight AI utilities (no GenAI dependency)
-import { createSubtitleCycler, setDialogueWithRevert, abortCurrentAI, isAIActive } from './ai.utils';
+import { createSubtitleCycler, setDialogueWithRevert, abortCurrentAI, isAIActive, detectImageIntent } from './ai.utils';
 import { logger } from './logger';
 import { useAutoDialogue } from './dialogue';
 import { get } from 'firebase/database';
@@ -25,7 +25,8 @@ const loadAI = async () => {
         summarizeText: ai.summarizeText,
         chatWithAI: ai.chatWithAI,
         clearChatHistory: ai.clearChatHistory,
-        updateWorldContext: ai.updateWorldContext
+        updateWorldContext: ai.updateWorldContext,
+        generateImage: ai.generateImage
     };
 };
 
@@ -928,6 +929,7 @@ export function useWorldEngine({
         executePendingCommand,
         setPendingCommand,
         currentMode,
+        switchMode,
         addEphemeralText,
         addAIResponse,
         addInstantAIResponse,
@@ -957,7 +959,7 @@ export function useWorldEngine({
         setFullscreenMode,
         exitFullscreenMode,
         switchBackgroundMode,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly });
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd });
 
     // Generate search data when search pattern changes
     useEffect(() => {
@@ -4553,6 +4555,50 @@ export function useWorldEngine({
         }
         // === Pending Command Handling ===
         else if (key === 'Enter' && pendingCommand && pendingCommand.isWaitingForSelection) {
+            // Special handling for /plan command - doesn't need text, just selection bounds
+            if (pendingCommand.command === 'plan') {
+                const selection = getNormalizedSelection();
+
+                if (selection) {
+                    // Check if there's a meaningful selection (not just a 1-cell cursor)
+                    const hasMeaningfulSelection =
+                        selection.startX !== selection.endX || selection.startY !== selection.endY;
+
+                    if (!hasMeaningfulSelection) {
+                        setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
+                    } else {
+                        // Create plan region data
+                        const planRegion = {
+                            startX: selection.startX,
+                            endX: selection.endX,
+                            startY: selection.startY,
+                            endY: selection.endY,
+                            timestamp: Date.now()
+                        };
+
+                        // Store plan region in worldData with unique key
+                        const planKey = `plan_${selection.startX},${selection.startY}_${Date.now()}`;
+                        const newWorldData = { ...worldData };
+                        newWorldData[planKey] = JSON.stringify(planRegion);
+                        setWorldData(newWorldData);
+
+                        const width = selection.endX - selection.startX + 1;
+                        const height = selection.endY - selection.startY + 1;
+                        setDialogueWithRevert(`Plan region saved (${width}×${height})`, setDialogueText);
+
+                        // Clear selection
+                        setSelectionStart(null);
+                        setSelectionEnd(null);
+
+                        // Clear pending command
+                        setPendingCommand(null);
+                    }
+                } else {
+                    setDialogueWithRevert("No region selected. Make a selection first, then press Enter", setDialogueText);
+                }
+                return true;
+            }
+
             const currentSelection = getSelectedText();
             if (currentSelection) {
                 // Execute the pending command with the selected text
@@ -4740,6 +4786,15 @@ export function useWorldEngine({
         }
         // === Plan Mode - Confirm Region ===
         else if (key === 'Enter' && currentMode === 'plan' && selectionStart && selectionEnd) {
+            // Check if there's a meaningful selection (not just a 1-cell cursor)
+            const hasMeaningfulSelection =
+                selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y;
+
+            if (!hasMeaningfulSelection) {
+                // No meaningful selection - skip plan region saving, let Enter behave normally
+                // Don't return true, fall through to normal Enter handling
+            } else {
+
             const minX = Math.floor(Math.min(selectionStart.x, selectionEnd.x));
             const maxX = Math.floor(Math.max(selectionStart.x, selectionEnd.x));
             const minY = Math.floor(Math.min(selectionStart.y, selectionEnd.y));
@@ -4769,9 +4824,274 @@ export function useWorldEngine({
             const height = maxY - minY + 1;
             setDialogueWithRevert(`Plan region saved (${width}×${height})`, setDialogueText);
             return true;
+            }
         }
-        // === Quick Chat (Cmd+Enter) ===
+        // === Selection/Plan Region AI Fill (Cmd+Enter) ===
         else if (key === 'Enter' && metaKey && !chatMode.isActive) {
+            // First priority: Check if there's an active selection
+            let targetRegion: { startX: number, endX: number, startY: number, endY: number } | null = null;
+
+            if (currentSelectionActive) {
+                // Use the current selection as target region
+                const minX = Math.floor(Math.min(selectionStart!.x, selectionEnd!.x));
+                const maxX = Math.floor(Math.max(selectionStart!.x, selectionEnd!.x));
+                const minY = Math.floor(Math.min(selectionStart!.y, selectionEnd!.y));
+                const maxY = Math.floor(Math.max(selectionStart!.y, selectionEnd!.y));
+
+                targetRegion = { startX: minX, endX: maxX, startY: minY, endY: maxY };
+            } else {
+                // Second priority: Check if cursor is inside a saved plan region
+                for (const key in worldData) {
+                    if (key.startsWith('plan_')) {
+                        try {
+                            const planData = JSON.parse(worldData[key] as string);
+                            if (cursorPos.x >= planData.startX && cursorPos.x <= planData.endX &&
+                                cursorPos.y >= planData.startY && cursorPos.y <= planData.endY) {
+                                targetRegion = planData;
+                                break;
+                            }
+                        } catch (e) {
+                            // Skip invalid plan data
+                        }
+                    }
+                }
+            }
+
+            if (targetRegion) {
+                // Check for existing image in the region
+                let existingImageData: string | null = null;
+                let existingImageKey: string | null = null;
+
+                for (const key in worldData) {
+                    if (key.startsWith('image_')) {
+                        const imgData = worldData[key];
+                        if (imgData && typeof imgData === 'object' && 'type' in imgData && imgData.type === 'image') {
+                            const img = imgData as any;
+                            // Check if image overlaps with target region
+                            if (img.startX <= targetRegion.endX && img.endX >= targetRegion.startX &&
+                                img.startY <= targetRegion.endY && img.endY >= targetRegion.startY) {
+                                existingImageData = img.src;
+                                existingImageKey = key;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Extract text from target region
+                let textToSend = '';
+                for (let y = targetRegion.startY; y <= targetRegion.endY; y++) {
+                    let lineText = '';
+                    for (let x = targetRegion.startX; x <= targetRegion.endX; x++) {
+                        const key = `${x},${y}`;
+                        const charData = worldData[key];
+                        if (charData && !isImageData(charData)) {
+                            const char = getCharacter(charData);
+                            lineText += char;
+                        } else {
+                            lineText += ' ';
+                        }
+                    }
+                    textToSend += lineText.trimEnd();
+                    if (y < targetRegion.endY) textToSend += '\n';
+                }
+
+                if (textToSend.trim() || existingImageData) {
+                    // Detect intent: image-to-image or text-to-image or text-to-text
+                    const hasImageIntent = existingImageData ||
+                        detectImageIntent(textToSend).intent === 'image';
+
+                    if (hasImageIntent) {
+                        // Image generation/editing path
+                        setDialogueWithRevert("Generating image...", setDialogueText);
+
+                        loadAI().then(ai => {
+                            return ai.generateImage(textToSend.trim(), existingImageData || undefined);
+                        }).then(async (result) => {
+                            if (!result.imageData) {
+                                setDialogueWithRevert("Image generation failed", setDialogueText);
+                                return;
+                            }
+
+                            setDialogueWithRevert("Image generated successfully", setDialogueText);
+
+                            // Load the generated image to get its dimensions
+                            const img = new Image();
+                            img.onload = async () => {
+                                // Calculate grid cell size based on current zoom
+                                const { width: charWidth, height: charHeight } = getEffectiveCharDims(zoomLevel);
+
+                                // Calculate how many cells the image spans
+                                const cellsWide = Math.ceil(img.width / charWidth);
+                                const cellsHigh = Math.ceil(img.height / charHeight);
+
+                                // Upload to storage
+                                const storageUrl = await uploadImageToStorage(result.imageData!);
+
+                                // Create image data structure
+                                const imageData: ImageData = {
+                                    type: 'image',
+                                    src: storageUrl,
+                                    startX: targetRegion.startX,
+                                    startY: targetRegion.startY,
+                                    endX: targetRegion.startX + cellsWide - 1,
+                                    endY: targetRegion.startY + cellsHigh - 1,
+                                    originalWidth: img.width,
+                                    originalHeight: img.height
+                                };
+
+                                // Remove existing image if present
+                                const newWorldData = { ...worldData };
+                                if (existingImageKey) {
+                                    delete newWorldData[existingImageKey];
+                                }
+
+                                // Clear text in target region
+                                for (let y = targetRegion.startY; y <= targetRegion.endY; y++) {
+                                    for (let x = targetRegion.startX; x <= targetRegion.endX; x++) {
+                                        const key = `${x},${y}`;
+                                        if (newWorldData[key] && !isImageData(newWorldData[key])) {
+                                            delete newWorldData[key];
+                                        }
+                                    }
+                                }
+
+                                // Add new image
+                                const imageKey = `image_${targetRegion.startX},${targetRegion.startY}`;
+                                newWorldData[imageKey] = imageData;
+                                setWorldData(newWorldData);
+
+                                // Clear selection if we were using a selection (not a saved plan region)
+                                if (currentSelectionActive) {
+                                    setSelectionStart(null);
+                                    setSelectionEnd(null);
+                                }
+
+                                // Keep cursor position
+                                setCursorPos(cursorPos);
+                            };
+
+                            img.onerror = () => {
+                                logger.error('Error loading generated image');
+                                setDialogueWithRevert("Error loading generated image", setDialogueText);
+                            };
+
+                            img.src = result.imageData!;
+                        }).catch((error) => {
+                            logger.error('Error in image generation:', error);
+                            setDialogueWithRevert("Could not generate image", setDialogueText);
+                        });
+                    } else {
+                        // Text generation path (existing logic)
+                        setDialogueWithRevert("Processing region...", setDialogueText);
+
+                        // Calculate target region dimensions
+                        const regionWidth = targetRegion.endX - targetRegion.startX + 1;
+                        const regionHeight = targetRegion.endY - targetRegion.startY + 1;
+
+                        // Calculate approximate target character count (80% fill to account for wrapping)
+                        const targetChars = Math.floor(regionWidth * regionHeight * 0.8);
+
+                        // Update world context
+                        const currentLabels = getAllLabels();
+                        const currentCompiledText = compiledTextCache;
+                        const compiledTextString = Object.entries(currentCompiledText)
+                            .sort(([aLine], [bLine]) => parseInt(aLine) - parseInt(bLine))
+                            .map(([lineY, text]) => `Line ${lineY}: ${text}`)
+                            .join('\n');
+
+                        // Create enhanced prompt with character count target
+                        const enhancedPrompt = `${textToSend.trim()}\n\n[Write a detailed response of approximately ${targetChars} characters to fill the available space. Be expansive and thorough.]`;
+
+                        loadAI().then(ai => {
+                            ai.updateWorldContext({
+                                compiledText: compiledTextString,
+                                labels: currentLabels,
+                                metadata: `Canvas viewport center: ${JSON.stringify(getViewportCenter())}, Current cursor: ${JSON.stringify(cursorPos)}`
+                            });
+                            return ai.chatWithAI(enhancedPrompt, true);
+                        }).then((response) => {
+                            // Don't show response in dialogue - write directly to target region
+                            setDialogueWithRevert("AI response filled", setDialogueText);
+
+                            // Wrap text to fit within target region width
+                            const wrapText = (text: string, maxWidth: number): string[] => {
+                                const paragraphs = text.split('\n');
+                                const lines: string[] = [];
+
+                                for (let i = 0; i < paragraphs.length; i++) {
+                                    const paragraph = paragraphs[i].trim();
+
+                                    if (paragraph === '') {
+                                        lines.push('');
+                                        continue;
+                                    }
+
+                                    const words = paragraph.split(' ');
+                                    let currentLine = '';
+
+                                    for (const word of words) {
+                                        const testLine = currentLine ? `${currentLine} ${word}` : word;
+                                        if (testLine.length <= maxWidth) {
+                                            currentLine = testLine;
+                                        } else {
+                                            if (currentLine) lines.push(currentLine);
+                                            currentLine = word;
+                                        }
+                                    }
+                                    if (currentLine) lines.push(currentLine);
+                                }
+                                return lines;
+                            };
+
+                            const wrappedLines = wrapText(response, regionWidth);
+
+                            // Clear existing text in target region
+                            const newWorldData = { ...worldData };
+                            for (let y = targetRegion.startY; y <= targetRegion.endY; y++) {
+                                for (let x = targetRegion.startX; x <= targetRegion.endX; x++) {
+                                    const key = `${x},${y}`;
+                                    if (newWorldData[key] && !isImageData(newWorldData[key])) {
+                                        delete newWorldData[key];
+                                    }
+                                }
+                            }
+
+                            // Write response into target region
+                            for (let lineIndex = 0; lineIndex < Math.min(wrappedLines.length, regionHeight); lineIndex++) {
+                                const line = wrappedLines[lineIndex];
+                                for (let charIndex = 0; charIndex < Math.min(line.length, regionWidth); charIndex++) {
+                                    const char = line[charIndex];
+                                    const x = targetRegion.startX + charIndex;
+                                    const y = targetRegion.startY + lineIndex;
+                                    const key = `${x},${y}`;
+                                    newWorldData[key] = char;
+                                }
+                            }
+                            setWorldData(newWorldData);
+
+                            // Clear selection if we were using a selection (not a saved plan region)
+                            if (currentSelectionActive) {
+                                setSelectionStart(null);
+                                setSelectionEnd(null);
+                            }
+
+                            // Keep cursor position
+                            setCursorPos(cursorPos);
+                        }).catch((error) => {
+                            logger.error('Error in region AI fill:', error);
+                            setDialogueWithRevert("Could not process region", setDialogueText);
+                        });
+                    }
+
+                    return true;
+                } else {
+                    setDialogueWithRevert("Region is empty", setDialogueText);
+                    return false;
+                }
+            }
+
+            // === Quick Chat (Cmd+Enter) ===
             // Extract text to send to AI - selection, enclosing text block, or current line
             let textToSend = '';
             let chatStartPos = cursorPos;

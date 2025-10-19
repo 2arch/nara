@@ -158,38 +158,7 @@ export default function UserState() {
         onPanDistanceChange={setPanDistance}
       />
 
-      {/* Pan distance indicator (only for visitors) */}
-      {!isOwner && !user && panDistance > 0 && (
-        <div style={{
-          position: 'fixed',
-          top: '20px',
-          right: '20px',
-          padding: '12px 16px',
-          backgroundColor: 'rgba(0, 0, 0, 0.8)',
-          color: '#fff',
-          fontFamily: 'monospace',
-          fontSize: '12px',
-          borderRadius: '4px',
-          zIndex: 9999
-        }}>
-          <div>Pan: {Math.floor(panDistance)} / {SIGNUP_THRESHOLD} cells</div>
-          <div style={{
-            width: '200px',
-            height: '4px',
-            backgroundColor: 'rgba(255, 255, 255, 0.2)',
-            borderRadius: '2px',
-            marginTop: '8px',
-            overflow: 'hidden'
-          }}>
-            <div style={{
-              width: `${progress}%`,
-              height: '100%',
-              backgroundColor: '#F0FF6A',
-              transition: 'width 0.3s ease'
-            }} />
-          </div>
-        </div>
-      )}
+      {/* Pan distance indicator removed - no longer shown in read-only mode */}
     </div>
   );
 }

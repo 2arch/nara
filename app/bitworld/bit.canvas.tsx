@@ -3977,7 +3977,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         // === Render Pan Distance Monitor ===
-        if (isPanning && panDistance > 0) {
+        // Only show in non-read-only mode
+        if (isPanning && panDistance > 0 && !engine.isReadOnly) {
             ctx.save();
             ctx.font = `14px ${fontFamily}`;
             ctx.fillStyle = '#808080';
