@@ -140,7 +140,7 @@ export interface WorldEngine {
     handlePanStart: (clientX: number, clientY: number) => PanStartInfo | null;
     handlePanMove: (clientX: number, clientY: number, panStartInfo: PanStartInfo) => Point;
     handlePanEnd: (newOffset: Point) => void;
-    handleKeyDown: (key: string, ctrlKey: boolean, metaKey: boolean, shiftKey: boolean) => boolean;
+    handleKeyDown: (key: string, ctrlKey: boolean, metaKey: boolean, shiftKey: boolean, altKey?: boolean) => boolean;
     setViewOffset: React.Dispatch<React.SetStateAction<Point>>;
     setZoomLevel: React.Dispatch<React.SetStateAction<number>>;
     selectionStart: Point | null;
@@ -2443,7 +2443,7 @@ export function useWorldEngine({
 
     // === Event Handlers ===
 
-    const handleKeyDown = useCallback((key: string, ctrlKey: boolean, metaKey: boolean, shiftKey: boolean): boolean => {
+    const handleKeyDown = useCallback((key: string, ctrlKey: boolean, metaKey: boolean, shiftKey: boolean, altKey: boolean = false): boolean => {
         let preventDefault = true;
         let nextCursorPos = { ...cursorPos };
         let nextWorldData = { ...worldData }; // Create mutable copy only if needed
@@ -2792,7 +2792,7 @@ export function useWorldEngine({
 
                                     // Update image data
                                     const updatedWorldData = { ...worldData };
-                                    updatedWorldData[existingImageKey!] = {
+                                    (updatedWorldData[existingImageKey!] as any) = {
                                         type: 'image',
                                         src: finalImageUrl,
                                         startX: imageRegion!.startX,
@@ -6145,10 +6145,10 @@ export function useWorldEngine({
             moved = true;
         } else if (key === 'ArrowUp') {
             if (isMod) {
-                // Meta+Up: Move to the topmost line with content
+                // Cmd+Up: Move to the topmost line with content
                 let topY = cursorPos.y;
                 let foundAnyContent = false;
-                
+
                 // Scan world data to find the minimum y coordinate with content
                 for (const k in worldData) {
                     const [, yStr] = k.split(',');
@@ -6158,18 +6158,99 @@ export function useWorldEngine({
                         foundAnyContent = true;
                     }
                 }
-                
+
                 nextCursorPos.y = foundAnyContent ? topY : 0;
+            } else if (altKey) {
+                // Opt+Up: Navigate blocks (alternates between top and bottom)
+                // First, find current block boundaries
+                let currentBlockTop = cursorPos.y;
+                let currentBlockBottom = cursorPos.y;
+
+                // Check if current line has content
+                let currentLineHasContent = false;
+                for (const k in worldData) {
+                    if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
+                    const [xStr, yStr] = k.split(',');
+                    const y = parseInt(yStr, 10);
+                    if (y === cursorPos.y) {
+                        currentLineHasContent = true;
+                        break;
+                    }
+                }
+
+                if (currentLineHasContent) {
+                    // Find top of current block
+                    for (let y = cursorPos.y - 1; y >= 0; y--) {
+                        let hasContent = false;
+                        for (const k in worldData) {
+                            if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
+                            const [xStr, yStr] = k.split(',');
+                            const checkY = parseInt(yStr, 10);
+                            if (checkY === y) {
+                                hasContent = true;
+                                break;
+                            }
+                        }
+                        if (hasContent) {
+                            currentBlockTop = y;
+                        } else {
+                            break; // Hit a gap, stop
+                        }
+                    }
+
+                    // If we're not at the top of current block, go to top
+                    if (cursorPos.y > currentBlockTop) {
+                        nextCursorPos.y = currentBlockTop;
+                    } else {
+                        // We're at top of block, find bottom of previous block
+                        let searchY = currentBlockTop - 1;
+                        let foundGap = false;
+                        let foundBlock = false;
+                        let previousBlockBottom = currentBlockTop - 1;
+
+                        while (searchY >= 0) {
+                            let hasContent = false;
+                            for (const k in worldData) {
+                                if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
+                                const [xStr, yStr] = k.split(',');
+                                const y = parseInt(yStr, 10);
+                                if (y === searchY) {
+                                    hasContent = true;
+                                    break;
+                                }
+                            }
+
+                            if (!hasContent) {
+                                foundGap = true;
+                            } else if (hasContent && foundGap) {
+                                // Found content after gap - this is bottom of previous block
+                                previousBlockBottom = searchY;
+                                foundBlock = true;
+                                break;
+                            } else if (hasContent && !foundGap) {
+                                // Still traversing current block's gap
+                                foundGap = true;
+                            }
+
+                            searchY--;
+                        }
+
+                        nextCursorPos.y = foundBlock ? previousBlockBottom : Math.max(0, cursorPos.y - 1);
+                    }
+                } else {
+                    // Not in a block, just move up by 1
+                    nextCursorPos.y = cursorPos.y - 1;
+                }
             } else {
                 nextCursorPos.y -= 1;
             }
             moved = true;
         } else if (key === 'ArrowDown') {
             if (isMod) {
-                // Meta+Down: Move to the bottommost line with content
+                // Cmd+Down: Move to the bottommost line with content
                 let bottomY = cursorPos.y;
                 let foundAnyContent = false;
-                
+
                 // Scan world data to find the maximum y coordinate with content
                 for (const k in worldData) {
                     const [, yStr] = k.split(',');
@@ -6179,59 +6260,163 @@ export function useWorldEngine({
                         foundAnyContent = true;
                     }
                 }
-                
+
                 nextCursorPos.y = foundAnyContent ? bottomY : cursorPos.y;
+            } else if (altKey) {
+                // Opt+Down: Navigate blocks (alternates between bottom and top)
+                // First, find current block boundaries
+                let currentBlockTop = cursorPos.y;
+                let currentBlockBottom = cursorPos.y;
+
+                // Check if current line has content
+                let currentLineHasContent = false;
+                for (const k in worldData) {
+                    if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
+                    const [xStr, yStr] = k.split(',');
+                    const y = parseInt(yStr, 10);
+                    if (y === cursorPos.y) {
+                        currentLineHasContent = true;
+                        break;
+                    }
+                }
+
+                if (currentLineHasContent) {
+                    // Find bottom of current block
+                    const maxY = 10000; // Reasonable upper bound
+                    for (let y = cursorPos.y + 1; y <= maxY; y++) {
+                        let hasContent = false;
+                        for (const k in worldData) {
+                            if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
+                            const [xStr, yStr] = k.split(',');
+                            const checkY = parseInt(yStr, 10);
+                            if (checkY === y) {
+                                hasContent = true;
+                                break;
+                            }
+                        }
+                        if (hasContent) {
+                            currentBlockBottom = y;
+                        } else {
+                            break; // Hit a gap, stop
+                        }
+                    }
+
+                    // If we're not at the bottom of current block, go to bottom
+                    if (cursorPos.y < currentBlockBottom) {
+                        nextCursorPos.y = currentBlockBottom;
+                    } else {
+                        // We're at bottom of block, find top of next block
+                        let searchY = currentBlockBottom + 1;
+                        let foundGap = false;
+                        let foundBlock = false;
+                        let nextBlockTop = currentBlockBottom + 1;
+
+                        while (searchY <= maxY) {
+                            let hasContent = false;
+                            for (const k in worldData) {
+                                if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
+                                const [xStr, yStr] = k.split(',');
+                                const y = parseInt(yStr, 10);
+                                if (y === searchY) {
+                                    hasContent = true;
+                                    break;
+                                }
+                            }
+
+                            if (!hasContent) {
+                                foundGap = true;
+                            } else if (hasContent && foundGap) {
+                                // Found content after gap - this is top of next block
+                                nextBlockTop = searchY;
+                                foundBlock = true;
+                                break;
+                            }
+
+                            searchY++;
+                            // Safety: don't search forever
+                            if (searchY > currentBlockBottom + 1000) break;
+                        }
+
+                        nextCursorPos.y = foundBlock ? nextBlockTop : cursorPos.y + 1;
+                    }
+                } else {
+                    // Not in a block, just move down by 1
+                    nextCursorPos.y = cursorPos.y + 1;
+                }
             } else {
                 nextCursorPos.y += 1;
             }
             moved = true;
         } else if (key === 'ArrowLeft') {
             if (isMod) {
-                // Meta+Left: Move to the beginning of the current word or previous word
-                let x = cursorPos.x - 1;
-                let passedContent = false;
-                
-                // Find the leftmost character on this line to determine search range
-                let leftmostX = x;
+                // Cmd+Left: Move to beginning of line (leftmost character position)
+                let leftmostX = 0;
                 for (const k in worldData) {
+                    if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
                     const [xStr, yStr] = k.split(',');
                     const checkY = parseInt(yStr, 10);
                     if (checkY === cursorPos.y) {
+                        const checkX = parseInt(xStr, 10);
+                        if (leftmostX === 0 || checkX < leftmostX) {
+                            leftmostX = checkX;
+                        }
+                    }
+                }
+                nextCursorPos.x = leftmostX;
+            } else if (altKey) {
+                // Opt+Left: Move to the beginning of the current word or previous word
+                // First check if there's any content on this line
+                let hasContentOnLine = false;
+                let leftmostX = cursorPos.x;
+                for (const k in worldData) {
+                    if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
+                    const [xStr, yStr] = k.split(',');
+                    const checkY = parseInt(yStr, 10);
+                    if (checkY === cursorPos.y) {
+                        hasContentOnLine = true;
                         const checkX = parseInt(xStr, 10);
                         if (checkX < leftmostX) {
                             leftmostX = checkX;
                         }
                     }
                 }
-                
-                // First, skip any spaces to the left
-                while (x >= leftmostX) {
-                    const key = `${x},${cursorPos.y}`;
-                    const charData = worldData[key];
-                    const char = charData && !isImageData(charData) ? getCharacter(charData) : '';
-                    if (!char || char === ' ' || char === '\t') {
-                        x--;
-                    } else {
-                        passedContent = true;
-                        break;
-                    }
-                }
-                
-                // If we found content, continue to find the beginning of the word
-                if (passedContent) {
-                    // Continue until we find a space or beginning of content
+
+                // If no content on line, just move left by 1
+                if (!hasContentOnLine) {
+                    nextCursorPos.x = cursorPos.x - 1;
+                } else {
+                    let x = cursorPos.x - 1;
+                    let passedContent = false;
+
+                    // First, skip any spaces to the left
                     while (x >= leftmostX) {
-                        const key = `${x-1},${cursorPos.y}`;
+                        const key = `${x},${cursorPos.y}`;
                         const charData = worldData[key];
                         const char = charData && !isImageData(charData) ? getCharacter(charData) : '';
                         if (!char || char === ' ' || char === '\t') {
+                            x--;
+                        } else {
+                            passedContent = true;
                             break;
                         }
-                        x--;
                     }
+
+                    // If we found content, continue to find the beginning of the word
+                    if (passedContent) {
+                        // Continue until we find a space or beginning of content
+                        while (x >= leftmostX) {
+                            const key = `${x-1},${cursorPos.y}`;
+                            const charData = worldData[key];
+                            const char = charData && !isImageData(charData) ? getCharacter(charData) : '';
+                            if (!char || char === ' ' || char === '\t') {
+                                break;
+                            }
+                            x--;
+                        }
+                    }
+
+                    nextCursorPos.x = x;
                 }
-                
-                nextCursorPos.x = x;
             } else {
                 nextCursorPos.x -= 1;
             }
@@ -6239,13 +6424,10 @@ export function useWorldEngine({
             moved = true;
         } else if (key === 'ArrowRight') {
             if (isMod) {
-                // Meta+Right: Move to the end of the current word or next word
-                let x = cursorPos.x;
-                let currentLine = cursorPos.y;
-                
-                // Find the rightmost character on this line to determine search range
-                let rightmostX = x;
+                // Cmd+Right: Move to end of line (rightmost character position + 1)
+                let rightmostX = cursorPos.x;
                 for (const k in worldData) {
+                    if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
                     const [xStr, yStr] = k.split(',');
                     const checkY = parseInt(yStr, 10);
                     if (checkY === cursorPos.y) {
@@ -6255,39 +6437,66 @@ export function useWorldEngine({
                         }
                     }
                 }
-                
-                // First, see if we're in the middle of a word
-                const startKey = `${x},${currentLine}`;
-                const startCharData = worldData[startKey];
-                const startChar = startCharData && !isImageData(startCharData) ? getCharacter(startCharData) : '';
-                let inWord = !!startChar && startChar !== ' ' && startChar !== '\t';
-                
-                // Find the end of current word or beginning of next word
-                while (x <= rightmostX) {
-                    const key = `${x},${currentLine}`;
-                    const charData = worldData[key];
-                    const char = charData && !isImageData(charData) ? getCharacter(charData) : '';
-                    
-                    if (!char) {
-                        // No character at this position, keep looking
-                        x++;
-                        continue;
+                // Position cursor one space after the rightmost character
+                nextCursorPos.x = rightmostX > cursorPos.x ? rightmostX + 1 : cursorPos.x;
+            } else if (altKey) {
+                // Opt+Right: Move to the end of the current word or next word
+                // First check if there's any content on this line
+                let hasContentOnLine = false;
+                let rightmostX = cursorPos.x;
+                for (const k in worldData) {
+                    if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
+                    const [xStr, yStr] = k.split(',');
+                    const checkY = parseInt(yStr, 10);
+                    if (checkY === cursorPos.y) {
+                        hasContentOnLine = true;
+                        const checkX = parseInt(xStr, 10);
+                        if (checkX > rightmostX) {
+                            rightmostX = checkX;
+                        }
                     }
-                    
-                    const isSpace = char === ' ' || char === '\t';
-                    
-                    if (inWord && isSpace) {
-                        // We've reached the end of the current word
-                        break;
-                    } else if (!inWord && !isSpace) {
-                        // We've reached the beginning of the next word
-                        inWord = true;
-                    }
-                    
-                    x++;
                 }
-                
-                nextCursorPos.x = x;
+
+                // If no content on line, just move right by 1
+                if (!hasContentOnLine) {
+                    nextCursorPos.x = cursorPos.x + 1;
+                } else {
+                    let x = cursorPos.x;
+                    let currentLine = cursorPos.y;
+
+                    // First, see if we're in the middle of a word
+                    const startKey = `${x},${currentLine}`;
+                    const startCharData = worldData[startKey];
+                    const startChar = startCharData && !isImageData(startCharData) ? getCharacter(startCharData) : '';
+                    let inWord = !!startChar && startChar !== ' ' && startChar !== '\t';
+
+                    // Find the end of current word or beginning of next word
+                    while (x <= rightmostX) {
+                        const key = `${x},${currentLine}`;
+                        const charData = worldData[key];
+                        const char = charData && !isImageData(charData) ? getCharacter(charData) : '';
+
+                        if (!char) {
+                            // No character at this position, keep looking
+                            x++;
+                            continue;
+                        }
+
+                        const isSpace = char === ' ' || char === '\t';
+
+                        if (inWord && isSpace) {
+                            // We've reached the end of the current word
+                            break;
+                        } else if (!inWord && !isSpace) {
+                            // We've reached the beginning of the next word
+                            inWord = true;
+                        }
+
+                        x++;
+                    }
+
+                    nextCursorPos.x = x;
+                }
             } else {
                 nextCursorPos.x += 1;
             }
@@ -6404,12 +6613,52 @@ export function useWorldEngine({
                     // Update local nextCursorPos for consistency if needed, though state is already set
                     nextCursorPos = { x: selectionStart?.x ?? cursorPos.x, y: selectionStart?.y ?? cursorPos.y };
                 }
-            } else if (metaKey) { 
+            } else if (metaKey) {
+                // Cmd+Backspace: Delete whole line (from cursor to beginning of line)
                 nextWorldData = { ...worldData }; // Create a copy before modifying
-                
+
+                // First, find the leftmost character on this line
+                let leftmostX = cursorPos.x;
+                for (const k in worldData) {
+                    const [xStr, yStr] = k.split(',');
+                    const checkY = parseInt(yStr, 10);
+                    if (checkY === cursorPos.y) {
+                        const checkX = parseInt(xStr, 10);
+                        if (checkX < leftmostX && !k.startsWith('block_') && !k.startsWith('label_') && !k.startsWith('bound_')) {
+                            leftmostX = checkX;
+                        }
+                    }
+                }
+
                 let deletedAny = false;
                 let x = cursorPos.x - 1; // Start from the character to the left of cursor
-                
+
+                // Delete all characters from cursor back to x=0
+                while (x >= 0) {
+                    const key = `${x},${cursorPos.y}`;
+                    if (worldData[key]) {
+                        delete nextWorldData[key];
+                        deletedAny = true;
+                    }
+                    x--;
+                }
+
+                // Only mark as changed if we actually deleted something
+                if (deletedAny) {
+                    worldDataChanged = true;
+                    // Move cursor to where the leftmost character was
+                    nextCursorPos.x = leftmostX;
+                } else {
+                    // If we didn't delete anything, just move cursor to current position (no change)
+                    nextCursorPos.x = cursorPos.x;
+                }
+            } else if (altKey) {
+                // Option+Backspace (Alt on Windows): Delete whole word
+                nextWorldData = { ...worldData }; // Create a copy before modifying
+
+                let deletedAny = false;
+                let x = cursorPos.x - 1; // Start from the character to the left of cursor
+
                 // Find the leftmost character on this line to determine range
                 let leftmostX = cursorPos.x - 1;
                 for (const k in worldData) {
@@ -6422,13 +6671,13 @@ export function useWorldEngine({
                         }
                     }
                 }
-                
+
                 // Continue deleting until we've checked all possible positions to the left
                 while (x >= leftmostX) {
                     const key = `${x},${cursorPos.y}`;
                     const charData = worldData[key];
                     const char = charData && !isImageData(charData) ? getCharacter(charData) : '';
-                    
+
                     // Stop at whitespace or when no character exists
                     if (!char || char === ' ' || char === '\t') {
                         if (!deletedAny) {
@@ -6447,10 +6696,10 @@ export function useWorldEngine({
                         delete nextWorldData[key];
                         deletedAny = true;
                     }
-                    
+
                     x--;
                 }
-                
+
                 // Only mark as changed if we actually deleted something
                 if (deletedAny) {
                     worldDataChanged = true;

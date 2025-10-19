@@ -4873,7 +4873,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         // Let engine handle all key input (including regular typing)
-        const preventDefault = engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey, e.shiftKey);
+        const preventDefault = engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey, e.shiftKey, e.altKey);
         if (preventDefault) {
             e.preventDefault();
             e.stopPropagation();
