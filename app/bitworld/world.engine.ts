@@ -2710,6 +2710,186 @@ export function useWorldEngine({
                         inputPositions: [],
                         isProcessing: false
                     });
+                } else if (exec.command === 'ai-chat') {
+                    // One-shot AI prompt
+                    const aiPrompt = exec.args[0];
+                    const isPermanent = exec.args[1] === 'permanent'; // Flag from Cmd+Enter
+
+                    if (!aiPrompt || !aiPrompt.trim()) {
+                        setDialogueWithRevert("No prompt provided", setDialogueText);
+                        return true;
+                    }
+
+                    // Check if there's an image at the command start position
+                    let existingImageData: string | null = null;
+                    let existingImageKey: string | null = null;
+                    let imageRegion: { startX: number, endX: number, startY: number, endY: number } | null = null;
+
+                    for (const key in worldData) {
+                        if (key.startsWith('image_')) {
+                            const imgData = worldData[key];
+                            if (imgData && typeof imgData === 'object' && 'type' in imgData && imgData.type === 'image') {
+                                const img = imgData as any;
+                                // Check if command was typed over this image
+                                if (exec.commandStartPos.x >= img.startX && exec.commandStartPos.x <= img.endX &&
+                                    exec.commandStartPos.y >= img.startY && exec.commandStartPos.y <= img.endY) {
+                                    existingImageData = img.src;
+                                    existingImageKey = key;
+                                    imageRegion = {
+                                        startX: img.startX,
+                                        endX: img.endX,
+                                        startY: img.startY,
+                                        endY: img.endY
+                                    };
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // If image exists, do image-to-image generation
+                    if (existingImageData && existingImageKey && imageRegion) {
+                        setDialogueWithRevert("Generating image...", setDialogueText);
+                        loadAI().then(ai => ai.generateImage(aiPrompt, existingImageData)).then(async (result) => {
+                            if (result.imageData) {
+                                // Replace the existing image
+                                const newWorldData = { ...worldData };
+
+                                // Upload to storage if available
+                                let finalImageUrl = result.imageData;
+                                if (uploadImageToStorage) {
+                                    try {
+                                        finalImageUrl = await uploadImageToStorage(result.imageData);
+                                    } catch (error) {
+                                        logger.error('Failed to upload generated image:', error);
+                                    }
+                                }
+
+                                // Get image dimensions for scaling
+                                const img = new Image();
+                                img.onload = () => {
+                                    const { width: charWidth, height: charHeight } = getEffectiveCharDims(zoomLevel);
+
+                                    const regionCellsWide = imageRegion!.endX - imageRegion!.startX + 1;
+                                    const regionCellsHigh = imageRegion!.endY - imageRegion!.startY + 1;
+                                    const regionPixelsWide = regionCellsWide * charWidth;
+                                    const regionPixelsHigh = regionCellsHigh * charHeight;
+
+                                    const imageAspect = img.width / img.height;
+                                    const regionAspect = regionPixelsWide / regionPixelsHigh;
+
+                                    let scaledWidth, scaledHeight;
+                                    if (imageAspect > regionAspect) {
+                                        scaledWidth = regionPixelsWide;
+                                        scaledHeight = regionPixelsWide / imageAspect;
+                                    } else {
+                                        scaledHeight = regionPixelsHigh;
+                                        scaledWidth = regionPixelsHigh * imageAspect;
+                                    }
+
+                                    const cellsWide = Math.ceil(scaledWidth / charWidth);
+                                    const cellsHigh = Math.ceil(scaledHeight / charHeight);
+
+                                    // Update image data
+                                    const updatedWorldData = { ...worldData };
+                                    updatedWorldData[existingImageKey!] = {
+                                        type: 'image',
+                                        src: finalImageUrl,
+                                        startX: imageRegion!.startX,
+                                        startY: imageRegion!.startY,
+                                        endX: imageRegion!.startX + cellsWide - 1,
+                                        endY: imageRegion!.startY + cellsHigh - 1,
+                                        width: img.width,
+                                        height: img.height,
+                                        timestamp: Date.now()
+                                    };
+                                    setWorldData(updatedWorldData);
+                                    setDialogueWithRevert("Image transformed", setDialogueText);
+                                };
+                                img.src = result.imageData;
+                            } else {
+                                setDialogueWithRevert("Image generation failed", setDialogueText);
+                            }
+                        }).catch((error) => {
+                            setDialogueWithRevert(`AI error: ${error.message || 'Could not generate image'}`, setDialogueText);
+                        });
+                        return true;
+                    }
+
+                    // Otherwise, do text-based AI chat
+                    setDialogueWithRevert("Asking AI...", setDialogueText);
+                    loadAI().then(ai => ai.chatWithAI(aiPrompt)).then((response) => {
+                        // Start response on next line, same X as where '/' was typed
+                        const responseStartPos = {
+                            x: exec.commandStartPos.x,
+                            y: exec.commandStartPos.y + 1
+                        };
+
+                        if (isPermanent) {
+                            // Cmd+Enter: Write permanently to canvas with wrapping
+                            const wrapWidth = 80; // Default wrap width
+
+                            // Text wrapping function
+                            const wrapText = (text: string, maxWidth: number): string[] => {
+                                const paragraphs = text.split('\n');
+                                const lines: string[] = [];
+
+                                for (const paragraph of paragraphs) {
+                                    if (paragraph.trim() === '') {
+                                        lines.push('');
+                                        continue;
+                                    }
+
+                                    const words = paragraph.split(' ');
+                                    let currentLine = '';
+
+                                    for (const word of words) {
+                                        const testLine = currentLine ? `${currentLine} ${word}` : word;
+                                        if (testLine.length <= maxWidth) {
+                                            currentLine = testLine;
+                                        } else {
+                                            if (currentLine) lines.push(currentLine);
+                                            currentLine = word;
+                                        }
+                                    }
+                                    if (currentLine) lines.push(currentLine);
+                                }
+                                return lines;
+                            };
+
+                            const wrappedLines = wrapText(response, wrapWidth);
+
+                            // Write each character permanently to worldData
+                            const newWorldData = { ...worldData };
+                            for (let lineIndex = 0; lineIndex < wrappedLines.length; lineIndex++) {
+                                const line = wrappedLines[lineIndex];
+                                for (let charIndex = 0; charIndex < line.length; charIndex++) {
+                                    const char = line[charIndex];
+                                    const x = responseStartPos.x + charIndex;
+                                    const y = responseStartPos.y + lineIndex;
+                                    const key = `${x},${y}`;
+                                    newWorldData[key] = char;
+                                }
+                            }
+                            setWorldData(newWorldData);
+
+                            // Move cursor to end of response
+                            setCursorPos({
+                                x: responseStartPos.x + wrappedLines[wrappedLines.length - 1].length,
+                                y: responseStartPos.y + wrappedLines.length - 1
+                            });
+
+                            setDialogueWithRevert("AI response written", setDialogueText);
+                        } else {
+                            // Enter: Show ephemeral response (like chat mode)
+                            createSubtitleCycler(response, setDialogueText);
+
+                            // Also show as ephemeral text at response start position
+                            addInstantAIResponse(responseStartPos, response, { queryText: aiPrompt, centered: false });
+                        }
+                    }).catch((error) => {
+                        setDialogueWithRevert(`AI error: ${error.message || 'Could not get AI response'}`, setDialogueText);
+                    });
                 } else if (exec.command === 'label') {
                     // Check if this is a --distance command
                     if (exec.args.length >= 2 && exec.args[0] === '--distance') {
@@ -4659,7 +4839,7 @@ export function useWorldEngine({
                     } else if (exec.command === 'summarize') {
                         const selectedText = exec.args[0];
                         const focus = exec.args.length > 1 ? exec.args.slice(1).join(' ') : undefined;
-                        
+
                         setDialogueWithRevert("Processing summary...", setDialogueText);
                         loadAI().then(ai => ai.summarizeText(selectedText, focus)).then((result) => {
                             createSubtitleCycler(result, setDialogueText);

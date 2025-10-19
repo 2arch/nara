@@ -911,6 +911,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         fadeInterval?: number;  // Delay between each character fade
         color?: string;
         queryText?: string;
+        centered?: boolean; // Whether to center the text (default true for backwards compatibility)
     }) => {
         // Calculate intelligent wrap width based on viewport (like dialogue system)
         const BASE_FONT_SIZE = 16;
@@ -972,9 +973,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         const maxLineWidth = Math.max(...wrappedLines.map(line => line.length));
         const totalHeight = wrappedLines.length;
 
-        // Offset startPos to center the text block
-        const centeredStartX = Math.floor(startPos.x - maxLineWidth / 2);
-        const centeredStartY = Math.floor(startPos.y - totalHeight / 2);
+        // Offset startPos to center the text block (unless centered: false)
+        const centeredStartX = options?.centered !== false
+            ? Math.floor(startPos.x - maxLineWidth / 2)
+            : startPos.x;
+        const centeredStartY = options?.centered !== false
+            ? Math.floor(startPos.y - totalHeight / 2)
+            : startPos.y;
 
         // Add all characters instantly
         let y = centeredStartY;
@@ -1154,17 +1159,17 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
     }, []);
 
     // Execute selected command
-    const executeCommand = useCallback((): CommandExecution | null => {
-        if (commandState.matchedCommands.length === 0) return null;
-
+    const executeCommand = useCallback((isPermanent: boolean = false): CommandExecution | null => {
         // If user hasn't navigated with arrow keys, use their raw input instead of selected suggestion
         const fullInput = commandState.input.trim();
-        const commandToExecute = commandState.hasNavigated 
-            ? commandState.matchedCommands[commandState.selectedIndex] 
+
+        // Allow execution even with no matches - treat as AI prompt
+        const commandToExecute = commandState.hasNavigated && commandState.matchedCommands.length > 0
+            ? commandState.matchedCommands[commandState.selectedIndex]
             : fullInput;
-        
+
         if (!commandToExecute) return null; // Safety check for undefined command
-        
+
         const inputParts = commandToExecute.split(/\s+/);
         const commandName = inputParts[0];
         
@@ -1231,10 +1236,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                         // Upload to storage for persistence
                         if (uploadImageToStorage) {
                             const storageUrl = await uploadImageToStorage(result.imageData);
-                            switchBackgroundMode('image', storageUrl, undefined, undefined, restOfInput.trim());
+                            switchBackgroundMode('image', storageUrl, '#000000', undefined, restOfInput.trim());
                             setDialogueWithRevert(`"${restOfInput.trim()}"`, setDialogueText);
                         } else {
-                            switchBackgroundMode('image', result.imageData, undefined, undefined, restOfInput.trim());
+                            switchBackgroundMode('image', result.imageData, '#000000', undefined, restOfInput.trim());
                             setDialogueWithRevert(`"${restOfInput.trim()}"`, setDialogueText);
                         }
                     } else {
@@ -1301,12 +1306,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     generateImage(prompt).then(async (result) => {
                         if (result.imageData) {
                             // Upload to storage for persistence
+                            // Default to black text for AI-generated backgrounds (most are light/colorful)
+                            const finalTextColor = textColorParam || '#000000';
                             if (uploadImageToStorage) {
                                 const storageUrl = await uploadImageToStorage(result.imageData);
-                                switchBackgroundMode('image', storageUrl, textColorParam, textBgParam, prompt);
+                                switchBackgroundMode('image', storageUrl, finalTextColor, textBgParam, prompt);
                                 setDialogueWithRevert(`"${prompt}"`, setDialogueText);
                             } else {
-                                switchBackgroundMode('image', result.imageData, textColorParam, textBgParam, prompt);
+                                switchBackgroundMode('image', result.imageData, finalTextColor, textBgParam, prompt);
                                 setDialogueWithRevert(`"${prompt}"`, setDialogueText);
                             }
                         } else {
@@ -2645,6 +2652,32 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return { command: 'upload', args, commandStartPos: commandState.commandStartPos };
         }
 
+        // Check if this is an unrecognized command - treat as AI prompt
+        if (!AVAILABLE_COMMANDS.includes(commandName.toLowerCase())) {
+            // This is an AI prompt, not a recognized command
+            const aiPrompt = commandToExecute; // Full input is the prompt
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            // Return special command for AI chat - world engine will handle the AI call
+            // Pass isPermanent flag to differentiate Enter vs Cmd+Enter
+            return {
+                command: 'ai-chat',
+                args: [aiPrompt, isPermanent ? 'permanent' : 'ephemeral'],
+                commandStartPos: commandState.commandStartPos
+            };
+        }
+
         // Clear command mode for other commands
         setCommandState({
             isActive: false,
@@ -2744,6 +2777,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         ctrlKey: boolean = false,
         metaKey: boolean = false
     ): boolean | CommandExecution | null => {
+        const isPermanent = metaKey || ctrlKey; // Track if Cmd/Ctrl+Enter
         // Handle paste in command mode (Cmd+V or Ctrl+V)
         if (commandState.isActive && key === 'v' && (ctrlKey || metaKey)) {
             pasteIntoCommand().then(result => {
@@ -2778,7 +2812,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             setCursorPos({ x: cursorPos.x + 1, y: cursorPos.y });
             return true;
         } else if (key === 'Enter') {
-            return executeCommand();
+            return executeCommand(isPermanent);
         } else if (key === 'Escape') {
             // Exit command mode without executing and restore cursor to original position
             const originalPos = commandState.originalCursorPos;
