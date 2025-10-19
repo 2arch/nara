@@ -2359,9 +2359,109 @@ export function useWorldEngine({
     // Define pasteText BEFORE handleKeyDown uses it
     const pasteText = useCallback(async (): Promise<boolean> => {
         try {
+            // First, try to read image from clipboard if there's a selection
+            const selection = getNormalizedSelection();
+
+            if (selection) {
+                try {
+                    const clipboardItems = await navigator.clipboard.read();
+                    for (const item of clipboardItems) {
+                        // Check for image types
+                        const imageType = item.types.find(type => type.startsWith('image/'));
+                        if (imageType) {
+                            const blob = await item.getType(imageType);
+
+                            // Convert blob to data URL
+                            const reader = new FileReader();
+                            const imageDataUrl = await new Promise<string>((resolve, reject) => {
+                                reader.onload = () => resolve(reader.result as string);
+                                reader.onerror = reject;
+                                reader.readAsDataURL(blob);
+                            });
+
+                            // Upload to storage if available
+                            let finalImageUrl = imageDataUrl;
+                            if (uploadImageToStorage) {
+                                try {
+                                    finalImageUrl = await uploadImageToStorage(imageDataUrl);
+                                } catch (error) {
+                                    logger.error('Failed to upload pasted image:', error);
+                                }
+                            }
+
+                            // Get selection bounds
+                            const minX = selection.startX;
+                            const maxX = selection.endX;
+                            const minY = selection.startY;
+                            const maxY = selection.endY;
+
+                            // Load image to get dimensions
+                            const img = new Image();
+                            img.onload = () => {
+                                const { width: charWidth, height: charHeight } = getEffectiveCharDims(zoomLevel);
+
+                                const selectionCellsWide = maxX - minX + 1;
+                                const selectionCellsHigh = maxY - minY + 1;
+                                const selectionPixelsWide = selectionCellsWide * charWidth;
+                                const selectionPixelsHigh = selectionCellsHigh * charHeight;
+
+                                const imageAspect = img.width / img.height;
+                                const selectionAspect = selectionPixelsWide / selectionPixelsHigh;
+
+                                let scaledWidth, scaledHeight;
+                                if (imageAspect > selectionAspect) {
+                                    scaledWidth = selectionPixelsWide;
+                                    scaledHeight = selectionPixelsWide / imageAspect;
+                                } else {
+                                    scaledHeight = selectionPixelsHigh;
+                                    scaledWidth = selectionPixelsHigh * imageAspect;
+                                }
+
+                                const cellsWide = Math.ceil(scaledWidth / charWidth);
+                                const cellsHigh = Math.ceil(scaledHeight / charHeight);
+
+                                // Clear selection area and place image
+                                const newWorldData = { ...worldData };
+
+                                // Clear the selection
+                                for (let y = minY; y <= maxY; y++) {
+                                    for (let x = minX; x <= maxX; x++) {
+                                        delete newWorldData[`${x},${y}`];
+                                    }
+                                }
+
+                                // Add image
+                                (newWorldData[`image_${Date.now()}`] as any) = {
+                                    type: 'image',
+                                    src: finalImageUrl,
+                                    startX: minX,
+                                    startY: minY,
+                                    endX: minX + cellsWide - 1,
+                                    endY: minY + cellsHigh - 1,
+                                    width: img.width,
+                                    height: img.height,
+                                    timestamp: Date.now()
+                                };
+
+                                setWorldData(newWorldData);
+                                setSelectionStart(null);
+                                setSelectionEnd(null);
+                                setDialogueWithRevert("Image pasted", setDialogueText);
+                            };
+                            img.src = imageDataUrl;
+
+                            return true;
+                        }
+                    }
+                } catch (err) {
+                    // No image in clipboard or error reading, fall through to text paste
+                    logger.debug('No image in clipboard, trying text:', err);
+                }
+            }
+
+            // Fall back to text paste
             const clipText = await navigator.clipboard.readText();
 
-            const selection = getNormalizedSelection();
             const pasteStartX = selection ? selection.startX : cursorPos.x;
             const pasteStartY = selection ? selection.startY : cursorPos.y;
 
@@ -2431,7 +2531,7 @@ export function useWorldEngine({
             logger.warn('Could not read from system clipboard or paste failed:', err);
             return false;
         }
-    }, [worldData, cursorPos, getNormalizedSelection, wordWrap]);
+    }, [worldData, cursorPos, getNormalizedSelection, wordWrap, uploadImageToStorage, getEffectiveCharDims, zoomLevel, setDialogueWithRevert, setSelectionStart, setSelectionEnd]);
 
     // Now define cutSelection, which depends on the above
     const cutSelection = useCallback(() => {
@@ -2720,7 +2820,205 @@ export function useWorldEngine({
                         return true;
                     }
 
-                    // Check if there's an image at the command start position
+                    // Priority 1: Check if there's an active selection
+                    const hasSelection = selectionStart && selectionEnd &&
+                        (selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y);
+
+                    if (hasSelection && selectionStart && selectionEnd) {
+                        const minX = Math.floor(Math.min(selectionStart.x, selectionEnd.x));
+                        const maxX = Math.floor(Math.max(selectionStart.x, selectionEnd.x));
+                        const minY = Math.floor(Math.min(selectionStart.y, selectionEnd.y));
+                        const maxY = Math.floor(Math.max(selectionStart.y, selectionEnd.y));
+
+                        // Check if selection contains an image
+                        let selectedImageData: string | null = null;
+                        let selectedImageKey: string | null = null;
+
+                        for (const key in worldData) {
+                            if (key.startsWith('image_')) {
+                                const imgData = worldData[key];
+                                if (imgData && typeof imgData === 'object' && 'type' in imgData && imgData.type === 'image') {
+                                    const img = imgData as any;
+                                    // Check if image overlaps with selection
+                                    if (img.startX <= maxX && img.endX >= minX &&
+                                        img.startY <= maxY && img.endY >= minY) {
+                                        selectedImageData = img.src;
+                                        selectedImageKey = key;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        // If selection contains an image, do image-to-image generation
+                        if (selectedImageData && selectedImageKey) {
+                            setDialogueWithRevert("Generating image...", setDialogueText);
+                            loadAI().then(ai => ai.generateImage(aiPrompt, selectedImageData)).then(async (result) => {
+                                if (result.imageData) {
+                                    const newWorldData = { ...worldData };
+
+                                    // Upload to storage if available
+                                    let finalImageUrl = result.imageData;
+                                    if (uploadImageToStorage) {
+                                        try {
+                                            finalImageUrl = await uploadImageToStorage(result.imageData);
+                                        } catch (error) {
+                                            logger.error('Failed to upload generated image:', error);
+                                        }
+                                    }
+
+                                    // Get image dimensions for scaling
+                                    const img = new Image();
+                                    img.onload = () => {
+                                        const { width: charWidth, height: charHeight } = getEffectiveCharDims(zoomLevel);
+
+                                        const selectionCellsWide = maxX - minX + 1;
+                                        const selectionCellsHigh = maxY - minY + 1;
+                                        const selectionPixelsWide = selectionCellsWide * charWidth;
+                                        const selectionPixelsHigh = selectionCellsHigh * charHeight;
+
+                                        const imageAspect = img.width / img.height;
+                                        const selectionAspect = selectionPixelsWide / selectionPixelsHigh;
+
+                                        let scaledWidth, scaledHeight;
+                                        if (imageAspect > selectionAspect) {
+                                            scaledWidth = selectionPixelsWide;
+                                            scaledHeight = selectionPixelsWide / imageAspect;
+                                        } else {
+                                            scaledHeight = selectionPixelsHigh;
+                                            scaledWidth = selectionPixelsHigh * imageAspect;
+                                        }
+
+                                        const cellsWide = Math.ceil(scaledWidth / charWidth);
+                                        const cellsHigh = Math.ceil(scaledHeight / charHeight);
+
+                                        // Delete old image and create new one at selection bounds
+                                        const updatedWorldData = { ...worldData };
+                                        if (selectedImageKey) {
+                                            delete updatedWorldData[selectedImageKey];
+                                        }
+
+                                        (updatedWorldData[`image_${Date.now()}`] as any) = {
+                                            type: 'image',
+                                            src: finalImageUrl,
+                                            startX: minX,
+                                            startY: minY,
+                                            endX: minX + cellsWide - 1,
+                                            endY: minY + cellsHigh - 1,
+                                            width: img.width,
+                                            height: img.height,
+                                            timestamp: Date.now()
+                                        };
+                                        setWorldData(updatedWorldData);
+                                        setDialogueWithRevert("Image transformed", setDialogueText);
+
+                                        // Clear selection after processing
+                                        setSelectionStart(null);
+                                        setSelectionEnd(null);
+                                    };
+                                    img.src = result.imageData;
+                                } else {
+                                    setDialogueWithRevert("Image generation failed", setDialogueText);
+                                }
+                            }).catch((error) => {
+                                setDialogueWithRevert(`AI error: ${error.message || 'Could not generate image'}`, setDialogueText);
+                            });
+                            return true;
+                        }
+
+                        // Otherwise, extract text from selection and do text transformation
+                        const getCharacter = (cellData: any): string => {
+                            if (!cellData) return '';
+                            if (typeof cellData === 'string') return cellData;
+                            if (typeof cellData === 'object' && 'char' in cellData) return cellData.char;
+                            return '';
+                        };
+
+                        // Extract text from selection
+                        let selectedText = '';
+                        for (let y = minY; y <= maxY; y++) {
+                            let line = '';
+                            for (let x = minX; x <= maxX; x++) {
+                                const cellKey = `${x},${y}`;
+                                line += getCharacter(worldData[cellKey]);
+                            }
+                            selectedText += line.trimEnd() + '\n';
+                        }
+                        selectedText = selectedText.trim();
+
+                        // If there's text in the selection, use it as context
+                        const fullPrompt = selectedText
+                            ? `${aiPrompt}\n\nExisting text:\n${selectedText}`
+                            : aiPrompt;
+
+                        setDialogueWithRevert(selectedText ? "Transforming text..." : "Generating text...", setDialogueText);
+                        loadAI().then(ai => ai.chatWithAI(fullPrompt)).then((response) => {
+                            const newWorldData = { ...worldData };
+
+                            // Clear the selection area
+                            for (let y = minY; y <= maxY; y++) {
+                                for (let x = minX; x <= maxX; x++) {
+                                    delete newWorldData[`${x},${y}`];
+                                }
+                            }
+
+                            // Wrap and write AI response in the selection bounds
+                            const wrapWidth = maxX - minX + 1;
+                            const wrapText = (text: string, maxWidth: number): string[] => {
+                                const paragraphs = text.split('\n');
+                                const lines: string[] = [];
+
+                                for (const paragraph of paragraphs) {
+                                    if (paragraph.trim() === '') {
+                                        lines.push('');
+                                        continue;
+                                    }
+
+                                    const words = paragraph.split(' ');
+                                    let currentLine = '';
+
+                                    for (const word of words) {
+                                        const testLine = currentLine ? `${currentLine} ${word}` : word;
+                                        if (testLine.length <= maxWidth) {
+                                            currentLine = testLine;
+                                        } else {
+                                            if (currentLine) lines.push(currentLine);
+                                            currentLine = word;
+                                        }
+                                    }
+                                    if (currentLine) lines.push(currentLine);
+                                }
+                                return lines;
+                            };
+
+                            const wrappedLines = wrapText(response, wrapWidth);
+
+                            // Write wrapped response starting at selection top-left
+                            for (let lineIndex = 0; lineIndex < wrappedLines.length; lineIndex++) {
+                                const line = wrappedLines[lineIndex];
+                                for (let charIndex = 0; charIndex < line.length; charIndex++) {
+                                    const char = line[charIndex];
+                                    const x = minX + charIndex;
+                                    const y = minY + lineIndex;
+                                    const key = `${x},${y}`;
+                                    newWorldData[key] = char;
+                                }
+                            }
+
+                            setWorldData(newWorldData);
+                            setDialogueWithRevert(selectedText ? "Text transformed" : "Text generated", setDialogueText);
+
+                            // Clear selection after processing
+                            setSelectionStart(null);
+                            setSelectionEnd(null);
+                        }).catch((error) => {
+                            setDialogueWithRevert(`AI error: ${error.message || 'Could not transform text'}`, setDialogueText);
+                        });
+
+                        return true;
+                    }
+
+                    // Priority 2: Check if there's an image at the command start position
                     let existingImageData: string | null = null;
                     let existingImageKey: string | null = null;
                     let imageRegion: { startX: number, endX: number, startY: number, endY: number } | null = null;
@@ -2816,7 +3114,7 @@ export function useWorldEngine({
                         return true;
                     }
 
-                    // Check if there's a text block at the command position
+                    // Priority 3: Check if there's a text block at the command position
                     const getCharacter = (cellData: any): string => {
                         if (!cellData) return '';
                         if (typeof cellData === 'string') return cellData;
@@ -2982,7 +3280,7 @@ export function useWorldEngine({
                         return true;
                     }
 
-                    // Otherwise, do text-based AI chat
+                    // Priority 4: Default text-based AI chat (no selection, no image, no text block)
                     setDialogueWithRevert("Asking AI...", setDialogueText);
                     loadAI().then(ai => ai.chatWithAI(aiPrompt)).then((response) => {
                         // Start response on next line, same X as where '/' was typed

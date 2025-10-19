@@ -100,9 +100,9 @@ const READ_ONLY_COMMANDS = ['signin', 'share'];
 // Commands organized by category for logical ordering
 const AVAILABLE_COMMANDS = [
     // Navigation & View
-    'nav', 'search', 'cam', 'full',
+    'nav', 'search', 'cam',
     // Content Creation
-    'label', 'bound', 'unbound', 'clip', 'upload', 'sci',
+    'label', 'clip', 'upload',
     // Styling & Display
     'mode', 'bg', 'text', 'font', 'indent',
     // State Management
@@ -110,7 +110,7 @@ const AVAILABLE_COMMANDS = [
     // Recording & Capture
     'tape',
     // Sharing & Publishing
-    'publish', 'unpublish', 'share', 'spawn', 'stage', 'monogram',
+    'publish', 'unpublish', 'share', 'spawn', 'monogram',
     // Account
     'signin', 'signout',
     // Modes
@@ -121,12 +121,12 @@ const AVAILABLE_COMMANDS = [
 
 // Category mapping for visual organization
 const COMMAND_CATEGORIES: { [category: string]: string[] } = {
-    'nav': ['nav', 'search', 'cam', 'full'],
-    'create': ['label', 'bound', 'unbound', 'clip', 'upload', 'sci'],
+    'nav': ['nav', 'search', 'cam'],
+    'create': ['label', 'clip', 'upload'],
     'style': ['mode', 'bg', 'text', 'font', 'indent'],
     'state': ['state', 'random', 'clear'],
     'record': ['tape'],
-    'share': ['publish', 'unpublish', 'share', 'spawn', 'stage', 'monogram'],
+    'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
     'account': ['signin', 'signout'],
     'modes': ['plan', 'chat'],
     'debug': ['debug']
@@ -137,7 +137,6 @@ const BG_COMMANDS = ['clear', 'live', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Neureal'];
 const NAV_COMMANDS: string[] = [];
 const CAMERA_COMMANDS = ['default', 'focus'];
-const SCI_COMMANDS = ['smiles', 'latex'];
 
 // Standardized color mapping used throughout the application
 export const COLOR_MAP: { [name: string]: string } = {
@@ -438,35 +437,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return ['text --g', ...Object.keys(COLOR_MAP).map(color => `text ${color}`)];
         }
 
-        if (lowerInput === 'bound') {
-            const parts = input.split(' ');
-            
-            if (parts.length > 1) {
-                const secondArg = parts[1];
-                
-                // Handle --x and --y flags
-                if (secondArg === '--x') {
-                    if (parts.length > 2) {
-                        // User is typing the x value
-                        return [input];
-                    }
-                    // Just typed --x, show example
-                    return ['bound --x <width>'];
-                } else if (secondArg === '--y') {
-                    if (parts.length > 2) {
-                        // User is typing the y value
-                        return [input];
-                    }
-                    // Just typed --y, show example
-                    return ['bound --y <height>'];
-                } else {
-                    // Regular bound command - show as typed
-                    return [input];
-                }
-            }
-            return ['bound', 'bound --x', 'bound --y', 'bound --x <width> --y <height>'];
-        }
-
         if (lowerInput === 'list') {
             const parts = input.split(' ');
 
@@ -487,18 +457,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     .map(camera => `cam ${camera}`);
             }
             return CAMERA_COMMANDS.map(camera => `cam ${camera}`);
-        }
-
-        if (lowerInput === 'sci') {
-            const parts = input.toLowerCase().split(' ');
-            if (parts.length > 1) {
-                // Show sci subcommands that match the second part
-                const sciInput = parts[1];
-                return SCI_COMMANDS
-                    .filter(sci => sci.startsWith(sciInput))
-                    .map(sci => `sci ${sci}`);
-            }
-            return SCI_COMMANDS.map(sci => `sci ${sci}`);
         }
 
         if (lowerInput === 'upload') {
@@ -2145,51 +2103,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return null;
         }
 
-        if (commandToExecute.startsWith('bound')) {
-            
-            // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
-            
-            // Return command execution for immediate processing
-            const args = inputParts.slice(1);
-            
-            return {
-                command: 'bound',
-                args: args,
-                commandStartPos: commandState.commandStartPos
-            };
-        }
-
-        if (commandToExecute.startsWith('unbound')) {
-            // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
-
-            // Return command execution for immediate processing
-            return {
-                command: 'unbound',
-                args: [],
-                commandStartPos: commandState.commandStartPos
-            };
-        }
-
         if (commandToExecute.startsWith('list')) {
             // Clear command mode
             setCommandState({
@@ -2257,27 +2170,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             setCommandData({});
 
             return null;
-        }
-
-        if (commandToExecute.startsWith('full')) {
-            // Clear command mode first
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
-
-            // Toggle fullscreen mode or return command for world engine to handle detection
-            return {
-                command: 'full',
-                args: [],
-                commandStartPos: commandState.commandStartPos
-            };
         }
 
         if (commandToExecute.startsWith('pro')) {
@@ -2348,40 +2240,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return {
                 command: 'spawn',
                 args: [],
-                commandStartPos: commandState.commandStartPos
-            };
-        }
-
-        if (commandToExecute.startsWith('stage')) {
-            // Parse: /stage [--up] [<url>]
-            const parts = commandToExecute.split(/\s+/);
-            const hasUpFlag = parts.includes('--up');
-
-            let args: string[] = [];
-            if (hasUpFlag) {
-                // --up flag: open file picker for template
-                args = ['--up'];
-            } else if (parts[1]) {
-                // Regular usage: /stage <url>
-                args = [parts[1]];
-            }
-
-            // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
-
-            // Return command execution for world engine to handle image staging
-            return {
-                command: 'stage',
-                args,
                 commandStartPos: commandState.commandStartPos
             };
         }
@@ -2554,48 +2412,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             setCommandData({});
 
             return { command: 'share', args: [], commandStartPos: commandState.commandStartPos };
-        }
-
-        // Handle sci command - shows subcategories for scientific notation
-        if (commandToExecute.startsWith('sci')) {
-            const parts = commandToExecute.split(' ');
-            const subCommand = parts[1];
-
-            if (subCommand === 'latex') {
-                // User selected latex from sci menu
-                // Clear command mode and propagate /latex
-                setCommandState({
-                    isActive: false,
-                    input: '',
-                    matchedCommands: [],
-                    selectedIndex: 0,
-                    commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                    hasNavigated: false
-                });
-                setCommandData({});
-
-                return { command: 'latex', args: [], commandStartPos: commandState.commandStartPos };
-            } else if (subCommand === 'smiles') {
-                // User selected smiles from sci menu
-                // Clear command mode and propagate /smiles
-                setCommandState({
-                    isActive: false,
-                    input: '',
-                    matchedCommands: [],
-                    selectedIndex: 0,
-                    commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                    hasNavigated: false
-                });
-                setCommandData({});
-
-                return { command: 'smiles', args: [], commandStartPos: commandState.commandStartPos };
-            } else {
-                // Just 'sci' with no subcommand - do nothing, keep showing subcategories
-                // This shouldn't normally execute since we're just navigating categories
-                return null;
-            }
         }
 
         // Handle latex command - activates LaTeX input mode
