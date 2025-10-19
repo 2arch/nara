@@ -2816,6 +2816,172 @@ export function useWorldEngine({
                         return true;
                     }
 
+                    // Check if there's a text block at the command position
+                    const getCharacter = (cellData: any): string => {
+                        if (!cellData) return '';
+                        if (typeof cellData === 'string') return cellData;
+                        if (typeof cellData === 'object' && 'char' in cellData) return cellData.char;
+                        return '';
+                    };
+
+                    // Simple flood-fill to find connected text block (includes spaces between text)
+                    const findTextBlock = (startPos: { x: number, y: number }): { x: number, y: number }[] => {
+                        const visited = new Set<string>();
+                        const textPositions: { x: number, y: number }[] = [];
+                        const queue: { x: number, y: number }[] = [startPos];
+
+                        while (queue.length > 0) {
+                            const pos = queue.shift()!;
+                            const key = `${pos.x},${pos.y}`;
+
+                            if (visited.has(key)) continue;
+                            visited.add(key);
+
+                            const char = getCharacter(worldData[key]);
+
+                            if (char && char.trim() !== '') {
+                                textPositions.push(pos);
+
+                                // Check 4 directions
+                                const directions = [
+                                    { x: pos.x - 1, y: pos.y },
+                                    { x: pos.x + 1, y: pos.y },
+                                    { x: pos.x, y: pos.y - 1 },
+                                    { x: pos.x, y: pos.y + 1 }
+                                ];
+
+                                for (const dir of directions) {
+                                    const dirKey = `${dir.x},${dir.y}`;
+                                    if (!visited.has(dirKey)) {
+                                        queue.push(dir);
+                                    }
+                                }
+                            } else if (textPositions.length > 0) {
+                                // If we've found text and this is a space, check if it connects text
+                                const hasTextLeft = getCharacter(worldData[`${pos.x - 1},${pos.y}`]).trim() !== '';
+                                const hasTextRight = getCharacter(worldData[`${pos.x + 1},${pos.y}`]).trim() !== '';
+
+                                if (hasTextLeft || hasTextRight) {
+                                    // Continue searching horizontally through spaces
+                                    if (!visited.has(`${pos.x - 1},${pos.y}`)) {
+                                        queue.push({ x: pos.x - 1, y: pos.y });
+                                    }
+                                    if (!visited.has(`${pos.x + 1},${pos.y}`)) {
+                                        queue.push({ x: pos.x + 1, y: pos.y });
+                                    }
+                                }
+                            }
+                        }
+
+                        return textPositions;
+                    };
+
+                    let textBlock = findTextBlock(exec.commandStartPos);
+
+                    // If no text found at start position, search nearby in 3x3 area
+                    if (textBlock.length === 0) {
+                        for (let dy = -1; dy <= 1; dy++) {
+                            for (let dx = -1; dx <= 1; dx++) {
+                                const checkPos = { x: exec.commandStartPos.x + dx, y: exec.commandStartPos.y + dy };
+                                const checkKey = `${checkPos.x},${checkPos.y}`;
+                                const checkChar = getCharacter(worldData[checkKey]);
+
+                                if (checkChar && checkChar.trim() !== '') {
+                                    // Found text nearby, use that as start
+                                    textBlock = findTextBlock(checkPos);
+                                    if (textBlock.length > 0) break;
+                                }
+                            }
+                            if (textBlock.length > 0) break;
+                        }
+                    }
+
+                    if (textBlock.length > 0) {
+                        // Found a text block - extract the text and use as context
+                        const minX = Math.min(...textBlock.map(p => p.x));
+                        const maxX = Math.max(...textBlock.map(p => p.x));
+                        const minY = Math.min(...textBlock.map(p => p.y));
+                        const maxY = Math.max(...textBlock.map(p => p.y));
+
+                        // Extract text content from bounding box
+                        let existingText = '';
+                        for (let y = minY; y <= maxY; y++) {
+                            let line = '';
+                            for (let x = minX; x <= maxX; x++) {
+                                const cellKey = `${x},${y}`;
+                                line += getCharacter(worldData[cellKey]);
+                            }
+                            existingText += line.trimEnd() + '\n';
+                        }
+                        existingText = existingText.trim();
+
+                        // Send existing text + prompt to AI
+                        const fullPrompt = `${aiPrompt}\n\nExisting text:\n${existingText}`;
+
+                        setDialogueWithRevert("Transforming text...", setDialogueText);
+                        loadAI().then(ai => ai.chatWithAI(fullPrompt)).then((response) => {
+                            // Replace text in the bounding box with AI response
+                            const newWorldData = { ...worldData };
+
+                            // Clear the existing text block
+                            for (let y = minY; y <= maxY; y++) {
+                                for (let x = minX; x <= maxX; x++) {
+                                    delete newWorldData[`${x},${y}`];
+                                }
+                            }
+
+                            // Wrap and write AI response at the same position
+                            const wrapWidth = maxX - minX + 1; // Use same width as original text block
+                            const wrapText = (text: string, maxWidth: number): string[] => {
+                                const paragraphs = text.split('\n');
+                                const lines: string[] = [];
+
+                                for (const paragraph of paragraphs) {
+                                    if (paragraph.trim() === '') {
+                                        lines.push('');
+                                        continue;
+                                    }
+
+                                    const words = paragraph.split(' ');
+                                    let currentLine = '';
+
+                                    for (const word of words) {
+                                        const testLine = currentLine ? `${currentLine} ${word}` : word;
+                                        if (testLine.length <= maxWidth) {
+                                            currentLine = testLine;
+                                        } else {
+                                            if (currentLine) lines.push(currentLine);
+                                            currentLine = word;
+                                        }
+                                    }
+                                    if (currentLine) lines.push(currentLine);
+                                }
+                                return lines;
+                            };
+
+                            const wrappedLines = wrapText(response, wrapWidth);
+
+                            // Write wrapped response starting at minX, minY
+                            for (let lineIndex = 0; lineIndex < wrappedLines.length; lineIndex++) {
+                                const line = wrappedLines[lineIndex];
+                                for (let charIndex = 0; charIndex < line.length; charIndex++) {
+                                    const char = line[charIndex];
+                                    const x = minX + charIndex;
+                                    const y = minY + lineIndex;
+                                    const key = `${x},${y}`;
+                                    newWorldData[key] = char;
+                                }
+                            }
+
+                            setWorldData(newWorldData);
+                            setDialogueWithRevert("Text transformed", setDialogueText);
+                        }).catch((error) => {
+                            setDialogueWithRevert(`AI error: ${error.message || 'Could not transform text'}`, setDialogueText);
+                        });
+
+                        return true;
+                    }
+
                     // Otherwise, do text-based AI chat
                     setDialogueWithRevert("Asking AI...", setDialogueText);
                     loadAI().then(ai => ai.chatWithAI(aiPrompt)).then((response) => {
