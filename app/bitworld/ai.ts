@@ -180,7 +180,7 @@ export async function generateImage(
         // Prepare contents - either text-to-image or image-to-image
         const contents: any[] = existingImage
             ? [prompt, { inlineData: { data: existingImage.split(',')[1], mimeType: 'image/png' } }]
-            : [prompt];
+            : [prompt]; // Add explicit trigger for text-to-image
 
         const response = await Promise.race([
             ai.models.generateContent({

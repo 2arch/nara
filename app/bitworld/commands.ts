@@ -90,6 +90,7 @@ interface UseCommandSystemProps {
     worldData?: any;
     setSelectionStart?: (pos: { x: number, y: number } | null) => void;
     setSelectionEnd?: (pos: { x: number, y: number } | null) => void;
+    uploadImageToStorage?: (dataUrl: string, mimeType?: string) => Promise<string>;
 }
 
 // --- Command System Constants ---
@@ -150,7 +151,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const [commandState, setCommandState] = useState<CommandState>({
@@ -1228,9 +1229,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 generateImage(restOfInput.trim()).then(async (result) => {
                     if (result.imageData) {
                         // Upload to storage for persistence
-                        const storageUrl = await uploadImageToStorage(result.imageData);
-                        switchBackgroundMode('image', storageUrl, undefined, undefined, restOfInput.trim());
-                        setDialogueWithRevert(`"${restOfInput.trim()}"`, setDialogueText);
+                        if (uploadImageToStorage) {
+                            const storageUrl = await uploadImageToStorage(result.imageData);
+                            switchBackgroundMode('image', storageUrl, undefined, undefined, restOfInput.trim());
+                            setDialogueWithRevert(`"${restOfInput.trim()}"`, setDialogueText);
+                        } else {
+                            switchBackgroundMode('image', result.imageData, undefined, undefined, restOfInput.trim());
+                            setDialogueWithRevert(`"${restOfInput.trim()}"`, setDialogueText);
+                        }
                     } else {
                         console.error('Image generation returned no imageData:', result);
                         setDialogueWithRevert("Image generation failed", setDialogueText);
@@ -1295,9 +1301,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     generateImage(prompt).then(async (result) => {
                         if (result.imageData) {
                             // Upload to storage for persistence
-                            const storageUrl = await uploadImageToStorage(result.imageData);
-                            switchBackgroundMode('image', storageUrl, textColorParam, textBgParam, prompt);
-                            setDialogueWithRevert(`"${prompt}"`, setDialogueText);
+                            if (uploadImageToStorage) {
+                                const storageUrl = await uploadImageToStorage(result.imageData);
+                                switchBackgroundMode('image', storageUrl, textColorParam, textBgParam, prompt);
+                                setDialogueWithRevert(`"${prompt}"`, setDialogueText);
+                            } else {
+                                switchBackgroundMode('image', result.imageData, textColorParam, textBgParam, prompt);
+                                setDialogueWithRevert(`"${prompt}"`, setDialogueText);
+                            }
                         } else {
                             console.error('Image generation returned no imageData:', result);
                             setDialogueWithRevert("Image generation failed", setDialogueText);

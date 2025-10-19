@@ -887,6 +887,34 @@ export function useWorldEngine({
         }
     }, [worldData, currentStateName, userUid, getUserPath, useHierarchicalFrames, hierarchicalFrames, updateTextFrames]);
 
+            // Helper function to upload images to Firebase Storage
+    const uploadImageToStorage = useCallback(async (dataUrl: string, mimeType: string = 'image/png'): Promise<string> => {
+        if (!userUid || !currentStateName) {
+            // Fallback to base64 if no storage available
+            return dataUrl;
+        }
+
+        try {
+            // Generate unique filename with correct extension
+            const timestamp = Date.now();
+            const random = Math.random().toString(36).substring(7);
+            const extension = mimeType === 'image/gif' ? 'gif' : 'png';
+            const filename = `${timestamp}_${random}.${extension}`;
+
+            // Upload to Firebase Storage
+            const imageRef = storageRef(storage, `worlds/${userUid}/${currentStateName}/images/${filename}`);
+            await uploadString(imageRef, dataUrl, 'data_url');
+
+            // Get public download URL
+            const downloadUrl = await getDownloadURL(imageRef);
+            return downloadUrl;
+        } catch (error) {
+            logger.error('Error uploading to Firebase Storage:', error);
+            // Fallback to base64 on error
+            return dataUrl;
+        }
+    }, [userUid, currentStateName]);
+    
     // === Responsive Frame Updates ===
     // Auto-update frames when world data changes (with debounce)
     useEffect(() => {
@@ -959,7 +987,7 @@ export function useWorldEngine({
         setFullscreenMode,
         exitFullscreenMode,
         switchBackgroundMode,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd });
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage });
 
     // Generate search data when search pattern changes
     useEffect(() => {
@@ -7283,34 +7311,6 @@ export function useWorldEngine({
         // The selection will be cleared in other functions if needed
         // This allows the selection to persist after mouse up
     }, [currentMode, selectionStart, selectionEnd, setDialogueText]);
-
-        // Helper function to upload images to Firebase Storage
-    const uploadImageToStorage = useCallback(async (dataUrl: string, mimeType: string = 'image/png'): Promise<string> => {
-        if (!userUid || !currentStateName) {
-            // Fallback to base64 if no storage available
-            return dataUrl;
-        }
-
-        try {
-            // Generate unique filename with correct extension
-            const timestamp = Date.now();
-            const random = Math.random().toString(36).substring(7);
-            const extension = mimeType === 'image/gif' ? 'gif' : 'png';
-            const filename = `${timestamp}_${random}.${extension}`;
-
-            // Upload to Firebase Storage
-            const imageRef = storageRef(storage, `worlds/${userUid}/${currentStateName}/images/${filename}`);
-            await uploadString(imageRef, dataUrl, 'data_url');
-
-            // Get public download URL
-            const downloadUrl = await getDownloadURL(imageRef);
-            return downloadUrl;
-        } catch (error) {
-            logger.error('Error uploading to Firebase Storage:', error);
-            // Fallback to base64 on error
-            return dataUrl;
-        }
-    }, [userUid, currentStateName]);
 
     // === IME Composition Handlers ===
     const handleCompositionStart = useCallback((): void => {
