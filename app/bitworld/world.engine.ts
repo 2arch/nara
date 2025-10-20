@@ -2159,30 +2159,30 @@ export function useWorldEngine({
         return closestBoundAbove;
     }, []);
 
-    const getPlanRegion = useCallback((worldData: WorldData, cursorPos: Point): { startX: number; endX: number; startY: number; endY: number } | null => {
-        // Check if cursor is within any plan region
+    const getNoteRegion = useCallback((worldData: WorldData, cursorPos: Point): { startX: number; endX: number; startY: number; endY: number } | null => {
+        // Check if cursor is within any note region
         const cursorX = cursorPos.x;
         const cursorY = cursorPos.y;
 
-        // Look through all plan_ entries
+        // Look through all note_ entries
         for (const key in worldData) {
-            if (key.startsWith('plan_')) {
+            if (key.startsWith('note_')) {
                 try {
-                    const planData = JSON.parse(worldData[key] as string);
+                    const noteData = JSON.parse(worldData[key] as string);
 
-                    // Check if cursor is within this plan region
-                    if (cursorX >= planData.startX && cursorX <= planData.endX &&
-                        cursorY >= planData.startY && cursorY <= planData.endY) {
+                    // Check if cursor is within this note region
+                    if (cursorX >= noteData.startX && cursorX <= noteData.endX &&
+                        cursorY >= noteData.startY && cursorY <= noteData.endY) {
 
                         return {
-                            startX: planData.startX,
-                            endX: planData.endX,
-                            startY: planData.startY,
-                            endY: planData.endY
+                            startX: noteData.startX,
+                            endX: noteData.endX,
+                            startY: noteData.startY,
+                            endY: noteData.endY
                         };
                     }
                 } catch (e) {
-                    // Skip invalid plan data
+                    // Skip invalid note data
                 }
             }
         }
@@ -2747,8 +2747,8 @@ export function useWorldEngine({
             return true;
         }
 
-        // === Plan Mode Exit/Cancel ===
-        if (key === 'Escape' && currentMode === 'plan') {
+        // === Note Mode Exit/Cancel ===
+        if (key === 'Escape' && currentMode === 'note') {
             // Check if there's a meaningful selection (not just cursor preview)
             const hasMeaningfulSelection = selectionStart && selectionEnd &&
                 (selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y);
@@ -2761,11 +2761,11 @@ export function useWorldEngine({
                 return true;
             }
 
-            // Exit plan mode back to default
+            // Exit note mode back to default
             setSelectionStart(null);
             setSelectionEnd(null);
             switchMode('default');
-            setDialogueWithRevert("Plan mode exited", setDialogueText);
+            setDialogueWithRevert("Note mode exited", setDialogueText);
             return true;
         }
 
@@ -5451,7 +5451,7 @@ export function useWorldEngine({
                         setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
                     } else {
                         // Create plan region data
-                        const planRegion = {
+                        const noteRegion = {
                             startX: selection.startX,
                             endX: selection.endX,
                             startY: selection.startY,
@@ -5459,10 +5459,10 @@ export function useWorldEngine({
                             timestamp: Date.now()
                         };
 
-                        // Store plan region in worldData with unique key
-                        const planKey = `plan_${selection.startX},${selection.startY}_${Date.now()}`;
+                        // Store note region in worldData with unique key
+                        const noteKey = `note_${selection.startX},${selection.startY}_${Date.now()}`;
                         const newWorldData = { ...worldData };
-                        newWorldData[planKey] = JSON.stringify(planRegion);
+                        newWorldData[noteKey] = JSON.stringify(noteRegion);
                         setWorldData(newWorldData);
 
                         const width = selection.endX - selection.startX + 1;
@@ -5691,14 +5691,14 @@ export function useWorldEngine({
             }
             return false;
         }
-        // === Plan Mode - Confirm Region ===
-        else if (key === 'Enter' && currentMode === 'plan' && selectionStart && selectionEnd) {
+        // === Note Mode - Confirm Region ===
+        else if (key === 'Enter' && currentMode === 'note' && selectionStart && selectionEnd) {
             // Check if there's a meaningful selection (not just a 1-cell cursor)
             const hasMeaningfulSelection =
                 selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y;
 
             if (!hasMeaningfulSelection) {
-                // No meaningful selection - skip plan region saving, let Enter behave normally
+                // No meaningful selection - skip note region saving, let Enter behave normally
                 // Don't return true, fall through to normal Enter handling
             } else {
 
@@ -5707,8 +5707,8 @@ export function useWorldEngine({
             const minY = Math.floor(Math.min(selectionStart.y, selectionEnd.y));
             const maxY = Math.floor(Math.max(selectionStart.y, selectionEnd.y));
 
-            // Create plan region data
-            const planRegion = {
+            // Create note region data
+            const noteRegion = {
                 startX: minX,
                 endX: maxX,
                 startY: minY,
@@ -5716,11 +5716,11 @@ export function useWorldEngine({
                 timestamp: Date.now()
             };
 
-            // Store plan region in worldData with unique key
-            const planKey = `plan_${minX},${minY}_${Date.now()}`;
+            // Store note region in worldData with unique key
+            const noteKey = `note_${minX},${minY}_${Date.now()}`;
             setWorldData(prev => ({
                 ...prev,
-                [planKey]: JSON.stringify(planRegion)
+                [noteKey]: JSON.stringify(noteRegion)
             }));
 
             // Clear the selection after saving
@@ -5747,18 +5747,18 @@ export function useWorldEngine({
 
                 targetRegion = { startX: minX, endX: maxX, startY: minY, endY: maxY };
             } else {
-                // Second priority: Check if cursor is inside a saved plan region
+                // Second priority: Check if cursor is inside a saved note region
                 for (const key in worldData) {
-                    if (key.startsWith('plan_')) {
+                    if (key.startsWith('note_')) {
                         try {
-                            const planData = JSON.parse(worldData[key] as string);
-                            if (cursorPos.x >= planData.startX && cursorPos.x <= planData.endX &&
-                                cursorPos.y >= planData.startY && cursorPos.y <= planData.endY) {
-                                targetRegion = planData;
+                            const noteData = JSON.parse(worldData[key] as string);
+                            if (cursorPos.x >= noteData.startX && cursorPos.x <= noteData.endX &&
+                                cursorPos.y >= noteData.startY && cursorPos.y <= noteData.endY) {
+                                targetRegion = noteData;
                                 break;
                             }
                         } catch (e) {
-                            // Skip invalid plan data
+                            // Skip invalid note data
                         }
                     }
                 }
@@ -7299,17 +7299,17 @@ export function useWorldEngine({
                     nextCursorPos.x = parseInt(lxStr, 10);
                     nextCursorPos.y = parseInt(lyStr, 10);
                 } else {
-                    // Check if we're within a plan region first
-                    const planRegion = getPlanRegion(worldData, cursorPos);
-                    if (planRegion && cursorPos.x === planRegion.startX && cursorPos.y > planRegion.startY) {
-                        // We're at the start of a line within a plan region (but not the first line)
-                        // Move cursor to the end of the previous line within the plan
-                        nextCursorPos.x = planRegion.endX + 1;
+                    // Check if we're within a note region first
+                    const noteRegion = getNoteRegion(worldData, cursorPos);
+                    if (noteRegion && cursorPos.x === noteRegion.startX && cursorPos.y > noteRegion.startY) {
+                        // We're at the start of a line within a note region (but not the first line)
+                        // Move cursor to the end of the previous line within the note
+                        nextCursorPos.x = noteRegion.endX + 1;
                         nextCursorPos.y = cursorPos.y - 1;
                         moved = true;
                         // Don't delete anything, just move cursor
-                    } else if (planRegion && cursorPos.x > planRegion.startX) {
-                        // We're within a plan region but not at the start - do normal backspace
+                    } else if (noteRegion && cursorPos.x > noteRegion.startX) {
+                        // We're within a note region but not at the start - do normal backspace
                         const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
                         if (worldData[deleteKey]) {
                             nextWorldData = { ...worldData };
@@ -7939,21 +7939,21 @@ export function useWorldEngine({
                 }
             }
 
-            // Check for plan region word wrapping (if not already handled by bounded region)
+            // Check for note region word wrapping (if not already handled by bounded region)
             if (!worldDataChanged) {
-                const planRegion = getPlanRegion(dataToDeleteFrom, cursorAfterDelete);
-                if (planRegion && proposedCursorPos.x > planRegion.endX) {
-                    // We're typing past the right edge of a plan region
+                const noteRegion = getNoteRegion(dataToDeleteFrom, cursorAfterDelete);
+                if (noteRegion && proposedCursorPos.x > noteRegion.endX) {
+                    // We're typing past the right edge of a note region
                     const nextLineY = cursorAfterDelete.y + 1;
 
-                    // Check if wrapping would exceed plan's height limit
-                    if (nextLineY <= planRegion.endY) {
+                    // Check if wrapping would exceed note's height limit
+                    if (nextLineY <= noteRegion.endY) {
                         // Simple word wrapping: scan backwards to find the last space, then move everything after it
                         const currentLineY = cursorAfterDelete.y;
-                        let wrapPoint = planRegion.startX; // Default to start of line if no space found
+                        let wrapPoint = noteRegion.startX; // Default to start of line if no space found
 
                         // Scan backwards from the boundary to find the last space
-                        for (let x = planRegion.endX; x >= planRegion.startX; x--) {
+                        for (let x = noteRegion.endX; x >= noteRegion.startX; x--) {
                             const charKey = `${x},${currentLineY}`;
                             const charData = dataToDeleteFrom[charKey];
                             const char = typeof charData === 'string' ? charData :
@@ -7966,7 +7966,7 @@ export function useWorldEngine({
                         }
 
                         // Only do word wrapping if we found a space and there's something to wrap
-                        if (wrapPoint > planRegion.startX && wrapPoint <= cursorAfterDelete.x) {
+                        if (wrapPoint > noteRegion.startX && wrapPoint <= cursorAfterDelete.x) {
                             // Collect all characters from wrap point to cursor
                             const textToWrap: Array<{x: number, char: string, style?: any}> = [];
 
@@ -7991,7 +7991,7 @@ export function useWorldEngine({
                             }
 
                             // Add the text to next line
-                            let newX = planRegion.startX;
+                            let newX = noteRegion.startX;
                             for (const {char, style} of textToWrap) {
                                 if (char !== ' ') { // Skip spaces when wrapping
                                     const newKey = `${newX},${nextLineY}`;
@@ -8014,12 +8014,12 @@ export function useWorldEngine({
                         } else {
                             // No good wrap point found - just move to next line
                             proposedCursorPos = {
-                                x: planRegion.startX,
+                                x: noteRegion.startX,
                                 y: nextLineY
                             };
                         }
                     } else {
-                        // Can't wrap within plan region (would exceed endY) - don't allow typing beyond bounds
+                        // Can't wrap within note region (would exceed endY) - don't allow typing beyond bounds
                         // Keep cursor at current position
                         proposedCursorPos = {
                             x: cursorAfterDelete.x,
@@ -8583,9 +8583,9 @@ export function useWorldEngine({
         // Simply mark selection process as ended
         setIsSelecting(false);
 
-        // In plan mode, show prompt to confirm region with Enter
-        if (currentMode === 'plan' && selectionStart && selectionEnd) {
-            setDialogueWithRevert("Press Enter to confirm plan region, or Escape to cancel", setDialogueText);
+        // In note mode, show prompt to confirm region with Enter
+        if (currentMode === 'note' && selectionStart && selectionEnd) {
+            setDialogueWithRevert("Press Enter to confirm note region, or Escape to cancel", setDialogueText);
         }
 
         // We keep the selection intact regardless

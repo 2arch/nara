@@ -65,7 +65,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const [isShiftPressed, setIsShiftPressed] = useState<boolean>(false);
     const [shiftDragStartPos, setShiftDragStartPos] = useState<Point | null>(null);
     const [selectedImageKey, setSelectedImageKey] = useState<string | null>(null);
-    const [selectedPlanKey, setSelectedPlanKey] = useState<string | null>(null);
+    const [selectedNoteKey, setSelectedNoteKey] = useState<string | null>(null);
     const [clipboardFlashBounds, setClipboardFlashBounds] = useState<Map<string, number>>(new Map()); // boundKey -> timestamp
     const lastCursorPosRef = useRef<Point | null>(null);
     const lastEnterPressRef = useRef<number>(0);
@@ -1181,49 +1181,49 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     }, [engine]);
 
     const findPlanAtPosition = useCallback((pos: Point): { key: string, data: any } | null => {
-        // Check all plan regions in worldData
+        // Check all note regions in worldData
         for (const key in engine.worldData) {
-            if (key.startsWith('plan_')) {
+            if (key.startsWith('note_')) {
                 try {
-                    const planData = JSON.parse(engine.worldData[key] as string);
-                    // Check if position is within plan bounds
-                    if (pos.x >= planData.startX && pos.x <= planData.endX &&
-                        pos.y >= planData.startY && pos.y <= planData.endY) {
-                        return { key, data: planData };
+                    const noteData = JSON.parse(engine.worldData[key] as string);
+                    // Check if position is within note bounds
+                    if (pos.x >= noteData.startX && pos.x <= noteData.endX &&
+                        pos.y >= noteData.startY && pos.y <= noteData.endY) {
+                        return { key, data: noteData };
                     }
                 } catch (e) {
-                    // Skip invalid plan data
+                    // Skip invalid note data
                 }
             }
         }
         return null;
     }, [engine]);
 
-    // Helper to get chronological list of plan regions and text blocks
+    // Helper to get chronological list of note regions and text blocks
     const getChronologicalItems = useCallback((): Array<{
-        type: 'plan' | 'textblock',
+        type: 'note' | 'textblock',
         timestamp: number,
         content: string,
         bounds: { startX: number, startY: number, endX: number, endY: number }
     }> => {
         const items: Array<{
-            type: 'plan' | 'textblock',
+            type: 'note' | 'textblock',
             timestamp: number,
             content: string,
             bounds: { startX: number, startY: number, endX: number, endY: number }
         }> = [];
 
-        // Collect all plan regions
+        // Collect all note regions
         for (const key in engine.worldData) {
-            if (key.startsWith('plan_')) {
+            if (key.startsWith('note_')) {
                 try {
-                    const planData = JSON.parse(engine.worldData[key] as string);
+                    const noteData = JSON.parse(engine.worldData[key] as string);
 
-                    // Extract text content within plan bounds
+                    // Extract text content within note bounds
                     let content = '';
-                    for (let y = planData.startY; y <= planData.endY; y++) {
+                    for (let y = noteData.startY; y <= noteData.endY; y++) {
                         let rowContent = '';
-                        for (let x = planData.startX; x <= planData.endX; x++) {
+                        for (let x = noteData.startX; x <= noteData.endX; x++) {
                             const cellKey = `${x},${y}`;
                             const cellData = engine.worldData[cellKey];
                             if (cellData && !engine.isImageData(cellData)) {
@@ -1240,26 +1240,26 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     }
 
                     items.push({
-                        type: 'plan',
-                        timestamp: planData.timestamp || 0,
+                        type: 'note',
+                        timestamp: noteData.timestamp || 0,
                         content: content.trim(),
                         bounds: {
-                            startX: planData.startX,
-                            startY: planData.startY,
-                            endX: planData.endX,
-                            endY: planData.endY
+                            startX: noteData.startX,
+                            startY: noteData.startY,
+                            endX: noteData.endX,
+                            endY: noteData.endY
                         }
                     });
                 } catch (e) {
-                    // Skip invalid plan data
+                    // Skip invalid note data
                 }
             }
         }
 
-        // Collect all text blocks (excluding those already in plan regions)
+        // Collect all text blocks (excluding those already in note regions)
         const processedPositions = new Set<string>();
 
-        // Mark positions within plan regions as processed
+        // Mark positions within note regions as processed
         for (const item of items) {
             for (let y = item.bounds.startY; y <= item.bounds.endY; y++) {
                 for (let x = item.bounds.startX; x <= item.bounds.endX; x++) {
@@ -1273,7 +1273,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             if (processedPositions.has(key)) continue;
 
             const data = engine.worldData[key];
-            if (!data || engine.isImageData(data) || key.startsWith('plan_') || key.startsWith('image_')) continue;
+            if (!data || engine.isImageData(data) || key.startsWith('note_') || key.startsWith('image_')) continue;
 
             const char = engine.getCharacter(data);
             if (!char || char.trim() === '') continue;
@@ -1325,7 +1325,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             });
         }
 
-        // Sort by timestamp (plan regions by actual timestamp, text blocks by position)
+        // Sort by timestamp (note regions by actual timestamp, text blocks by position)
         return items.sort((a, b) => a.timestamp - b.timestamp);
     }, [engine, findTextBlock]);
 
@@ -3569,19 +3569,19 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
         }
 
-        // === Render Plan Regions ===
-        // Render saved plan regions with opaque sheen
+        // === Render Note Regions ===
+        // Render saved note regions with opaque sheen
         for (const key in engine.worldData) {
-            if (key.startsWith('plan_')) {
+            if (key.startsWith('note_')) {
                 try {
-                    const planData = JSON.parse(engine.worldData[key] as string);
-                    const { startX, endX, startY, endY } = planData;
+                    const noteData = JSON.parse(engine.worldData[key] as string);
+                    const { startX, endX, startY, endY } = noteData;
 
-                    // Use semi-transparent overlay for plan regions
+                    // Use semi-transparent overlay for note regions
                     const planColor = `rgba(${hexToRgb(engine.textColor)}, 0.15)`;
                     ctx.fillStyle = planColor;
 
-                    // Fill each cell in the plan region
+                    // Fill each cell in the note region
                     for (let worldY = startY; worldY <= endY; worldY++) {
                         for (let worldX = startX; worldX <= endX; worldX++) {
                             const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
@@ -3594,7 +3594,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         }
                     }
                 } catch (e) {
-                    // Skip invalid plan data
+                    // Skip invalid note data
                 }
             }
         }
@@ -3650,11 +3650,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
-        // === Render Selected Plan Border ===
-        if (selectedPlanKey) {
+        // === Render Selected Note Border ===
+        if (selectedNoteKey) {
             try {
-                const selectedPlanData = JSON.parse(engine.worldData[selectedPlanKey] as string);
-                // Draw selection border around the selected plan region
+                const selectedPlanData = JSON.parse(engine.worldData[selectedNoteKey] as string);
+                // Draw selection border around the selected note region
                 const topLeftScreen = engine.worldToScreen(selectedPlanData.startX, selectedPlanData.startY, currentZoom, currentOffset);
                 const bottomRightScreen = engine.worldToScreen(selectedPlanData.endX + 1, selectedPlanData.endY + 1, currentZoom, currentOffset);
 
@@ -3670,7 +3670,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     bottomRightScreen.y - topLeftScreen.y - lineWidth
                 );
             } catch (e) {
-                // Skip invalid plan data
+                // Skip invalid note data
             }
         }
 
@@ -3728,14 +3728,14 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             }
                         }
                     }
-                } else if (selectedPlanKey) {
-                    // Draw preview for plan region destination
+                } else if (selectedNoteKey) {
+                    // Draw preview for note region destination
                     try {
-                        const planData = JSON.parse(engine.worldData[selectedPlanKey] as string);
+                        const noteData = JSON.parse(engine.worldData[selectedNoteKey] as string);
                         ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
 
-                        for (let y = planData.startY; y <= planData.endY; y++) {
-                            for (let x = planData.startX; x <= planData.endX; x++) {
+                        for (let y = noteData.startY; y <= noteData.endY; y++) {
+                            for (let x = noteData.startX; x <= noteData.endX; x++) {
                                 const destX = x + distanceX;
                                 const destY = y + distanceY;
                                 const destScreenPos = engine.worldToScreen(destX, destY, currentZoom, currentOffset);
@@ -3747,7 +3747,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             }
                         }
                     } catch (e) {
-                        // Invalid plan data, skip preview
+                        // Invalid note data, skip preview
                     }
                 } else {
                     // Check if we have an active selection
@@ -4071,7 +4071,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, selectedPlanKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
+    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, selectedNoteKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
 
 
     // --- Drawing Loop Effect ---
@@ -4258,22 +4258,22 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     isClickMovementRef.current = true;
                 }
             } else {
-                // If no text block or image found, check for plan region
+                // If no text block or image found, check for note region
                 const planAtPosition = findPlanAtPosition(snappedWorldPos);
 
                 if (planAtPosition) {
-                    // Clear any text selection and image selection, select the plan region
+                    // Clear any text selection and image selection, select the note region
                     engine.handleSelectionStart(0, 0);
                     engine.handleSelectionEnd();
                     setSelectedImageKey(null);
-                    setSelectedPlanKey(planAtPosition.key);
+                    setSelectedNoteKey(planAtPosition.key);
 
                     // Set flag to prevent trail creation
                     isClickMovementRef.current = true;
                 } else {
                     // Clear any selections if clicking on empty space
                     setSelectedImageKey(null);
-                    setSelectedPlanKey(null);
+                    setSelectedNoteKey(null);
                 }
             }
         }
@@ -4331,9 +4331,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     engine.handleCanvasClick(x, y, true, false, e.metaKey, e.ctrlKey);
                 }
             } else {
-                // Clear image and plan selections when starting regular selection
+                // Clear image and note selections when starting regular selection
                 setSelectedImageKey(null);
-                setSelectedPlanKey(null);
+                setSelectedNoteKey(null);
 
                 // Regular selection start
                 isSelectingMouseDownRef.current = true; // Track mouse down state
@@ -4487,34 +4487,34 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     engine.moveImage(imageKey, distanceX, distanceY);
                                 }
                             }
-                        } else if (selectedPlanKey) {
-                            // Check if we're moving a selected plan region
+                        } else if (selectedNoteKey) {
+                            // Check if we're moving a selected note region
                             try {
-                                const planData = JSON.parse(engine.worldData[selectedPlanKey] as string);
+                                const noteData = JSON.parse(engine.worldData[selectedNoteKey] as string);
 
-                                // Create new plan region with shifted coordinates
+                                // Create new note region with shifted coordinates
                                 const newPlanData = {
-                                    startX: planData.startX + distanceX,
-                                    endX: planData.endX + distanceX,
-                                    startY: planData.startY + distanceY,
-                                    endY: planData.endY + distanceY,
+                                    startX: noteData.startX + distanceX,
+                                    endX: noteData.endX + distanceX,
+                                    startY: noteData.startY + distanceY,
+                                    endY: noteData.endY + distanceY,
                                     timestamp: Date.now()
                                 };
 
-                                // Delete old plan and create new one with shifted position
-                                const newPlanKey = `plan_${newPlanData.startX},${newPlanData.startY}_${Date.now()}`;
+                                // Delete old note and create new one with shifted position
+                                const newPlanKey = `note_${newPlanData.startX},${newPlanData.startY}_${Date.now()}`;
 
                                 engine.setWorldData(prev => {
                                     const newData = { ...prev };
-                                    delete newData[selectedPlanKey];
+                                    delete newData[selectedNoteKey];
                                     newData[newPlanKey] = JSON.stringify(newPlanData);
                                     return newData;
                                 });
 
-                                // Update selected key to the new plan region
-                                setSelectedPlanKey(newPlanKey);
+                                // Update selected key to the new note region
+                                setSelectedNoteKey(newPlanKey);
                             } catch (e) {
-                                // Invalid plan data, skip move
+                                // Invalid note data, skip move
                             }
                         } else {
                             // Check if we have an active selection to move
@@ -4920,15 +4920,15 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             return;
         }
 
-        // Handle plan region-specific keys before passing to engine
-        if (selectedPlanKey && e.key === 'Backspace') {
-            // Delete the selected plan region
+        // Handle note region-specific keys before passing to engine
+        if (selectedNoteKey && e.key === 'Backspace') {
+            // Delete the selected note region
             engine.setWorldData(prev => {
                 const newData = { ...prev };
-                delete newData[selectedPlanKey];
+                delete newData[selectedNoteKey];
                 return newData;
             });
-            setSelectedPlanKey(null); // Clear selection
+            setSelectedNoteKey(null); // Clear selection
             e.preventDefault();
             e.stopPropagation();
             return;
@@ -4940,7 +4940,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             e.preventDefault();
             e.stopPropagation();
         }
-    }, [engine, handleKeyDownFromController, selectedImageKey, selectedPlanKey, hostDialogue]);
+    }, [engine, handleKeyDownFromController, selectedImageKey, selectedNoteKey, hostDialogue]);
 
     const hiddenInputRef = useRef<HTMLInputElement>(null);
 
@@ -4999,7 +4999,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     />
                 </div>
             )}
-            {/* Chronological tracker for text blocks and plan regions - HIDDEN */}
+            {/* Chronological tracker for text blocks and note regions - HIDDEN */}
             {/* {(() => {
                 const items = getChronologicalItems();
                 if (items.length === 0) return null;
@@ -5040,11 +5040,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 key={index}
                                 style={{
                                     padding: '8px',
-                                    backgroundColor: item.type === 'plan'
+                                    backgroundColor: item.type === 'note'
                                         ? 'rgba(100, 150, 255, 0.2)'
                                         : 'rgba(150, 150, 150, 0.1)',
                                     borderRadius: '4px',
-                                    borderLeft: item.type === 'plan'
+                                    borderLeft: item.type === 'note'
                                         ? '3px solid rgba(100, 150, 255, 0.8)'
                                         : '3px solid rgba(150, 150, 150, 0.5)',
                                     wordBreak: 'break-word'
@@ -5058,7 +5058,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     justifyContent: 'space-between',
                                     alignItems: 'center'
                                 }}>
-                                    <span>{item.type === 'plan' ? '📋 PLAN' : '📝 TEXT'}</span>
+                                    <span>{item.type === 'note' ? '📋 NOTE' : '📝 TEXT'}</span>
                                     <span>({item.bounds.endX - item.bounds.startX + 1}×{item.bounds.endY - item.bounds.startY + 1})</span>
                                 </div>
                                 <div style={{

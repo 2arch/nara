@@ -30,7 +30,7 @@ export interface CommandExecution {
 }
 
 // --- Mode System Types ---
-export type CanvasMode = 'default' | 'air' | 'chat' | 'plan';
+export type CanvasMode = 'default' | 'air' | 'chat' | 'note';
 export type BackgroundMode = 'transparent' | 'color' | 'image' | 'video' | 'space' | 'stream';
 export type CameraMode = 'default' | 'focus';
 
@@ -106,7 +106,7 @@ const AVAILABLE_COMMANDS = [
     // Content Creation
     'label', 'tape', 'clip', 'upload',
     // Special
-    'mode', 'plan', 'chat',
+    'mode', 'note', 'chat',
     // Styling & Display
     'bg', 'text', 'font',
     // State Management
@@ -123,7 +123,7 @@ const AVAILABLE_COMMANDS = [
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent'],
     'create': ['label', 'tape', 'clip', 'upload'],
-    'special': ['mode', 'plan', 'chat'],
+    'special': ['mode', 'note', 'chat'],
     'style': ['bg', 'text', 'font'],
     'state': ['state', 'random', 'clear'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
@@ -131,7 +131,7 @@ export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'debug': ['debug']
 };
 
-const MODE_COMMANDS = ['default', 'air', 'chat', 'plan'];
+const MODE_COMMANDS = ['default', 'air', 'chat', 'note'];
 const BG_COMMANDS = ['clear', 'live', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Neureal'];
 const NAV_COMMANDS: string[] = [];
@@ -1168,8 +1168,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     } else {
                         // For other modes, switch mode in current context
                         switchMode(modeArg);
-                        if (modeArg === 'plan') {
-                            setDialogueWithRevert("Plan mode: Make selections and press Enter to save. Esc to exit.", setDialogueText);
+                        if (modeArg === 'note') {
+                            setDialogueWithRevert("Note mode: Make selections and press Enter to save. Esc to exit.", setDialogueText);
                         }
                     }
                 }
@@ -2078,13 +2078,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             };
         }
 
-        if (commandToExecute.startsWith('plan')) {
-            // /plan command - one-shot plan region creation from selection
+        if (commandToExecute.startsWith('note')) {
+            // /note command - one-shot note region creation from selection
             // Check if there's already a selection
             const existingSelection = getNormalizedSelection?.();
 
             if (existingSelection) {
-                // Selection exists - create plan region immediately
+                // Selection exists - create note region immediately
                 const hasMeaningfulSelection =
                     existingSelection.startX !== existingSelection.endX ||
                     existingSelection.startY !== existingSelection.endY;
@@ -2092,8 +2092,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 if (!hasMeaningfulSelection) {
                     setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
                 } else if (setWorldData && worldData && setSelectionStart && setSelectionEnd) {
-                    // Create plan region data
-                    const planRegion = {
+                    // Create note region data
+                    const noteRegion = {
                         startX: existingSelection.startX,
                         endX: existingSelection.endX,
                         startY: existingSelection.startY,
@@ -2101,15 +2101,15 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                         timestamp: Date.now()
                     };
 
-                    // Store plan region in worldData with unique key
-                    const planKey = `plan_${existingSelection.startX},${existingSelection.startY}_${Date.now()}`;
+                    // Store note region in worldData with unique key
+                    const noteKey = `note_${existingSelection.startX},${existingSelection.startY}_${Date.now()}`;
                     const newWorldData = { ...worldData };
-                    newWorldData[planKey] = JSON.stringify(planRegion);
+                    newWorldData[noteKey] = JSON.stringify(noteRegion);
                     setWorldData(newWorldData);
 
                     const width = existingSelection.endX - existingSelection.startX + 1;
                     const height = existingSelection.endY - existingSelection.startY + 1;
-                    setDialogueWithRevert(`Plan region saved (${width}×${height})`, setDialogueText);
+                    setDialogueWithRevert(`Note region saved (${width}×${height})`, setDialogueText);
 
                     // Clear selection
                     setSelectionStart(null);
@@ -2118,12 +2118,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             } else {
                 // No selection - set as pending command waiting for selection
                 setPendingCommand({
-                    command: 'plan',
+                    command: 'note',
                     args: [],
                     isWaitingForSelection: true
                 });
 
-                setDialogueWithRevert("Make a selection, then press Enter to save as plan region", setDialogueText);
+                setDialogueWithRevert("Make a selection, then press Enter to save as note region", setDialogueText);
             }
 
             // Clear command mode
