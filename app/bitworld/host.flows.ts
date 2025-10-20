@@ -308,9 +308,87 @@ export const upgradeFlow: HostFlow = {
   }
 };
 
+// Tutorial flow - interactive onboarding with agent demonstrations
+export const tutorialFlow: HostFlow = {
+  flowId: 'tutorial',
+  startMessageId: 'tutorial_welcome',
+  messages: {
+    'tutorial_welcome': {
+      id: 'tutorial_welcome',
+      text: 'Hey! I\'m your guide. I\'ll show you around Nara.',
+      expectsInput: false,
+      nextMessageId: 'tutorial_background_intro'
+    },
+
+    'tutorial_background_intro': {
+      id: 'tutorial_background_intro',
+      text: 'Let\'s start with something simple. \n \n Type /bg followed by any color to change the background.',
+      expectsInput: false,
+      nextMessageId: 'tutorial_typing_intro',
+      previousMessageId: 'tutorial_welcome'
+    },
+
+    'tutorial_typing_intro': {
+      id: 'tutorial_typing_intro',
+      text: 'To write text, just click anywhere on the canvas and start typing. \n \n The canvas is infinite - your thoughts can go anywhere.',
+      expectsInput: false,
+      nextMessageId: 'tutorial_label_intro',
+      previousMessageId: 'tutorial_background_intro'
+    },
+
+    'tutorial_label_intro': {
+      id: 'tutorial_label_intro',
+      text: 'Want to mark something important? \n \n Use /label to create markers that help organize your space.',
+      expectsInput: false,
+      nextMessageId: 'tutorial_selection_intro',
+      previousMessageId: 'tutorial_typing_intro'
+    },
+
+    'tutorial_selection_intro': {
+      id: 'tutorial_selection_intro',
+      text: 'Select regions by holding Shift and dragging. \n \n Then use /bound to create a bounded area.',
+      expectsInput: false,
+      nextMessageId: 'tutorial_ai_intro',
+      previousMessageId: 'tutorial_label_intro'
+    },
+
+    'tutorial_ai_intro': {
+      id: 'tutorial_ai_intro',
+      text: 'Here\'s where it gets interesting. \n \n Nara has AI built in.',
+      expectsInput: false,
+      nextMessageId: 'tutorial_ai_explain',
+      previousMessageId: 'tutorial_selection_intro'
+    },
+
+    'tutorial_ai_explain': {
+      id: 'tutorial_ai_explain',
+      text: 'Type / to see AI commands. \n \n /write, /transform, /explain - they\'re all here.',
+      expectsInput: false,
+      nextMessageId: 'tutorial_navigation',
+      previousMessageId: 'tutorial_ai_intro'
+    },
+
+    'tutorial_navigation': {
+      id: 'tutorial_navigation',
+      text: 'Use two fingers to pan around. \n \n Your canvas is infinite in all directions.',
+      expectsInput: false,
+      nextMessageId: 'tutorial_complete',
+      previousMessageId: 'tutorial_ai_explain'
+    },
+
+    'tutorial_complete': {
+      id: 'tutorial_complete',
+      text: 'That\'s it! You\'re ready to explore. \n \n Press Escape to exit this tutorial.',
+      expectsInput: false,
+      previousMessageId: 'tutorial_navigation'
+    }
+  }
+};
+
 // Export all flows
 export const HOST_FLOWS: Record<string, HostFlow> = {
   'welcome': welcomeFlow,
   'verification': verificationFlow,
-  'upgrade': upgradeFlow
+  'upgrade': upgradeFlow,
+  'tutorial': tutorialFlow
 };

@@ -840,7 +840,9 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       collectedData: {},
       isProcessing: false
     });
-  }, []);
+    // Clear the host dialogue visual
+    setHostData(null);
+  }, [setHostData]);
 
   return {
     hostState: state,

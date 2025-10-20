@@ -106,7 +106,7 @@ const AVAILABLE_COMMANDS = [
     // Content Creation
     'label', 'tape', 'clip', 'upload',
     // Special
-    'mode', 'note', 'chat',
+    'mode', 'note', 'chat', 'tutorial',
     // Styling & Display
     'bg', 'text', 'font',
     // State Management
@@ -123,7 +123,7 @@ const AVAILABLE_COMMANDS = [
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent'],
     'create': ['label', 'tape', 'clip', 'upload'],
-    'special': ['mode', 'note', 'chat'],
+    'special': ['mode', 'note', 'chat', 'tutorial'],
     'style': ['bg', 'text', 'font'],
     'state': ['state', 'random', 'clear'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],

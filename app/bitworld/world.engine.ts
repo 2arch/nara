@@ -248,6 +248,13 @@ export interface WorldEngine {
     // Upgrade flow callback
     setUpgradeFlowHandler: (handler: () => void) => void;
     triggerUpgradeFlow: () => void;
+    setTutorialFlowHandler: (handler: () => void) => void;
+    triggerTutorialFlow: () => void;
+    // Host dialogue utilities
+    setHostDialogueExitHandler: (handler: () => void) => void;
+    setHostDialogueFlowGetter: (getter: () => string | null) => void;
+    exitHostDialogue: () => void;
+    getCurrentHostFlow: () => string | null;
     // Text compilation access
     getCompiledText: () => { [lineY: number]: string };
     compiledTextCache: { [lineY: number]: string }; // Direct access to compiled text cache for real-time updates
@@ -414,7 +421,14 @@ export function useWorldEngine({
 
     // Upgrade flow handler ref
     const upgradeFlowHandlerRef = useRef<(() => void) | null>(null);
-    
+
+    // Tutorial flow handler ref
+    const tutorialFlowHandlerRef = useRef<(() => void) | null>(null);
+
+    // Host dialogue utilities refs
+    const hostDialogueExitHandlerRef = useRef<(() => void) | null>(null);
+    const hostDialogueFlowGetterRef = useRef<(() => string | null) | null>(null);
+
     // Auto-clear temporary dialogue messages
     useAutoDialogue(dialogueText, setDialogueText);
 
@@ -2630,6 +2644,38 @@ export function useWorldEngine({
             return true;
         }
 
+        // === Host Mode Exit (Tutorial and other flows) ===
+        // Allow ESC to exit host dialogue flows at any time
+        if (key === 'Escape' && hostMode.isActive) {
+            // Check if we can exit this flow (tutorial is always escapable)
+            const currentFlow = hostDialogueFlowGetterRef.current?.();
+
+            // Tutorial flow is always escapable
+            if (currentFlow === 'tutorial' || currentFlow === 'upgrade') {
+                // Exit the flow
+                if (hostDialogueExitHandlerRef.current) {
+                    hostDialogueExitHandlerRef.current();
+                }
+
+                // Clear host mode
+                setHostMode({ isActive: false, currentInputType: null });
+
+                // Clear chat mode if active
+                if (chatMode.isActive) {
+                    setChatMode({
+                        isActive: false,
+                        currentInput: '',
+                        inputPositions: [],
+                        isProcessing: false
+                    });
+                    setChatData({});
+                }
+
+                setDialogueWithRevert(`${currentFlow} exited`, setDialogueText);
+                return true;
+            }
+        }
+
         // === Read-Only Mode: Block writes on mobile, allow ephemeral typing on desktop ===
         // Exception: Allow input when host mode is active (for signup/login flows)
         const isMobile = typeof window !== 'undefined' && 'ontouchstart' in window;
@@ -2734,8 +2780,15 @@ export function useWorldEngine({
         }
 
         // === Chat Mode Exit ===
-        // Don't allow ESC out of chat mode if in host mode (authentication) or read-only
-        if (key === 'Escape' && chatMode.isActive && !hostMode.isActive && !isReadOnly) {
+        // Allow ESC to exit chat mode and host dialogue flows
+        if (key === 'Escape' && chatMode.isActive && !isReadOnly) {
+            // Exit host dialogue if active
+            if (hostMode.isActive && hostDialogueExitHandlerRef.current) {
+                hostDialogueExitHandlerRef.current();
+                setHostMode({ isActive: false, currentInputType: null });
+            }
+
+            // Exit chat mode
             setChatMode({
                 isActive: false,
                 currentInput: '',
@@ -3510,6 +3563,13 @@ export function useWorldEngine({
                         hostDialogueHandlerRef.current();
                     } else {
                         setDialogueWithRevert("Sign in flow not available", setDialogueText);
+                    }
+                } else if (exec.command === 'tutorial') {
+                    // Trigger tutorial flow via callback
+                    if (tutorialFlowHandlerRef.current) {
+                        tutorialFlowHandlerRef.current();
+                    } else {
+                        setDialogueWithRevert("Tutorial flow not available", setDialogueText);
                     }
                 } else if (exec.command === 'signout') {
                     // Sign out from Firebase
@@ -9058,6 +9118,31 @@ export function useWorldEngine({
             if (upgradeFlowHandlerRef.current) {
                 upgradeFlowHandlerRef.current();
             }
+        },
+        setTutorialFlowHandler: (handler: () => void) => {
+            tutorialFlowHandlerRef.current = handler;
+        },
+        triggerTutorialFlow: () => {
+            if (tutorialFlowHandlerRef.current) {
+                tutorialFlowHandlerRef.current();
+            }
+        },
+        setHostDialogueExitHandler: (handler: () => void) => {
+            hostDialogueExitHandlerRef.current = handler;
+        },
+        setHostDialogueFlowGetter: (getter: () => string | null) => {
+            hostDialogueFlowGetterRef.current = getter;
+        },
+        exitHostDialogue: () => {
+            if (hostDialogueExitHandlerRef.current) {
+                hostDialogueExitHandlerRef.current();
+            }
+        },
+        getCurrentHostFlow: () => {
+            if (hostDialogueFlowGetterRef.current) {
+                return hostDialogueFlowGetterRef.current();
+            }
+            return null;
         },
         // Agent system
         agentEnabled,
