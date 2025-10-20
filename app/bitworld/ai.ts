@@ -55,7 +55,14 @@ Output only the result.`,
             })
         ]);
 
-        return (response as any).text?.trim() || text;
+        const result = (response as any).text?.trim() || text;
+
+        // Increment usage after successful response
+        if (userId) {
+            await incrementUserUsage(userId);
+        }
+
+        return result;
     } catch (error) {
         if (error instanceof Error && error.message === 'AI operation was interrupted') {
             logger.debug('AI transform operation was interrupted by user');
@@ -69,10 +76,18 @@ Output only the result.`,
 /**
  * Explain text according to given analysis type or general analysis
  */
-export async function explainText(text: string, analysisType: string = 'analysis'): Promise<string> {
+export async function explainText(text: string, analysisType: string = 'analysis', userId?: string): Promise<string> {
     const abortController = createAIAbortController();
-    
+
     try {
+        // Check user quota before proceeding
+        if (userId) {
+            const quota = await checkUserQuota(userId);
+            if (!quota.canUseAI) {
+                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`;
+            }
+        }
+
         if (abortController.signal.aborted) {
             throw new Error('AI operation was interrupted');
         }
@@ -102,7 +117,14 @@ export async function explainText(text: string, analysisType: string = 'analysis
             })
         ]);
 
-        return (response as any).text?.trim() || `Could not analyze the text`;
+        const result = (response as any).text?.trim() || `Could not analyze the text`;
+
+        // Increment usage after successful response
+        if (userId) {
+            await incrementUserUsage(userId);
+        }
+
+        return result;
     } catch (error) {
         if (error instanceof Error && error.message === 'AI operation was interrupted') {
             logger.debug('AI explain operation was interrupted by user');
@@ -116,10 +138,18 @@ export async function explainText(text: string, analysisType: string = 'analysis
 /**
  * Summarize the given text
  */
-export async function summarizeText(text: string, focus?: string): Promise<string> {
+export async function summarizeText(text: string, focus?: string, userId?: string): Promise<string> {
     const abortController = createAIAbortController();
-    
+
     try {
+        // Check user quota before proceeding
+        if (userId) {
+            const quota = await checkUserQuota(userId);
+            if (!quota.canUseAI) {
+                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`;
+            }
+        }
+
         if (abortController.signal.aborted) {
             throw new Error('AI operation was interrupted');
         }
@@ -149,7 +179,14 @@ export async function summarizeText(text: string, focus?: string): Promise<strin
             })
         ]);
 
-        return (response as any).text?.trim() || `Could not summarize the text`;
+        const result = (response as any).text?.trim() || `Could not summarize the text`;
+
+        // Increment usage after successful response
+        if (userId) {
+            await incrementUserUsage(userId);
+        }
+
+        return result;
     } catch (error) {
         if (error instanceof Error && error.message === 'AI operation was interrupted') {
             logger.debug('AI summarize operation was interrupted by user');
@@ -230,6 +267,11 @@ export async function generateImage(
             throw new Error('No image generated in response');
         }
 
+        // Increment usage after successful generation
+        if (userId) {
+            await incrementUserUsage(userId);
+        }
+
         return { imageData, text: text.trim() };
     } catch (error) {
         if (error instanceof Error && error.message === 'AI operation was interrupted') {
@@ -279,10 +321,18 @@ export function getCurrentWorldContext() {
 /**
  * Chat with AI maintaining conversation history
  */
-export async function chatWithAI(message: string, useCache: boolean = true): Promise<string> {
+export async function chatWithAI(message: string, useCache: boolean = true, userId?: string): Promise<string> {
     const abortController = createAIAbortController();
-    
+
     try {
+        // Check user quota before proceeding
+        if (userId) {
+            const quota = await checkUserQuota(userId);
+            if (!quota.canUseAI) {
+                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`;
+            }
+        }
+
         // Add user message to history
         chatHistory.push({
             role: 'user',
@@ -395,6 +445,11 @@ User: ${message}`,
             content: aiResponse,
             timestamp: Date.now()
         });
+
+        // Increment usage after successful response
+        if (userId) {
+            await incrementUserUsage(userId);
+        }
 
         return aiResponse;
     } catch (error) {

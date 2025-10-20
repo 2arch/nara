@@ -1210,7 +1210,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 isMultiWordDescriptive) {
                 setDialogueWithRevert("Generating background image...", setDialogueText);
 
-                generateImage(restOfInput.trim()).then(async (result) => {
+                generateImage(restOfInput.trim(), undefined, userUid || undefined).then(async (result) => {
                     if (result.imageData) {
                         // Upload to storage for persistence
                         if (uploadImageToStorage) {
@@ -1282,7 +1282,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 if (prompt.trim()) {
                     // 'bg clear' with a prompt - generate AI image
                     setDialogueWithRevert("Generating background image...", setDialogueText);
-                    generateImage(prompt).then(async (result) => {
+                    generateImage(prompt, undefined, userUid || undefined).then(async (result) => {
                         if (result.imageData) {
                             // Upload to storage for persistence
                             // Default to black text for AI-generated backgrounds (most are light/colorful)

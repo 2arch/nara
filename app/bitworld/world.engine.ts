@@ -2853,7 +2853,7 @@ export function useWorldEngine({
                         // If selection contains an image, do image-to-image generation
                         if (selectedImageData && selectedImageKey) {
                             setDialogueWithRevert("Generating image...", setDialogueText);
-                            loadAI().then(ai => ai.generateImage(aiPrompt, selectedImageData)).then(async (result) => {
+                            loadAI().then(ai => ai.generateImage(aiPrompt, selectedImageData, userUid || undefined)).then(async (result) => {
                                 if (result.imageData) {
                                     const newWorldData = { ...worldData };
 
@@ -2952,7 +2952,7 @@ export function useWorldEngine({
                             : aiPrompt;
 
                         setDialogueWithRevert(selectedText ? "Transforming text..." : "Generating text...", setDialogueText);
-                        loadAI().then(ai => ai.chatWithAI(fullPrompt)).then((response) => {
+                        loadAI().then(ai => ai.chatWithAI(fullPrompt, true, userUid || undefined)).then((response) => {
                             const newWorldData = { ...worldData };
 
                             // Clear the selection area
@@ -3048,7 +3048,7 @@ export function useWorldEngine({
                     // If image exists, do image-to-image generation
                     if (existingImageData && existingImageKey && imageRegion) {
                         setDialogueWithRevert("Generating image...", setDialogueText);
-                        loadAI().then(ai => ai.generateImage(aiPrompt, existingImageData)).then(async (result) => {
+                        loadAI().then(ai => ai.generateImage(aiPrompt, existingImageData, userUid || undefined)).then(async (result) => {
                             if (result.imageData) {
                                 // Replace the existing image
                                 const newWorldData = { ...worldData };
@@ -3217,7 +3217,7 @@ export function useWorldEngine({
                         const fullPrompt = `${aiPrompt}\n\nExisting text:\n${existingText}`;
 
                         setDialogueWithRevert("Transforming text...", setDialogueText);
-                        loadAI().then(ai => ai.chatWithAI(fullPrompt)).then((response) => {
+                        loadAI().then(ai => ai.chatWithAI(fullPrompt, true, userUid || undefined)).then((response) => {
                             // Replace text in the bounding box with AI response
                             const newWorldData = { ...worldData };
 
@@ -3282,7 +3282,7 @@ export function useWorldEngine({
 
                     // Priority 4: Default text-based AI chat (no selection, no image, no text block)
                     setDialogueWithRevert("Asking AI...", setDialogueText);
-                    loadAI().then(ai => ai.chatWithAI(aiPrompt)).then((response) => {
+                    loadAI().then(ai => ai.chatWithAI(aiPrompt, true, userUid || undefined)).then((response) => {
                         // Start response on next line, same X as where '/' was typed
                         const responseStartPos = {
                             x: exec.commandStartPos.x,
@@ -4983,8 +4983,8 @@ export function useWorldEngine({
                     if (chatMode.currentInput.trim() && !chatMode.isProcessing) {
                         setChatMode(prev => ({ ...prev, isProcessing: true }));
                         setDialogueWithRevert("Processing...", setDialogueText);
-                        
-                        loadAI().then(ai => ai.chatWithAI(chatMode.currentInput.trim())).then((response) => {
+
+                        loadAI().then(ai => ai.chatWithAI(chatMode.currentInput.trim(), true, userUid || undefined)).then((response) => {
                             // Show response in dialogue system
                             createSubtitleCycler(response, setDialogueText);
                             
@@ -5072,7 +5072,7 @@ export function useWorldEngine({
                         setChatMode(prev => ({ ...prev, isProcessing: true }));
                         setDialogueWithRevert("Processing...", setDialogueText);
 
-                        loadAI().then(ai => ai.chatWithAI(chatMode.currentInput.trim())).then((response) => {
+                        loadAI().then(ai => ai.chatWithAI(chatMode.currentInput.trim(), true, userUid || undefined)).then((response) => {
                             // Show response in dialogue system (subtitle-style)
                             createSubtitleCycler(response, setDialogueText);
                             
@@ -5407,7 +5407,7 @@ export function useWorldEngine({
                         const instructions = exec.args.length > 1 ? exec.args.slice(1).join(' ') : 'analysis';
                         
                         setDialogueWithRevert("Processing explanation...", setDialogueText);
-                        loadAI().then(ai => ai.explainText(selectedText, instructions)).then((result) => {
+                        loadAI().then(ai => ai.explainText(selectedText, instructions, userUid || undefined)).then((result) => {
                             createSubtitleCycler(result, setDialogueText);
                         }).catch(() => {
                             setDialogueWithRevert(`Could not explain text`, setDialogueText);
@@ -5417,7 +5417,7 @@ export function useWorldEngine({
                         const focus = exec.args.length > 1 ? exec.args.slice(1).join(' ') : undefined;
 
                         setDialogueWithRevert("Processing summary...", setDialogueText);
-                        loadAI().then(ai => ai.summarizeText(selectedText, focus)).then((result) => {
+                        loadAI().then(ai => ai.summarizeText(selectedText, focus, userUid || undefined)).then((result) => {
                             createSubtitleCycler(result, setDialogueText);
                         }).catch(() => {
                             setDialogueWithRevert(`Could not summarize text`, setDialogueText);
@@ -5714,7 +5714,7 @@ export function useWorldEngine({
                         setDialogueWithRevert("Generating image...", setDialogueText);
 
                         loadAI().then(ai => {
-                            return ai.generateImage(textToSend.trim(), existingImageData || undefined);
+                            return ai.generateImage(textToSend.trim(), existingImageData || undefined, userUid || undefined);
                         }).then(async (result) => {
                             if (!result.imageData) {
                                 setDialogueWithRevert("Image generation failed", setDialogueText);
@@ -5840,7 +5840,7 @@ export function useWorldEngine({
                                 labels: currentLabels,
                                 metadata: `Canvas viewport center: ${JSON.stringify(getViewportCenter())}, Current cursor: ${JSON.stringify(cursorPos)}`
                             });
-                            return ai.chatWithAI(enhancedPrompt, true);
+                            return ai.chatWithAI(enhancedPrompt, true, userUid || undefined);
                         }).then((response) => {
                             // Don't show response in dialogue - write directly to target region
                             setDialogueWithRevert("AI response filled", setDialogueText);
@@ -6027,7 +6027,7 @@ export function useWorldEngine({
                     });
 
                     // Use world context for AI chat
-                    return ai.chatWithAI(textToSend.trim(), true); // true = use context
+                    return ai.chatWithAI(textToSend.trim(), true, userUid || undefined); // true = use context
                 }).then((response) => {
                     // Show response in dialogue system
                     createSubtitleCycler(response, setDialogueText);
