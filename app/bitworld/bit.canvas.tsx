@@ -2764,7 +2764,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             if (hoveredIndex >= 0 && hoveredIndex < engine.commandState.matchedCommands.length) {
                                 const hoveredCommand = engine.commandState.matchedCommands[hoveredIndex];
                                 // Check if hovered command belongs to this category
-                                isHovered = COMMAND_CATEGORIES[categoryName]?.includes(hoveredCommand) || false;
+                                isHovered = (categoryName && COMMAND_CATEGORIES[categoryName as keyof typeof COMMAND_CATEGORIES]?.includes(hoveredCommand)) || false;
                             }
                         } else {
                             // For regular commands, just check Y coordinate
