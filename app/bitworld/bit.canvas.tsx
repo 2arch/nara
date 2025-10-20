@@ -6,7 +6,7 @@ import { useDialogue, useDebugDialogue } from './dialogue';
 import { useMonogramSystem } from './monogram';
 import { useControllerSystem, createMonogramController, createCameraController, createGridController, createTapeController } from './controllers';
 import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchicalFrames, HierarchicalFrame, HierarchyLevel } from './bit.blocks';
-import { COLOR_MAP } from './commands';
+import { COLOR_MAP, COMMAND_CATEGORIES } from './commands';
 import { useHostDialogue } from './host.dialogue';
 import { setDialogueWithRevert } from './ai';
 import { CanvasRecorder } from './tape';
@@ -2676,14 +2676,16 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         // === Render Command Data ===
         if (engine.commandState.isActive) {
-            // First, draw background for selected command
-            const selectedCommandY = engine.commandState.commandStartPos.y + 1 + engine.commandState.selectedIndex;
-            const selectedCommand = engine.commandState.matchedCommands[engine.commandState.selectedIndex];
-            if (selectedCommand) {
-                const selectedScreenPos = engine.worldToScreen(engine.commandState.commandStartPos.x, selectedCommandY, currentZoom, currentOffset);
-                if (selectedScreenPos.x > -effectiveCharWidth * 2 && selectedScreenPos.x < cssWidth + effectiveCharWidth && selectedScreenPos.y > -effectiveCharHeight * 2 && selectedScreenPos.y < cssHeight + effectiveCharHeight) {
-                    ctx.fillStyle = 'rgba(255, 107, 53, 0.3)'; // Highlight background
-                    ctx.fillRect(selectedScreenPos.x, selectedScreenPos.y, selectedCommand.length * effectiveCharWidth, effectiveCharHeight);
+            // First, draw background for selected command (only if user has navigated)
+            if (engine.commandState.hasNavigated) {
+                const selectedCommandY = engine.commandState.commandStartPos.y + 1 + engine.commandState.selectedIndex;
+                const selectedCommand = engine.commandState.matchedCommands[engine.commandState.selectedIndex];
+                if (selectedCommand) {
+                    const selectedScreenPos = engine.worldToScreen(engine.commandState.commandStartPos.x, selectedCommandY, currentZoom, currentOffset);
+                    if (selectedScreenPos.x > -effectiveCharWidth * 2 && selectedScreenPos.x < cssWidth + effectiveCharWidth && selectedScreenPos.y > -effectiveCharHeight * 2 && selectedScreenPos.y < cssHeight + effectiveCharHeight) {
+                        ctx.fillStyle = 'rgba(255, 107, 53, 0.3)'; // Highlight background
+                        ctx.fillRect(selectedScreenPos.x, selectedScreenPos.y, selectedCommand.length * effectiveCharWidth, effectiveCharHeight);
+                    }
                 }
             }
         }
@@ -2706,15 +2708,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     // Check if this is a category label (special background marker)
                     const isCategoryLabel = charStyle?.background === 'category-label';
 
-                    // Check if mouse is hovering over this command line
-                    const isHovered = mouseWorldPos && Math.floor(mouseWorldPos.y) === worldY && worldY > engine.commandState.commandStartPos.y;
-
                     // Get command text and check if it's a color command
                     const suggestionIndex = worldY - engine.commandState.commandStartPos.y - 1;
                     let highlightColor: string | null = null;
+                    let commandText = '';
 
                     if (suggestionIndex >= 0 && suggestionIndex < engine.commandState.matchedCommands.length) {
-                        const commandText = engine.commandState.matchedCommands[suggestionIndex];
+                        commandText = engine.commandState.matchedCommands[suggestionIndex];
 
                         // Extract color from bg/text commands
                         if (commandText.startsWith('bg ')) {
@@ -2732,6 +2732,24 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         }
                     }
 
+                    // Check if mouse is hovering over this command line
+                    let isHovered = false;
+                    if (mouseWorldPos && worldY > engine.commandState.commandStartPos.y) {
+                        if (isCategoryLabel) {
+                            // For category labels, highlight if hovering over any command in this category
+                            const categoryName = charStyle?.color; // Category name is stored in style.color
+                            const hoveredIndex = Math.floor(mouseWorldPos.y) - engine.commandState.commandStartPos.y - 1;
+                            if (hoveredIndex >= 0 && hoveredIndex < engine.commandState.matchedCommands.length) {
+                                const hoveredCommand = engine.commandState.matchedCommands[hoveredIndex];
+                                // Check if hovered command belongs to this category
+                                isHovered = COMMAND_CATEGORIES[categoryName]?.includes(hoveredCommand) || false;
+                            }
+                        } else {
+                            // For regular commands, just check Y coordinate
+                            isHovered = Math.floor(mouseWorldPos.y) === worldY;
+                        }
+                    }
+
                     // Draw background for command data
                     if (isCategoryLabel) {
                         // Category label - flip colors with alpha matching command suggestions
@@ -2740,19 +2758,41 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const bgG = parseInt(bgHex.substring(2, 4), 16);
                         const bgB = parseInt(bgHex.substring(4, 6), 16);
 
-                        if (isHovered) {
-                            // Hovered category label - use 90% opacity (same as hovered suggestions)
-                            ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
-                        } else if (engine.commandState.isActive && worldY === engine.commandState.commandStartPos.y + 1 + engine.commandState.selectedIndex) {
-                            // Selected category label - use 80% opacity (same as selected suggestions)
-                            ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.8)`;
-                        } else {
-                            // Other category labels - use 60% opacity (same as other suggestions)
-                            ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.6)`;
+                        const textHex = engine.textColor.replace('#', '');
+                        const textR = parseInt(textHex.substring(0, 2), 16);
+                        const textG = parseInt(textHex.substring(2, 4), 16);
+                        const textB = parseInt(textHex.substring(4, 6), 16);
+
+                        // Check if this category label should be highlighted based on selected command
+                        let isSelected = false;
+                        if (engine.commandState.isActive && engine.commandState.hasNavigated && engine.commandState.selectedIndex >= 0) {
+                            const categoryName = charStyle?.color; // Category name is stored in style.color
+                            const selectedCommand = engine.commandState.matchedCommands[engine.commandState.selectedIndex];
+                            if (selectedCommand && categoryName) {
+                                // Check if selected command belongs to this category
+                                isSelected = COMMAND_CATEGORIES[categoryName]?.includes(selectedCommand) || false;
+                            }
                         }
-                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                        // Text uses text color
-                        ctx.fillStyle = engine.textColor;
+
+                        if (isHovered) {
+                            // Hovered category label - use 90% opacity background
+                            ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            // Text uses full opacity text color for prominence
+                            ctx.fillStyle = engine.textColor;
+                        } else if (isSelected) {
+                            // Selected category label - use 80% opacity background
+                            ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.8)`;
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            // Text uses full opacity text color for prominence
+                            ctx.fillStyle = engine.textColor;
+                        } else {
+                            // Other category labels - use 60% opacity background
+                            ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.6)`;
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            // Text uses 60% opacity text color
+                            ctx.fillStyle = `rgba(${textR}, ${textG}, ${textB}, 0.6)`;
+                        }
                     } else if (worldY === engine.commandState.commandStartPos.y) {
                         // Command line (typed command) - use text color at full opacity
                         ctx.fillStyle = engine.textColor;
@@ -2780,7 +2820,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
                             ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
                         }
-                    } else if (engine.commandState.isActive && worldY === engine.commandState.commandStartPos.y + 1 + engine.commandState.selectedIndex) {
+                    } else if (engine.commandState.isActive && engine.commandState.hasNavigated && worldY === engine.commandState.commandStartPos.y + 1 + engine.commandState.selectedIndex) {
                         // Selected suggestion - use swatch color at 80% opacity if available
                         if (highlightColor) {
                             const hex = highlightColor.replace('#', '');

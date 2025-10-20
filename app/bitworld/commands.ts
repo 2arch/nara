@@ -78,6 +78,7 @@ interface UseCommandSystemProps {
     getAllBounds?: () => Array<{startX: number, endX: number, startY: number, endY: number, color: string, title?: string}>;
     availableStates?: string[];
     username?: string;
+    userUid?: string | null;
     updateSettings?: (settings: Partial<WorldSettings>) => void;
     settings?: WorldSettings;
     getEffectiveCharDims: (zoom: number) => { width: number; height: number; fontSize: number; };
@@ -100,35 +101,32 @@ const READ_ONLY_COMMANDS = ['signin', 'share'];
 // Commands organized by category for logical ordering
 const AVAILABLE_COMMANDS = [
     // Navigation & View
-    'nav', 'search', 'cam',
+    'nav', 'search', 'cam', 'indent',
     // Content Creation
-    'label', 'clip', 'upload',
+    'label', 'tape', 'clip', 'upload',
+    // Special
+    'mode', 'plan', 'chat',
     // Styling & Display
-    'mode', 'bg', 'text', 'font', 'indent',
+    'bg', 'text', 'font',
     // State Management
     'state', 'random', 'clear',
-    // Recording & Capture
-    'tape',
     // Sharing & Publishing
     'publish', 'unpublish', 'share', 'spawn', 'monogram',
     // Account
     'signin', 'signout',
-    // Modes
-    'plan', 'chat',
     // Debug
     'debug'
 ];
 
 // Category mapping for visual organization
-const COMMAND_CATEGORIES: { [category: string]: string[] } = {
-    'nav': ['nav', 'search', 'cam'],
-    'create': ['label', 'clip', 'upload'],
-    'style': ['mode', 'bg', 'text', 'font', 'indent'],
+export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
+    'nav': ['nav', 'search', 'cam', 'indent'],
+    'create': ['label', 'tape', 'clip', 'upload'],
+    'special': ['mode', 'plan', 'chat'],
+    'style': ['bg', 'text', 'font'],
     'state': ['state', 'random', 'clear'],
-    'record': ['tape'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
     'account': ['signin', 'signout'],
-    'modes': ['plan', 'chat'],
     'debug': ['debug']
 };
 
@@ -150,7 +148,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, userUid, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const [commandState, setCommandState] = useState<CommandState>({
@@ -235,7 +233,16 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
 
     // Utility function to match commands based on input
     const matchCommands = useCallback((input: string): string[] => {
-        const commandList = isReadOnly ? READ_ONLY_COMMANDS : AVAILABLE_COMMANDS;
+        let commandList = isReadOnly ? READ_ONLY_COMMANDS : AVAILABLE_COMMANDS;
+
+        // Filter signin/signout based on authentication state
+        const isAuthenticated = !!userUid;
+        commandList = commandList.filter(cmd => {
+            if (isAuthenticated && cmd === 'signin') return false; // Hide signin when authenticated
+            if (!isAuthenticated && cmd === 'signout') return false; // Hide signout when not authenticated
+            return true;
+        });
+
         if (!input) return commandList;
         const lowerInput = input.toLowerCase().split(' ')[0];
         
@@ -489,7 +496,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         }
 
         return commandList.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
-    }, [getAllLabels, getAllBounds, availableStates, clipboardItems, isReadOnly]);
+    }, [getAllLabels, getAllBounds, availableStates, clipboardItems, isReadOnly, userUid]);
 
     // Mode switching functionality
     const switchMode = useCallback((newMode: CanvasMode) => {
@@ -969,10 +976,23 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         const key = `${cursorPos.x},${cursorPos.y}`;
         newCommandData[key] = '/';
 
+        // Filter commands based on authentication state
+        const isAuthenticated = !!userUid;
+
         // Draw all available commands below with category labels
         let currentY = cursorPos.y + 1;
         Object.entries(COMMAND_CATEGORIES).forEach(([categoryName, commands]) => {
-            commands.forEach((command, indexInCategory) => {
+            // Filter commands in this category based on auth state
+            const filteredCommands = commands.filter(cmd => {
+                if (isAuthenticated && cmd === 'signin') return false;
+                if (!isAuthenticated && cmd === 'signout') return false;
+                return true;
+            });
+
+            // Skip empty categories
+            if (filteredCommands.length === 0) return;
+
+            filteredCommands.forEach((command, indexInCategory) => {
                 // Draw category label to the left of first command in category with lighter background
                 if (indexInCategory === 0) {
                     for (let i = 0; i < categoryName.length; i++) {
@@ -980,7 +1000,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                         newCommandData[labelKey] = {
                             char: categoryName[i],
                             style: {
-                                background: 'category-label' // Special marker for category labels
+                                background: 'category-label', // Special marker for category labels
+                                color: categoryName // Store category name for hover detection
                             }
                         };
                     }
@@ -999,13 +1020,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         setCommandState({
             isActive: true,
             input: '',
-            matchedCommands: isReadOnly ? READ_ONLY_COMMANDS : AVAILABLE_COMMANDS,
+            matchedCommands: matchCommands(''), // Use matchCommands to apply authentication filtering
             selectedIndex: 0,
             commandStartPos: { x: cursorPos.x, y: cursorPos.y },
             originalCursorPos: { x: cursorPos.x, y: cursorPos.y }, // Store original position
             hasNavigated: false
         });
-    }, [isReadOnly]);
+    }, [isReadOnly, matchCommands, userUid]);
 
     // Handle character input in command mode
     const addCharacter = useCallback((char: string) => {

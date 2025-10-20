@@ -164,15 +164,28 @@ export async function summarizeText(text: string, focus?: string): Promise<strin
  * Generate or edit an image using Gemini's image generation model
  * @param prompt - Text description for image generation or editing
  * @param existingImage - Optional existing image data URL for image-to-image editing
+ * @param userId - Optional user ID for quota checking and usage tracking
  * @returns Object containing imageData (base64 data URL) and optional text response
  */
 export async function generateImage(
     prompt: string,
-    existingImage?: string
+    existingImage?: string,
+    userId?: string
 ): Promise<{ imageData: string | null, text: string }> {
     const abortController = createAIAbortController();
 
     try {
+        // Check user quota before proceeding
+        if (userId) {
+            const quota = await checkUserQuota(userId);
+            if (!quota.canUseAI) {
+                return {
+                    imageData: null,
+                    text: `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`
+                };
+            }
+        }
+
         if (abortController.signal.aborted) {
             throw new Error('AI operation was interrupted');
         }
