@@ -262,6 +262,74 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       nextMessageId = currentMessage.nextMessageId;
     }
 
+    // Handle upgrade checkout redirect
+    if (nextMessageId === 'redirecting_to_checkout') {
+      const flow = HOST_FLOWS[state.currentFlowId!];
+      const redirectingMessage = flow.messages['redirecting_to_checkout'];
+
+      // Show redirecting message
+      setHostData({
+        text: redirectingMessage.text,
+        centerPos: getViewportCenter(),
+        timestamp: Date.now()
+      });
+
+      setState(prev => ({
+        ...prev,
+        currentMessageId: 'redirecting_to_checkout',
+        isProcessing: true,
+        isActive: false // Deactivate flow during redirect
+      }));
+
+      // Get current user and create checkout session
+      const user = auth.currentUser;
+      if (!user) {
+        setHostData({
+          text: 'please sign in first to upgrade',
+          centerPos: getViewportCenter(),
+          timestamp: Date.now()
+        });
+        setState(prev => ({ ...prev, isProcessing: false, isActive: false }));
+        return false;
+      }
+
+      try {
+        const response = await fetch('/api/stripe/checkout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            plan: 'pro',
+            interval: 'monthly',
+            userId: user.uid,
+          }),
+        });
+
+        const data = await response.json();
+
+        if (data.url) {
+          // Redirect to Stripe checkout
+          window.location.href = data.url;
+          return true;
+        } else {
+          setHostData({
+            text: 'checkout failed. please try /pro command instead.',
+            centerPos: getViewportCenter(),
+            timestamp: Date.now()
+          });
+          setState(prev => ({ ...prev, isProcessing: false, isActive: false }));
+          return false;
+        }
+      } catch (error) {
+        setHostData({
+          text: 'something went wrong. please try /pro command instead.',
+          centerPos: getViewportCenter(),
+          timestamp: Date.now()
+        });
+        setState(prev => ({ ...prev, isProcessing: false, isActive: false }));
+        return false;
+      }
+    }
+
     // Handle checking existing user credentials
     if (nextMessageId === 'checking_user') {
       const flow = HOST_FLOWS[state.currentFlowId!];

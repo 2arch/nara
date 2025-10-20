@@ -677,6 +677,28 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         engine.setHostDialogueHandler(handleHostDialogueFlow);
     }, [engine, handleHostDialogueFlow]);
 
+    // Upgrade flow handler
+    const handleUpgradeFlow = useCallback(() => {
+        // Activate host mode
+        engine.setHostMode({ isActive: true, currentInputType: null });
+
+        // Activate chat mode for input
+        engine.setChatMode({
+            isActive: true,
+            currentInput: '',
+            inputPositions: [],
+            isProcessing: false
+        });
+
+        // Start the upgrade flow
+        hostDialogue.startFlow('upgrade');
+    }, [engine, hostDialogue]);
+
+    // Register upgrade flow handler with engine
+    useEffect(() => {
+        engine.setUpgradeFlowHandler(handleUpgradeFlow);
+    }, [engine, handleUpgradeFlow]);
+
     // Track clipboard additions for visual feedback
     const prevClipboardLengthRef = useRef(0);
     useEffect(() => {

@@ -16,7 +16,7 @@ export const STRIPE_PLANS = {
 
 // Plan metadata for easy lookup
 export const PLAN_DETAILS = {
-  [STRIPE_PLANS.pro.monthly]: { tier: 'pro', interval: 'month', price: 7.99 },
+  [STRIPE_PLANS.pro.monthly]: { tier: 'pro', interval: 'month', price: 10.00 },
 } as const;
 
 export type StripePlan = keyof typeof PLAN_DETAILS;

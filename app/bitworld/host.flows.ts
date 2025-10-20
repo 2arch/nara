@@ -227,8 +227,90 @@ export const verificationFlow: HostFlow = {
   }
 };
 
+// Upgrade flow - for when users hit AI limits
+export const upgradeFlow: HostFlow = {
+  flowId: 'upgrade',
+  startMessageId: 'limit_reached',
+  messages: {
+    'limit_reached': {
+      id: 'limit_reached',
+      text: 'You\'ve hit your daily AI limit.',
+      expectsInput: false,
+      nextMessageId: 'explain_limit'
+    },
+
+    'explain_limit': {
+      id: 'explain_limit',
+      text: 'On the fresh tier, you get 5 AI interactions per day. \n \n This helps us keep Nara sustainable while you explore.',
+      expectsInput: false,
+      nextMessageId: 'introduce_pro',
+      previousMessageId: 'limit_reached'
+    },
+
+    'introduce_pro': {
+      id: 'introduce_pro',
+      text: 'But if you\'re ready to go deeper, Nara Pro gives you unlimited AI.',
+      expectsInput: false,
+      nextMessageId: 'show_benefits',
+      previousMessageId: 'explain_limit'
+    },
+
+    'show_benefits': {
+      id: 'show_benefits',
+      text: 'With Pro, you can: \n \n → Generate unlimited images \n → Transform text without limits \n → Chat with AI as much as you need \n → Push your thinking further',
+      expectsInput: false,
+      nextMessageId: 'show_pricing',
+      previousMessageId: 'introduce_pro'
+    },
+
+    'show_pricing': {
+      id: 'show_pricing',
+      text: 'Nara Pro is $10/month. \n \n Think of it as the cost of two coffees for unlimited creative space.',
+      expectsInput: false,
+      nextMessageId: 'upgrade_prompt',
+      previousMessageId: 'show_benefits'
+    },
+
+    'upgrade_prompt': {
+      id: 'upgrade_prompt',
+      text: 'Ready to upgrade? \n \n Type "yes" to continue, or "no" if you\'d like to stay on the fresh tier.',
+      expectsInput: true,
+      inputType: 'choice',
+      choices: ['yes', 'no'],
+      inputValidator: (input: string) => {
+        const lowercased = input.toLowerCase().trim();
+        if (lowercased === 'yes' || lowercased === 'no') {
+          return { valid: true };
+        }
+        return { valid: false, error: 'please type "yes" or "no"' };
+      },
+      onResponse: async (input: string, collectedData: Record<string, any>) => {
+        if (input.toLowerCase().trim() === 'yes') {
+          return 'redirecting_to_checkout';
+        } else {
+          return 'upgrade_declined';
+        }
+      },
+      previousMessageId: 'show_pricing'
+    },
+
+    'redirecting_to_checkout': {
+      id: 'redirecting_to_checkout',
+      text: 'taking you to checkout...',
+      expectsInput: false
+    },
+
+    'upgrade_declined': {
+      id: 'upgrade_declined',
+      text: 'No worries! Your quota resets tomorrow. \n \n You can always upgrade later by typing /pro.',
+      expectsInput: false
+    }
+  }
+};
+
 // Export all flows
 export const HOST_FLOWS: Record<string, HostFlow> = {
   'welcome': welcomeFlow,
-  'verification': verificationFlow
+  'verification': verificationFlow,
+  'upgrade': upgradeFlow
 };

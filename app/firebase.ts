@@ -332,7 +332,7 @@ export const checkUserQuota = async (uid: string): Promise<{ canUseAI: boolean, 
     }
 
     const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-    const dailyUsed = profile.aiUsage?.daily[today] || 0;
+    const dailyUsed = profile.aiUsage?.daily?.[today] || 0;
     const tier = profile.membership || 'fresh'; // Default to 'fresh' if somehow still missing
     const dailyLimit = TIER_LIMITS[tier].daily;
     
@@ -359,33 +359,45 @@ export const upgradeUserToPro = async (uid: string): Promise<boolean> => {
 
 export const incrementUserUsage = async (uid: string): Promise<boolean> => {
   try {
+    console.log('[Firebase] Incrementing usage for uid:', uid);
     const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
     const currentMonth = new Date().toISOString().substring(0, 7); // YYYY-MM
-    
+
     const userRef = ref(database, `users/${uid}`);
     const snapshot = await get(userRef);
-    
-    if (!snapshot.exists()) return false;
+
+    if (!snapshot.exists()) {
+      console.log('[Firebase] User not found:', uid);
+      return false;
+    }
     
     const userData = snapshot.val() as UserProfileData;
     const currentUsage = userData.aiUsage || { daily: {}, monthly: {}, total: 0 };
-    
+
+    // Ensure daily and monthly objects exist
+    const daily = currentUsage.daily || {};
+    const monthly = currentUsage.monthly || {};
+    const total = currentUsage.total || 0;
+
     // Increment counters
     const newUsage = {
-      ...currentUsage,
       daily: {
-        ...currentUsage.daily,
-        [today]: (currentUsage.daily[today] || 0) + 1
+        ...daily,
+        [today]: (daily[today] || 0) + 1
       },
       monthly: {
-        ...currentUsage.monthly,
-        [currentMonth]: (currentUsage.monthly[currentMonth] || 0) + 1
+        ...monthly,
+        [currentMonth]: (monthly[currentMonth] || 0) + 1
       },
-      total: currentUsage.total + 1
+      total: total + 1,
+      lastReset: currentUsage.lastReset || new Date().toISOString()
     };
     
     // Update in database
+    console.log('[Firebase] Writing usage to database:', newUsage);
     await set(ref(database, `users/${uid}/aiUsage`), newUsage);
+    console.log(`[Firebase] AI usage incremented for ${uid}: ${newUsage.daily[today]} today, ${newUsage.total} total`);
+    logger.info(`AI usage incremented for ${uid}: ${newUsage.daily[today]} today, ${newUsage.total} total`);
     return true;
   } catch (error) {
     logger.error('Error incrementing user usage:', error);

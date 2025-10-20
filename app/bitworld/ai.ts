@@ -26,7 +26,7 @@ export async function transformText(text: string, instructions: string, userId?:
         if (userId) {
             const quota = await checkUserQuota(userId);
             if (!quota.canUseAI) {
-                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`;
+                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /pro`;
             }
         }
 
@@ -84,7 +84,7 @@ export async function explainText(text: string, analysisType: string = 'analysis
         if (userId) {
             const quota = await checkUserQuota(userId);
             if (!quota.canUseAI) {
-                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`;
+                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /pro`;
             }
         }
 
@@ -146,7 +146,7 @@ export async function summarizeText(text: string, focus?: string, userId?: strin
         if (userId) {
             const quota = await checkUserQuota(userId);
             if (!quota.canUseAI) {
-                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`;
+                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /pro`;
             }
         }
 
@@ -218,7 +218,7 @@ export async function generateImage(
             if (!quota.canUseAI) {
                 return {
                     imageData: null,
-                    text: `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`
+                    text: `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /pro`
                 };
             }
         }
@@ -329,7 +329,7 @@ export async function chatWithAI(message: string, useCache: boolean = true, user
         if (userId) {
             const quota = await checkUserQuota(userId);
             if (!quota.canUseAI) {
-                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`;
+                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /pro`;
             }
         }
 
@@ -448,7 +448,11 @@ User: ${message}`,
 
         // Increment usage after successful response
         if (userId) {
-            await incrementUserUsage(userId);
+            console.log('[AI] Incrementing usage for user:', userId);
+            const success = await incrementUserUsage(userId);
+            console.log('[AI] Usage increment result:', success);
+        } else {
+            console.log('[AI] No userId provided, skipping usage increment');
         }
 
         return aiResponse;

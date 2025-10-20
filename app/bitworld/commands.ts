@@ -92,6 +92,7 @@ interface UseCommandSystemProps {
     setSelectionStart?: (pos: { x: number, y: number } | null) => void;
     setSelectionEnd?: (pos: { x: number, y: number } | null) => void;
     uploadImageToStorage?: (dataUrl: string, mimeType?: string) => Promise<string>;
+    triggerUpgradeFlow?: () => void;
 }
 
 // --- Command System Constants ---
@@ -148,7 +149,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, userUid, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, userUid, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const [commandState, setCommandState] = useState<CommandState>({
@@ -1211,6 +1212,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 setDialogueWithRevert("Generating background image...", setDialogueText);
 
                 generateImage(restOfInput.trim(), undefined, userUid || undefined).then(async (result) => {
+                    // Check if quota exceeded
+                    if (result.text && result.text.startsWith('AI limit reached')) {
+                        if (triggerUpgradeFlow) {
+                            triggerUpgradeFlow();
+                        }
+                        return;
+                    }
+
                     if (result.imageData) {
                         // Upload to storage for persistence
                         if (uploadImageToStorage) {
@@ -1283,6 +1292,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     // 'bg clear' with a prompt - generate AI image
                     setDialogueWithRevert("Generating background image...", setDialogueText);
                     generateImage(prompt, undefined, userUid || undefined).then(async (result) => {
+                        // Check if quota exceeded
+                        if (result.text && result.text.startsWith('AI limit reached')) {
+                            if (triggerUpgradeFlow) {
+                                triggerUpgradeFlow();
+                            }
+                            return;
+                        }
+
                         if (result.imageData) {
                             // Upload to storage for persistence
                             // Default to black text for AI-generated backgrounds (most are light/colorful)

@@ -245,6 +245,9 @@ export interface WorldEngine {
     setMonogramCommandHandler: (handler: (args: string[]) => void) => void;
     // Host dialogue flow callback
     setHostDialogueHandler: (handler: () => void) => void;
+    // Upgrade flow callback
+    setUpgradeFlowHandler: (handler: () => void) => void;
+    triggerUpgradeFlow: () => void;
     // Text compilation access
     getCompiledText: () => { [lineY: number]: string };
     compiledTextCache: { [lineY: number]: string }; // Direct access to compiled text cache for real-time updates
@@ -408,6 +411,9 @@ export function useWorldEngine({
 
     // Host dialogue handler ref
     const hostDialogueHandlerRef = useRef<(() => void) | null>(null);
+
+    // Upgrade flow handler ref
+    const upgradeFlowHandlerRef = useRef<(() => void) | null>(null);
     
     // Auto-clear temporary dialogue messages
     useAutoDialogue(dialogueText, setDialogueText);
@@ -987,7 +993,11 @@ export function useWorldEngine({
         setFullscreenMode,
         exitFullscreenMode,
         switchBackgroundMode,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, userUid, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage });
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, userUid, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow: () => {
+        if (upgradeFlowHandlerRef.current) {
+            upgradeFlowHandlerRef.current();
+        }
+    } });
 
     // Generate search data when search pattern changes
     useEffect(() => {
@@ -2149,6 +2159,37 @@ export function useWorldEngine({
         return closestBoundAbove;
     }, []);
 
+    const getPlanRegion = useCallback((worldData: WorldData, cursorPos: Point): { startX: number; endX: number; startY: number; endY: number } | null => {
+        // Check if cursor is within any plan region
+        const cursorX = cursorPos.x;
+        const cursorY = cursorPos.y;
+
+        // Look through all plan_ entries
+        for (const key in worldData) {
+            if (key.startsWith('plan_')) {
+                try {
+                    const planData = JSON.parse(worldData[key] as string);
+
+                    // Check if cursor is within this plan region
+                    if (cursorX >= planData.startX && cursorX <= planData.endX &&
+                        cursorY >= planData.startY && cursorY <= planData.endY) {
+
+                        return {
+                            startX: planData.startX,
+                            endX: planData.endX,
+                            startY: planData.startY,
+                            endY: planData.endY
+                        };
+                    }
+                } catch (e) {
+                    // Skip invalid plan data
+                }
+            }
+        }
+
+        return null;
+    }, []);
+
     // === List Detection ===
     const findListAt = useCallback((x: number, y: number): { key: string; data: ListData } | null => {
         for (const key in worldData) {
@@ -2854,6 +2895,14 @@ export function useWorldEngine({
                         if (selectedImageData && selectedImageKey) {
                             setDialogueWithRevert("Generating image...", setDialogueText);
                             loadAI().then(ai => ai.generateImage(aiPrompt, selectedImageData, userUid || undefined)).then(async (result) => {
+                                // Check if quota exceeded
+                                if (result.text && result.text.startsWith('AI limit reached')) {
+                                    if (upgradeFlowHandlerRef.current) {
+                                        upgradeFlowHandlerRef.current();
+                                    }
+                                    return;
+                                }
+
                                 if (result.imageData) {
                                     const newWorldData = { ...worldData };
 
@@ -2953,6 +3002,14 @@ export function useWorldEngine({
 
                         setDialogueWithRevert(selectedText ? "Transforming text..." : "Generating text...", setDialogueText);
                         loadAI().then(ai => ai.chatWithAI(fullPrompt, true, userUid || undefined)).then((response) => {
+                            // Check if quota exceeded
+                            if (response.startsWith('AI limit reached')) {
+                                if (upgradeFlowHandlerRef.current) {
+                                    upgradeFlowHandlerRef.current();
+                                }
+                                return;
+                            }
+
                             const newWorldData = { ...worldData };
 
                             // Clear the selection area
@@ -3049,6 +3106,14 @@ export function useWorldEngine({
                     if (existingImageData && existingImageKey && imageRegion) {
                         setDialogueWithRevert("Generating image...", setDialogueText);
                         loadAI().then(ai => ai.generateImage(aiPrompt, existingImageData, userUid || undefined)).then(async (result) => {
+                            // Check if quota exceeded
+                            if (result.text && result.text.startsWith('AI limit reached')) {
+                                if (upgradeFlowHandlerRef.current) {
+                                    upgradeFlowHandlerRef.current();
+                                }
+                                return;
+                            }
+
                             if (result.imageData) {
                                 // Replace the existing image
                                 const newWorldData = { ...worldData };
@@ -3218,6 +3283,14 @@ export function useWorldEngine({
 
                         setDialogueWithRevert("Transforming text...", setDialogueText);
                         loadAI().then(ai => ai.chatWithAI(fullPrompt, true, userUid || undefined)).then((response) => {
+                            // Check if quota exceeded
+                            if (response.startsWith('AI limit reached')) {
+                                if (upgradeFlowHandlerRef.current) {
+                                    upgradeFlowHandlerRef.current();
+                                }
+                                return;
+                            }
+
                             // Replace text in the bounding box with AI response
                             const newWorldData = { ...worldData };
 
@@ -3283,6 +3356,14 @@ export function useWorldEngine({
                     // Priority 4: Default text-based AI chat (no selection, no image, no text block)
                     setDialogueWithRevert("Asking AI...", setDialogueText);
                     loadAI().then(ai => ai.chatWithAI(aiPrompt, true, userUid || undefined)).then((response) => {
+                        // Check if quota exceeded
+                        if (response.startsWith('AI limit reached')) {
+                            if (upgradeFlowHandlerRef.current) {
+                                upgradeFlowHandlerRef.current();
+                            }
+                            return;
+                        }
+
                         // Start response on next line, same X as where '/' was typed
                         const responseStartPos = {
                             x: exec.commandStartPos.x,
@@ -4985,9 +5066,18 @@ export function useWorldEngine({
                         setDialogueWithRevert("Processing...", setDialogueText);
 
                         loadAI().then(ai => ai.chatWithAI(chatMode.currentInput.trim(), true, userUid || undefined)).then((response) => {
+                            // Check if quota exceeded
+                            if (response.startsWith('AI limit reached')) {
+                                if (upgradeFlowHandlerRef.current) {
+                                    upgradeFlowHandlerRef.current();
+                                }
+                                setChatMode(prev => ({ ...prev, isProcessing: false }));
+                                return;
+                            }
+
                             // Show response in dialogue system
                             createSubtitleCycler(response, setDialogueText);
-                            
+
                             // Write response permanently to canvas below the input
                             const responseStartPos = {
                                 x: chatMode.inputPositions[0]?.x || cursorPos.x,
@@ -5073,9 +5163,18 @@ export function useWorldEngine({
                         setDialogueWithRevert("Processing...", setDialogueText);
 
                         loadAI().then(ai => ai.chatWithAI(chatMode.currentInput.trim(), true, userUid || undefined)).then((response) => {
+                            // Check if quota exceeded
+                            if (response.startsWith('AI limit reached')) {
+                                if (upgradeFlowHandlerRef.current) {
+                                    upgradeFlowHandlerRef.current();
+                                }
+                                setChatMode(prev => ({ ...prev, isProcessing: false }));
+                                return;
+                            }
+
                             // Show response in dialogue system (subtitle-style)
                             createSubtitleCycler(response, setDialogueText);
-                            
+
                             // Also show response as ephemeral text at cursor location
                             // Find a good position for the AI response (slightly below current input)
                             const responseStartPos = {
@@ -5396,7 +5495,15 @@ export function useWorldEngine({
                         
                         if (selectedText && instructions) {
                             setDialogueWithRevert("Processing transformation...", setDialogueText);
-                            loadAI().then(ai => ai.transformText(selectedText, instructions)).then((result) => {
+                            loadAI().then(ai => ai.transformText(selectedText, instructions, userUid || undefined)).then((result) => {
+                                // Check if quota exceeded
+                                if (result.startsWith('AI limit reached')) {
+                                    if (upgradeFlowHandlerRef.current) {
+                                        upgradeFlowHandlerRef.current();
+                                    }
+                                    return;
+                                }
+
                                 createSubtitleCycler(result, setDialogueText);
                             }).catch(() => {
                                 setDialogueWithRevert(`Could not transform text`, setDialogueText);
@@ -5408,6 +5515,14 @@ export function useWorldEngine({
                         
                         setDialogueWithRevert("Processing explanation...", setDialogueText);
                         loadAI().then(ai => ai.explainText(selectedText, instructions, userUid || undefined)).then((result) => {
+                            // Check if quota exceeded
+                            if (result.startsWith('AI limit reached')) {
+                                if (upgradeFlowHandlerRef.current) {
+                                    upgradeFlowHandlerRef.current();
+                                }
+                                return;
+                            }
+
                             createSubtitleCycler(result, setDialogueText);
                         }).catch(() => {
                             setDialogueWithRevert(`Could not explain text`, setDialogueText);
@@ -5418,6 +5533,14 @@ export function useWorldEngine({
 
                         setDialogueWithRevert("Processing summary...", setDialogueText);
                         loadAI().then(ai => ai.summarizeText(selectedText, focus, userUid || undefined)).then((result) => {
+                            // Check if quota exceeded
+                            if (result.startsWith('AI limit reached')) {
+                                if (upgradeFlowHandlerRef.current) {
+                                    upgradeFlowHandlerRef.current();
+                                }
+                                return;
+                            }
+
                             createSubtitleCycler(result, setDialogueText);
                         }).catch(() => {
                             setDialogueWithRevert(`Could not summarize text`, setDialogueText);
@@ -5716,6 +5839,14 @@ export function useWorldEngine({
                         loadAI().then(ai => {
                             return ai.generateImage(textToSend.trim(), existingImageData || undefined, userUid || undefined);
                         }).then(async (result) => {
+                            // Check if quota exceeded
+                            if (result.text && result.text.startsWith('AI limit reached')) {
+                                if (upgradeFlowHandlerRef.current) {
+                                    upgradeFlowHandlerRef.current();
+                                }
+                                return;
+                            }
+
                             if (!result.imageData) {
                                 setDialogueWithRevert("Image generation failed", setDialogueText);
                                 return;
@@ -5842,6 +5973,14 @@ export function useWorldEngine({
                             });
                             return ai.chatWithAI(enhancedPrompt, true, userUid || undefined);
                         }).then((response) => {
+                            // Check if quota exceeded
+                            if (response.startsWith('AI limit reached')) {
+                                if (upgradeFlowHandlerRef.current) {
+                                    upgradeFlowHandlerRef.current();
+                                }
+                                return;
+                            }
+
                             // Don't show response in dialogue - write directly to target region
                             setDialogueWithRevert("AI response filled", setDialogueText);
 
@@ -6029,6 +6168,14 @@ export function useWorldEngine({
                     // Use world context for AI chat
                     return ai.chatWithAI(textToSend.trim(), true, userUid || undefined); // true = use context
                 }).then((response) => {
+                    // Check if quota exceeded
+                    if (response.startsWith('AI limit reached')) {
+                        if (upgradeFlowHandlerRef.current) {
+                            upgradeFlowHandlerRef.current();
+                        }
+                        return;
+                    }
+
                     // Show response in dialogue system
                     createSubtitleCycler(response, setDialogueText);
                     
@@ -7082,29 +7229,45 @@ export function useWorldEngine({
                     }
                 }
 
+                // Determine what type of character we're starting on
+                const startKey = `${x},${cursorPos.y}`;
+                const startCharData = worldData[startKey];
+                const startChar = startCharData && !isImageData(startCharData) ? getCharacter(startCharData) : '';
+                const startingOnSpace = startChar === ' ' || startChar === '\t';
+
                 // Continue deleting until we've checked all possible positions to the left
                 while (x >= leftmostX) {
                     const key = `${x},${cursorPos.y}`;
                     const charData = worldData[key];
                     const char = charData && !isImageData(charData) ? getCharacter(charData) : '';
 
-                    // Stop at whitespace or when no character exists
-                    if (!char || char === ' ' || char === '\t') {
-                        if (!deletedAny) {
-                            // If we haven't deleted anything yet but found whitespace,
-                            // delete it and continue looking for text
-                            if (char) {
-                                delete nextWorldData[key];
-                                deletedAny = true;
-                            }
+                    const isSpace = char === ' ' || char === '\t';
+
+                    if (!char) {
+                        // No character here, continue
+                        x--;
+                        continue;
+                    }
+
+                    if (startingOnSpace) {
+                        // If we started on a space, only delete spaces
+                        if (isSpace) {
+                            delete nextWorldData[key];
+                            deletedAny = true;
                         } else {
-                            // If we've already deleted some text, stop at whitespace
+                            // Hit a non-space, stop
                             break;
                         }
                     } else {
-                        // Delete the character
-                        delete nextWorldData[key];
-                        deletedAny = true;
+                        // If we started on a word, delete the word but stop at spaces
+                        if (isSpace) {
+                            // Hit a space, stop (don't delete it)
+                            break;
+                        } else {
+                            // Delete the word character
+                            delete nextWorldData[key];
+                            deletedAny = true;
+                        }
                     }
 
                     x--;
@@ -7136,14 +7299,34 @@ export function useWorldEngine({
                     nextCursorPos.x = parseInt(lxStr, 10);
                     nextCursorPos.y = parseInt(lyStr, 10);
                 } else {
-                    // Check if we're at the beginning of a line (need to merge with previous line)
-                    // Only merge if cursor is actually before any characters on this line, not at first character
-                    const currentLineChars = extractLineCharacters(worldData, cursorPos.y);
-                    const isAtLineStart = currentLineChars.length > 0 ?
-                        cursorPos.x < currentLineChars[0].x :
-                        cursorPos.x === 0;
-                    
-                    if (isAtLineStart && cursorPos.y > 0) {
+                    // Check if we're within a plan region first
+                    const planRegion = getPlanRegion(worldData, cursorPos);
+                    if (planRegion && cursorPos.x === planRegion.startX && cursorPos.y > planRegion.startY) {
+                        // We're at the start of a line within a plan region (but not the first line)
+                        // Move cursor to the end of the previous line within the plan
+                        nextCursorPos.x = planRegion.endX + 1;
+                        nextCursorPos.y = cursorPos.y - 1;
+                        moved = true;
+                        // Don't delete anything, just move cursor
+                    } else if (planRegion && cursorPos.x > planRegion.startX) {
+                        // We're within a plan region but not at the start - do normal backspace
+                        const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
+                        if (worldData[deleteKey]) {
+                            nextWorldData = { ...worldData };
+                            delete nextWorldData[deleteKey];
+                            worldDataChanged = true;
+                        }
+                        nextCursorPos.x -= 1;
+                        moved = true;
+                    } else {
+                        // Check if we're at the beginning of a line (need to merge with previous line)
+                        // Only merge if cursor is actually before any characters on this line, not at first character
+                        const currentLineChars = extractLineCharacters(worldData, cursorPos.y);
+                        const isAtLineStart = currentLineChars.length > 0 ?
+                            cursorPos.x < currentLineChars[0].x :
+                            cursorPos.x === 0;
+
+                        if (isAtLineStart && cursorPos.y > 0) {
                         // Find the last character position on the previous line
                         const prevLineChars = extractLineCharacters(worldData, cursorPos.y - 1);
                         let targetX = 0; // Default to start of line if no characters
@@ -7184,6 +7367,7 @@ export function useWorldEngine({
                             worldDataChanged = true;
                         }
                         nextCursorPos.x -= 1; // Move cursor left regardless
+                        }
                     }
                 }
             }
@@ -7754,7 +7938,99 @@ export function useWorldEngine({
                     };
                 }
             }
-            
+
+            // Check for plan region word wrapping (if not already handled by bounded region)
+            if (!worldDataChanged) {
+                const planRegion = getPlanRegion(dataToDeleteFrom, cursorAfterDelete);
+                if (planRegion && proposedCursorPos.x > planRegion.endX) {
+                    // We're typing past the right edge of a plan region
+                    const nextLineY = cursorAfterDelete.y + 1;
+
+                    // Check if wrapping would exceed plan's height limit
+                    if (nextLineY <= planRegion.endY) {
+                        // Simple word wrapping: scan backwards to find the last space, then move everything after it
+                        const currentLineY = cursorAfterDelete.y;
+                        let wrapPoint = planRegion.startX; // Default to start of line if no space found
+
+                        // Scan backwards from the boundary to find the last space
+                        for (let x = planRegion.endX; x >= planRegion.startX; x--) {
+                            const charKey = `${x},${currentLineY}`;
+                            const charData = dataToDeleteFrom[charKey];
+                            const char = typeof charData === 'string' ? charData :
+                                        (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
+
+                            if (char === ' ') {
+                                wrapPoint = x + 1; // Start wrapping after the space
+                                break;
+                            }
+                        }
+
+                        // Only do word wrapping if we found a space and there's something to wrap
+                        if (wrapPoint > planRegion.startX && wrapPoint <= cursorAfterDelete.x) {
+                            // Collect all characters from wrap point to cursor
+                            const textToWrap: Array<{x: number, char: string, style?: any}> = [];
+
+                            for (let x = wrapPoint; x <= cursorAfterDelete.x; x++) {
+                                const charKey = `${x},${currentLineY}`;
+                                const charData = dataToDeleteFrom[charKey];
+                                if (charData) {
+                                    const char = typeof charData === 'string' ? charData :
+                                               (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
+                                    const style = typeof charData === 'object' && 'style' in charData ? charData.style : undefined;
+                                    if (char) {
+                                        textToWrap.push({x, char, style});
+                                    }
+                                }
+                            }
+
+                            // Remove the text from current line (but keep the space)
+                            const updatedWorldData = { ...dataToDeleteFrom };
+                            for (let x = wrapPoint; x <= cursorAfterDelete.x; x++) {
+                                const charKey = `${x},${currentLineY}`;
+                                delete updatedWorldData[charKey];
+                            }
+
+                            // Add the text to next line
+                            let newX = planRegion.startX;
+                            for (const {char, style} of textToWrap) {
+                                if (char !== ' ') { // Skip spaces when wrapping
+                                    const newKey = `${newX},${nextLineY}`;
+                                    updatedWorldData[newKey] = style ? {char, style} : char;
+                                    newX++;
+                                }
+                            }
+
+                            // Add the current character being typed
+                            const finalKey = `${newX},${nextLineY}`;
+                            updatedWorldData[finalKey] = key;
+
+                            // Update world data and cursor position
+                            setWorldData(updatedWorldData);
+                            setCursorPos({ x: newX + 1, y: nextLineY });
+                            worldDataChanged = true;
+
+                            // Skip normal character placement since we handled it above
+                            return true;
+                        } else {
+                            // No good wrap point found - just move to next line
+                            proposedCursorPos = {
+                                x: planRegion.startX,
+                                y: nextLineY
+                            };
+                        }
+                    } else {
+                        // Can't wrap within plan region (would exceed endY) - don't allow typing beyond bounds
+                        // Keep cursor at current position
+                        proposedCursorPos = {
+                            x: cursorAfterDelete.x,
+                            y: cursorAfterDelete.y
+                        };
+                        // Don't type the character
+                        return true;
+                    }
+                }
+            }
+
             nextCursorPos = proposedCursorPos;
             moved = true;
 
@@ -8774,6 +9050,14 @@ export function useWorldEngine({
         },
         setHostDialogueHandler: (handler: () => void) => {
             hostDialogueHandlerRef.current = handler;
+        },
+        setUpgradeFlowHandler: (handler: () => void) => {
+            upgradeFlowHandlerRef.current = handler;
+        },
+        triggerUpgradeFlow: () => {
+            if (upgradeFlowHandlerRef.current) {
+                upgradeFlowHandlerRef.current();
+            }
         },
         // Agent system
         agentEnabled,
