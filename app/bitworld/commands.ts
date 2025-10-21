@@ -147,8 +147,8 @@ export const COLOR_MAP: { [name: string]: string } = {
     'chalk': '#69AED6',
     'cobalt': '#0B109F',
     'garden': '#162400',
-    'red': '#FF5200',
-    'dust': '#FFC0CB',
+    'crimson': '#FF5200',
+    'orchid': '#FFC0CB',
 };
 
 // --- Command System Hook ---
@@ -1578,10 +1578,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 setDialogueWithRevert("Text style reset to default", setDialogueText);
             }
 
-            // Notify tutorial flow that text/color command was executed
+            // Notify tutorial flow that text command was executed
             if (onCommandExecuted) {
                 const args = inputParts.slice(1);
-                onCommandExecuted('color', args);
+                onCommandExecuted('text', args);
             }
 
             // Clear command mode

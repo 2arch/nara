@@ -350,12 +350,12 @@ export const tutorialFlow: HostFlow = {
 
     'learn_color': {
       id: 'learn_color',
-      text: 'Now change your text color. \n \n Type: /color blue',
+      text: 'Now change your text color. \n \n Type: /text blue',
       expectsInput: true,
       requiresChatMode: false,
-      expectedCommand: 'color',
+      expectedCommand: 'text',
       commandValidator: (cmd, args) => {
-        return cmd === 'color' && args.length > 0 && args[0].toLowerCase() === 'blue';
+        return cmd === 'text' && args.length > 0 && args[0].toLowerCase() === 'blue';
       },
       nextMessageId: 'color_success',
       previousMessageId: 'background_success'

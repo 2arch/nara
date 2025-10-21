@@ -66,6 +66,23 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const [shiftDragStartPos, setShiftDragStartPos] = useState<Point | null>(null);
     const [selectedImageKey, setSelectedImageKey] = useState<string | null>(null);
     const [selectedNoteKey, setSelectedNoteKey] = useState<string | null>(null);
+
+    // Resize state
+    type ResizeHandle = 'top-left' | 'top-right' | 'bottom-right' | 'bottom-left';
+    const [resizeState, setResizeState] = useState<{
+        active: boolean;
+        type: 'image' | 'note' | null;
+        key: string | null;
+        handle: ResizeHandle | null;
+        originalBounds: { startX: number; startY: number; endX: number; endY: number } | null;
+    }>({
+        active: false,
+        type: null,
+        key: null,
+        handle: null,
+        originalBounds: null
+    });
+
     const [clipboardFlashBounds, setClipboardFlashBounds] = useState<Map<string, number>>(new Map()); // boundKey -> timestamp
     const lastCursorPosRef = useRef<Point | null>(null);
     const lastEnterPressRef = useRef<number>(0);
@@ -3671,6 +3688,22 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     bottomRightScreen.x - topLeftScreen.x - lineWidth,
                     bottomRightScreen.y - topLeftScreen.y - lineWidth
                 );
+
+                // Draw resize thumbs (handles) at corners only
+                const thumbSize = 8;
+                const thumbColor = `rgba(${hexToRgb(engine.textColor)}, 1)`;
+                ctx.fillStyle = thumbColor;
+
+                const left = topLeftScreen.x;
+                const right = bottomRightScreen.x;
+                const top = topLeftScreen.y;
+                const bottom = bottomRightScreen.y;
+
+                // Corner thumbs
+                ctx.fillRect(left - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-left
+                ctx.fillRect(right - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-right
+                ctx.fillRect(left - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-left
+                ctx.fillRect(right - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-right
             }
         }
 
@@ -3693,6 +3726,22 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     bottomRightScreen.x - topLeftScreen.x - lineWidth,
                     bottomRightScreen.y - topLeftScreen.y - lineWidth
                 );
+
+                // Draw resize thumbs (handles) at corners only
+                const thumbSize = 8;
+                const thumbColor = `rgba(${hexToRgb(engine.textColor)}, 1)`;
+                ctx.fillStyle = thumbColor;
+
+                const left = topLeftScreen.x;
+                const right = bottomRightScreen.x;
+                const top = topLeftScreen.y;
+                const bottom = bottomRightScreen.y;
+
+                // Corner thumbs
+                ctx.fillRect(left - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-left
+                ctx.fillRect(right - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-right
+                ctx.fillRect(left - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-left
+                ctx.fillRect(right - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-right
             } catch (e) {
                 // Skip invalid note data
             }
@@ -4324,6 +4373,91 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
+            // Check if clicking on a resize handle first
+            const thumbSize = 8;
+            const thumbHitArea = thumbSize + 4; // Add padding for easier clicking
+
+            // Helper function to check if point is within a thumb
+            const isWithinThumb = (px: number, py: number, tx: number, ty: number): boolean => {
+                return Math.abs(px - tx) <= thumbHitArea / 2 && Math.abs(py - ty) <= thumbHitArea / 2;
+            };
+
+            // Check image resize handles
+            if (selectedImageKey) {
+                const selectedImageData = engine.worldData[selectedImageKey];
+                if (engine.isImageData(selectedImageData)) {
+                    const topLeftScreen = engine.worldToScreen(selectedImageData.startX, selectedImageData.startY, engine.zoomLevel, engine.viewOffset);
+                    const bottomRightScreen = engine.worldToScreen(selectedImageData.endX + 1, selectedImageData.endY + 1, engine.zoomLevel, engine.viewOffset);
+
+                    const left = topLeftScreen.x;
+                    const right = bottomRightScreen.x;
+                    const top = topLeftScreen.y;
+                    const bottom = bottomRightScreen.y;
+
+                    // Check each corner handle
+                    let handle: ResizeHandle | null = null;
+                    if (isWithinThumb(x, y, left, top)) handle = 'top-left';
+                    else if (isWithinThumb(x, y, right, top)) handle = 'top-right';
+                    else if (isWithinThumb(x, y, right, bottom)) handle = 'bottom-right';
+                    else if (isWithinThumb(x, y, left, bottom)) handle = 'bottom-left';
+
+                    if (handle) {
+                        setResizeState({
+                            active: true,
+                            type: 'image',
+                            key: selectedImageKey,
+                            handle,
+                            originalBounds: {
+                                startX: selectedImageData.startX,
+                                startY: selectedImageData.startY,
+                                endX: selectedImageData.endX,
+                                endY: selectedImageData.endY
+                            }
+                        });
+                        return; // Early return, don't process other mouse events
+                    }
+                }
+            }
+
+            // Check note resize handles
+            if (selectedNoteKey) {
+                try {
+                    const selectedNoteData = JSON.parse(engine.worldData[selectedNoteKey] as string);
+                    const topLeftScreen = engine.worldToScreen(selectedNoteData.startX, selectedNoteData.startY, engine.zoomLevel, engine.viewOffset);
+                    const bottomRightScreen = engine.worldToScreen(selectedNoteData.endX + 1, selectedNoteData.endY + 1, engine.zoomLevel, engine.viewOffset);
+
+                    const left = topLeftScreen.x;
+                    const right = bottomRightScreen.x;
+                    const top = topLeftScreen.y;
+                    const bottom = bottomRightScreen.y;
+
+                    // Check each corner handle
+                    let handle: ResizeHandle | null = null;
+                    if (isWithinThumb(x, y, left, top)) handle = 'top-left';
+                    else if (isWithinThumb(x, y, right, top)) handle = 'top-right';
+                    else if (isWithinThumb(x, y, right, bottom)) handle = 'bottom-right';
+                    else if (isWithinThumb(x, y, left, bottom)) handle = 'bottom-left';
+
+                    if (handle) {
+                        setResizeState({
+                            active: true,
+                            type: 'note',
+                            key: selectedNoteKey,
+                            handle,
+                            originalBounds: {
+                                startX: selectedNoteData.startX,
+                                startY: selectedNoteData.startY,
+                                endX: selectedNoteData.endX,
+                                endY: selectedNoteData.endY
+                            }
+                        });
+                        return; // Early return, don't process other mouse events
+                    }
+                } catch (e) {
+                    // Skip invalid note data
+                }
+            }
+
             if (e.shiftKey) {
                 // Shift+drag: prioritize selection, fallback to text block
                 isSelectingMouseDownRef.current = false;
@@ -4366,7 +4500,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
             canvasRef.current?.focus();
         }
-    }, [engine]);
+    }, [engine, selectedImageKey, selectedNoteKey]);
 
     const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -4411,11 +4545,76 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 snappedWorldPos.subY = fractionalY >= 0.5 ? 0.5 : 0;
             }
             setMouseWorldPos(snappedWorldPos);
-            
+
             // Update monogram trail with mouse position
             if (monogramEnabled && monogramSystem.options.interactiveTrails) {
                 monogramSystem.updateMousePosition(worldPos);
             }
+        }
+
+        // Handle resize drag
+        if (resizeState.active && resizeState.handle && resizeState.originalBounds) {
+            const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
+            const snappedX = Math.floor(worldPos.x);
+            const snappedY = Math.floor(worldPos.y);
+
+            const { originalBounds, handle } = resizeState;
+            let newBounds = { ...originalBounds };
+
+            // Update bounds based on which corner handle is being dragged
+            switch (handle) {
+                case 'top-left':
+                    newBounds.startX = Math.min(snappedX, originalBounds.endX - 1);
+                    newBounds.startY = Math.min(snappedY, originalBounds.endY - 1);
+                    break;
+                case 'top-right':
+                    newBounds.endX = Math.max(snappedX, originalBounds.startX + 1);
+                    newBounds.startY = Math.min(snappedY, originalBounds.endY - 1);
+                    break;
+                case 'bottom-right':
+                    newBounds.endX = Math.max(snappedX, originalBounds.startX + 1);
+                    newBounds.endY = Math.max(snappedY, originalBounds.startY + 1);
+                    break;
+                case 'bottom-left':
+                    newBounds.startX = Math.min(snappedX, originalBounds.endX - 1);
+                    newBounds.endY = Math.max(snappedY, originalBounds.startY + 1);
+                    break;
+            }
+
+            // Apply the resize to the appropriate object type
+            if (resizeState.type === 'image' && resizeState.key) {
+                const imageData = engine.worldData[resizeState.key];
+                if (engine.isImageData(imageData)) {
+                    engine.setWorldData(prev => ({
+                        ...prev,
+                        [resizeState.key!]: {
+                            ...imageData,
+                            startX: newBounds.startX,
+                            startY: newBounds.startY,
+                            endX: newBounds.endX,
+                            endY: newBounds.endY
+                        }
+                    }));
+                }
+            } else if (resizeState.type === 'note' && resizeState.key) {
+                try {
+                    const noteData = JSON.parse(engine.worldData[resizeState.key] as string);
+                    engine.setWorldData(prev => ({
+                        ...prev,
+                        [resizeState.key!]: JSON.stringify({
+                            ...noteData,
+                            startX: newBounds.startX,
+                            startY: newBounds.startY,
+                            endX: newBounds.endX,
+                            endY: newBounds.endY
+                        })
+                    }));
+                } catch (e) {
+                    // Invalid note data
+                }
+            }
+
+            return; // Don't process other mouse move events during resize
         }
 
         if (isMiddleMouseDownRef.current && panStartInfoRef.current) {
@@ -4434,7 +4633,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             // Handle selection move
             engine.handleSelectionMove(x, y); // Update engine's selection end
         }
-    }, [engine, shiftDragStartPos]);
+    }, [engine, shiftDragStartPos, resizeState]);
 
     const handleCanvasMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         if (isMiddleMouseDownRef.current && e.button === 1) { // Middle mouse button - panning end
@@ -4452,6 +4651,18 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         if (e.button === 0) { // Left mouse button
+            // Reset resize state if active
+            if (resizeState.active) {
+                setResizeState({
+                    active: false,
+                    type: null,
+                    key: null,
+                    handle: null,
+                    originalBounds: null
+                });
+                return; // Early return after resize complete
+            }
+
             if (e.shiftKey && shiftDragStartPos) {
                 // Calculate distance from shift+drag start to current position
                 const rect = canvasRef.current?.getBoundingClientRect();
@@ -4633,7 +4844,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
             }
         }
-    }, [engine, shiftDragStartPos, findTextBlock, findImageAtPosition]);
+    }, [engine, shiftDragStartPos, findTextBlock, findImageAtPosition, resizeState]);
 
     const handleCanvasMouseLeave = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         // Clear hover position when mouse leaves canvas
