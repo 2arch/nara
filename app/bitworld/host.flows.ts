@@ -328,12 +328,12 @@ export const tutorialFlow: HostFlow = {
 
     'learn_background': {
       id: 'learn_background',
-      text: 'Let\'s start by changing the background color. \n \n Type: /bg red',
+      text: 'Let\'s start by changing the background color. \n \n Type: /bg chalk',
       expectsInput: true,
       requiresChatMode: false,
       expectedCommand: 'bg',
       commandValidator: (cmd, args) => {
-        return cmd === 'bg' && args.length > 0 && args[0].toLowerCase() === 'red';
+        return cmd === 'bg' && args.length > 0 && args[0].toLowerCase() === 'chalk';
       },
       nextMessageId: 'background_success',
       previousMessageId: 'tutorial_welcome'
@@ -350,12 +350,12 @@ export const tutorialFlow: HostFlow = {
 
     'learn_color': {
       id: 'learn_color',
-      text: 'Now change your text color. \n \n Type: /text blue',
+      text: 'Now change your text color. \n \n Type: /text garden',
       expectsInput: true,
       requiresChatMode: false,
       expectedCommand: 'text',
       commandValidator: (cmd, args) => {
-        return cmd === 'text' && args.length > 0 && args[0].toLowerCase() === 'blue';
+        return cmd === 'text' && args.length > 0 && args[0].toLowerCase() === 'garden';
       },
       nextMessageId: 'color_success',
       previousMessageId: 'background_success'
@@ -363,7 +363,7 @@ export const tutorialFlow: HostFlow = {
 
     'color_success': {
       id: 'color_success',
-      text: 'Great! Your text is now blue. \n \n Let\'s create a label to organize your thoughts.',
+      text: 'Great! Your text is now garden green. \n \n Let\'s create a label to organize your thoughts.',
       expectsInput: false,
       requiresChatMode: false,
       nextMessageId: 'learn_label',
@@ -372,7 +372,7 @@ export const tutorialFlow: HostFlow = {
 
     'learn_label': {
       id: 'learn_label',
-      text: 'Labels help you mark important points in space. \n \n Type: /label my first label',
+      text: 'Labels help you mark important points in space. \n \n First, select a location by clicking and dragging on the canvas. \n \n Then, type: /label ',
       expectsInput: true,
       requiresChatMode: false,
       expectedCommand: 'label',

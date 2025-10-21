@@ -14,6 +14,7 @@ export interface CommandState {
     commandStartPos: Point;
     originalCursorPos: Point; // Store original cursor position to restore on Escape
     hasNavigated: boolean; // Track if user has used arrow keys to navigate
+    helpMode?: boolean; // Flag to show help text for all commands
 }
 
 export interface PendingCommand {
@@ -108,7 +109,7 @@ const AVAILABLE_COMMANDS = [
     // Content Creation
     'label', 'tape', 'clip', 'upload',
     // Special
-    'mode', 'note', 'chat', 'tutorial',
+    'mode', 'note', 'chat', 'tutorial', 'help',
     // Styling & Display
     'bg', 'text', 'font',
     // State Management
@@ -125,7 +126,7 @@ const AVAILABLE_COMMANDS = [
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent'],
     'create': ['label', 'tape', 'clip', 'upload'],
-    'special': ['mode', 'note', 'chat', 'tutorial'],
+    'special': ['mode', 'note', 'chat', 'tutorial', 'help'],
     'style': ['bg', 'text', 'font'],
     'state': ['state', 'random', 'clear'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
@@ -138,6 +139,37 @@ const BG_COMMANDS = ['clear', 'live', 'web'];
 const FONT_COMMANDS = ['IBM Plex Mono', 'Neureal'];
 const NAV_COMMANDS: string[] = [];
 const CAMERA_COMMANDS = ['default', 'focus'];
+
+// Detailed help descriptions for each command
+export const COMMAND_HELP: { [command: string]: string } = {
+    'nav': 'Navigate to saved labels. Type /nav to see all your labels, then select one to jump to that location. Labels act as spatial bookmarks in your canvas.',
+    'search': 'Search through all text on your canvas. Type /search followed by your query to find and navigate to specific content. Useful for finding ideas in large canvases.',
+    'cam': 'Control camera behavior. Use /cam focus to enable focus mode, which smoothly follows your cursor. Use /cam default to return to normal panning.',
+    'indent': 'Toggle text indentation. This affects how new lines are indented when you press Enter, helping you organize thoughts hierarchically.',
+    'label': 'Create a spatial label at your current selection. First, select an area by clicking and dragging. Then type /label followed by your label text. Labels appear as arrows pointing to important locations.',
+    'tape': 'Record and transcribe your voice. Type /tape to start recording, speak your thoughts, then press Enter. Your speech will be transcribed and placed on the canvas at your cursor position.',
+    'clip': 'Save selected text to your clipboard. Select text, then type /clip to capture it. Access your clips later to paste them anywhere on the canvas.',
+    'upload': 'Upload an image to your canvas. Type /upload, then select an image file. The image will be placed at your current cursor position and saved to your canvas.',
+    'mode': 'Switch canvas modes. /mode default for standard writing, /mode air for ephemeral text that doesn\'t save, /mode chat to talk with AI, /mode note for focused note-taking.',
+    'note': 'Quick shortcut to enter note mode. This creates a focused writing space perfect for drafting ideas before placing them on your main canvas.',
+    'chat': 'Quick shortcut to enter chat mode. Talk with AI to transform, expand, or generate text. The AI can help you develop ideas or create content based on your prompts.',
+    'tutorial': 'Start the interactive tutorial. Learn the basics of spatial writing through hands-on exercises that teach you core commands and concepts.',
+    'help': 'Show this detailed help menu. The command list stays open with descriptions for every available command, so you can explore what\'s possible.',
+    'bg': 'Change background color or mode. Type /bg followed by a color name (red, blue, chalk, etc.) or a mode: /bg clear for transparent, /bg live for screen sharing, /bg web for image/video generation.',
+    'text': 'Change text color. Type /text followed by a color name (garden, sky, sunset, etc.). This sets the color for all new text you write on the canvas.',
+    'font': 'Change font family. Type /font followed by a font name: "IBM Plex Mono" for a clean monospace font, or "Neureal" for a more stylized aesthetic.',
+    'state': 'Save or load canvas states. Type /state to see saved states, /state save [name] to save current canvas, /state load [name] to restore a saved state. Perfect for versioning your work.',
+    'random': 'Randomize text styling. Applies random colors and styles to your text for a more organic, playful aesthetic. Great for breaking out of rigid design patterns.',
+    'clear': 'Clear all text from the canvas. WARNING: This deletes everything on your current canvas. Use /state save first if you want to preserve your work.',
+    'publish': 'Publish your canvas publicly. Makes your canvas accessible at your public URL (nara.ws/username/canvasname). Others can view but not edit.',
+    'unpublish': 'Unpublish your canvas. Makes your canvas private again. It will no longer be accessible at the public URL.',
+    'share': 'Get a shareable link to your canvas. Copy this link to share your canvas with others. If published, they can view it; if private, you control access.',
+    'spawn': 'Set your spawn point. This is where you\'ll start when you open this canvas. Type /spawn to set it to your current position.',
+    'monogram': 'Add your monogram to the canvas. Places your personal identifier at the current cursor position.',
+    'signin': 'Sign in to your Nara account. Required for saving work, publishing canvases, and accessing AI features.',
+    'signout': 'Sign out of your Nara account. You\'ll return to read-only mode.',
+    'debug': 'Toggle debug mode. Shows technical information about canvas state, performance, and rendering. Useful for troubleshooting or understanding the system.'
+};
 
 // Standardized color mapping used throughout the application
 export const COLOR_MAP: { [name: string]: string } = {
@@ -2153,7 +2185,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             });
             setCommandData({});
 
-            return null;
+            // Return special flag to indicate cursor should be restored
+            return {
+                command: 'note',
+                args: [],
+                commandStartPos: commandState.commandStartPos,
+                restoreCursor: true
+            } as CommandExecution & { restoreCursor?: boolean };
         }
 
         if (commandToExecute.startsWith('list')) {
@@ -2293,6 +2331,44 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 hasNavigated: false
             });
             setCommandData({});
+
+            return null;
+        }
+
+        if (commandToExecute.startsWith('help')) {
+            // Keep command mode active to show all commands
+            // Help text will only be shown on hover
+            const allCommands = isReadOnly ? READ_ONLY_COMMANDS : AVAILABLE_COMMANDS;
+
+            // Build command data - just show commands, no help text yet
+            const newCommandData: WorldData = {};
+            const commandText = '/';
+
+            // Draw command text
+            for (let i = 0; i < commandText.length; i++) {
+                const key = `${commandState.commandStartPos.x + i},${commandState.commandStartPos.y}`;
+                newCommandData[key] = commandText[i];
+            }
+
+            // Draw all commands without help text (help text shown on hover)
+            allCommands.forEach((command, index) => {
+                const suggestionY = commandState.commandStartPos.y + 1 + index;
+
+                // Draw command name
+                for (let i = 0; i < command.length; i++) {
+                    const key = `${commandState.commandStartPos.x + i},${suggestionY}`;
+                    newCommandData[key] = command[i];
+                }
+            });
+
+            setCommandData(newCommandData);
+            setCommandState(prev => ({
+                ...prev,
+                input: '',
+                matchedCommands: allCommands,
+                selectedIndex: 0,
+                helpMode: true
+            }));
 
             return null;
         }
@@ -2704,7 +2780,15 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             setCursorPos({ x: cursorPos.x + 1, y: cursorPos.y });
             return true;
         } else if (key === 'Enter') {
-            return executeCommand(isPermanent);
+            const originalPos = commandState.originalCursorPos;
+            const result = executeCommand(isPermanent);
+
+            // Check if command returned a flag to restore cursor
+            if (result && typeof result === 'object' && 'restoreCursor' in result && result.restoreCursor) {
+                setCursorPos(originalPos);
+            }
+
+            return result;
         } else if (key === 'Escape') {
             // Exit command mode without executing and restore cursor to original position
             const originalPos = commandState.originalCursorPos;
@@ -2728,29 +2812,25 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             navigateDown();
             return true;
         } else if (key === 'Tab') {
-            // Tab completion - complete to currently selected suggestion or if there's only one match
+            // Tab completion - complete to the currently selected match
             if (commandState.matchedCommands.length >= 1) {
                 const selectedCommand = commandState.matchedCommands[commandState.selectedIndex];
                 if (selectedCommand) {
-                    // Check if this is a command with subcommands (has a space in it)
-                    const hasSubcommand = selectedCommand.includes(' ');
+                    // Get new suggestions based on the selected command
+                    const newMatchedCommands = matchCommands(selectedCommand);
 
-                    // Update input to the selected/completed command
+                    // Update command state with the completed command
                     setCommandState(prev => {
-                        // Only try to expand further if the command has subcommands
-                        const newMatchedCommands = hasSubcommand ? matchCommands(selectedCommand) : [selectedCommand];
-
-                        // Update command display
                         const newCommandData: WorldData = {};
                         const commandText = `/${selectedCommand}`;
 
-                        // Draw command text at original command start position
+                        // Draw command text
                         for (let i = 0; i < commandText.length; i++) {
                             const key = `${prev.commandStartPos.x + i},${prev.commandStartPos.y}`;
                             newCommandData[key] = commandText[i];
                         }
 
-                        // Draw autocomplete suggestions below (if any)
+                        // Draw suggestions
                         newMatchedCommands.forEach((command, index) => {
                             const suggestionY = prev.commandStartPos.y + 1 + index;
                             for (let i = 0; i < command.length; i++) {
@@ -2765,13 +2845,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                             ...prev,
                             input: selectedCommand,
                             matchedCommands: newMatchedCommands,
-                            selectedIndex: 0
+                            selectedIndex: 0,
+                            hasNavigated: true // Mark that user has navigated/completed
                         };
                     });
 
                     // Move cursor to end of completed command
                     setCursorPos({
-                        x: commandState.commandStartPos.x + selectedCommand.length + 1, // +1 for the '/'
+                        x: commandState.commandStartPos.x + selectedCommand.length + 1,
                         y: commandState.commandStartPos.y
                     });
                 }
@@ -2899,11 +2980,99 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         });
     }, [matchCommands]);
 
+    // Helper method to execute a command from a string (for keyboard shortcuts)
+    // This executes immediately without opening the command palette
+    const executeCommandString = useCallback((commandString: string) => {
+        // Parse the command
+        const inputParts = commandString.split(/\s+/);
+        const commandName = inputParts[0];
+
+        // Directly execute based on command name
+        if (commandName === 'note') {
+            // Check if there's a selection
+            const existingSelection = getNormalizedSelection?.();
+            if (existingSelection) {
+                const hasMeaningfulSelection =
+                    existingSelection.startX !== existingSelection.endX ||
+                    existingSelection.startY !== existingSelection.endY;
+
+                if (hasMeaningfulSelection && setWorldData && worldData && setSelectionStart && setSelectionEnd) {
+                    // Create note region
+                    const noteRegion = {
+                        startX: existingSelection.startX,
+                        endX: existingSelection.endX,
+                        startY: existingSelection.startY,
+                        endY: existingSelection.endY,
+                        timestamp: Date.now()
+                    };
+
+                    const noteKey = `note_${existingSelection.startX},${existingSelection.startY}_${Date.now()}`;
+                    const newWorldData = { ...worldData };
+                    newWorldData[noteKey] = JSON.stringify(noteRegion);
+                    setWorldData(newWorldData);
+
+                    const width = existingSelection.endX - existingSelection.startX + 1;
+                    const height = existingSelection.endY - existingSelection.startY + 1;
+                    setDialogueWithRevert(`Note region saved (${width}×${height})`, setDialogueText);
+
+                    // Clear selection
+                    setSelectionStart(null);
+                    setSelectionEnd(null);
+                } else {
+                    setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
+                }
+            } else {
+                setDialogueWithRevert("Make a selection first", setDialogueText);
+            }
+        } else if (commandName === 'publish') {
+            // Execute publish command
+            // TODO: Implement publish logic or call existing publish function
+            setDialogueWithRevert("Publishing canvas...", setDialogueText);
+        }
+    }, [getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, setDialogueText]);
+
+    // Helper method to activate command with pre-filled input (for Cmd+F search)
+    const startCommandWithInput = useCallback((cursorPos: Point, input: string) => {
+        startCommand(cursorPos);
+
+        // Pre-fill the input
+        const matchedCmds = matchCommands(input);
+        setCommandState(prev => ({
+            ...prev,
+            input,
+            matchedCommands: matchedCmds,
+            selectedIndex: 0
+        }));
+
+        // Update the command data display
+        const newCommandData: WorldData = {};
+        const commandText = `/${input}`;
+
+        for (let i = 0; i < commandText.length; i++) {
+            const key = `${cursorPos.x + i},${cursorPos.y}`;
+            newCommandData[key] = commandText[i];
+        }
+
+        // Draw suggestions
+        matchedCmds.forEach((command, index) => {
+            const suggestionY = cursorPos.y + 1 + index;
+            for (let i = 0; i < command.length; i++) {
+                const key = `${cursorPos.x + i},${suggestionY}`;
+                newCommandData[key] = command[i];
+            }
+        });
+
+        setCommandData(newCommandData);
+    }, [startCommand, matchCommands]);
+
     return {
         commandState,
         commandData,
         handleKeyDown,
         selectCommand,
+        executeCommandString,
+        startCommand, // Expose startCommand for keyboard shortcuts
+        startCommandWithInput, // Expose for Cmd+F
         isCommandMode: commandState.isActive,
         // Pending command system
         pendingCommand,

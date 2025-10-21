@@ -1004,6 +1004,9 @@ export function useWorldEngine({
         setFullscreenMode,
         exitFullscreenMode,
         switchBackgroundMode,
+        executeCommandString,
+        startCommand,
+        startCommandWithInput,
     } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, userUid, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
@@ -2991,6 +2994,105 @@ export function useWorldEngine({
                             }).catch((error) => {
                                 setDialogueWithRevert(`AI error: ${error.message || 'Could not generate image'}`, setDialogueText);
                             });
+                            return true;
+                        }
+
+                        // Otherwise, check if prompt is asking for image generation
+                        // Helper to detect image generation requests
+                        const isImageGenerationPrompt = (prompt: string): boolean => {
+                            const lowerPrompt = prompt.toLowerCase();
+                            const imageKeywords = [
+                                'draw', 'paint', 'sketch', 'illustrate', 'image', 'picture',
+                                'photo', 'render', 'visualize', 'create a scene', 'show me',
+                                'generate an image', 'make an image', 'design', 'artwork'
+                            ];
+                            return imageKeywords.some(keyword => lowerPrompt.includes(keyword));
+                        };
+
+                        if (isImageGenerationPrompt(aiPrompt)) {
+                            // Generate image in the selection bounds
+                            setDialogueWithRevert("Generating image...", setDialogueText);
+                            loadAI().then(ai => ai.generateImage(aiPrompt, undefined, userUid || undefined)).then(async (result) => {
+                                // Check if quota exceeded
+                                if (result.text && result.text.startsWith('AI limit reached')) {
+                                    if (upgradeFlowHandlerRef.current) {
+                                        upgradeFlowHandlerRef.current();
+                                    }
+                                    return;
+                                }
+
+                                if (result.imageData) {
+                                    const newWorldData = { ...worldData };
+
+                                    // Upload to storage if available
+                                    let finalImageUrl = result.imageData;
+                                    if (uploadImageToStorage) {
+                                        try {
+                                            finalImageUrl = await uploadImageToStorage(result.imageData);
+                                        } catch (error) {
+                                            logger.error('Failed to upload generated image:', error);
+                                        }
+                                    }
+
+                                    // Get image dimensions for scaling
+                                    const img = new Image();
+                                    img.onload = () => {
+                                        const { width: charWidth, height: charHeight } = getEffectiveCharDims(zoomLevel);
+
+                                        const selectionCellsWide = maxX - minX + 1;
+                                        const selectionCellsHigh = maxY - minY + 1;
+                                        const selectionPixelsWide = selectionCellsWide * charWidth;
+                                        const selectionPixelsHigh = selectionCellsHigh * charHeight;
+
+                                        const imageAspect = img.width / img.height;
+                                        const selectionAspect = selectionPixelsWide / selectionPixelsHigh;
+
+                                        let scaledWidth, scaledHeight;
+                                        if (imageAspect > selectionAspect) {
+                                            scaledWidth = selectionPixelsWide;
+                                            scaledHeight = selectionPixelsWide / imageAspect;
+                                        } else {
+                                            scaledHeight = selectionPixelsHigh;
+                                            scaledWidth = selectionPixelsHigh * imageAspect;
+                                        }
+
+                                        const cellsWide = Math.ceil(scaledWidth / charWidth);
+                                        const cellsHigh = Math.ceil(scaledHeight / charHeight);
+
+                                        // Clear the selection area and create image
+                                        const updatedWorldData = { ...worldData };
+                                        for (let y = minY; y <= maxY; y++) {
+                                            for (let x = minX; x <= maxX; x++) {
+                                                delete updatedWorldData[`${x},${y}`];
+                                            }
+                                        }
+
+                                        (updatedWorldData[`image_${Date.now()}`] as any) = {
+                                            type: 'image',
+                                            src: finalImageUrl,
+                                            startX: minX,
+                                            startY: minY,
+                                            endX: minX + cellsWide - 1,
+                                            endY: minY + cellsHigh - 1,
+                                            originalWidth: img.width,
+                                            originalHeight: img.height
+                                        };
+
+                                        setWorldData(updatedWorldData);
+                                        setDialogueWithRevert("Image generated", setDialogueText);
+
+                                        // Clear selection after processing
+                                        setSelectionStart(null);
+                                        setSelectionEnd(null);
+                                    };
+                                    img.src = finalImageUrl;
+                                } else {
+                                    setDialogueWithRevert("Could not generate image", setDialogueText);
+                                }
+                            }).catch((error) => {
+                                setDialogueWithRevert(`AI error: ${error.message || 'Could not generate image'}`, setDialogueText);
+                            });
+
                             return true;
                         }
 
@@ -8978,7 +9080,7 @@ export function useWorldEngine({
         worldData,
         commandData,
         commandState,
-        commandSystem: { selectCommand },
+        commandSystem: { selectCommand, executeCommandString, startCommand, startCommandWithInput },
         chatData,
         lightModeData,
         searchData,

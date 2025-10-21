@@ -253,3 +253,43 @@ export function createTapeController(toggleRecording: () => void): ControllerGro
         ]
     };
 }
+
+// --- Command Controller ---
+export function createCommandController(actions: {
+    executeNote: () => void;
+    executePublish: () => void;
+    openCommandPalette: () => void;
+    openSearch: () => void;
+}): ControllerGroup {
+    return {
+        name: 'commands',
+        description: 'Quick Command Shortcuts',
+        enabled: true,
+        bindings: [
+            {
+                key: 'n',
+                ctrlOrMeta: true,
+                description: 'Create note region (/note)',
+                action: actions.executeNote
+            },
+            {
+                key: 'f',
+                ctrlOrMeta: true,
+                description: 'Search canvas (/search)',
+                action: actions.openSearch
+            },
+            {
+                key: 'k',
+                ctrlOrMeta: true,
+                description: 'Open command palette',
+                action: actions.openCommandPalette
+            },
+            {
+                key: 'p',
+                ctrlOrMeta: true,
+                description: 'Publish canvas (/publish)',
+                action: actions.executePublish
+            }
+        ]
+    };
+}

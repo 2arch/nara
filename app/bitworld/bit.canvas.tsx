@@ -4,9 +4,9 @@ import { useRouter } from 'next/navigation';
 import type { WorldData, Point, WorldEngine, PanStartInfo } from './world.engine'; // Adjust path as needed
 import { useDialogue, useDebugDialogue } from './dialogue';
 import { useMonogramSystem } from './monogram';
-import { useControllerSystem, createMonogramController, createCameraController, createGridController, createTapeController } from './controllers';
+import { useControllerSystem, createMonogramController, createCameraController, createGridController, createTapeController, createCommandController } from './controllers';
 import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchicalFrames, HierarchicalFrame, HierarchyLevel } from './bit.blocks';
-import { COLOR_MAP, COMMAND_CATEGORIES } from './commands';
+import { COLOR_MAP, COMMAND_CATEGORIES, COMMAND_HELP } from './commands';
 import { useHostDialogue } from './host.dialogue';
 import { setDialogueWithRevert } from './ai';
 import { CanvasRecorder } from './tape';
@@ -948,7 +948,13 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         registerGroup(createCameraController(engine));
         registerGroup(createGridController({ cycleGridMode: engine.cycleGridMode }));
         registerGroup(createTapeController(toggleRecording));
-    }, [registerGroup, engine.cycleGridMode, toggleRecording]);
+        registerGroup(createCommandController({
+            executeNote: () => engine.commandSystem.executeCommandString('note'),
+            executePublish: () => engine.commandSystem.executeCommandString('publish'),
+            openCommandPalette: () => engine.commandSystem.startCommand(engine.cursorPos),
+            openSearch: () => engine.commandSystem.startCommandWithInput(engine.cursorPos, 'search ')
+        }));
+    }, [registerGroup, engine.cycleGridMode, toggleRecording, engine.commandSystem, engine.cursorPos]);
     
     // Enhanced debug text without monogram info - only calculate if debug is visible
     const enhancedDebugText = engine.settings.isDebugVisible ? `${debugText}
@@ -2968,6 +2974,39 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                                 ctx.fillStyle = swatchColor;
                                 ctx.fillRect(cellX, cellY, effectiveCharWidth, effectiveCharHeight);
+                            }
+
+                            // In help mode, show help text on hover (styled like category labels)
+                            if (engine.commandState.helpMode && isHovered) {
+                                const baseCommand = commandText.split(' ')[0];
+                                const helpText = COMMAND_HELP[baseCommand];
+                                if (helpText) {
+                                    const helpStartX = engine.commandState.commandStartPos.x + commandText.length + 2;
+
+                                    // Get background and text colors for category-label style
+                                    const bgHex = (engine.backgroundColor || '#FFFFFF').replace('#', '');
+                                    const bgR = parseInt(bgHex.substring(0, 2), 16);
+                                    const bgG = parseInt(bgHex.substring(2, 4), 16);
+                                    const bgB = parseInt(bgHex.substring(4, 6), 16);
+
+                                    // Draw help text with category-label styling
+                                    for (let i = 0; i < helpText.length; i++) {
+                                        const helpWorldX = helpStartX + i;
+                                        const helpScreenPos = engine.worldToScreen(helpWorldX, worldY, currentZoom, currentOffset);
+
+                                        if (helpScreenPos.x > -effectiveCharWidth * 2 && helpScreenPos.x < cssWidth + effectiveCharWidth) {
+                                            // Draw background (90% opacity like hovered category labels)
+                                            ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
+                                            ctx.fillRect(helpScreenPos.x, helpScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+
+                                            // Draw text in text color
+                                            ctx.fillStyle = engine.textColor;
+                                            if (helpText[i] && helpText[i].trim() !== '') {
+                                                renderText(ctx, helpText[i], helpScreenPos.x, helpScreenPos.y + verticalTextOffset);
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
