@@ -1479,41 +1479,27 @@ export function useWorldEngine({
         try {
             // Capture screenshot if publishing and callback is available
             if (isPublic && captureScreenshot) {
-                console.log('📸 Screenshot capture requested for state:', stateName);
-                console.log('📸 Screenshot callback available:', !!captureScreenshotCallbackRef.current);
-
                 if (captureScreenshotCallbackRef.current) {
                     try {
-                        console.log('📸 Calling screenshot callback...');
                         const screenshotDataUrl = await captureScreenshotCallbackRef.current();
-                        console.log('📸 Screenshot captured, size:', screenshotDataUrl?.length || 0, 'characters');
 
                         if (screenshotDataUrl) {
                             // TEMPORARY: Store base64 directly in database until Storage CORS is configured
                             // TODO: Switch to Firebase Storage once bucket is ready
-                            console.log('📸 Storing screenshot in database (base64)');
-
                             const screenshotRef = ref(database, getUserPath(`${stateName}/screenshot`));
                             await set(screenshotRef, screenshotDataUrl);
-                            console.log('✅ Screenshot stored successfully');
                             logger.debug('Screenshot captured and stored for state:', stateName);
-                        } else {
-                            console.warn('⚠️ Screenshot callback returned null/empty');
                         }
                     } catch (error) {
-                        console.error('❌ Failed to capture screenshot:', error);
                         logger.warn('Failed to capture screenshot:', error);
                         // Continue with publishing even if screenshot fails
                     }
-                } else {
-                    console.warn('⚠️ Screenshot callback not registered yet');
                 }
             }
 
             // Set the public flag at the root level of the state (not in metadata)
             const publicRef = ref(database, getUserPath(`${stateName}/public`));
             await set(publicRef, isPublic);
-            console.log('✅ State published successfully:', stateName);
             return true;
         } catch (error) {
             console.error('❌ Error updating state publish status:', error);
@@ -6475,22 +6461,18 @@ export function useWorldEngine({
 
                 // Convert LaTeX to SVG with current text color
                 (async () => {
-                    console.log('Starting LaTeX conversion for:', latexInput);
                     const { convertLatexToSVG } = await import('./utils.latex');
                     const imageDataUrl = await convertLatexToSVG(latexInput, textColor);
-                    console.log('SVG data URL generated:', imageDataUrl ? 'SUCCESS' : 'FAILED');
 
                     if (imageDataUrl) {
                         // Create an image element to get dimensions
                         const img = new Image();
                         img.onload = async () => {
-                            console.log('Image loaded, dimensions:', img.width, 'x', img.height);
                             const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
 
                             // Calculate grid cells needed
                             const cellsWide = Math.ceil(img.width / effectiveCharWidth);
                             const cellsHigh = Math.ceil(img.height / effectiveCharHeight);
-                            console.log('Grid cells:', cellsWide, 'x', cellsHigh);
 
                             // Upload to Firebase Storage and get URL
                             const storageUrl = await uploadImageToStorage(imageDataUrl);
@@ -6509,13 +6491,11 @@ export function useWorldEngine({
 
                             // Add to world data
                             const imageKey = `image_${startPosition.x},${startPosition.y}`;
-                            console.log('Adding image to worldData with key:', imageKey, 'at position:', startPosition);
                             setWorldData(prev => {
                                 const updated = {
                                     ...prev,
                                     [imageKey]: imageData
                                 };
-                                console.log('WorldData updated, image key present:', imageKey in updated);
                                 return updated;
                             });
 
@@ -6553,22 +6533,18 @@ export function useWorldEngine({
 
                 // Convert SMILES to SVG with current text color
                 (async () => {
-                    console.log('Starting SMILES conversion for:', smilesInput);
                     const { convertSMILESToSVG } = await import('./utils.SMILES');
                     const imageDataUrl = await convertSMILESToSVG(smilesInput, textColor);
-                    console.log('SMILES SVG data URL generated:', imageDataUrl ? 'SUCCESS' : 'FAILED');
 
                     if (imageDataUrl) {
                         // Create an image element to get dimensions
                         const img = new Image();
                         img.onload = async () => {
-                            console.log('SMILES image loaded, dimensions:', img.width, 'x', img.height);
                             const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
 
                             // Calculate grid cells needed
                             const cellsWide = Math.ceil(img.width / effectiveCharWidth);
                             const cellsHigh = Math.ceil(img.height / effectiveCharHeight);
-                            console.log('Grid cells:', cellsWide, 'x', cellsHigh);
 
                             // Upload to Firebase Storage and get URL
                             const storageUrl = await uploadImageToStorage(imageDataUrl);
@@ -6587,13 +6563,11 @@ export function useWorldEngine({
 
                             // Add to world data
                             const imageKey = `image_${startPosition.x},${startPosition.y}`;
-                            console.log('Adding SMILES image to worldData with key:', imageKey, 'at position:', startPosition);
                             setWorldData(prev => {
                                 const updated = {
                                     ...prev,
                                     [imageKey]: imageData
                                 };
-                                console.log('WorldData updated, image key present:', imageKey in updated);
                                 return updated;
                             });
 

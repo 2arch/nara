@@ -197,7 +197,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
             // Last fallback: color JPEG
             const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-            console.log('📸 Canvas captured (fallback), data URL length:', dataUrl.length);
             return dataUrl;
         } catch (error) {
             console.error('❌ Failed to capture screenshot:', error);
@@ -513,12 +512,10 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                     // Check for 100 cell threshold - trigger signup for unauthenticated users
                     if (newTotal >= 100 && !hasTriggeredSignupPromptRef.current) {
                         hasTriggeredSignupPromptRef.current = true;
-                        console.log('Pan threshold reached:', newTotal, 'cells');
 
                         // Check if user is authenticated
                         const { auth } = require('../firebase');
                         const user = auth.currentUser;
-                        console.log('User auth status:', !!user, 'hostDialogue available:', !!hostDialogue);
 
                         if (!user && hostDialogue && !hostDialogue.isHostActive) {
 
@@ -946,7 +943,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             executeNote: () => engine.commandSystem.executeCommandString('note'),
             executePublish: () => engine.commandSystem.executeCommandString('publish'),
             openCommandPalette: () => engine.commandSystem.startCommand(engine.cursorPos),
-            openSearch: () => engine.commandSystem.startCommandWithInput(engine.cursorPos, 'search ')
+            openSearch: () => engine.commandSystem.startCommandWithInput(engine.cursorPos, 'search '),
+            executeLabel: () => engine.commandSystem.executeCommandString('label')
         }));
     }, [registerGroup, engine.cycleGridMode, toggleRecording, engine.commandSystem, engine.cursorPos]);
     

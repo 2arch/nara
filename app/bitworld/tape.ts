@@ -13,7 +13,6 @@ export class CanvasRecorder {
 
   start() {
     if (this.isRecording) {
-      console.log('Already recording');
       return;
     }
 
@@ -50,8 +49,6 @@ export class CanvasRecorder {
 
       this.mediaRecorder.start(100); // Collect data every 100ms
       this.isRecording = true;
-
-      console.log(`🔴 Recording started (${this.frameRate}fps, ${(options.videoBitsPerSecond! / 1000000).toFixed(0)}Mbps, ${options.mimeType || 'default codec'})`);
     } catch (error) {
       console.error('Failed to start recording:', error);
       this.isRecording = false;
@@ -65,7 +62,6 @@ export class CanvasRecorder {
 
   async stop(): Promise<void> {
     if (!this.isRecording || !this.mediaRecorder) {
-      console.log('Not currently recording');
       return;
     }
 
@@ -87,12 +83,10 @@ export class CanvasRecorder {
           this.stream = null;
         }
 
-        console.log('✅ High-quality WebM video downloaded!');
         resolve();
       };
 
       this.mediaRecorder!.stop();
-      console.log('🛑 Recording stopped. Processing video...');
     });
   }
 

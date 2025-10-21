@@ -72,8 +72,6 @@ export function renderLatexToSVG(latexString: string): SVGElement | null {
  */
 export async function convertLatexToImage(latexString: string): Promise<string | null> {
     try {
-        console.log('Converting LaTeX:', latexString);
-
         // Create a temporary container for rendering
         const container = document.createElement('div');
         container.style.position = 'absolute';
@@ -91,8 +89,6 @@ export async function convertLatexToImage(latexString: string): Promise<string |
                 displayMode: true,
                 output: 'html'
             });
-            console.log('KaTeX rendered successfully');
-            console.log('Container HTML:', container.innerHTML);
         } catch (e) {
             console.error('KaTeX render error:', e);
             document.body.removeChild(container);

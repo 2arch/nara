@@ -260,6 +260,7 @@ export function createCommandController(actions: {
     executePublish: () => void;
     openCommandPalette: () => void;
     openSearch: () => void;
+    executeLabel: () => void;
 }): ControllerGroup {
     return {
         name: 'commands',
@@ -289,6 +290,12 @@ export function createCommandController(actions: {
                 ctrlOrMeta: true,
                 description: 'Publish canvas (/publish)',
                 action: actions.executePublish
+            },
+            {
+                key: 'l',
+                ctrlOrMeta: true,
+                description: 'Create label from selection (/label)',
+                action: actions.executeLabel
             }
         ]
     };

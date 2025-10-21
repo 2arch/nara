@@ -701,12 +701,6 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           throw new Error('Missing required information. Please try again.');
         }
 
-        console.log('Creating account with:', {
-          email: newCollectedData.email,
-          username: newCollectedData.username,
-          hasPassword: !!newCollectedData.password
-        });
-
         // Create user with email and password
         const userCredential = await createUserWithEmailAndPassword(auth, newCollectedData.email, newCollectedData.password);
         const user = userCredential.user;
