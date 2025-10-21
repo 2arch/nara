@@ -191,6 +191,25 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       });
     }
 
+    // Activate host mode
+    if (setHostMode) {
+      setHostMode({
+        isActive: true,
+        currentInputType: startMessage.inputType || null
+      });
+    }
+
+    // Only activate chat mode if required (default to true for backward compatibility)
+    const requiresChatMode = startMessage.requiresChatMode !== false;
+    if (setChatMode && requiresChatMode) {
+      setChatMode({
+        isActive: true,
+        currentInput: '',
+        inputPositions: [],
+        isProcessing: false
+      });
+    }
+
     setState({
       isActive: true,
       currentFlowId: flowId,
@@ -198,7 +217,7 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       collectedData: {},
       isProcessing: false
     });
-  }, [setHostData, getViewportCenter, setWorldData]);
+  }, [setHostData, getViewportCenter, setWorldData, setHostMode, setChatMode]);
 
   // Get current message
   const getCurrentMessage = useCallback((): HostMessage | null => {
@@ -840,9 +859,47 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       collectedData: {},
       isProcessing: false
     });
-    // Clear the host dialogue visual
-    setHostData(null);
-  }, [setHostData]);
+  }, []);
+
+  // Validate command execution for tutorial flows
+  const validateCommand = useCallback((executedCommand: string, args: string[], worldState?: any): boolean => {
+    const currentMessage = getCurrentMessage();
+    if (!currentMessage) return false;
+
+    // Check if this message expects a command
+    if (!currentMessage.expectedCommand || !currentMessage.commandValidator) {
+      return false;
+    }
+
+    // Check if the executed command matches the expected command
+    if (executedCommand !== currentMessage.expectedCommand) {
+      return false;
+    }
+
+    // Run the validator
+    const isValid = currentMessage.commandValidator(executedCommand, args, worldState);
+
+    // If valid, advance to next message
+    if (isValid && currentMessage.nextMessageId) {
+      const flow = HOST_FLOWS[state.currentFlowId!];
+      const nextMessage = flow.messages[currentMessage.nextMessageId];
+
+      if (nextMessage) {
+        setHostData({
+          text: nextMessage.text,
+          centerPos: getViewportCenter(),
+          timestamp: Date.now()
+        });
+
+        setState(prev => ({
+          ...prev,
+          currentMessageId: currentMessage.nextMessageId!
+        }));
+      }
+    }
+
+    return isValid;
+  }, [getCurrentMessage, state.currentFlowId, setHostData, getViewportCenter]);
 
   return {
     hostState: state,
@@ -855,6 +912,7 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
     isHostActive: state.isActive,
     isHostProcessing: state.isProcessing,
     advanceToNextMessage,
-    goBackToPreviousMessage
+    goBackToPreviousMessage,
+    validateCommand
   };
 }

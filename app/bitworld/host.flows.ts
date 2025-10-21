@@ -21,6 +21,11 @@ export interface HostMessage {
   spawnContent?: (centerPos: { x: number; y: number }) => Record<string, string>;
   // Cleanup flag to remove previously spawned labels
   despawnLabels?: boolean;
+
+  // Tutorial-specific: command validation
+  requiresChatMode?: boolean; // If false, user executes commands directly on canvas
+  expectedCommand?: string; // The command the user should execute (e.g., "bg")
+  commandValidator?: (executedCommand: string, args: string[], worldState?: any) => boolean; // Validate command was executed correctly
 }
 
 export interface HostFlow {
@@ -308,79 +313,91 @@ export const upgradeFlow: HostFlow = {
   }
 };
 
-// Tutorial flow - interactive onboarding with agent demonstrations
+// Tutorial flow - interactive command learning
 export const tutorialFlow: HostFlow = {
   flowId: 'tutorial',
   startMessageId: 'tutorial_welcome',
   messages: {
     'tutorial_welcome': {
       id: 'tutorial_welcome',
-      text: 'Hey! I\'m your guide. I\'ll show you around Nara.',
+      text: 'Welcome to the Nara tutorial! \n \n I\'ll teach you the basics of spatial writing.',
       expectsInput: false,
-      nextMessageId: 'tutorial_background_intro'
+      requiresChatMode: false,
+      nextMessageId: 'learn_background'
     },
 
-    'tutorial_background_intro': {
-      id: 'tutorial_background_intro',
-      text: 'Let\'s start with something simple. \n \n Type /bg followed by any color to change the background.',
-      expectsInput: false,
-      nextMessageId: 'tutorial_typing_intro',
+    'learn_background': {
+      id: 'learn_background',
+      text: 'Let\'s start by changing the background color. \n \n Type: /bg red',
+      expectsInput: true,
+      requiresChatMode: false,
+      expectedCommand: 'bg',
+      commandValidator: (cmd, args) => {
+        return cmd === 'bg' && args.length > 0 && args[0].toLowerCase() === 'red';
+      },
+      nextMessageId: 'background_success',
       previousMessageId: 'tutorial_welcome'
     },
 
-    'tutorial_typing_intro': {
-      id: 'tutorial_typing_intro',
-      text: 'To write text, just click anywhere on the canvas and start typing. \n \n The canvas is infinite - your thoughts can go anywhere.',
+    'background_success': {
+      id: 'background_success',
+      text: 'Perfect! You changed the background to red. \n \n Next, let\'s learn about text colors.',
       expectsInput: false,
-      nextMessageId: 'tutorial_label_intro',
-      previousMessageId: 'tutorial_background_intro'
+      requiresChatMode: false,
+      nextMessageId: 'learn_color',
+      previousMessageId: 'learn_background'
     },
 
-    'tutorial_label_intro': {
-      id: 'tutorial_label_intro',
-      text: 'Want to mark something important? \n \n Use /label to create markers that help organize your space.',
-      expectsInput: false,
-      nextMessageId: 'tutorial_selection_intro',
-      previousMessageId: 'tutorial_typing_intro'
+    'learn_color': {
+      id: 'learn_color',
+      text: 'Now change your text color. \n \n Type: /color blue',
+      expectsInput: true,
+      requiresChatMode: false,
+      expectedCommand: 'color',
+      commandValidator: (cmd, args) => {
+        return cmd === 'color' && args.length > 0 && args[0].toLowerCase() === 'blue';
+      },
+      nextMessageId: 'color_success',
+      previousMessageId: 'background_success'
     },
 
-    'tutorial_selection_intro': {
-      id: 'tutorial_selection_intro',
-      text: 'Select regions by holding Shift and dragging. \n \n Then use /bound to create a bounded area.',
+    'color_success': {
+      id: 'color_success',
+      text: 'Great! Your text is now blue. \n \n Let\'s create a label to organize your thoughts.',
       expectsInput: false,
-      nextMessageId: 'tutorial_ai_intro',
-      previousMessageId: 'tutorial_label_intro'
+      requiresChatMode: false,
+      nextMessageId: 'learn_label',
+      previousMessageId: 'learn_color'
     },
 
-    'tutorial_ai_intro': {
-      id: 'tutorial_ai_intro',
-      text: 'Here\'s where it gets interesting. \n \n Nara has AI built in.',
-      expectsInput: false,
-      nextMessageId: 'tutorial_ai_explain',
-      previousMessageId: 'tutorial_selection_intro'
+    'learn_label': {
+      id: 'learn_label',
+      text: 'Labels help you mark important points in space. \n \n Type: /label my first label',
+      expectsInput: true,
+      requiresChatMode: false,
+      expectedCommand: 'label',
+      commandValidator: (cmd, args) => {
+        return cmd === 'label' && args.length > 0;
+      },
+      nextMessageId: 'label_success',
+      previousMessageId: 'color_success'
     },
 
-    'tutorial_ai_explain': {
-      id: 'tutorial_ai_explain',
-      text: 'Type / to see AI commands. \n \n /write, /transform, /explain - they\'re all here.',
+    'label_success': {
+      id: 'label_success',
+      text: 'Excellent! You created a label. \n \n Labels appear as arrows pointing to that location.',
       expectsInput: false,
-      nextMessageId: 'tutorial_navigation',
-      previousMessageId: 'tutorial_ai_intro'
-    },
-
-    'tutorial_navigation': {
-      id: 'tutorial_navigation',
-      text: 'Use two fingers to pan around. \n \n Your canvas is infinite in all directions.',
-      expectsInput: false,
+      requiresChatMode: false,
       nextMessageId: 'tutorial_complete',
-      previousMessageId: 'tutorial_ai_explain'
+      previousMessageId: 'learn_label'
     },
 
     'tutorial_complete': {
       id: 'tutorial_complete',
-      text: 'That\'s it! You\'re ready to explore. \n \n Press Escape to exit this tutorial.',
+      text: 'You\'ve completed the basics! \n \n Type /help anytime to see all commands. Happy writing!',
       expectsInput: false,
-      previousMessageId: 'tutorial_navigation'
+      requiresChatMode: false,
+      previousMessageId: 'label_success'
     }
   }
 };

@@ -694,37 +694,33 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         hostDialogue.startFlow('upgrade');
     }, [engine, hostDialogue]);
 
+    // Register upgrade flow handler with engine
+    useEffect(() => {
+        engine.setUpgradeFlowHandler(handleUpgradeFlow);
+    }, [engine, handleUpgradeFlow]);
+
     // Tutorial flow handler
     const handleTutorialFlow = useCallback(() => {
         // Activate host mode
         engine.setHostMode({ isActive: true, currentInputType: null });
 
-        // Activate chat mode for input
-        engine.setChatMode({
-            isActive: true,
-            currentInput: '',
-            inputPositions: [],
-            isProcessing: false
-        });
+        // Do NOT activate chat mode - tutorial validates actual commands on canvas
+        // Chat mode will be controlled by individual messages via requiresChatMode field
 
         // Start the tutorial flow
         hostDialogue.startFlow('tutorial');
     }, [engine, hostDialogue]);
-
-    // Register upgrade flow handler with engine
-    useEffect(() => {
-        engine.setUpgradeFlowHandler(handleUpgradeFlow);
-    }, [engine, handleUpgradeFlow]);
 
     // Register tutorial flow handler with engine
     useEffect(() => {
         engine.setTutorialFlowHandler(handleTutorialFlow);
     }, [engine, handleTutorialFlow]);
 
-    // Register host dialogue utilities with engine
+    // Register command validation handler with engine (for tutorial)
     useEffect(() => {
-        engine.setHostDialogueExitHandler(hostDialogue.exitFlow);
-        engine.setHostDialogueFlowGetter(() => hostDialogue.hostState.currentFlowId);
+        engine.setCommandValidationHandler((command: string, args: string[], worldState?: any) => {
+            return hostDialogue.validateCommand(command, args, worldState);
+        });
     }, [engine, hostDialogue]);
 
     // Track clipboard additions for visual feedback
@@ -4866,8 +4862,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             // If message doesn't expect input (display-only), allow navigation
             if (currentMessage && !currentMessage.expectsInput) {
                 // Right arrow or any other key advances forward (if next exists)
-                // Exclude Escape key to allow exiting the flow
-                if (currentMessage.nextMessageId && (e.key === 'ArrowRight' || (e.key !== 'ArrowLeft' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Escape'))) {
+                if (currentMessage.nextMessageId && (e.key === 'ArrowRight' || (e.key !== 'ArrowLeft' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown'))) {
                     hostDialogue.advanceToNextMessage();
                     e.preventDefault();
                     e.stopPropagation();

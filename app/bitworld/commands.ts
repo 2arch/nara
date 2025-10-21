@@ -93,6 +93,8 @@ interface UseCommandSystemProps {
     setSelectionEnd?: (pos: { x: number, y: number } | null) => void;
     uploadImageToStorage?: (dataUrl: string, mimeType?: string) => Promise<string>;
     triggerUpgradeFlow?: () => void;
+    triggerTutorialFlow?: () => void;
+    onCommandExecuted?: (command: string, args: string[]) => void;
 }
 
 // --- Command System Constants ---
@@ -143,13 +145,14 @@ export const COLOR_MAP: { [name: string]: string } = {
     'black': '#000000',
     'sulfur': '#F0FF6A',
     'chalk': '#69AED6',
+    'cobalt': '#0B109F',
     'garden': '#162400',
-    'orange': '#FFA500',
-    'ochre': '#FFC0CB',
+    'red': '#FF5200',
+    'dust': '#FFC0CB',
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, userUid, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, userUid, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const [commandState, setCommandState] = useState<CommandState>({
@@ -1441,7 +1444,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 // No arguments - default to white background
                 switchBackgroundMode('color', '#FFFFFF');
             }
-            
+
+            // Notify tutorial flow that bg command was executed
+            if (onCommandExecuted) {
+                const args = inputParts.slice(1);
+                onCommandExecuted('bg', args);
+            }
+
             // Clear command mode
             setCommandState({
                 isActive: false,
@@ -1453,7 +1462,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 hasNavigated: false
             });
             setCommandData({});
-            
+
             return null;
         }
 
@@ -1568,7 +1577,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 }));
                 setDialogueWithRevert("Text style reset to default", setDialogueText);
             }
-            
+
+            // Notify tutorial flow that text/color command was executed
+            if (onCommandExecuted) {
+                const args = inputParts.slice(1);
+                onCommandExecuted('color', args);
+            }
+
             // Clear command mode
             setCommandState({
                 isActive: false,
@@ -1580,7 +1595,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 hasNavigated: false
             });
             setCommandData({});
-            
+
             return null;
         }
 
@@ -2245,6 +2260,27 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     });
                 });
             });
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            return null;
+        }
+
+        if (commandToExecute.startsWith('tutorial')) {
+            // Trigger the tutorial flow
+            if (triggerTutorialFlow) {
+                triggerTutorialFlow();
+            }
 
             // Clear command mode
             setCommandState({
