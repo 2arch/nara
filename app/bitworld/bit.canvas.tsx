@@ -135,17 +135,13 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
     // Capture canvas screenshot for Open Graph previews
     const captureScreenshot = useCallback(async (): Promise<string | null> => {
-        console.log('📸 captureScreenshot called');
         const canvas = canvasRef.current;
-        console.log('📸 Canvas element:', !!canvas);
 
         if (!canvas) {
-            console.warn('⚠️ Canvas ref is null');
             return null;
         }
 
         try {
-            console.log('📸 Capturing canvas as data URL...');
 
             // Resize to max 1200px width for og:image (Twitter/OG standard)
             const maxWidth = 1200;
@@ -174,7 +170,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
                     // Use JPEG with 0.8 quality for smaller file size
                     const dataUrl = smallCanvas.toDataURL('image/jpeg', 0.8);
-                    console.log('📸 Canvas captured (resized + grayscale), data URL length:', dataUrl.length);
                     return dataUrl;
                 }
             }
@@ -197,7 +192,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 }
                 tempCtx.putImageData(imageData, 0, 0);
                 const dataUrl = tempCanvas.toDataURL('image/jpeg', 0.8);
-                console.log('📸 Canvas captured (grayscale), data URL length:', dataUrl.length);
                 return dataUrl;
             }
 

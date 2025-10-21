@@ -448,11 +448,7 @@ User: ${message}`,
 
         // Increment usage after successful response
         if (userId) {
-            console.log('[AI] Incrementing usage for user:', userId);
-            const success = await incrementUserUsage(userId);
-            console.log('[AI] Usage increment result:', success);
-        } else {
-            console.log('[AI] No userId provided, skipping usage increment');
+            await incrementUserUsage(userId);
         }
 
         return aiResponse;

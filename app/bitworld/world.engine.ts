@@ -3589,7 +3589,7 @@ export function useWorldEngine({
                     // Check if this is a --distance command
                     if (exec.args.length >= 2 && exec.args[0] === '--distance') {
                         const distanceStr = exec.args[1];
-                        
+
                         if (distanceStr.toLowerCase() === 'off') {
                             // Set to maximum value to effectively disable distance filtering
                             const newSettings = { labelProximityThreshold: 999999 };
@@ -3606,6 +3606,66 @@ export function useWorldEngine({
                             } else {
                                 setDialogueWithRevert("Invalid distance. Please provide a positive number or 'off'.", setDialogueText);
                             }
+                        }
+                    } else if (exec.args.length === 0 && selectionStart && selectionEnd) {
+                        // No args provided but there's a selection - extract text from selection
+                        const hasSelection = selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y;
+
+                        if (hasSelection) {
+                            const minX = Math.floor(Math.min(selectionStart.x, selectionEnd.x));
+                            const maxX = Math.floor(Math.max(selectionStart.x, selectionEnd.x));
+                            const minY = Math.floor(Math.min(selectionStart.y, selectionEnd.y));
+                            const maxY = Math.floor(Math.max(selectionStart.y, selectionEnd.y));
+
+                            // Helper to extract character from cell data
+                            const getCharacter = (cellData: any): string => {
+                                if (!cellData) return '';
+                                if (typeof cellData === 'string') return cellData;
+                                if (typeof cellData === 'object' && 'char' in cellData) return cellData.char;
+                                return '';
+                            };
+
+                            // Extract text from selection
+                            let selectedText = '';
+                            for (let y = minY; y <= maxY; y++) {
+                                let line = '';
+                                for (let x = minX; x <= maxX; x++) {
+                                    const cellKey = `${x},${y}`;
+                                    line += getCharacter(worldData[cellKey]);
+                                }
+                                selectedText += line.trimEnd() + ' ';
+                            }
+                            selectedText = selectedText.trim();
+
+                            if (selectedText) {
+                                // Create label at selection start position
+                                const labelKey = `label_${minX},${minY}`;
+                                const newLabel = {
+                                    text: selectedText,
+                                    color: '#000000', // Default black text
+                                    background: '#FFFFFF' // Default white background
+                                };
+
+                                setWorldData(prev => ({
+                                    ...prev,
+                                    [labelKey]: JSON.stringify(newLabel)
+                                }));
+
+                                setDialogueWithRevert(`Label "${selectedText}" created`, setDialogueText);
+
+                                // Clear selection after creating label
+                                setSelectionStart(null);
+                                setSelectionEnd(null);
+
+                                // Notify tutorial flow
+                                if (commandValidationHandlerRef.current) {
+                                    commandValidationHandlerRef.current('label', [selectedText], worldData);
+                                }
+                            } else {
+                                setDialogueWithRevert("Selection is empty", setDialogueText);
+                            }
+                        } else {
+                            setDialogueWithRevert("Make a selection first or provide label text: /label 'text'", setDialogueText);
                         }
                     } else if (exec.args.length >= 1) {
                         // Parse the raw command input to handle quoted strings
