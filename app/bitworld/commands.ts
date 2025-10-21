@@ -155,6 +155,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'chat': 'Quick shortcut to enter chat mode. Talk with AI to transform, expand, or generate text. The AI can help you develop ideas or create content based on your prompts.',
     'tutorial': 'Start the interactive tutorial. Learn the basics of spatial writing through hands-on exercises that teach you core commands and concepts.',
     'help': 'Show this detailed help menu. The command list stays open with descriptions for every available command, so you can explore what\'s possible.',
+    'tab': 'Toggle AI-powered autocomplete suggestions. When enabled, type and see AI suggestions appear as gray text. Press Tab to accept suggestions.',
     'bg': 'Change background color or mode. Type /bg followed by a color name (red, blue, chalk, etc.) or a mode: /bg clear for transparent, /bg live for screen sharing, /bg web for image/video generation.',
     'text': 'Change text color. Type /text followed by a color name (garden, sky, sunset, etc.). This sets the color for all new text you write on the canvas.',
     'font': 'Change font family. Type /font followed by a font name: "IBM Plex Mono" for a clean monospace font, or "Neureal" for a more stylized aesthetic.',
@@ -1223,6 +1224,34 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             setCommandData({});
             
             return null; // Mode switches don't need further processing
+        }
+
+        // Handle tab/autocomplete toggle
+        if (commandName === 'tab') {
+            if (updateSettings) {
+                updateSettings({
+                    isAutocompleteEnabled: !settings?.isAutocompleteEnabled
+                });
+                const newState = !settings?.isAutocompleteEnabled;
+                setDialogueWithRevert(
+                    `Autocomplete ${newState ? 'enabled' : 'disabled'}`,
+                    setDialogueText
+                );
+            }
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            return null; // Autocomplete toggle doesn't need further processing
         }
 
         if (commandToExecute.startsWith('bg')) {

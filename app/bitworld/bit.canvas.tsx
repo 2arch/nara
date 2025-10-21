@@ -2649,6 +2649,35 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Suggestion Data (Gray Ghost Text) ===
+        for (const key in engine.suggestionData) {
+            const [xStr, yStr] = key.split(',');
+            const worldX = parseInt(xStr, 10);
+            const worldY = parseInt(yStr, 10);
+
+            if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                const charData = engine.suggestionData[key];
+
+                // Skip image data - only process text characters
+                if (engine.isImageData(charData)) {
+                    continue;
+                }
+
+                const char = typeof charData === 'string' ? charData : charData.char;
+
+                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                    if (char && char.trim() !== '') {
+                        // Draw suggestion text in gray (50% opacity)
+                        ctx.fillStyle = engine.textColor;
+                        ctx.globalAlpha = 0.3;
+                        renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
+                        ctx.globalAlpha = 1.0;
+                    }
+                }
+            }
+        }
+
         // === Render LaTeX Data (Blue Background, White Text) ===
         for (const key in engine.latexData) {
             const [xStr, yStr] = key.split(',');

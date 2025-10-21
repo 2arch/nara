@@ -679,7 +679,7 @@ export async function generateVideo(prompt: string): Promise<string | null> {
  */
 export async function generateClusterLabel(clusterContent: string): Promise<string | null> {
     try {
-        
+
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash-lite',
             contents: `Create a very short, descriptive label (2-4 words max) for this text cluster:
@@ -701,15 +701,93 @@ Respond with ONLY the label, no explanation.`,
         });
 
         const label = response.text?.trim();
-        
+
         // Validate the label is reasonably short and meaningful
         if (label && label.length >= 3 && label.length <= 30 && !label.includes('"')) {
             return label;
         }
-        
+
         return null;
     } catch (error) {
         logger.error('Error generating cluster label:', error);
         return null;
+    }
+}
+
+/**
+ * Get autocomplete suggestions using logprobs for next token prediction
+ * @param currentText The text typed so far (current word being typed)
+ * @param context Optional surrounding context for better predictions
+ * @returns Array of suggestion strings sorted by probability
+ */
+export async function getAutocompleteSuggestions(
+    currentText: string,
+    context?: string
+): Promise<string[]> {
+    try {
+        // Don't suggest if text is empty or just whitespace
+        if (!currentText || currentText.trim().length === 0) {
+            return [];
+        }
+
+        // Build prompt with context if available
+        const prompt = context
+            ? `${context}\n${currentText}`
+            : currentText;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-lite',
+            contents: prompt,
+            config: {
+                responseLogprobs: true,
+                logprobs: 5, // top 5 token candidates
+                maxOutputTokens: 3, // Generate a few tokens to get alternatives
+                temperature: 0.9
+            }
+        });
+
+        // Extract top candidates from logprobs
+        const logprobsResult = response.candidates?.[0]?.logprobsResult;
+
+        // Try topCandidates first - look through all steps to find one with candidates
+        let topCandidates = null;
+        if (logprobsResult?.topCandidates) {
+            for (let i = 0; i < logprobsResult.topCandidates.length; i++) {
+                if (logprobsResult.topCandidates[i]?.candidates && logprobsResult.topCandidates[i]?.candidates?.length && logprobsResult.topCandidates[i]?.candidates!.length > 0) {
+                    topCandidates = logprobsResult.topCandidates[i]?.candidates || null;
+                    break;
+                }
+            }
+        }
+
+        if (!topCandidates || topCandidates.length === 0) {
+            // Use chosenCandidates as fallback
+            const chosenCandidates = logprobsResult?.chosenCandidates;
+            if (chosenCandidates && chosenCandidates.length > 0) {
+                topCandidates = chosenCandidates;
+            } else {
+                return [];
+            }
+        }
+
+        // Convert candidates to suggestion strings, filter out non-word tokens
+        const suggestions = topCandidates
+            .filter(candidate => {
+                const token = candidate.token || '';
+                // Filter out special tokens, whitespace-only, punctuation-only
+                return token.trim().length > 0 && /[a-zA-Z]/.test(token);
+            })
+            .map(candidate => {
+                let token = candidate.token || '';
+                // Clean up token - remove leading whitespace but keep the word
+                token = token.trim();
+                return token;
+            })
+            .filter(token => token.length > 0);
+
+        return suggestions;
+    } catch (error) {
+        logger.error('Error getting autocomplete suggestions:', error);
+        return [];
     }
 }

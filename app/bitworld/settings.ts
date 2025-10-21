@@ -21,6 +21,8 @@ export interface WorldSettings {
     // Persisted monogram state
     monogramMode?: import('./monogram').MonogramMode;
     monogramEnabled?: boolean;
+    // Autocomplete
+    isAutocompleteEnabled?: boolean;
 }
 
 export const initialSettings: WorldSettings = {
@@ -37,6 +39,7 @@ export const initialSettings: WorldSettings = {
         trailFadeMs: 500
     },
     labelProximityThreshold: 999999,
+    isAutocompleteEnabled: false, // Autocomplete disabled by default
 };
 
 export function useWorldSettings() {

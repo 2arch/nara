@@ -26,7 +26,8 @@ const loadAI = async () => {
         chatWithAI: ai.chatWithAI,
         clearChatHistory: ai.clearChatHistory,
         updateWorldContext: ai.updateWorldContext,
-        generateImage: ai.generateImage
+        generateImage: ai.generateImage,
+        getAutocompleteSuggestions: ai.getAutocompleteSuggestions
     };
 };
 
@@ -107,8 +108,14 @@ export interface WorldEngine {
     worldData: WorldData;
     commandData: WorldData;
     commandState: CommandState;
-    commandSystem: { selectCommand: (command: string) => void };
+    commandSystem: {
+        selectCommand: (command: string) => void;
+        executeCommandString: (command: string) => void;
+        startCommand: (cursorPos: Point) => void;
+        startCommandWithInput: (cursorPos: Point, input: string) => void;
+    };
     chatData: WorldData;
+    suggestionData: WorldData;
     lightModeData: WorldData;
     hostData: { text: string; color?: string; centerPos: Point; timestamp?: number } | null; // Host messages rendered at fixed position with streaming
     stagedImageData: ImageData[]; // Ephemeral staged images (cleared with Escape, supports multiple)
@@ -406,6 +413,14 @@ export function useWorldEngine({
     const [boundCycleIndex, setBoundCycleIndex] = useState<number>(0); // Track which bound to cycle to next
     const [dialogueText, setDialogueText] = useState('');
     const tapeRecordingCallbackRef = useRef<(() => Promise<void> | void) | null>(null);
+
+    // Inline autocomplete state
+    const [suggestionData, setSuggestionData] = useState<WorldData>({});
+    const [currentSuggestion, setCurrentSuggestion] = useState<string>('');
+    const [currentSuggestions, setCurrentSuggestions] = useState<string[]>([]);
+    const [currentSuggestionIndex, setCurrentSuggestionIndex] = useState<number>(0);
+    const suggestionDebounceRef = useRef<NodeJS.Timeout | null>(null);
+    const currentSuggestionRef = useRef<string>(''); // Ref for immediate access
 
     // Double ESC detection for AI interruption
     const lastEscTimeRef = useRef<number | null>(null);
@@ -2606,7 +2621,21 @@ export function useWorldEngine({
 
     // === Event Handlers ===
 
+    // Helper to clear autocomplete suggestions - call this on ANY interaction
+    const clearAutocompleteSuggestions = useCallback(() => {
+        setCurrentSuggestion('');
+        setSuggestionData({});
+        setCurrentSuggestions([]);
+        setCurrentSuggestionIndex(0);
+        currentSuggestionRef.current = ''; // Also clear the ref
+    }, []);
+
     const handleKeyDown = useCallback((key: string, ctrlKey: boolean, metaKey: boolean, shiftKey: boolean, altKey: boolean = false): boolean => {
+        // Clear autocomplete on ANY key press (except Tab which handles suggestions)
+        if (key !== 'Tab') {
+            clearAutocompleteSuggestions();
+        }
+
         let preventDefault = true;
         let nextCursorPos = { ...cursorPos };
         let nextWorldData = { ...worldData }; // Create mutable copy only if needed
@@ -7188,6 +7217,7 @@ export function useWorldEngine({
         }
         // --- List-specific Backspace handling ---
         else if (key === 'Backspace') {
+
             // During IME composition, let the native IME handle backspace
             if (isComposingRef.current) {
                 return true;
@@ -7499,84 +7529,55 @@ export function useWorldEngine({
             }
             moved = true; // Cursor position changed or selection was deleted
         } else if (key === 'Tab') {
-            // Cycle through all available bounds
-            const bounds: Array<{key: string, data: any}> = [];
-            
-            for (const key in worldData) {
-                if (key.startsWith('bound_')) {
-                    try {
-                        const boundData = JSON.parse(worldData[key] as string);
-                        bounds.push({key, data: boundData});
-                    } catch (e) {
-                        // Skip invalid bound data
-                    }
-                }
-            }
-            
-            if (bounds.length === 0) {
-                logger.debug('No bounds found');
-            } else {
-                // Sort bounds by their position for consistent cycling
-                bounds.sort((a, b) => {
-                    if (a.data.startY !== b.data.startY) {
-                        return a.data.startY - b.data.startY; // Sort by Y first
-                    }
-                    return a.data.startX - b.data.startX; // Then by X
-                });
-                
-                // Cycle to next bound
-                const nextIndex = boundCycleIndex % bounds.length;
-                const targetBound = bounds[nextIndex];
-                
-                // Find the last character within the bounded region
-                let lastCharX = targetBound.data.startX;
-                let lastCharY = targetBound.data.startY;
-                let foundChar = false;
-                
-                // Scan from bottom-right to top-left to find the last character
-                for (let y = targetBound.data.endY; y >= targetBound.data.startY; y--) {
-                    for (let x = targetBound.data.endX; x >= targetBound.data.startX; x--) {
-                        const key = `${x},${y}`;
-                        const charData = worldData[key];
-                        if (charData && !isImageData(charData)) {
-                            const char = getCharacter(charData);
-                            if (char && char !== ' ' && char !== '\t') {
-                                lastCharX = x;
-                                lastCharY = y;
-                                foundChar = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (foundChar) break;
-                }
-                
-                // Move cursor to the last character position (or start if no text found)
-                nextCursorPos = { 
-                    x: lastCharX, 
-                    y: lastCharY 
-                };
-                
-                
-                // Immediately center viewport on the new cursor position
-                if (typeof window !== 'undefined') {
-                    const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
-                    if (effectiveCharWidth > 0 && effectiveCharHeight > 0) {
-                        const viewportCharWidth = window.innerWidth / effectiveCharWidth;
-                        const viewportCharHeight = window.innerHeight / effectiveCharHeight;
-                        
-                        const centerX = nextCursorPos.x - viewportCharWidth / 2;
-                        const centerY = nextCursorPos.y - viewportCharHeight / 2;
-                        
-                        setViewOffset({ x: centerX, y: centerY });
-                    }
-                }
-                
-                setBoundCycleIndex(nextIndex + 1); // Prepare for next cycle
-                moved = true;
-            }
+            // Tab key is ONLY for accepting autocomplete suggestions
+            // Always prevent default browser behavior (focusing address bar)
+            preventDefault = true;
 
-            preventDefault = true; // Prevent Tab from moving focus
+            // Use ref for immediate access to suggestion (state may not have updated yet)
+            const suggestionToAccept = currentSuggestionRef.current;
+
+            if (suggestionToAccept) {
+                // Accept the current suggestion
+                const suggestionLength = suggestionToAccept.length;
+                nextWorldData = { ...worldData };
+
+                for (let i = 0; i < suggestionLength; i++) {
+                    const key = `${cursorPos.x + i},${cursorPos.y}`;
+                    const char = suggestionToAccept[i];
+
+                    // Check if current text style is different from global defaults
+                    const hasCustomStyle = currentTextStyle.color !== textColor || currentTextStyle.background !== undefined;
+
+                    if (hasCustomStyle) {
+                        // Store styled character
+                        const style: { color?: string; background?: string } = {
+                            color: currentTextStyle.color
+                        };
+                        if (currentTextStyle.background !== undefined) {
+                            style.background = currentTextStyle.background;
+                        }
+
+                        nextWorldData[key] = {
+                            char: char,
+                            style: style
+                        };
+                    } else {
+                        // Store plain character
+                        nextWorldData[key] = char;
+                    }
+                }
+
+                worldDataChanged = true;
+                nextCursorPos.x += suggestionLength;
+                moved = true;
+
+                // Clear suggestion
+                setCurrentSuggestion('');
+                setSuggestionData({});
+                setCurrentSuggestions([]);
+                setCurrentSuggestionIndex(0);
+            }
+            // If no suggestion, Tab does nothing (but still prevents default browser behavior)
         } else if (key === 'Delete') {
             // Check if cursor is in a list first (and no selection active)
             if (!currentSelectionActive) {
@@ -8242,6 +8243,68 @@ export function useWorldEngine({
                 worldDataChanged = true; // Mark that synchronous data change occurred
                 setLastEnterX(null); // Reset Enter X tracking when typing
 
+                // Generate autocomplete suggestion with debouncing (only if enabled)
+                if (settings.isAutocompleteEnabled) {
+                    if (suggestionDebounceRef.current) {
+                        clearTimeout(suggestionDebounceRef.current);
+                    }
+
+                    suggestionDebounceRef.current = setTimeout(async () => {
+                    try {
+                        // Get current line text for context
+                        let currentLineText = '';
+                        for (let x = cursorAfterDelete.x - 20; x < cursorAfterDelete.x + 1; x++) {
+                            const char = worldData[`${x},${cursorAfterDelete.y}`];
+                            if (char && typeof char === 'string') {
+                                currentLineText += char;
+                            }
+                        }
+                        currentLineText = currentLineText.trim();
+
+                        if (currentLineText.length > 0) {
+                            let suggestions: string[] = [];
+                            try {
+                                const response = await fetch('/api/autocomplete', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                    },
+                                    body: JSON.stringify({ currentText: currentLineText })
+                                });
+
+                                if (response.ok) {
+                                    const data = await response.json();
+                                    suggestions = data.suggestions || [];
+                                }
+                            } catch (aiError) {
+                                // Silently fail
+                            }
+
+                            if (suggestions.length > 0) {
+                                setCurrentSuggestions(suggestions);
+                                setCurrentSuggestionIndex(0);
+
+                                // Use first suggestion
+                                const firstSuggestion = suggestions[0];
+                                setCurrentSuggestion(firstSuggestion);
+                                currentSuggestionRef.current = firstSuggestion; // Set ref immediately
+
+                                // Create suggestion data (gray ghost text two positions after cursor)
+                                const newSuggestionData: WorldData = {};
+                                for (let i = 0; i < firstSuggestion.length; i++) {
+                                    // Position suggestion two cells to the right of cursor
+                                    const suggestionKey = `${cursorAfterDelete.x + 2 + i},${cursorAfterDelete.y}`;
+                                    newSuggestionData[suggestionKey] = firstSuggestion[i];
+                                }
+                                setSuggestionData(newSuggestionData);
+                            }
+                        }
+                    } catch (error) {
+                        logger.error('Error generating autocomplete:', error);
+                    }
+                    }, 300); // 300ms debounce
+                } // End if isAutocompleteEnabled
+
                 // Mark that we just typed a character (for IME composition logic)
                 // But not for space, since space ends composition
                 if (key !== ' ') {
@@ -8296,6 +8359,9 @@ export function useWorldEngine({
     ]);
 
     const handleCanvasClick = useCallback((canvasRelativeX: number, canvasRelativeY: number, clearSelection: boolean = false, shiftKey: boolean = false, metaKey: boolean = false, ctrlKey: boolean = false): void => {
+        // Clear autocomplete on canvas click
+        clearAutocompleteSuggestions();
+
         const newCursorPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
 
         // === Cmd+Click to Add Text Block to Clipboard ===
@@ -9082,6 +9148,7 @@ export function useWorldEngine({
         commandState,
         commandSystem: { selectCommand, executeCommandString, startCommand, startCommandWithInput },
         chatData,
+        suggestionData,
         lightModeData,
         searchData,
         viewOffset,
