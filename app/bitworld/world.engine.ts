@@ -1023,6 +1023,8 @@ export function useWorldEngine({
         executeCommandString,
         startCommand,
         startCommandWithInput,
+        addComposedText,
+        removeCompositionTrigger,
     } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, userUid, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
@@ -2838,7 +2840,12 @@ export function useWorldEngine({
 
         // === Command Handling (Early Priority) ===
         if (enableCommands) {
-            const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos, ctrlKey, metaKey, shiftKey, altKey);
+            // Set justTypedCharRef for command mode character input (for IME composition)
+            if (commandState.isActive && key.length === 1 && !isMod && key !== ' ' && !isComposingRef.current) {
+                justTypedCharRef.current = true;
+            }
+
+            const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos, ctrlKey, metaKey, shiftKey, altKey, isComposingRef.current);
             if (commandResult && typeof commandResult === 'object') {
                 // It's a command execution object - handle it
                 const exec = commandResult as CommandExecution;
@@ -5538,8 +5545,8 @@ export function useWorldEngine({
                 }
                 // In host mode, Escape does nothing - user stays in chat mode
                 return true;
-            } else if (key.length === 1) {
-                // Add character to chat input
+            } else if (key.length === 1 && !isComposingRef.current) {
+                // Add character to chat input (skip during IME composition)
                 const newInput = chatMode.currentInput + key;
                 const currentKey = `${cursorPos.x},${cursorPos.y}`;
 
@@ -5557,6 +5564,12 @@ export function useWorldEngine({
 
                 // Move cursor immediately for chat mode
                 setCursorPos({ x: cursorPos.x + 1, y: cursorPos.y });
+
+                // Mark that we just typed a character (for IME composition logic)
+                if (key !== ' ') {
+                    justTypedCharRef.current = true;
+                }
+
                 return true;
             } else if (key === 'Backspace') {
                 if (metaKey) {
@@ -8943,13 +8956,34 @@ export function useWorldEngine({
             // Back up one position to where the trigger character was written
             startPos = { x: currentPos.x - 1, y: currentPos.y };
 
-            // Remove the trigger character at the start position
-            setWorldData(prev => {
-                const newWorldData = { ...prev };
-                const triggerKey = `${startPos.x},${startPos.y}`;
-                delete newWorldData[triggerKey];
-                return newWorldData;
-            });
+            // Remove the trigger character from the appropriate data store
+            const triggerKey = `${startPos.x},${startPos.y}`;
+
+            if (chatMode.isActive && !commandState.isActive) {
+                // Remove from chatData
+                setChatData(prev => {
+                    const newChatData = { ...prev };
+                    delete newChatData[triggerKey];
+                    return newChatData;
+                });
+
+                // Remove from chat mode input and positions
+                setChatMode(prev => ({
+                    ...prev,
+                    currentInput: prev.currentInput.slice(0, -1),
+                    inputPositions: prev.inputPositions.slice(0, -1)
+                }));
+            } else if (commandState.isActive) {
+                // Remove from commandData using command system helper
+                removeCompositionTrigger();
+            } else {
+                // Regular mode: Remove from worldData
+                setWorldData(prev => {
+                    const newWorldData = { ...prev };
+                    delete newWorldData[triggerKey];
+                    return newWorldData;
+                });
+            }
 
             // Move cursor back to where composition should start
             setCursorPos(startPos);
@@ -8967,7 +9001,7 @@ export function useWorldEngine({
         setCompositionStartPos(startPos);
         compositionStartPosRef.current = startPos;
         setCompositionText('');
-    }, []);
+    }, [chatMode.isActive, commandState.isActive, removeCompositionTrigger]);
 
     const handleCompositionUpdate = useCallback((text: string): void => {
         setCompositionText(text);
@@ -8995,40 +9029,77 @@ export function useWorldEngine({
         // Calculate final cursor position after placing all characters
         const finalCursorPos = { x: startPos.x + text.length, y: startPos.y };
 
-        // Place each character from the composed text using functional setState
-        setWorldData(prev => {
-            const newWorldData = { ...prev };
-            let currentPos = { ...startPos };
+        // Detect which mode is active and write to appropriate data store
+        if (chatMode.isActive && !commandState.isActive) {
+            // Chat mode: write to chatData and update chatMode state
+            setChatData(prev => {
+                const newChatData = { ...prev };
+                let currentPos = { ...startPos };
 
-            for (const char of text) {
-                const key = `${currentPos.x},${currentPos.y}`;
-
-                // Check if current text style is different from global defaults
-                const hasCustomStyle = currentTextStyle.color !== textColor || currentTextStyle.background !== undefined;
-
-                if (hasCustomStyle) {
-                    // Store styled character
-                    const style: { color?: string; background?: string } = {
-                        color: currentTextStyle.color
-                    };
-                    if (currentTextStyle.background !== undefined) {
-                        style.background = currentTextStyle.background;
-                    }
-
-                    newWorldData[key] = {
-                        char: char,
-                        style: style
-                    };
-                } else {
-                    // Store plain character
-                    newWorldData[key] = char;
+                for (const char of text) {
+                    const key = `${currentPos.x},${currentPos.y}`;
+                    newChatData[key] = char;
+                    currentPos.x++;
                 }
 
-                currentPos.x++;
-            }
+                return newChatData;
+            });
 
-            return newWorldData;
-        });
+            // Update chat mode input and positions
+            setChatMode(prev => {
+                const newPositions = [...prev.inputPositions];
+                let currentPos = { ...startPos };
+
+                for (const char of text) {
+                    newPositions.push({ ...currentPos });
+                    currentPos.x++;
+                }
+
+                return {
+                    ...prev,
+                    currentInput: prev.currentInput + text,
+                    inputPositions: newPositions
+                };
+            });
+        } else if (commandState.isActive) {
+            // Command mode: use command system's helper to handle composed text
+            addComposedText(text, startPos);
+        } else {
+            // Regular mode: write to worldData with styling
+            setWorldData(prev => {
+                const newWorldData = { ...prev };
+                let currentPos = { ...startPos };
+
+                for (const char of text) {
+                    const key = `${currentPos.x},${currentPos.y}`;
+
+                    // Check if current text style is different from global defaults
+                    const hasCustomStyle = currentTextStyle.color !== textColor || currentTextStyle.background !== undefined;
+
+                    if (hasCustomStyle) {
+                        // Store styled character
+                        const style: { color?: string; background?: string } = {
+                            color: currentTextStyle.color
+                        };
+                        if (currentTextStyle.background !== undefined) {
+                            style.background = currentTextStyle.background;
+                        }
+
+                        newWorldData[key] = {
+                            char: char,
+                            style: style
+                        };
+                    } else {
+                        // Store plain character
+                        newWorldData[key] = char;
+                    }
+
+                    currentPos.x++;
+                }
+
+                return newWorldData;
+            });
+        }
 
         // Update cursor position to after the composed text
         setCursorPos(finalCursorPos);
@@ -9038,7 +9109,7 @@ export function useWorldEngine({
         justTypedCharRef.current = false;
         preCompositionCursorPosRef.current = null;
         justCancelledCompositionRef.current = false;
-    }, [currentTextStyle, textColor]);
+    }, [currentTextStyle, textColor, chatMode.isActive, commandState.isActive, addComposedText]);
 
     const deleteCharacter = useCallback((x: number, y: number): void => {
         const key = `${x},${y}`;

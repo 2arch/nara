@@ -2772,7 +2772,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         ctrlKey: boolean = false,
         metaKey: boolean = false,
         shiftKey: boolean = false,
-        altKey: boolean = false
+        altKey: boolean = false,
+        isComposing: boolean = false
     ): boolean | CommandExecution | null => {
         const isPermanent = metaKey || ctrlKey; // Track if Cmd/Ctrl+Enter
         // Handle paste in command mode (Cmd+V or Ctrl+V)
@@ -2962,8 +2963,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 }
             }
             return true;
-        } else if (key.length === 1) {
-            // Add character to command input
+        } else if (key.length === 1 && !isComposing) {
+            // Add character to command input (skip during IME composition)
             addCharacter(key);
             // Move cursor forward
             setCursorPos(prev => ({ x: prev.x + 1, y: prev.y }));
@@ -3156,6 +3157,79 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         setCommandData(newCommandData);
     }, [startCommand, matchCommands]);
 
+    // Helper method to remove trigger character for IME composition
+    const removeCompositionTrigger = useCallback(() => {
+        setCommandState(prev => {
+            // Remove last character from input
+            const newInput = prev.input.slice(0, -1);
+            const newMatchedCommands = matchCommands(newInput);
+
+            // Update command display
+            const newCommandData: WorldData = {};
+            const commandText = `/${newInput}`;
+
+            // Draw command text at original command start position
+            for (let i = 0; i < commandText.length; i++) {
+                const key = `${prev.commandStartPos.x + i},${prev.commandStartPos.y}`;
+                newCommandData[key] = commandText[i];
+            }
+
+            // Draw autocomplete suggestions below
+            newMatchedCommands.forEach((command, index) => {
+                const suggestionY = prev.commandStartPos.y + 1 + index;
+                for (let i = 0; i < command.length; i++) {
+                    const key = `${prev.commandStartPos.x + i},${suggestionY}`;
+                    newCommandData[key] = command[i];
+                }
+            });
+
+            setCommandData(newCommandData);
+
+            return {
+                ...prev,
+                input: newInput,
+                matchedCommands: newMatchedCommands,
+                selectedIndex: Math.min(prev.selectedIndex, newMatchedCommands.length - 1),
+            };
+        });
+    }, [matchCommands]);
+
+    // Helper method to add composed text from IME (Korean, Japanese, Chinese, etc.)
+    const addComposedText = useCallback((text: string, startPos: Point) => {
+        setCommandState(prev => {
+            const newInput = prev.input + text;
+            const newMatchedCommands = matchCommands(newInput);
+
+            // Update command display at original command start position
+            const newCommandData: WorldData = {};
+            const commandText = `/${newInput}`;
+
+            // Draw command text at original command start position
+            for (let i = 0; i < commandText.length; i++) {
+                const key = `${prev.commandStartPos.x + i},${prev.commandStartPos.y}`;
+                newCommandData[key] = commandText[i];
+            }
+
+            // Draw autocomplete suggestions below
+            newMatchedCommands.forEach((command, index) => {
+                const suggestionY = prev.commandStartPos.y + 1 + index;
+                for (let i = 0; i < command.length; i++) {
+                    const key = `${prev.commandStartPos.x + i},${suggestionY}`;
+                    newCommandData[key] = command[i];
+                }
+            });
+
+            setCommandData(newCommandData);
+
+            return {
+                ...prev,
+                input: newInput,
+                matchedCommands: newMatchedCommands,
+                selectedIndex: Math.min(prev.selectedIndex, newMatchedCommands.length - 1),
+            };
+        });
+    }, [matchCommands]);
+
     return {
         commandState,
         commandData,
@@ -3164,6 +3238,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         executeCommandString,
         startCommand, // Expose startCommand for keyboard shortcuts
         startCommandWithInput, // Expose for Cmd+F
+        addComposedText, // Expose for IME composition
+        removeCompositionTrigger, // Expose for IME composition start
         isCommandMode: commandState.isActive,
         // Pending command system
         pendingCommand,
