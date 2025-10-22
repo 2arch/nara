@@ -3826,9 +3826,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
-        // === Render Generating Image Region ===
-        if (engine.generatingImageRegion) {
-            const { startX, endX, startY, endY } = engine.generatingImageRegion;
+        // === Render AI Processing Region ===
+        if (engine.aiProcessingRegion) {
+            const { startX, endX, startY, endY } = engine.aiProcessingRegion;
 
             // Pulse effect using time
             const pulseAlpha = 0.15 + 0.1 * Math.sin(Date.now() / 400);
