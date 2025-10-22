@@ -3002,7 +3002,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 const baseCommand = commandText.split(' ')[0];
                                 const helpText = COMMAND_HELP[baseCommand];
                                 if (helpText) {
-                                    const helpStartX = engine.commandState.commandStartPos.x + commandText.length + 2;
+                                    // Find the longest command to determine consistent help text start position
+                                    const longestCommandLength = Math.max(...engine.commandState.matchedCommands.map(cmd => cmd.length));
+                                    const helpStartX = engine.commandState.commandStartPos.x + longestCommandLength + 1; // +3 for 2 spaces gap
                                     const maxWrapWidth = 60; // Maximum width for help text
 
                                     // Get background and text colors for category-label style
@@ -3722,6 +3724,29 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     }
                 } catch (e) {
                     // Skip invalid note data
+                }
+            }
+        }
+
+        // === Render Generating Image Region ===
+        if (engine.generatingImageRegion) {
+            const { startX, endX, startY, endY } = engine.generatingImageRegion;
+
+            // Pulse effect using time
+            const pulseAlpha = 0.15 + 0.1 * Math.sin(Date.now() / 400);
+            const generatingColor = `rgba(${hexToRgb(engine.textColor)}, ${pulseAlpha})`;
+            ctx.fillStyle = generatingColor;
+
+            // Fill each cell in the generating region
+            for (let worldY = startY; worldY <= endY; worldY++) {
+                for (let worldX = startX; worldX <= endX; worldX++) {
+                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+
+                    // Only draw if cell is visible on screen
+                    if (screenPos.x >= -effectiveCharWidth && screenPos.x <= cssWidth &&
+                        screenPos.y >= -effectiveCharHeight && screenPos.y <= cssHeight) {
+                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                    }
                 }
             }
         }

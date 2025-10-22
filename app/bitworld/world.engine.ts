@@ -402,6 +402,7 @@ export function useWorldEngine({
     const [isSelecting, setIsSelecting] = useState(false);
     const [selectionStart, setSelectionStart] = useState<Point | null>(null);
     const [selectionEnd, setSelectionEnd] = useState<Point | null>(null);
+    const [generatingImageRegion, setGeneratingImageRegion] = useState<{ startX: number, endX: number, startY: number, endY: number } | null>(null);
 
     // === State ===
     const [worldData, setWorldData] = useState<WorldData>(initialWorldData);
@@ -2932,6 +2933,9 @@ export function useWorldEngine({
                         if (selectedImageData && selectedImageKey) {
                             setDialogueWithRevert("Generating image...", setDialogueText);
 
+                            // Show visual feedback for image generation
+                            setGeneratingImageRegion({ startX: minX, endX: maxX, startY: minY, endY: maxY });
+
                             // Convert image to base64 if it's a URL (for CORS-safe image-to-image)
                             (async () => {
                                 let base64ImageData: string;
@@ -2960,11 +2964,13 @@ export function useWorldEngine({
                                         logger.debug('Successfully converted to base64');
                                     } catch (error) {
                                         logger.error('Failed to fetch image for conversion:', error);
+                                        setGeneratingImageRegion(null); // Clear visual feedback
                                         setDialogueWithRevert("Could not load image for editing", setDialogueText);
                                         return;
                                     }
                                 } else {
                                     logger.error('Invalid image format:', selectedImageData);
+                                    setGeneratingImageRegion(null); // Clear visual feedback
                                     setDialogueWithRevert("Invalid image format", setDialogueText);
                                     return;
                                 }
@@ -3038,6 +3044,7 @@ export function useWorldEngine({
                                             timestamp: Date.now()
                                         };
                                         setWorldData(updatedWorldData);
+                                        setGeneratingImageRegion(null); // Clear visual feedback
                                         setDialogueWithRevert("Image transformed", setDialogueText);
 
                                         // Clear selection after processing
@@ -3046,9 +3053,11 @@ export function useWorldEngine({
                                     };
                                     img.src = result.imageData;
                                 } else {
+                                    setGeneratingImageRegion(null); // Clear visual feedback
                                     setDialogueWithRevert("Image generation failed", setDialogueText);
                                 }
                                 }).catch((error) => {
+                                    setGeneratingImageRegion(null); // Clear visual feedback
                                     setDialogueWithRevert(`AI error: ${error.message || 'Could not generate image'}`, setDialogueText);
                                 });
                             })(); // Close async IIFE
@@ -3070,6 +3079,10 @@ export function useWorldEngine({
                         if (isImageGenerationPrompt(aiPrompt)) {
                             // Generate image in the selection bounds
                             setDialogueWithRevert("Generating image...", setDialogueText);
+
+                            // Show visual feedback for image generation
+                            setGeneratingImageRegion({ startX: minX, endX: maxX, startY: minY, endY: maxY });
+
                             loadAI().then(ai => ai.generateImage(aiPrompt, undefined, userUid || undefined)).then(async (result) => {
                                 // Check if quota exceeded
                                 if (result.text && result.text.startsWith('AI limit reached')) {
@@ -3141,6 +3154,7 @@ export function useWorldEngine({
                                         };
 
                                         setWorldData(updatedWorldData);
+                                        setGeneratingImageRegion(null); // Clear visual feedback
                                         setDialogueWithRevert("Image generated", setDialogueText);
 
                                         // Clear selection after processing
@@ -3149,9 +3163,11 @@ export function useWorldEngine({
                                     };
                                     img.src = finalImageUrl;
                                 } else {
+                                    setGeneratingImageRegion(null); // Clear visual feedback
                                     setDialogueWithRevert("Could not generate image", setDialogueText);
                                 }
                             }).catch((error) => {
+                                setGeneratingImageRegion(null); // Clear visual feedback
                                 setDialogueWithRevert(`AI error: ${error.message || 'Could not generate image'}`, setDialogueText);
                             });
 
@@ -3331,6 +3347,9 @@ export function useWorldEngine({
                             const regionHeight = imageRegion!.endY - imageRegion!.startY + 1;
                             const aspectRatio = regionWidth > regionHeight ? '16:9' : regionHeight > regionWidth ? '9:16' : '1:1';
 
+                            // Show visual feedback for image generation
+                            setGeneratingImageRegion(imageRegion);
+
                             loadAI().then(ai => ai.generateImage(aiPrompt, base64ImageData, userUid || undefined, aspectRatio)).then(async (result) => {
                             // Check if quota exceeded
                             if (result.text && result.text.startsWith('AI limit reached')) {
@@ -3396,13 +3415,16 @@ export function useWorldEngine({
                                         };
                                         return updatedWorldData;
                                     });
+                                    setGeneratingImageRegion(null); // Clear visual feedback
                                     setDialogueWithRevert("Image transformed", setDialogueText);
                                 };
                                 img.src = result.imageData;
                             } else {
+                                setGeneratingImageRegion(null); // Clear visual feedback
                                 setDialogueWithRevert("Image generation failed", setDialogueText);
                             }
                             }).catch((error) => {
+                                setGeneratingImageRegion(null); // Clear visual feedback
                                 setDialogueWithRevert(`AI error: ${error.message || 'Could not generate image'}`, setDialogueText);
                             });
                         })(); // Close async IIFE
@@ -9299,6 +9321,7 @@ export function useWorldEngine({
         setZoomLevel, // Expose zoom setter
         selectionStart,
         selectionEnd,
+        generatingImageRegion,
         handleSelectionStart,
         handleSelectionMove,
         handleSelectionEnd,
