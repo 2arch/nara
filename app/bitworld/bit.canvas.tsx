@@ -2609,6 +2609,16 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const worldX = parseInt(xStr, 10);
             const worldY = parseInt(yStr, 10);
 
+            // Skip positions that are currently being used for IME composition preview in chat mode
+            if (engine.isComposing && engine.compositionStartPos && engine.compositionText && engine.chatMode.isActive) {
+                const compStartX = engine.compositionStartPos.x;
+                const compEndX = compStartX + engine.compositionText.length - 1;
+                const compY = engine.compositionStartPos.y;
+                if (worldY === compY && worldX >= compStartX && worldX <= compEndX) {
+                    continue;
+                }
+            }
+
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.chatData[key];
 
@@ -2635,6 +2645,44 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         if (char.trim() !== '') {
                             ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
                             renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
+                        }
+                    }
+                }
+            }
+        }
+
+        // === Render IME Composition Preview for Chat Mode ===
+        if (engine.isComposing && engine.compositionText && engine.compositionStartPos && engine.chatMode.isActive) {
+            const startPos = engine.compositionStartPos;
+
+            for (let i = 0; i < engine.compositionText.length; i++) {
+                const char = engine.compositionText[i];
+                const worldX = startPos.x + i;
+                const worldY = startPos.y;
+
+                if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+
+                    if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                        screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+
+                        if (char && char.trim() !== '') {
+                            // Draw background using accent color (engine.textColor)
+                            ctx.fillStyle = engine.textColor;
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+
+                            // Draw text using background color (inverse of accent)
+                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                            renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
+
+                            // Draw underline to indicate composition state
+                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                            ctx.fillRect(
+                                screenPos.x,
+                                screenPos.y + effectiveCharHeight - 2,
+                                effectiveCharWidth,
+                                2
+                            );
                         }
                     }
                 }
@@ -2783,6 +2831,17 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         for (const key in engine.commandData) {
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
+
+            // Skip positions that are currently being used for IME composition preview in command mode
+            if (engine.isComposing && engine.compositionStartPos && engine.compositionText && engine.commandState.isActive) {
+                const compStartX = engine.compositionStartPos.x;
+                const compEndX = compStartX + engine.compositionText.length - 1;
+                const compY = engine.compositionStartPos.y;
+                if (worldY === compY && worldX >= compStartX && worldX <= compEndX) {
+                    continue;
+                }
+            }
+
             if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                 const charData = engine.commandData[key];
                 
@@ -3062,6 +3121,45 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
             }
         }
+
+        // === Render IME Composition Preview for Command Mode ===
+        if (engine.isComposing && engine.compositionText && engine.compositionStartPos && engine.commandState.isActive) {
+            const startPos = engine.compositionStartPos;
+
+            for (let i = 0; i < engine.compositionText.length; i++) {
+                const char = engine.compositionText[i];
+                const worldX = startPos.x + i;
+                const worldY = startPos.y;
+
+                if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+
+                    if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                        screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+
+                        if (char && char.trim() !== '') {
+                            // Draw background using text color (command line style)
+                            ctx.fillStyle = engine.textColor;
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+
+                            // Draw text using background color
+                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                            renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
+
+                            // Draw underline to indicate composition state
+                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                            ctx.fillRect(
+                                screenPos.x,
+                                screenPos.y + effectiveCharHeight - 2,
+                                effectiveCharWidth,
+                                2
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         ctx.fillStyle = engine.textColor; // Reset to normal text color
 
 

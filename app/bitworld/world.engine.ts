@@ -567,6 +567,7 @@ export function useWorldEngine({
     const justTypedCharRef = useRef<boolean>(false); // Track if we just typed a character before composition starts
     const preCompositionCursorPosRef = useRef<Point | null>(null); // Track cursor position before backing up
     const justCancelledCompositionRef = useRef<boolean>(false); // Track if we just cancelled composition with backspace
+    const compositionCancelledByModeExitRef = useRef<boolean>(false); // Track if composition was cancelled by exiting mode
 
     // === Agent System ===
     const [agentEnabled, setAgentEnabled] = useState<boolean>(false);
@@ -980,6 +981,23 @@ export function useWorldEngine({
     // === Settings System ===
     const { settings, setSettings, updateSettings } = useWorldSettings();
 
+    // Callback to cancel IME composition (for command system)
+    const cancelComposition = useCallback(() => {
+        if (isComposingRef.current) {
+            // Mark that composition was cancelled by mode exit
+            compositionCancelledByModeExitRef.current = true;
+
+            setIsComposing(false);
+            isComposingRef.current = false;
+            setCompositionText('');
+            setCompositionStartPos(null);
+            compositionStartPosRef.current = null;
+            justTypedCharRef.current = false;
+            preCompositionCursorPosRef.current = null;
+            justCancelledCompositionRef.current = false;
+        }
+    }, []);
+
     // === Command System ===
     const {
         commandState,
@@ -1025,7 +1043,7 @@ export function useWorldEngine({
         startCommandWithInput,
         addComposedText,
         removeCompositionTrigger,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, userUid, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow: () => {
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, userUid, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
         }
@@ -2776,6 +2794,19 @@ export function useWorldEngine({
         // === Chat Mode Exit ===
         // Don't allow ESC out of chat mode if in host mode (authentication) or read-only
         if (key === 'Escape' && chatMode.isActive && !hostMode.isActive && !isReadOnly) {
+            // Cancel any active composition before exiting
+            if (isComposingRef.current) {
+                compositionCancelledByModeExitRef.current = true;
+                setIsComposing(false);
+                isComposingRef.current = false;
+                setCompositionText('');
+                setCompositionStartPos(null);
+                compositionStartPosRef.current = null;
+                justTypedCharRef.current = false;
+                preCompositionCursorPosRef.current = null;
+                justCancelledCompositionRef.current = false;
+            }
+
             setChatMode({
                 isActive: false,
                 currentInput: '',
@@ -5532,6 +5563,19 @@ export function useWorldEngine({
             } else if (key === 'Escape') {
                 // Only allow exiting chat mode if NOT in host mode
                 if (!hostMode.isActive) {
+                    // Cancel any active composition before exiting
+                    if (isComposingRef.current) {
+                        compositionCancelledByModeExitRef.current = true;
+                        setIsComposing(false);
+                        isComposingRef.current = false;
+                        setCompositionText('');
+                        setCompositionStartPos(null);
+                        compositionStartPosRef.current = null;
+                        justTypedCharRef.current = false;
+                        preCompositionCursorPosRef.current = null;
+                        justCancelledCompositionRef.current = false;
+                    }
+
                     // Exit chat mode
                     setChatMode({
                         isActive: false,
@@ -9008,6 +9052,12 @@ export function useWorldEngine({
     }, []);
 
     const handleCompositionEnd = useCallback((text: string): void => {
+        // If composition was cancelled by mode exit, don't process the text
+        if (compositionCancelledByModeExitRef.current) {
+            compositionCancelledByModeExitRef.current = false;
+            return;
+        }
+
         // Use ref to get the most up-to-date start position synchronously
         const startPos = compositionStartPosRef.current || cursorPosRef.current;
 

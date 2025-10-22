@@ -96,6 +96,7 @@ interface UseCommandSystemProps {
     triggerUpgradeFlow?: () => void;
     triggerTutorialFlow?: () => void;
     onCommandExecuted?: (command: string, args: string[]) => void;
+    cancelComposition?: () => void; // Callback to cancel IME composition
 }
 
 // --- Command System Constants ---
@@ -185,7 +186,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, userUid, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, userUid, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const [commandState, setCommandState] = useState<CommandState>({
@@ -2820,6 +2821,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
 
             return result;
         } else if (key === 'Escape') {
+            // Cancel any active composition before exiting
+            if (cancelComposition) {
+                cancelComposition();
+            }
+
             // Exit command mode without executing and restore cursor to original position
             const originalPos = commandState.originalCursorPos;
             setCommandState({
