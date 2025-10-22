@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useWorldSave } from './world.save'; // Import the new hook
 import { useCommandSystem, CommandState, CommandExecution, BackgroundMode, COLOR_MAP } from './commands'; // Import command system
-import { getSmartIndentation, calculateWordDeletion, extractLineCharacters, detectTextBlocks, findClosestBlock, extractAllTextBlocks, groupTextBlocksIntoClusters, filterClustersForLabeling, generateTextBlockFrames, generateHierarchicalFrames, HierarchicalFrameSystem, HierarchicalFrame, HierarchyLevel, defaultDistanceConfig, DistanceBasedConfig } from './bit.blocks'; // Import block detection utilities
+import { getSmartIndentation, calculateWordDeletion, extractLineCharacters, detectTextBlocks, findClosestBlock, findBlockForDeletion, extractAllTextBlocks, groupTextBlocksIntoClusters, filterClustersForLabeling, generateTextBlockFrames, generateHierarchicalFrames, HierarchicalFrameSystem, HierarchicalFrame, HierarchyLevel, defaultDistanceConfig, DistanceBasedConfig } from './bit.blocks'; // Import block detection utilities
 import { useWorldSettings, WorldSettings } from './settings';
 import { set, ref, increment, runTransaction } from 'firebase/database';
 import { database, auth, storage } from '@/app/firebase';
@@ -2931,7 +2931,45 @@ export function useWorldEngine({
                         // If selection contains an image, do image-to-image generation
                         if (selectedImageData && selectedImageKey) {
                             setDialogueWithRevert("Generating image...", setDialogueText);
-                            loadAI().then(ai => ai.generateImage(aiPrompt, selectedImageData, userUid || undefined)).then(async (result) => {
+
+                            // Convert image to base64 if it's a URL (for CORS-safe image-to-image)
+                            (async () => {
+                                let base64ImageData: string;
+
+                                // Check if it's already a data URL
+                                if (selectedImageData && selectedImageData.startsWith('data:')) {
+                                    base64ImageData = selectedImageData;
+                                    logger.debug('Image is already base64 data URL');
+                                }
+                                // Check if it's a Firebase Storage URL
+                                else if (selectedImageData && (selectedImageData.startsWith('http://') || selectedImageData.startsWith('https://'))) {
+                                    logger.debug('Fetching Firebase Storage URL:', selectedImageData);
+                                    try {
+                                        // Fetch and convert to base64
+                                        const response = await fetch(selectedImageData);
+                                        if (!response.ok) {
+                                            throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
+                                        }
+                                        const blob = await response.blob();
+                                        base64ImageData = await new Promise<string>((resolve, reject) => {
+                                            const reader = new FileReader();
+                                            reader.onloadend = () => resolve(reader.result as string);
+                                            reader.onerror = reject;
+                                            reader.readAsDataURL(blob);
+                                        });
+                                        logger.debug('Successfully converted to base64');
+                                    } catch (error) {
+                                        logger.error('Failed to fetch image for conversion:', error);
+                                        setDialogueWithRevert("Could not load image for editing", setDialogueText);
+                                        return;
+                                    }
+                                } else {
+                                    logger.error('Invalid image format:', selectedImageData);
+                                    setDialogueWithRevert("Invalid image format", setDialogueText);
+                                    return;
+                                }
+
+                                loadAI().then(ai => ai.generateImage(aiPrompt, base64ImageData, userUid || undefined)).then(async (result) => {
                                 // Check if quota exceeded
                                 if (result.text && result.text.startsWith('AI limit reached')) {
                                     if (upgradeFlowHandlerRef.current) {
@@ -3006,9 +3044,10 @@ export function useWorldEngine({
                                 } else {
                                     setDialogueWithRevert("Image generation failed", setDialogueText);
                                 }
-                            }).catch((error) => {
-                                setDialogueWithRevert(`AI error: ${error.message || 'Could not generate image'}`, setDialogueText);
-                            });
+                                }).catch((error) => {
+                                    setDialogueWithRevert(`AI error: ${error.message || 'Could not generate image'}`, setDialogueText);
+                                });
+                            })(); // Close async IIFE
                             return true;
                         }
 
@@ -3241,7 +3280,45 @@ export function useWorldEngine({
                     // If image exists, do image-to-image generation
                     if (existingImageData && existingImageKey && imageRegion) {
                         setDialogueWithRevert("Generating image...", setDialogueText);
-                        loadAI().then(ai => ai.generateImage(aiPrompt, existingImageData, userUid || undefined)).then(async (result) => {
+
+                        // Convert image to base64 if it's a URL (for CORS-safe image-to-image)
+                        (async () => {
+                            let base64ImageData: string;
+
+                            // Check if it's already a data URL
+                            if (existingImageData.startsWith('data:')) {
+                                base64ImageData = existingImageData;
+                                logger.debug('Image is already base64 data URL');
+                            }
+                            // Check if it's a Firebase Storage URL
+                            else if (existingImageData.startsWith('http://') || existingImageData.startsWith('https://')) {
+                                logger.debug('Fetching Firebase Storage URL:', existingImageData);
+                                try {
+                                    // Fetch and convert to base64
+                                    const response = await fetch(existingImageData);
+                                    if (!response.ok) {
+                                        throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
+                                    }
+                                    const blob = await response.blob();
+                                    base64ImageData = await new Promise<string>((resolve, reject) => {
+                                        const reader = new FileReader();
+                                        reader.onloadend = () => resolve(reader.result as string);
+                                        reader.onerror = reject;
+                                        reader.readAsDataURL(blob);
+                                    });
+                                    logger.debug('Successfully converted to base64');
+                                } catch (error) {
+                                    logger.error('Failed to fetch image for conversion:', error);
+                                    setDialogueWithRevert("Could not load image for editing", setDialogueText);
+                                    return;
+                                }
+                            } else {
+                                logger.error('Invalid image format:', existingImageData);
+                                setDialogueWithRevert("Invalid image format", setDialogueText);
+                                return;
+                            }
+
+                            loadAI().then(ai => ai.generateImage(aiPrompt, base64ImageData, userUid || undefined)).then(async (result) => {
                             // Check if quota exceeded
                             if (result.text && result.text.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
@@ -3309,9 +3386,10 @@ export function useWorldEngine({
                             } else {
                                 setDialogueWithRevert("Image generation failed", setDialogueText);
                             }
-                        }).catch((error) => {
-                            setDialogueWithRevert(`AI error: ${error.message || 'Could not generate image'}`, setDialogueText);
-                        });
+                            }).catch((error) => {
+                                setDialogueWithRevert(`AI error: ${error.message || 'Could not generate image'}`, setDialogueText);
+                            });
+                        })(); // Close async IIFE
                         return true;
                     }
 
@@ -6299,43 +6377,22 @@ export function useWorldEngine({
                 if (lineChars.length > 0) {
                     const blocks = detectTextBlocks(lineChars);
                     const closestBlockResult = findClosestBlock(blocks, cursorPos.x);
-                    
+
                     if (closestBlockResult && closestBlockResult.distance === 0) {
                         // Cursor is within a text block - use that block
                         const block = closestBlockResult.block;
                         textToSend = block.characters.map(c => c.char).join('');
                         chatStartPos = { x: block.start, y: currentY };
+                    } else if (closestBlockResult) {
+                        // Cursor is NOT within a block, but there are blocks on the line
+                        // Use the closest block (respects 2+ cell gap boundaries)
+                        const block = closestBlockResult.block;
+                        textToSend = block.characters.map(c => c.char).join('');
+                        chatStartPos = { x: block.start, y: currentY };
                     } else {
-                        // No enclosing block or cursor not within block - fall back to entire line
-                        let lineText = '';
-                        let minX = cursorPos.x;
-                        let maxX = cursorPos.x;
-                        
-                        // Find the extent of text on current line
-                        for (const key in worldData) {
-                            const [xStr, yStr] = key.split(',');
-                            const x = parseInt(xStr, 10);
-                            const y = parseInt(yStr, 10);
-                            
-                            if (y === currentY) {
-                                minX = Math.min(minX, x);
-                                maxX = Math.max(maxX, x);
-                            }
-                        }
-                        
-                        // Extract the line text
-                        for (let x = minX; x <= maxX; x++) {
-                            const key = `${x},${currentY}`;
-                            const charData = worldData[key];
-                            if (charData && !isImageData(charData)) {
-                                const char = getCharacter(charData);
-                                lineText += char;
-                            } else {
-                                lineText += ' ';
-                            }
-                        }
-                        textToSend = lineText.trim();
-                        chatStartPos = { x: minX, y: currentY };
+                        // No blocks found at all (shouldn't happen if lineChars.length > 0)
+                        setDialogueWithRevert("No text found to send to AI", setDialogueText);
+                        return false;
                     }
                 } else {
                     // No text on line
@@ -6885,9 +6942,16 @@ export function useWorldEngine({
             }
             
             logger.debug('Final targetIndent after viewport check:', targetIndent);
-            
+
             nextCursorPos.y = cursorPos.y + 1;
-            nextCursorPos.x = targetIndent !== undefined && targetIndent !== null ? targetIndent : cursorPos.x;            
+            // Failsafe: if targetIndent is NaN, undefined, or null, use previous cursor X position
+            if (targetIndent !== undefined && targetIndent !== null && !isNaN(targetIndent)) {
+                nextCursorPos.x = targetIndent;
+            } else {
+                // Fallback to current cursor X if targetIndent is invalid
+                nextCursorPos.x = cursorPos.x;
+                logger.warn('targetIndent was invalid (NaN/null/undefined), using current cursor X:', cursorPos.x);
+            }
             moved = true;
         } else if (key === 'ArrowUp') {
             if (isMod) {
@@ -7361,120 +7425,126 @@ export function useWorldEngine({
                     nextCursorPos = { x: selectionStart?.x ?? cursorPos.x, y: selectionStart?.y ?? cursorPos.y };
                 }
             } else if (metaKey) {
-                // Cmd+Backspace: Delete whole line (from cursor to beginning of line)
+                // Cmd+Backspace: Delete whole line (using text block detection with 2+ cell gap rule)
                 nextWorldData = { ...worldData }; // Create a copy before modifying
 
-                // First, find the leftmost character on this line
-                let leftmostX = cursorPos.x;
-                for (const k in worldData) {
-                    const [xStr, yStr] = k.split(',');
-                    const checkY = parseInt(yStr, 10);
-                    if (checkY === cursorPos.y) {
-                        const checkX = parseInt(xStr, 10);
-                        if (checkX < leftmostX && !k.startsWith('block_') && !k.startsWith('label_') && !k.startsWith('bound_')) {
-                            leftmostX = checkX;
-                        }
-                    }
-                }
-
-                let deletedAny = false;
-                let x = cursorPos.x - 1; // Start from the character to the left of cursor
-
-                // Delete all characters from cursor back to x=0
-                while (x >= 0) {
-                    const key = `${x},${cursorPos.y}`;
-                    if (worldData[key]) {
-                        delete nextWorldData[key];
-                        deletedAny = true;
-                    }
-                    x--;
-                }
-
-                // Only mark as changed if we actually deleted something
-                if (deletedAny) {
-                    worldDataChanged = true;
-                    // Move cursor to where the leftmost character was
-                    nextCursorPos.x = leftmostX;
-                } else {
-                    // If we didn't delete anything, just move cursor to current position (no change)
+                // Use text block detection to find the current block
+                // Don't include spaces - we want to detect gaps based on empty cells
+                const lineChars = extractLineCharacters(worldData, cursorPos.y, false);
+                if (lineChars.length === 0) {
+                    // No characters on this line
                     nextCursorPos.x = cursorPos.x;
-                }
-            } else if (altKey) {
-                // Option+Backspace (Alt on Windows): Delete whole word
-                nextWorldData = { ...worldData }; // Create a copy before modifying
+                } else {
+                    const blocks = detectTextBlocks(lineChars);
+                    const currentBlock = findBlockForDeletion(blocks, cursorPos.x);
 
-                let deletedAny = false;
-                let x = cursorPos.x - 1; // Start from the character to the left of cursor
-
-                // Find the leftmost character on this line to determine range
-                let leftmostX = cursorPos.x - 1;
-                for (const k in worldData) {
-                    const [xStr, yStr] = k.split(',');
-                    const checkY = parseInt(yStr, 10);
-                    if (checkY === cursorPos.y) {
-                        const checkX = parseInt(xStr, 10);
-                        if (checkX < leftmostX) {
-                            leftmostX = checkX;
+                    if (currentBlock) {
+                        // Delete all characters in the current block
+                        let deletedAny = false;
+                        for (let x = currentBlock.start; x <= currentBlock.end; x++) {
+                            const key = `${x},${cursorPos.y}`;
+                            if (worldData[key]) {
+                                delete nextWorldData[key];
+                                deletedAny = true;
+                            }
                         }
-                    }
-                }
 
-                // Determine what type of character we're starting on
-                const startKey = `${x},${cursorPos.y}`;
-                const startCharData = worldData[startKey];
-                const startChar = startCharData && !isImageData(startCharData) ? getCharacter(startCharData) : '';
-                const startingOnSpace = startChar === ' ' || startChar === '\t';
-
-                // Continue deleting until we've checked all possible positions to the left
-                while (x >= leftmostX) {
-                    const key = `${x},${cursorPos.y}`;
-                    const charData = worldData[key];
-                    const char = charData && !isImageData(charData) ? getCharacter(charData) : '';
-
-                    const isSpace = char === ' ' || char === '\t';
-
-                    if (!char) {
-                        // No character here, continue
-                        x--;
-                        continue;
-                    }
-
-                    if (startingOnSpace) {
-                        // If we started on a space, only delete spaces
-                        if (isSpace) {
-                            delete nextWorldData[key];
-                            deletedAny = true;
+                        if (deletedAny) {
+                            worldDataChanged = true;
+                            nextCursorPos.x = currentBlock.start; // Position cursor at start of deleted block
                         } else {
-                            // Hit a non-space, stop
-                            break;
+                            nextCursorPos.x = cursorPos.x;
                         }
                     } else {
-                        // If we started on a word, delete the word but stop at spaces
-                        if (isSpace) {
-                            // Hit a space, stop (don't delete it)
-                            break;
-                        } else {
-                            // Delete the word character
-                            delete nextWorldData[key];
-                            deletedAny = true;
-                        }
+                        // No block found, keep cursor where it is
+                        nextCursorPos.x = cursorPos.x;
                     }
-
-                    x--;
                 }
+            } else if (altKey) {
+                // Option+Backspace: Delete word or spaces, respecting 2+ cell gap block boundaries
+                nextWorldData = { ...worldData }; // Create a copy before modifying
 
-                // Only mark as changed if we actually deleted something
-                if (deletedAny) {
-                    worldDataChanged = true;
-                    nextCursorPos.x = x + 1; // Move cursor to where we stopped
+                // Get text blocks on this line (don't include spaces to detect gaps)
+                const lineChars = extractLineCharacters(worldData, cursorPos.y, false);
+                if (lineChars.length === 0) {
+                    nextCursorPos.x = cursorPos.x;
                 } else {
-                    // If we didn't delete anything, perform regular backspace behavior
-                    const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
-                    if (worldData[deleteKey]) {
-                        delete nextWorldData[deleteKey];
-                        worldDataChanged = true;
+                    const blocks = detectTextBlocks(lineChars);
+                    const currentBlock = findBlockForDeletion(blocks, cursorPos.x);
+
+                    if (currentBlock) {
+                        // Check what type of character we're starting on
+                        let x = cursorPos.x - 1;
+                        const startKey = `${x},${cursorPos.y}`;
+                        const startCharData = worldData[startKey];
+
+                        if (!startCharData) {
+                            // No character at cursor position, fallback to regular backspace
+                            nextCursorPos.x = cursorPos.x;
+                        } else {
+                            const startChar = isImageData(startCharData) ? '' : getCharacter(startCharData);
+                            const startingOnSpace = startChar === ' ' || startChar === '\t';
+                            let deletedAny = false;
+
+                            // Don't go past the start of the current block
+                            while (x >= currentBlock.start) {
+                                const key = `${x},${cursorPos.y}`;
+                                const charData = worldData[key];
+
+                                if (!charData) {
+                                    // Empty cell - stop here (we've hit the block boundary)
+                                    break;
+                                }
+
+                                const char = isImageData(charData) ? '' : getCharacter(charData);
+                                const isSpace = char === ' ' || char === '\t';
+
+                                if (startingOnSpace) {
+                                    // Started on space - delete all consecutive spaces
+                                    if (isSpace) {
+                                        delete nextWorldData[key];
+                                        deletedAny = true;
+                                    } else {
+                                        // Hit a non-space, stop
+                                        break;
+                                    }
+                                } else {
+                                    // Started on word - delete word characters, stop at spaces
+                                    if (isSpace) {
+                                        // Hit a space - stop here
+                                        break;
+                                    } else {
+                                        // Delete non-space character (part of the word)
+                                        delete nextWorldData[key];
+                                        deletedAny = true;
+                                    }
+                                }
+
+                                x--;
+                            }
+
+                            if (deletedAny) {
+                                worldDataChanged = true;
+                                nextCursorPos.x = x + 1;
+                            } else {
+                                // Nothing deleted, fallback to regular backspace
+                                const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
+                                if (worldData[deleteKey]) {
+                                    delete nextWorldData[deleteKey];
+                                    worldDataChanged = true;
+                                }
+                                nextCursorPos.x -= 1;
+                            }
+                        }
+                    } else {
+                        // No block found, fallback to regular backspace
+                        const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
+                        if (worldData[deleteKey]) {
+                            delete nextWorldData[deleteKey];
+                            worldDataChanged = true;
+                        }
+                        nextCursorPos.x -= 1;
                     }
-                    nextCursorPos.x -= 1;
                 }
             } else {
                 // Regular Backspace: Check for label first

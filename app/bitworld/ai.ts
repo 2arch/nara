@@ -228,9 +228,20 @@ export async function generateImage(
         }
 
         // Prepare contents - either text-to-image or image-to-image
-        const contents: any[] = existingImage
-            ? [prompt, { inlineData: { data: existingImage.split(',')[1], mimeType: 'image/png' } }]
-            : [prompt]; // Add explicit trigger for text-to-image
+        let contents: any[] = [prompt];
+
+        if (existingImage) {
+            // existingImage should already be a base64 data URL (converted by caller)
+            // Extract mime type and base64 data
+            const matches = existingImage.match(/^data:([^;]+);base64,(.+)$/);
+            if (!matches) {
+                throw new Error('Invalid image format - must be base64 data URL');
+            }
+            const mimeType = matches[1];
+            const base64Data = matches[2];
+
+            contents = [prompt, { inlineData: { data: base64Data, mimeType } }];
+        }
 
         const response = await Promise.race([
             ai.models.generateContent({
