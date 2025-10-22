@@ -3003,6 +3003,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 const helpText = COMMAND_HELP[baseCommand];
                                 if (helpText) {
                                     const helpStartX = engine.commandState.commandStartPos.x + commandText.length + 2;
+                                    const maxWrapWidth = 60; // Maximum width for help text
 
                                     // Get background and text colors for category-label style
                                     const bgHex = (engine.backgroundColor || '#FFFFFF').replace('#', '');
@@ -3010,23 +3011,48 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     const bgG = parseInt(bgHex.substring(2, 4), 16);
                                     const bgB = parseInt(bgHex.substring(4, 6), 16);
 
-                                    // Draw help text with category-label styling
-                                    for (let i = 0; i < helpText.length; i++) {
-                                        const helpWorldX = helpStartX + i;
-                                        const helpScreenPos = engine.worldToScreen(helpWorldX, worldY, currentZoom, currentOffset);
+                                    // Word wrap the help text
+                                    const wrapText = (text: string, maxWidth: number): string[] => {
+                                        const words = text.split(' ');
+                                        const lines: string[] = [];
+                                        let currentLine = '';
 
-                                        if (helpScreenPos.x > -effectiveCharWidth * 2 && helpScreenPos.x < cssWidth + effectiveCharWidth) {
-                                            // Draw background (90% opacity like hovered category labels)
-                                            ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
-                                            ctx.fillRect(helpScreenPos.x, helpScreenPos.y, effectiveCharWidth, effectiveCharHeight);
-
-                                            // Draw text in text color
-                                            ctx.fillStyle = engine.textColor;
-                                            if (helpText[i] && helpText[i].trim() !== '') {
-                                                renderText(ctx, helpText[i], helpScreenPos.x, helpScreenPos.y + verticalTextOffset);
+                                        for (const word of words) {
+                                            const testLine = currentLine ? `${currentLine} ${word}` : word;
+                                            if (testLine.length <= maxWidth) {
+                                                currentLine = testLine;
+                                            } else {
+                                                if (currentLine) lines.push(currentLine);
+                                                currentLine = word;
                                             }
                                         }
-                                    }
+                                        if (currentLine) lines.push(currentLine);
+                                        return lines;
+                                    };
+
+                                    const wrappedLines = wrapText(helpText, maxWrapWidth);
+
+                                    // Draw wrapped help text with category-label styling
+                                    wrappedLines.forEach((line, lineIndex) => {
+                                        const helpY = worldY + lineIndex;
+                                        for (let i = 0; i < line.length; i++) {
+                                            const helpWorldX = helpStartX + i;
+                                            const helpScreenPos = engine.worldToScreen(helpWorldX, helpY, currentZoom, currentOffset);
+
+                                            if (helpScreenPos.x > -effectiveCharWidth * 2 && helpScreenPos.x < cssWidth + effectiveCharWidth &&
+                                                helpScreenPos.y > -effectiveCharHeight * 2 && helpScreenPos.y < cssHeight + effectiveCharHeight) {
+                                                // Draw background (90% opacity like hovered category labels)
+                                                ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
+                                                ctx.fillRect(helpScreenPos.x, helpScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+
+                                                // Draw text in text color
+                                                ctx.fillStyle = engine.textColor;
+                                                if (line[i] && line[i].trim() !== '') {
+                                                    renderText(ctx, line[i], helpScreenPos.x, helpScreenPos.y + verticalTextOffset);
+                                                }
+                                            }
+                                        }
+                                    });
                                 }
                             }
                         }

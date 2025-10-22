@@ -3004,17 +3004,21 @@ export function useWorldEngine({
                                         const imageAspect = img.width / img.height;
                                         const selectionAspect = selectionPixelsWide / selectionPixelsHigh;
 
+                                        // Cover behavior: scale to fill, then crop overflow
                                         let scaledWidth, scaledHeight;
                                         if (imageAspect > selectionAspect) {
-                                            scaledWidth = selectionPixelsWide;
-                                            scaledHeight = selectionPixelsWide / imageAspect;
-                                        } else {
+                                            // Image is wider - match height, crop width
                                             scaledHeight = selectionPixelsHigh;
                                             scaledWidth = selectionPixelsHigh * imageAspect;
+                                        } else {
+                                            // Image is taller - match width, crop height
+                                            scaledWidth = selectionPixelsWide;
+                                            scaledHeight = selectionPixelsWide / imageAspect;
                                         }
 
-                                        const cellsWide = Math.ceil(scaledWidth / charWidth);
-                                        const cellsHigh = Math.ceil(scaledHeight / charHeight);
+                                        // Always use exact selection dimensions (image will be cropped by renderer)
+                                        const cellsWide = selectionCellsWide;
+                                        const cellsHigh = selectionCellsHigh;
 
                                         // Delete old image and create new one at selection bounds
                                         const updatedWorldData = { ...worldData };
@@ -3101,17 +3105,21 @@ export function useWorldEngine({
                                         const imageAspect = img.width / img.height;
                                         const selectionAspect = selectionPixelsWide / selectionPixelsHigh;
 
+                                        // Cover behavior: scale to fill, then crop overflow
                                         let scaledWidth, scaledHeight;
                                         if (imageAspect > selectionAspect) {
-                                            scaledWidth = selectionPixelsWide;
-                                            scaledHeight = selectionPixelsWide / imageAspect;
-                                        } else {
+                                            // Image is wider - match height, crop width
                                             scaledHeight = selectionPixelsHigh;
                                             scaledWidth = selectionPixelsHigh * imageAspect;
+                                        } else {
+                                            // Image is taller - match width, crop height
+                                            scaledWidth = selectionPixelsWide;
+                                            scaledHeight = selectionPixelsWide / imageAspect;
                                         }
 
-                                        const cellsWide = Math.ceil(scaledWidth / charWidth);
-                                        const cellsHigh = Math.ceil(scaledHeight / charHeight);
+                                        // Always use exact selection dimensions (image will be cropped by renderer)
+                                        const cellsWide = selectionCellsWide;
+                                        const cellsHigh = selectionCellsHigh;
 
                                         // Clear the selection area and create image
                                         const updatedWorldData = { ...worldData };
@@ -3346,9 +3354,31 @@ export function useWorldEngine({
                                 // Get image dimensions for scaling
                                 const img = new Image();
                                 img.onload = () => {
-                                    // Fill entire selection region (stretch to fit)
-                                    const cellsWide = imageRegion!.endX - imageRegion!.startX + 1;
-                                    const cellsHigh = imageRegion!.endY - imageRegion!.startY + 1;
+                                    const { width: charWidth, height: charHeight } = getEffectiveCharDims(zoomLevel);
+
+                                    const regionCellsWide = imageRegion!.endX - imageRegion!.startX + 1;
+                                    const regionCellsHigh = imageRegion!.endY - imageRegion!.startY + 1;
+                                    const regionPixelsWide = regionCellsWide * charWidth;
+                                    const regionPixelsHigh = regionCellsHigh * charHeight;
+
+                                    const imageAspect = img.width / img.height;
+                                    const regionAspect = regionPixelsWide / regionPixelsHigh;
+
+                                    // Cover behavior: scale to fill, then crop overflow
+                                    let scaledWidth, scaledHeight;
+                                    if (imageAspect > regionAspect) {
+                                        // Image is wider - match height, crop width
+                                        scaledHeight = regionPixelsHigh;
+                                        scaledWidth = regionPixelsHigh * imageAspect;
+                                    } else {
+                                        // Image is taller - match width, crop height
+                                        scaledWidth = regionPixelsWide;
+                                        scaledHeight = regionPixelsWide / imageAspect;
+                                    }
+
+                                    // Always use exact region dimensions (image will be cropped by renderer)
+                                    const cellsWide = regionCellsWide;
+                                    const cellsHigh = regionCellsHigh;
 
                                     // Use functional setState to avoid overwriting concurrent edits
                                     setWorldData(currentWorldData => {
