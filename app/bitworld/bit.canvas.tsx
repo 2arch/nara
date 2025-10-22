@@ -3853,26 +3853,90 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         if (engine.selectionStart && engine.selectionEnd) {
             const start = engine.selectionStart;
             const end = engine.selectionEnd;
-            
+
             // Calculate selection bounds
             const minX = Math.min(start.x, end.x);
             const maxX = Math.max(start.x, end.x);
             const minY = Math.min(start.y, end.y);
             const maxY = Math.max(start.y, end.y);
-            
+
             // Use light transparent version of text accent color
             const selectionColor = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
             ctx.fillStyle = selectionColor;
-            
-            // Fill each cell in the selection area
-            for (let worldY = minY; worldY <= maxY; worldY++) {
-                for (let worldX = minX; worldX <= maxX; worldX++) {
-                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                    
-                    // Only draw if cell is visible on screen
-                    if (screenPos.x >= -effectiveCharWidth && screenPos.x <= cssWidth && 
-                        screenPos.y >= -effectiveCharHeight && screenPos.y <= cssHeight) {
-                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+
+            // Check if selection started on a character (text-aware selection mode)
+            const startKey = `${Math.floor(start.x)},${Math.floor(start.y)}`;
+            const startData = engine.worldData[startKey];
+            const startedOnChar = startData && !engine.isImageData(startData) && engine.getCharacter(startData).trim() !== '';
+
+            if (startedOnChar) {
+                // Text-editor-style selection: highlight only cells with characters, line by line
+                for (let worldY = minY; worldY <= maxY; worldY++) {
+                    const isFirstLine = worldY === minY;
+                    const isLastLine = worldY === maxY;
+
+                    // Find the actual start and end of content on this line
+                    // For middle lines, scan the entire world; for first/last lines, respect selection bounds
+                    let scanStartX = isFirstLine ? minX : Number.MIN_SAFE_INTEGER;
+                    let scanEndX = isLastLine ? maxX : Number.MAX_SAFE_INTEGER;
+
+                    let contentStartX = Number.MAX_SAFE_INTEGER;
+                    let contentEndX = Number.MIN_SAFE_INTEGER;
+
+                    // Scan a reasonable range to find text (e.g., -10000 to +10000 from selection)
+                    const scanRangeStart = isFirstLine ? minX : Math.min(minX, -10000);
+                    const scanRangeEnd = isLastLine ? maxX : Math.max(maxX, 10000);
+
+                    for (let worldX = scanRangeStart; worldX <= scanRangeEnd; worldX++) {
+                        const key = `${worldX},${worldY}`;
+                        const data = engine.worldData[key];
+                        const hasChar = data && !engine.isImageData(data) && engine.getCharacter(data).trim() !== '';
+
+                        if (hasChar) {
+                            if (worldX < contentStartX) contentStartX = worldX;
+                            if (worldX > contentEndX) contentEndX = worldX;
+                        }
+                    }
+
+                    // Only draw if there's content on this line
+                    if (contentStartX <= contentEndX) {
+                        // Constrain to selection bounds only on first and last lines
+                        let drawStartX = contentStartX;
+                        let drawEndX = contentEndX;
+
+                        if (isFirstLine) {
+                            drawStartX = Math.max(contentStartX, minX);
+                        }
+                        if (isLastLine) {
+                            drawEndX = Math.min(contentEndX, maxX);
+                        }
+
+                        // Draw a continuous rectangle for this line segment
+                        const startScreenPos = engine.worldToScreen(drawStartX, worldY, currentZoom, currentOffset);
+                        const endScreenPos = engine.worldToScreen(drawEndX + 1, worldY, currentZoom, currentOffset);
+
+                        if (startScreenPos.x < cssWidth && endScreenPos.x >= 0 &&
+                            startScreenPos.y >= -effectiveCharHeight && startScreenPos.y <= cssHeight) {
+                            ctx.fillRect(
+                                startScreenPos.x,
+                                startScreenPos.y,
+                                endScreenPos.x - startScreenPos.x,
+                                effectiveCharHeight
+                            );
+                        }
+                    }
+                }
+            } else {
+                // Square/block selection mode: fill all cells in the rectangular area
+                for (let worldY = minY; worldY <= maxY; worldY++) {
+                    for (let worldX = minX; worldX <= maxX; worldX++) {
+                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+
+                        // Only draw if cell is visible on screen
+                        if (screenPos.x >= -effectiveCharWidth && screenPos.x <= cssWidth &&
+                            screenPos.y >= -effectiveCharHeight && screenPos.y <= cssHeight) {
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        }
                     }
                 }
             }
