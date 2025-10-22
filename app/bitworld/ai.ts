@@ -207,7 +207,8 @@ export async function summarizeText(text: string, focus?: string, userId?: strin
 export async function generateImage(
     prompt: string,
     existingImage?: string,
-    userId?: string
+    userId?: string,
+    aspectRatio?: string // e.g., "16:9", "1:1", "9:16"
 ): Promise<{ imageData: string | null, text: string }> {
     const abortController = createAIAbortController();
 
@@ -248,7 +249,8 @@ export async function generateImage(
                 model: 'gemini-2.5-flash-image',
                 contents,
                 config: {
-                    responseModalities: ["IMAGE", "TEXT"]
+                    responseModalities: ["IMAGE", "TEXT"],
+                    ...(aspectRatio && { aspectRatio })
                 }
             }),
             new Promise((_, reject) => {

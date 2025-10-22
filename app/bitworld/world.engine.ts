@@ -2945,8 +2945,8 @@ export function useWorldEngine({
                                 else if (selectedImageData && (selectedImageData.startsWith('http://') || selectedImageData.startsWith('https://'))) {
                                     logger.debug('Fetching Firebase Storage URL:', selectedImageData);
                                     try {
-                                        // Fetch and convert to base64
-                                        const response = await fetch(selectedImageData);
+                                        // Fetch and convert to base64 (with CORS mode)
+                                        const response = await fetch(selectedImageData, { mode: 'cors' });
                                         if (!response.ok) {
                                             throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
                                         }
@@ -3294,8 +3294,8 @@ export function useWorldEngine({
                             else if (existingImageData.startsWith('http://') || existingImageData.startsWith('https://')) {
                                 logger.debug('Fetching Firebase Storage URL:', existingImageData);
                                 try {
-                                    // Fetch and convert to base64
-                                    const response = await fetch(existingImageData);
+                                    // Fetch and convert to base64 (with CORS mode)
+                                    const response = await fetch(existingImageData, { mode: 'cors' });
                                     if (!response.ok) {
                                         throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
                                     }
@@ -3318,7 +3318,12 @@ export function useWorldEngine({
                                 return;
                             }
 
-                            loadAI().then(ai => ai.generateImage(aiPrompt, base64ImageData, userUid || undefined)).then(async (result) => {
+                            // Calculate aspect ratio from image region
+                            const regionWidth = imageRegion!.endX - imageRegion!.startX + 1;
+                            const regionHeight = imageRegion!.endY - imageRegion!.startY + 1;
+                            const aspectRatio = regionWidth > regionHeight ? '16:9' : regionHeight > regionWidth ? '9:16' : '1:1';
+
+                            loadAI().then(ai => ai.generateImage(aiPrompt, base64ImageData, userUid || undefined, aspectRatio)).then(async (result) => {
                             // Check if quota exceeded
                             if (result.text && result.text.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
@@ -3328,9 +3333,6 @@ export function useWorldEngine({
                             }
 
                             if (result.imageData) {
-                                // Replace the existing image
-                                const newWorldData = { ...worldData };
-
                                 // Upload to storage if available
                                 let finalImageUrl = result.imageData;
                                 if (uploadImageToStorage) {
@@ -3344,42 +3346,26 @@ export function useWorldEngine({
                                 // Get image dimensions for scaling
                                 const img = new Image();
                                 img.onload = () => {
-                                    const { width: charWidth, height: charHeight } = getEffectiveCharDims(zoomLevel);
+                                    // Fill entire selection region (stretch to fit)
+                                    const cellsWide = imageRegion!.endX - imageRegion!.startX + 1;
+                                    const cellsHigh = imageRegion!.endY - imageRegion!.startY + 1;
 
-                                    const regionCellsWide = imageRegion!.endX - imageRegion!.startX + 1;
-                                    const regionCellsHigh = imageRegion!.endY - imageRegion!.startY + 1;
-                                    const regionPixelsWide = regionCellsWide * charWidth;
-                                    const regionPixelsHigh = regionCellsHigh * charHeight;
-
-                                    const imageAspect = img.width / img.height;
-                                    const regionAspect = regionPixelsWide / regionPixelsHigh;
-
-                                    let scaledWidth, scaledHeight;
-                                    if (imageAspect > regionAspect) {
-                                        scaledWidth = regionPixelsWide;
-                                        scaledHeight = regionPixelsWide / imageAspect;
-                                    } else {
-                                        scaledHeight = regionPixelsHigh;
-                                        scaledWidth = regionPixelsHigh * imageAspect;
-                                    }
-
-                                    const cellsWide = Math.ceil(scaledWidth / charWidth);
-                                    const cellsHigh = Math.ceil(scaledHeight / charHeight);
-
-                                    // Update image data
-                                    const updatedWorldData = { ...worldData };
-                                    (updatedWorldData[existingImageKey!] as any) = {
-                                        type: 'image',
-                                        src: finalImageUrl,
-                                        startX: imageRegion!.startX,
-                                        startY: imageRegion!.startY,
-                                        endX: imageRegion!.startX + cellsWide - 1,
-                                        endY: imageRegion!.startY + cellsHigh - 1,
-                                        width: img.width,
-                                        height: img.height,
-                                        timestamp: Date.now()
-                                    };
-                                    setWorldData(updatedWorldData);
+                                    // Use functional setState to avoid overwriting concurrent edits
+                                    setWorldData(currentWorldData => {
+                                        const updatedWorldData = { ...currentWorldData };
+                                        (updatedWorldData[existingImageKey!] as any) = {
+                                            type: 'image',
+                                            src: finalImageUrl,
+                                            startX: imageRegion!.startX,
+                                            startY: imageRegion!.startY,
+                                            endX: imageRegion!.startX + cellsWide - 1,
+                                            endY: imageRegion!.startY + cellsHigh - 1,
+                                            width: img.width,
+                                            height: img.height,
+                                            timestamp: Date.now()
+                                        };
+                                        return updatedWorldData;
+                                    });
                                     setDialogueWithRevert("Image transformed", setDialogueText);
                                 };
                                 img.src = result.imageData;
