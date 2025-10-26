@@ -1785,12 +1785,12 @@ export function useWorldEngine({
 
                 try {
                     const charData = worldData[key];
-                    
+
                     // Skip image data - only process text/label characters
                     if (isImageData(charData)) {
                         continue;
                     }
-                    
+
                     const charString = getCharacter(charData);
                     const data = JSON.parse(charString);
                     const text = data.text || '';
@@ -1798,6 +1798,25 @@ export function useWorldEngine({
 
                     if (y === ly && x >= lx && x < lx + width) {
                         return { key, data };
+                    }
+                } catch (e) {
+                    // Ignore parsing errors
+                }
+            }
+        }
+        return null;
+    }, [worldData]);
+
+    const findTaskAt = useCallback((x: number, y: number): { key: string, data: any } | null => {
+        for (const key in worldData) {
+            if (key.startsWith('task_')) {
+                try {
+                    const taskData = JSON.parse(worldData[key] as string);
+                    const { startX, endX, startY, endY } = taskData;
+
+                    // Check if the cursor position is within the task bounds
+                    if (x >= startX && x <= endX && y >= startY && y <= endY) {
+                        return { key, data: taskData };
                     }
                 } catch (e) {
                     // Ignore parsing errors
@@ -2339,6 +2358,32 @@ export function useWorldEngine({
         if (labelsToDelete.size > 0) {
             deleted = true;
             labelsToDelete.forEach(key => {
+                delete newWorldData[key];
+            });
+        }
+
+        // Find and delete tasks intersecting with selection
+        const tasksToDelete = new Set<string>();
+        for (const key in newWorldData) {
+            if (key.startsWith('task_')) {
+                try {
+                    const taskData = JSON.parse(newWorldData[key] as string);
+                    const { startX, endX, startY, endY } = taskData;
+
+                    // Check for intersection between task bounds and selection bounds
+                    if (startX <= selection.endX && endX >= selection.startX &&
+                        startY <= selection.endY && endY >= selection.startY) {
+                        tasksToDelete.add(key);
+                    }
+                } catch (e) {
+                    // ignore
+                }
+            }
+        }
+
+        if (tasksToDelete.size > 0) {
+            deleted = true;
+            tasksToDelete.forEach(key => {
                 delete newWorldData[key];
             });
         }
@@ -3783,8 +3828,7 @@ export function useWorldEngine({
                                 const labelKey = `label_${minX},${minY}`;
                                 const newLabel = {
                                     text: selectedText,
-                                    color: '#000000', // Default black text
-                                    background: '#FFFFFF' // Default white background
+                                    color: textColor // Label bg uses text color, label text uses bg color (inverted)
                                 };
 
                                 setWorldData(prev => ({
@@ -3812,33 +3856,49 @@ export function useWorldEngine({
                         // Parse the raw command input to handle quoted strings
                         const fullCommand = exec.command + ' ' + exec.args.join(' ');
                         const commandParts = fullCommand.split(' ');
-                        
+
                         let text = '';
-                        let textColor = '#000000'; // Default black text
-                        let backgroundColor = '#FFFFFF'; // Default white background
-                        
+                        let labelColor = textColor; // Label bg uses text color, label text uses bg color (inverted)
+
                         // Check for quoted text (single quotes)
-                        const quotedMatch = fullCommand.match(/label\s+'([^']+)'(?:\s+(\S+))?(?:\s+(\S+))?/);
-                        
+                        const quotedMatch = fullCommand.match(/label\s+'([^']+)'(?:\s+(\S+))?/);
+
                         if (quotedMatch) {
                             // Found quoted text
                             text = quotedMatch[1];
-                            if (quotedMatch[2]) textColor = quotedMatch[2];
-                            if (quotedMatch[3]) backgroundColor = quotedMatch[3];
+                            if (quotedMatch[2]) {
+                                // Resolve color name to hex
+                                const colorArg = quotedMatch[2];
+                                labelColor = (COLOR_MAP[colorArg.toLowerCase()] || colorArg).toUpperCase();
+
+                                // Validate hex color
+                                if (!/^#[0-9A-F]{6}$/i.test(labelColor)) {
+                                    setDialogueWithRevert(`Invalid color: ${colorArg}. Use hex code or name.`, setDialogueText);
+                                    return;
+                                }
+                            }
                         } else {
                             // No quotes - use first argument as text
                             text = exec.args[0];
-                            if (exec.args[1]) textColor = exec.args[1];
-                            if (exec.args[2]) backgroundColor = exec.args[2];
+                            if (exec.args[1]) {
+                                // Resolve color name to hex
+                                const colorArg = exec.args[1];
+                                labelColor = (COLOR_MAP[colorArg.toLowerCase()] || colorArg).toUpperCase();
+
+                                // Validate hex color
+                                if (!/^#[0-9A-F]{6}$/i.test(labelColor)) {
+                                    setDialogueWithRevert(`Invalid color: ${colorArg}. Use hex code or name.`, setDialogueText);
+                                    return;
+                                }
+                            }
                         }
-                        
+
                         const labelKey = `label_${exec.commandStartPos.x},${exec.commandStartPos.y}`;
-                        const newLabel = { 
-                            text, 
-                            color: textColor,
-                            background: backgroundColor
+                        const newLabel = {
+                            text,
+                            color: labelColor
                         };
-                        
+
                         setWorldData(prev => ({
                             ...prev,
                             [labelKey]: JSON.stringify(newLabel)
@@ -3852,6 +3912,136 @@ export function useWorldEngine({
                         }
                     } else {
                         setDialogueWithRevert("Usage: /label 'text' [textColor] [backgroundColor] or /label --distance <number>", setDialogueText);
+                    }
+                } else if (exec.command === 'task') {
+                    // /task command - create a toggleable task from selection
+                    if (selectionStart && selectionEnd) {
+                        const hasSelection = selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y;
+
+                        if (hasSelection) {
+                            const normalized = getNormalizedSelection();
+                            if (normalized) {
+                                // Get color argument (default to sulfur)
+                                const highlightColor = exec.args.length > 0 ? exec.args[0] : 'sulfur';
+
+                                // Resolve color name to hex
+                                const hexColor = (COLOR_MAP[highlightColor.toLowerCase()] || highlightColor).toUpperCase();
+
+                                // Validate hex color
+                                if (!/^#[0-9A-F]{6}$/i.test(hexColor)) {
+                                    setDialogueWithRevert(`Invalid color: ${highlightColor}. Use hex code or name.`, setDialogueText);
+                                } else {
+                                    // Create task data
+                                    const taskKey = `task_${normalized.startX},${normalized.startY}_${Date.now()}`;
+                                    const taskData = {
+                                        startX: normalized.startX,
+                                        endX: normalized.endX,
+                                        startY: normalized.startY,
+                                        endY: normalized.endY,
+                                        color: hexColor,
+                                        completed: false,
+                                        timestamp: Date.now()
+                                    };
+
+                                    // Store task in worldData
+                                    setWorldData(prev => ({
+                                        ...prev,
+                                        [taskKey]: JSON.stringify(taskData)
+                                    }));
+
+                                    const width = normalized.endX - normalized.startX + 1;
+                                    const height = normalized.endY - normalized.startY + 1;
+                                    setDialogueWithRevert(`Task created (${width}×${height}). Click to toggle completion.`, setDialogueText);
+
+                                    // Clear selection
+                                    setSelectionStart(null);
+                                    setSelectionEnd(null);
+                                }
+                            }
+                        } else {
+                            setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
+                        }
+                    } else {
+                        setDialogueWithRevert("Make a selection first", setDialogueText);
+                    }
+                } else if (exec.command === 'margin') {
+                    // /margin command - create a margin note for selected text
+                    console.log('[/margin] Command triggered in world engine');
+
+                    if (selectionStart && selectionEnd) {
+                        const hasSelection = selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y;
+                        console.log('[/margin] Selection exists:', { selectionStart, selectionEnd, hasSelection });
+
+                        if (hasSelection) {
+                            console.log('[/margin] Loading bit.blocks functions...');
+                            // Use dynamic import to load margin calculation functions
+                            import('./bit.blocks').then(({ findTextBlockForSelection, calculateMarginPlacement }) => {
+                                console.log('[/margin] Functions loaded');
+                                const normalized = getNormalizedSelection();
+                                console.log('[/margin] Normalized selection:', normalized);
+
+                                if (normalized) {
+                                    // Find the text block containing this selection
+                                    const textBlock = findTextBlockForSelection(normalized, worldData);
+                                    console.log('[/margin] Text block found:', textBlock);
+
+                                    if (textBlock) {
+                                        // Calculate margin placement (right, left, or bottom)
+                                        const marginPlacement = calculateMarginPlacement(
+                                            textBlock,
+                                            normalized.startY,
+                                            worldData
+                                        );
+                                        console.log('[/margin] Margin placement calculated:', marginPlacement);
+
+                                        if (marginPlacement) {
+                                            // Create note region data
+                                            const noteRegion = {
+                                                startX: marginPlacement.startX,
+                                                endX: marginPlacement.endX,
+                                                startY: marginPlacement.startY,
+                                                endY: marginPlacement.endY,
+                                                timestamp: Date.now()
+                                            };
+
+                                            // Store note region in worldData with unique key
+                                            const noteKey = `note_${marginPlacement.startX},${marginPlacement.startY}_${Date.now()}`;
+                                            setWorldData(prev => ({
+                                                ...prev,
+                                                [noteKey]: JSON.stringify(noteRegion)
+                                            }));
+                                            console.log('[/margin] Note region created with key:', noteKey, noteRegion);
+
+                                            const width = marginPlacement.endX - marginPlacement.startX + 1;
+                                            const height = marginPlacement.endY - marginPlacement.startY + 1;
+                                            setDialogueWithRevert(
+                                                `Margin note created (${width}×${height}) on ${marginPlacement.position}`,
+                                                setDialogueText
+                                            );
+
+                                            // Clear selection
+                                            setSelectionStart(null);
+                                            setSelectionEnd(null);
+                                        } else {
+                                            console.log('[/margin] No available margin space found');
+                                            setDialogueWithRevert("Could not find available margin space", setDialogueText);
+                                        }
+                                    } else {
+                                        console.log('[/margin] No text block found for selection');
+                                        setDialogueWithRevert("Could not find text block for selection", setDialogueText);
+                                    }
+                                }
+                            }).catch((error) => {
+                                console.error('[/margin] Error loading margin functions:', error);
+                                setDialogueWithRevert("Error creating margin note", setDialogueText);
+                            });
+                        } else {
+                            console.log('[/margin] Selection must span more than one cell');
+                            setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
+                        }
+                    } else {
+                        console.log('[/margin] No selection exists');
+                        setDialogueWithRevert("Make a selection first", setDialogueText);
                     }
                 } else if (exec.command === 'monogram') {
                     // Handle monogram via callback
@@ -7643,86 +7833,96 @@ export function useWorldEngine({
                     }
                 }
             } else {
-                // Regular Backspace: Check for label first
-                const labelToDelete = findLabelAt(cursorPos.x - 1, cursorPos.y);
-                if (labelToDelete) {
+                // Regular Backspace: Check for task first, then label
+                const taskToDelete = findTaskAt(cursorPos.x - 1, cursorPos.y);
+                if (taskToDelete) {
                     nextWorldData = { ...worldData };
-                    delete nextWorldData[labelToDelete.key];
+                    delete nextWorldData[taskToDelete.key];
                     worldDataChanged = true;
-                    // Move cursor to the start of where the label was
-                    const coordsStr = labelToDelete.key.substring('label_'.length);
-                    const [lxStr, lyStr] = coordsStr.split(',');
-                    nextCursorPos.x = parseInt(lxStr, 10);
-                    nextCursorPos.y = parseInt(lyStr, 10);
+                    // Move cursor to the start of where the task was
+                    nextCursorPos.x = taskToDelete.data.startX;
+                    nextCursorPos.y = taskToDelete.data.startY;
                 } else {
-                    // Check if we're within a note region first
-                    const noteRegion = getNoteRegion(worldData, cursorPos);
-                    if (noteRegion && cursorPos.x === noteRegion.startX && cursorPos.y > noteRegion.startY) {
-                        // We're at the start of a line within a note region (but not the first line)
-                        // Move cursor to the end of the previous line within the note
-                        nextCursorPos.x = noteRegion.endX + 1;
-                        nextCursorPos.y = cursorPos.y - 1;
-                        moved = true;
-                        // Don't delete anything, just move cursor
-                    } else if (noteRegion && cursorPos.x > noteRegion.startX) {
-                        // We're within a note region but not at the start - do normal backspace
-                        const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
-                        if (worldData[deleteKey]) {
-                            nextWorldData = { ...worldData };
-                            delete nextWorldData[deleteKey];
-                            worldDataChanged = true;
-                        }
-                        nextCursorPos.x -= 1;
-                        moved = true;
-                    } else {
-                        // Check if we're at the beginning of a line (need to merge with previous line)
-                        // Only merge if cursor is actually before any characters on this line, not at first character
-                        const currentLineChars = extractLineCharacters(worldData, cursorPos.y);
-                        const isAtLineStart = currentLineChars.length > 0 ?
-                            cursorPos.x < currentLineChars[0].x :
-                            cursorPos.x === 0;
-
-                        if (isAtLineStart && cursorPos.y > 0) {
-                        // Find the last character position on the previous line
-                        const prevLineChars = extractLineCharacters(worldData, cursorPos.y - 1);
-                        let targetX = 0; // Default to start of line if no characters
-                        
-                        if (prevLineChars.length > 0) {
-                            // Find rightmost character on previous line
-                            targetX = Math.max(...prevLineChars.map(c => c.x)) + 1;
-                        }
-                        
-                        // Collect all text from current line to move it
+                    const labelToDelete = findLabelAt(cursorPos.x - 1, cursorPos.y);
+                    if (labelToDelete) {
                         nextWorldData = { ...worldData };
-                        const currentLineData = currentLineChars.map(c => ({ 
-                            char: c.char, 
-                            originalKey: `${c.x},${cursorPos.y}` 
-                        }));
-                        
-                        // Remove all characters from current line
-                        for (const charData of currentLineData) {
-                            delete nextWorldData[charData.originalKey];
-                        }
-                        
-                        // Add characters to previous line starting from targetX
-                        for (let i = 0; i < currentLineData.length; i++) {
-                            const newKey = `${targetX + i},${cursorPos.y - 1}`;
-                            nextWorldData[newKey] = currentLineData[i].char;
-                        }
-                        
-                        // Move cursor to the junction point
-                        nextCursorPos.x = targetX;
-                        nextCursorPos.y = cursorPos.y - 1;
+                        delete nextWorldData[labelToDelete.key];
                         worldDataChanged = true;
+                        // Move cursor to the start of where the label was
+                        const coordsStr = labelToDelete.key.substring('label_'.length);
+                        const [lxStr, lyStr] = coordsStr.split(',');
+                        nextCursorPos.x = parseInt(lxStr, 10);
+                        nextCursorPos.y = parseInt(lyStr, 10);
                     } else {
-                        // Delete one character to the left
-                        const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
-                        if (worldData[deleteKey]) {
-                            nextWorldData = { ...worldData }; // Create copy before modifying
-                            delete nextWorldData[deleteKey]; // Remove char from world
-                            worldDataChanged = true;
-                        }
-                        nextCursorPos.x -= 1; // Move cursor left regardless
+                        // Check if we're within a note region first
+                        const noteRegion = getNoteRegion(worldData, cursorPos);
+                        if (noteRegion && cursorPos.x === noteRegion.startX && cursorPos.y > noteRegion.startY) {
+                            // We're at the start of a line within a note region (but not the first line)
+                            // Move cursor to the end of the previous line within the note
+                            nextCursorPos.x = noteRegion.endX + 1;
+                            nextCursorPos.y = cursorPos.y - 1;
+                            moved = true;
+                            // Don't delete anything, just move cursor
+                        } else if (noteRegion && cursorPos.x > noteRegion.startX) {
+                            // We're within a note region but not at the start - do normal backspace
+                            const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
+                            if (worldData[deleteKey]) {
+                                nextWorldData = { ...worldData };
+                                delete nextWorldData[deleteKey];
+                                worldDataChanged = true;
+                            }
+                            nextCursorPos.x -= 1;
+                            moved = true;
+                        } else {
+                            // Check if we're at the beginning of a line (need to merge with previous line)
+                            // Only merge if cursor is actually before any characters on this line, not at first character
+                            const currentLineChars = extractLineCharacters(worldData, cursorPos.y);
+                            const isAtLineStart = currentLineChars.length > 0 ?
+                                cursorPos.x < currentLineChars[0].x :
+                                cursorPos.x === 0;
+
+                            if (isAtLineStart && cursorPos.y > 0) {
+                                // Find the last character position on the previous line
+                                const prevLineChars = extractLineCharacters(worldData, cursorPos.y - 1);
+                                let targetX = 0; // Default to start of line if no characters
+
+                                if (prevLineChars.length > 0) {
+                                    // Find rightmost character on previous line
+                                    targetX = Math.max(...prevLineChars.map(c => c.x)) + 1;
+                                }
+
+                                // Collect all text from current line to move it
+                                nextWorldData = { ...worldData };
+                                const currentLineData = currentLineChars.map(c => ({
+                                    char: c.char,
+                                    originalKey: `${c.x},${cursorPos.y}`
+                                }));
+
+                                // Remove all characters from current line
+                                for (const charData of currentLineData) {
+                                    delete nextWorldData[charData.originalKey];
+                                }
+
+                                // Add characters to previous line starting from targetX
+                                for (let i = 0; i < currentLineData.length; i++) {
+                                    const newKey = `${targetX + i},${cursorPos.y - 1}`;
+                                    nextWorldData[newKey] = currentLineData[i].char;
+                                }
+
+                                // Move cursor to the junction point
+                                nextCursorPos.x = targetX;
+                                nextCursorPos.y = cursorPos.y - 1;
+                                worldDataChanged = true;
+                            } else {
+                                // Delete one character to the left
+                                const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
+                                if (worldData[deleteKey]) {
+                                    nextWorldData = { ...worldData }; // Create copy before modifying
+                                    delete nextWorldData[deleteKey]; // Remove char from world
+                                    worldDataChanged = true;
+                                }
+                                nextCursorPos.x -= 1; // Move cursor left regardless
+                            }
                         }
                     }
                 }
@@ -7860,19 +8060,27 @@ export function useWorldEngine({
                     nextCursorPos = { x: selectionStart?.x ?? cursorPos.x, y: selectionStart?.y ?? cursorPos.y };
                  }
             } else {
-                // Delete char at current cursor pos, check for label first
-                const labelToDelete = findLabelAt(cursorPos.x, cursorPos.y);
-                if (labelToDelete) {
+                // Delete char at current cursor pos, check for task first, then label
+                const taskToDelete = findTaskAt(cursorPos.x, cursorPos.y);
+                if (taskToDelete) {
                     nextWorldData = { ...worldData };
-                    delete nextWorldData[labelToDelete.key];
+                    delete nextWorldData[taskToDelete.key];
                     worldDataChanged = true;
                     // Cursor does not move
                 } else {
-                    const deleteKey = `${cursorPos.x},${cursorPos.y}`;
-                    if (worldData[deleteKey]) {
-                        nextWorldData = { ...worldData }; // Create copy before modifying
-                        delete nextWorldData[deleteKey];
+                    const labelToDelete = findLabelAt(cursorPos.x, cursorPos.y);
+                    if (labelToDelete) {
+                        nextWorldData = { ...worldData };
+                        delete nextWorldData[labelToDelete.key];
                         worldDataChanged = true;
+                        // Cursor does not move
+                    } else {
+                        const deleteKey = `${cursorPos.x},${cursorPos.y}`;
+                        if (worldData[deleteKey]) {
+                            nextWorldData = { ...worldData }; // Create copy before modifying
+                            delete nextWorldData[deleteKey];
+                            worldDataChanged = true;
+                        }
                     }
                 }
             }
@@ -8718,6 +8926,39 @@ export function useWorldEngine({
         if (isInGlitchedRegion) {
             // Don't allow cursor movement into glitched regions
             return;
+        }
+
+        // === Click to Toggle Task Completion ===
+        // Check if clicked within a task region
+        for (const key in worldData) {
+            if (key.startsWith('task_')) {
+                try {
+                    const taskData = JSON.parse(worldData[key] as string);
+                    const { startX, endX, startY, endY } = taskData;
+
+                    // Check if click is within task bounds
+                    if (newCursorPos.x >= startX && newCursorPos.x <= endX &&
+                        newCursorPos.y >= startY && newCursorPos.y <= endY) {
+                        // Toggle task completion
+                        const updatedTaskData = {
+                            ...taskData,
+                            completed: !taskData.completed
+                        };
+
+                        setWorldData(prev => ({
+                            ...prev,
+                            [key]: JSON.stringify(updatedTaskData)
+                        }));
+
+                        const status = updatedTaskData.completed ? 'completed' : 'reopened';
+                        setDialogueWithRevert(`Task ${status}`, setDialogueText);
+
+                        return; // Don't process regular click behavior
+                    }
+                } catch (e) {
+                    // Skip invalid task data
+                }
+            }
         }
 
         // If in chat mode, clear previous input when clicking

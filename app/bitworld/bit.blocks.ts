@@ -1252,13 +1252,13 @@ function extractContentFromBoundingBox(
 export async function generateClusterLabels(clusters: TextCluster[], worldData?: WorldData): Promise<ClusterLabel[]> {
     // Import AI function dynamically to avoid circular dependencies
     const { generateClusterLabel } = await import('./ai');
-    
+
     const labels: ClusterLabel[] = [];
-    
+
     for (const cluster of clusters) {
         const content = extractClusterContent(cluster, worldData);
         const aiLabel = await generateClusterLabel(content);
-        
+
         if (aiLabel) {
             labels.push({
                 clusterId: cluster.id,
@@ -1266,12 +1266,198 @@ export async function generateClusterLabels(clusters: TextCluster[], worldData?:
                 text: aiLabel,
                 type: 'summary', // AI-generated labels are summaries
                 confidence: 0.8, // High confidence for AI labels
-                contentSample: content.split('\n')[0]?.slice(0, 50) + 
+                contentSample: content.split('\n')[0]?.slice(0, 50) +
                                (content.split('\n')[0]?.length > 50 ? '...' : '') || '',
                 boundingBox: cluster.boundingBox
             });
         }
     }
-    
+
     return labels;
+}
+
+// === MARGIN NOTE PLACEMENT ===
+
+export interface MarginPlacement {
+    startX: number;
+    endX: number;
+    startY: number;
+    endY: number;
+    position: 'right' | 'left' | 'bottom';
+}
+
+/**
+ * Finds the text block containing a selection using bit.blocks clustering
+ * @param selection The current selection bounds
+ * @param worldData Combined world data
+ * @returns The text block bounding box or null if not found
+ */
+export function findTextBlockForSelection(
+    selection: {startX: number, endX: number, startY: number, endY: number},
+    worldData: WorldData
+): {minX: number, maxX: number, minY: number, maxY: number} | null {
+    // Extract all text blocks within the selection area
+    const lineBlocks = extractAllTextBlocks(worldData);
+    const clusters = groupTextBlocksIntoClusters(lineBlocks);
+
+    // Find the cluster that contains or overlaps with the selection
+    for (const cluster of clusters) {
+        const { boundingBox } = cluster;
+
+        // Check if selection overlaps with this cluster
+        const overlaps = !(
+            selection.endX < boundingBox.minX ||
+            selection.startX > boundingBox.maxX ||
+            selection.endY < boundingBox.minY ||
+            selection.startY > boundingBox.maxY
+        );
+
+        if (overlaps) {
+            return boundingBox;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Checks if a region is free of text (available for margin note)
+ * @param startX Start X position
+ * @param endX End X position
+ * @param startY Start Y position
+ * @param endY End Y position
+ * @param worldData Combined world data
+ * @returns true if region is free, false otherwise
+ */
+export function isRegionFree(
+    startX: number,
+    endX: number,
+    startY: number,
+    endY: number,
+    worldData: WorldData
+): boolean {
+    // First check for existing note regions
+    for (const key in worldData) {
+        if (key.startsWith('note_')) {
+            try {
+                const noteData = JSON.parse(worldData[key] as string);
+
+                // Check if the proposed region overlaps with this note region
+                const overlaps = !(
+                    endX < noteData.startX ||
+                    startX > noteData.endX ||
+                    endY < noteData.startY ||
+                    startY > noteData.startY
+                );
+
+                if (overlaps) {
+                    return false; // Region is occupied by another note
+                }
+            } catch (e) {
+                // Skip invalid note data
+            }
+        }
+    }
+
+    // Then check for text/image content at each position
+    for (let y = startY; y <= endY; y++) {
+        for (let x = startX; x <= endX; x++) {
+            const key = `${x},${y}`;
+            const data = worldData[key];
+
+            // Check if there's any content at this position
+            if (data) {
+                // If it's text data (not empty)
+                if (typeof data === 'string' && data.trim() !== '') {
+                    return false;
+                }
+                // If it's styled character data
+                if (typeof data === 'object' && 'char' in data && data.char.trim() !== '') {
+                    return false;
+                }
+                // If it's image data
+                if (typeof data === 'object' && 'type' in data && data.type === 'image') {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+/**
+ * Calculates the best margin position for a note relative to a text block
+ * Priority: right > left > bottom
+ * @param textBlock The text block bounding box
+ * @param selectionStartY The Y position where the selection started
+ * @param worldData Combined world data to check for available space
+ * @param marginWidth Default width for side margins (default: 30)
+ * @param marginHeight Default height for bottom margin (default: 10)
+ * @returns Margin placement information
+ */
+export function calculateMarginPlacement(
+    textBlock: {minX: number, maxX: number, minY: number, maxY: number},
+    selectionStartY: number,
+    worldData: WorldData,
+    marginWidth: number = 30,
+    marginHeight: number = 10
+): MarginPlacement | null {
+    const blockHeight = textBlock.maxY - textBlock.minY + 1;
+
+    // Try right margin first
+    const rightStartX = textBlock.maxX + 2; // +1 cell gap + 1 for the note
+    const rightEndX = rightStartX + marginWidth - 1;
+    const rightStartY = selectionStartY;
+    const rightEndY = Math.min(selectionStartY + marginHeight - 1, textBlock.maxY);
+
+    if (isRegionFree(rightStartX, rightEndX, rightStartY, rightEndY, worldData)) {
+        return {
+            startX: rightStartX,
+            endX: rightEndX,
+            startY: rightStartY,
+            endY: rightEndY,
+            position: 'right'
+        };
+    }
+
+    // Try left margin
+    const leftEndX = textBlock.minX - 2; // -1 cell gap - 1 for the note
+    const leftStartX = leftEndX - marginWidth + 1;
+    const leftStartY = selectionStartY;
+    const leftEndY = Math.min(selectionStartY + marginHeight - 1, textBlock.maxY);
+
+    if (isRegionFree(leftStartX, leftEndX, leftStartY, leftEndY, worldData)) {
+        return {
+            startX: leftStartX,
+            endX: leftEndX,
+            startY: leftStartY,
+            endY: leftEndY,
+            position: 'left'
+        };
+    }
+
+    // Try bottom margin (full width of text block)
+    const bottomStartX = textBlock.minX;
+    const bottomEndX = textBlock.maxX;
+    const bottomStartY = textBlock.maxY + 2; // +1 cell gap + 1 for the note
+    const bottomEndY = bottomStartY + marginHeight - 1;
+
+    if (isRegionFree(bottomStartX, bottomEndX, bottomStartY, bottomEndY, worldData)) {
+        return {
+            startX: bottomStartX,
+            endX: bottomEndX,
+            startY: bottomStartY,
+            endY: bottomEndY,
+            position: 'bottom'
+        };
+    }
+
+    // No available space found - return bottom anyway (overlapping)
+    return {
+        startX: bottomStartX,
+        endX: bottomEndX,
+        startY: bottomStartY,
+        endY: bottomEndY,
+        position: 'bottom'
+    };
 }

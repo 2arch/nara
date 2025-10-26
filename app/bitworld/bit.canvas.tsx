@@ -5,7 +5,7 @@ import type { WorldData, Point, WorldEngine, PanStartInfo } from './world.engine
 import { useDialogue, useDebugDialogue } from './dialogue';
 import { useMonogramSystem } from './monogram';
 import { useControllerSystem, createMonogramController, createCameraController, createGridController, createTapeController, createCommandController } from './controllers';
-import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchicalFrames, HierarchicalFrame, HierarchyLevel } from './bit.blocks';
+import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchicalFrames, HierarchicalFrame, HierarchyLevel, findTextBlockForSelection } from './bit.blocks';
 import { COLOR_MAP, COMMAND_CATEGORIES, COMMAND_HELP } from './commands';
 import { useHostDialogue } from './host.dialogue';
 import { setDialogueWithRevert } from './ai';
@@ -1866,6 +1866,55 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Task Highlights ===
+        for (const key in engine.worldData) {
+            if (key.startsWith('task_')) {
+                try {
+                    const taskData = JSON.parse(engine.worldData[key] as string);
+                    const { startX, endX, startY, endY, color, completed } = taskData;
+
+                    // Render task highlight (only if not completed)
+                    if (!completed) {
+                        for (let y = startY; y <= endY; y++) {
+                            for (let x = startX; x <= endX; x++) {
+                                if (x >= startWorldX - 5 && x <= endWorldX + 5 && y >= startWorldY - 5 && y <= endWorldY + 5) {
+                                    const screenPos = engine.worldToScreen(x, y, currentZoom, currentOffset);
+                                    if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                                        screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                                        ctx.fillStyle = color;
+                                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Render strikethrough if completed
+                    if (completed) {
+                        for (let y = startY; y <= endY; y++) {
+                            const strikeY = y; // Center strikethrough vertically in the cell
+                            if (strikeY >= startWorldY - 5 && strikeY <= endWorldY + 5) {
+                                const leftScreenPos = engine.worldToScreen(startX, strikeY, currentZoom, currentOffset);
+                                const rightScreenPos = engine.worldToScreen(endX + 1, strikeY, currentZoom, currentOffset);
+
+                                if (leftScreenPos.x < cssWidth + effectiveCharWidth && rightScreenPos.x > -effectiveCharWidth) {
+                                    ctx.strokeStyle = engine.textColor;
+                                    ctx.lineWidth = 2;
+                                    const strikeThrough = leftScreenPos.y + effectiveCharHeight / 2;
+                                    ctx.beginPath();
+                                    ctx.moveTo(Math.max(0, leftScreenPos.x), strikeThrough);
+                                    ctx.lineTo(Math.min(cssWidth, rightScreenPos.x), strikeThrough);
+                                    ctx.stroke();
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Skip invalid task data
+                }
+            }
+        }
+
         // === Render List Content (No borders - just content + scrollbar) ===
         for (const key in engine.worldData) {
             if (key.startsWith('list_')) {
@@ -2295,8 +2344,27 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const posKey = `${worldX},${worldY}`;
                         const boundInfo = boundsIndexRef.current?.get(posKey);
 
-                        // Apply text color based on background
-                        if (boundInfo) {
+                        // Check if this position is within an active (non-completed) task
+                        let isInActiveTask = false;
+                        for (const key in engine.worldData) {
+                            if (key.startsWith('task_')) {
+                                try {
+                                    const taskData = JSON.parse(engine.worldData[key] as string);
+                                    if (!taskData.completed &&
+                                        worldX >= taskData.startX && worldX <= taskData.endX &&
+                                        worldY >= taskData.startY && worldY <= taskData.endY) {
+                                        isInActiveTask = true;
+                                        break;
+                                    }
+                                } catch (e) {}
+                            }
+                        }
+
+                        // Apply text color based on context
+                        if (isInActiveTask) {
+                            // Text within task highlight uses background color for contrast
+                            ctx.fillStyle = engine.backgroundColor;
+                        } else if (boundInfo) {
                             ctx.fillStyle = boundInfo.textColor;
                         } else {
                             ctx.fillStyle = (charStyle && charStyle.color) || engine.textColor;
@@ -3281,7 +3349,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const charString = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
                         const labelData = JSON.parse(charString);
                         const text = labelData.text || '';
-                        const color = labelData.color || '#000000';
+                        const labelColor = labelData.color || engine.textColor; // Default to text color (accent)
                         const labelWidthInChars = text.length;
 
                         const isVisible = worldX <= viewBounds.maxX && (worldX + labelWidthInChars) >= viewBounds.minX &&
@@ -3291,19 +3359,18 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             // Ensure consistent font settings for labels (same as regular text)
                             ctx.font = `${effectiveFontSize}px ${fontFamily}`;
                             ctx.textBaseline = 'top';
-                            
+
                             // Render each character of the label individually across cells
                             for (let charIndex = 0; charIndex < text.length; charIndex++) {
                                 const charWorldX = worldX + charIndex;
                                 const charScreenPos = engine.worldToScreen(charWorldX, worldY, currentZoom, currentOffset);
-                                
-                                // Fill background for this character cell
-                                ctx.fillStyle = color;
+
+                                // Fill background with accent color
+                                ctx.fillStyle = labelColor;
                                 ctx.fillRect(charScreenPos.x, charScreenPos.y, effectiveCharWidth, effectiveCharHeight);
 
-                                // Render the character with contrasting color
-                                const textColor = color === '#000000' || color === 'black' ? '#FFFFFF' : '#000000';
-                                ctx.fillStyle = textColor;
+                                // Render text with background color (cutout effect)
+                                ctx.fillStyle = engine.backgroundColor;
                                 ctx.fillText(text[charIndex], charScreenPos.x, charScreenPos.y + verticalTextOffset);
                             }
                         } else {
@@ -3329,13 +3396,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 
                                 adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
                                 adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
-                                
-                                drawArrow(ctx, adjustedX, adjustedY, intersection.angle, color);
+
+                                drawArrow(ctx, adjustedX, adjustedY, intersection.angle, labelColor);
 
                                 // Draw the label text next to the arrow
                                 if (text) {
-                                
-                                ctx.fillStyle = color;
+
+                                ctx.fillStyle = labelColor;
                                 ctx.font = `${effectiveFontSize}px ${fontFamily}`;
                                 const textOffset = ARROW_SIZE * 1.5;
                                 
@@ -3864,30 +3931,78 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const selectionColor = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
             ctx.fillStyle = selectionColor;
 
-            // Check if selection started on a character (text-aware selection mode)
+            // Check if selection started on a character OR within a text block (text-aware selection mode)
             const startKey = `${Math.floor(start.x)},${Math.floor(start.y)}`;
             const startData = engine.worldData[startKey];
             const startedOnChar = startData && !engine.isImageData(startData) && engine.getCharacter(startData).trim() !== '';
 
-            if (startedOnChar) {
+            // Check if selection actually overlaps with any label or task bounds
+            let overlapsLabelOrTask = false;
+            for (const key in engine.worldData) {
+                if (key.startsWith('label_')) {
+                    try {
+                        const labelData = JSON.parse(engine.worldData[key] as string);
+                        const coordsStr = key.substring('label_'.length);
+                        const [lxStr, lyStr] = coordsStr.split(',');
+                        const lx = parseInt(lxStr, 10);
+                        const ly = parseInt(lyStr, 10);
+                        const labelWidth = labelData.text?.length || 0;
+                        const labelEndX = lx + labelWidth - 1;
+                        // Check for actual 2D overlap (both X and Y)
+                        const xOverlap = !(maxX < lx || minX > labelEndX);
+                        const yOverlap = !(maxY < ly || minY > ly);
+                        if (xOverlap && yOverlap) {
+                            overlapsLabelOrTask = true;
+                            break;
+                        }
+                    } catch (e) {}
+                } else if (key.startsWith('task_')) {
+                    try {
+                        const taskData = JSON.parse(engine.worldData[key] as string);
+                        // Check for actual 2D overlap (both X and Y)
+                        const xOverlap = !(maxX < taskData.startX || minX > taskData.endX);
+                        const yOverlap = !(maxY < taskData.startY || minY > taskData.endY);
+                        if (xOverlap && yOverlap) {
+                            overlapsLabelOrTask = true;
+                            break;
+                        }
+                    } catch (e) {}
+                }
+            }
+
+            // Also check if the starting position is within a text block (even if it's a space)
+            const potentialTextBlock = findTextBlockForSelection(
+                { startX: Math.floor(start.x), endX: Math.floor(start.x), startY: Math.floor(start.y), endY: Math.floor(start.y) },
+                engine.worldData
+            );
+            const startedInTextBlock = potentialTextBlock !== null;
+
+            // Use text-aware selection ONLY if:
+            // 1. Selection doesn't overlap with any label/task
+            // 2. Started on an actual character (not just near a text block)
+            // This ensures clicking near labels/tasks falls through to box selection
+            if (!overlapsLabelOrTask && startedOnChar) {
                 // Text-editor-style selection: highlight only cells with characters, line by line
+                // First, find the text block that contains the selection
+                const textBlock = findTextBlockForSelection(
+                    { startX: minX, endX: maxX, startY: minY, endY: maxY },
+                    engine.worldData
+                );
+
+                // Use text block boundaries to constrain the selection horizontally
+                const blockMinX = textBlock ? textBlock.minX : minX;
+                const blockMaxX = textBlock ? textBlock.maxX : maxX;
+
                 for (let worldY = minY; worldY <= maxY; worldY++) {
                     const isFirstLine = worldY === minY;
                     const isLastLine = worldY === maxY;
 
-                    // Find the actual start and end of content on this line
-                    // For middle lines, scan the entire world; for first/last lines, respect selection bounds
-                    let scanStartX = isFirstLine ? minX : Number.MIN_SAFE_INTEGER;
-                    let scanEndX = isLastLine ? maxX : Number.MAX_SAFE_INTEGER;
-
+                    // Only scan within the text block's horizontal boundaries
                     let contentStartX = Number.MAX_SAFE_INTEGER;
                     let contentEndX = Number.MIN_SAFE_INTEGER;
 
-                    // Scan a reasonable range to find text (e.g., -10000 to +10000 from selection)
-                    const scanRangeStart = isFirstLine ? minX : Math.min(minX, -10000);
-                    const scanRangeEnd = isLastLine ? maxX : Math.max(maxX, 10000);
-
-                    for (let worldX = scanRangeStart; worldX <= scanRangeEnd; worldX++) {
+                    // Scan within the text block boundaries (or selection if no block found)
+                    for (let worldX = blockMinX; worldX <= blockMaxX; worldX++) {
                         const key = `${worldX},${worldY}`;
                         const data = engine.worldData[key];
                         const hasChar = data && !engine.isImageData(data) && engine.getCharacter(data).trim() !== '';

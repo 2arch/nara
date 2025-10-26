@@ -108,7 +108,7 @@ const AVAILABLE_COMMANDS = [
     // Navigation & View
     'nav', 'search', 'cam', 'indent',
     // Content Creation
-    'label', 'tape', 'clip', 'upload',
+    'label', 'task', 'tape', 'clip', 'upload', 'margin',
     // Special
     'mode', 'note', 'chat', 'tutorial', 'help',
     // Styling & Display
@@ -126,7 +126,7 @@ const AVAILABLE_COMMANDS = [
 // Category mapping for visual organization
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent'],
-    'create': ['label', 'tape', 'clip', 'upload'],
+    'create': ['label', 'task', 'tape', 'clip', 'upload', 'margin'],
     'special': ['mode', 'note', 'chat', 'tutorial', 'help'],
     'style': ['bg', 'text', 'font'],
     'state': ['state', 'random', 'clear'],
@@ -147,10 +147,12 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'search': 'Search through all text on your canvas. Type /search followed by your query to find and navigate to specific content. Useful for finding ideas in large canvases.',
     'cam': 'Control camera behavior. Use /cam focus to enable focus mode, which smoothly follows your cursor. Use /cam default to return to normal panning.',
     'indent': 'Toggle text indentation. This affects how new lines are indented when you press Enter, helping you organize thoughts hierarchically.',
-    'label': 'Create a spatial label at your current selection. First, select an area by clicking and dragging. Then type /label followed by your label text. Labels appear as arrows pointing to important locations.',
+    'label': 'Create a spatial label at your current selection. Type /label \'text\' [color]. Defaults to current text color (accent). Custom colors: /label \'text\' crimson. Labels show as colored cells with cutout text.',
+    'task': 'Create a toggleable task from selected text. Select text, then type /task [color]. Click the highlighted task to toggle completion (adds strikethrough). Click again to un-complete it.',
     'tape': 'Record and transcribe your voice. Type /tape to start recording, speak your thoughts, then press Enter. Your speech will be transcribed and placed on the canvas at your cursor position.',
     'clip': 'Save selected text to your clipboard. Select text, then type /clip to capture it. Access your clips later to paste them anywhere on the canvas.',
     'upload': 'Upload an image to your canvas. Type /upload, then select an image file. The image will be placed at your current cursor position and saved to your canvas.',
+    'margin': 'Create a margin note for selected text. Select text, then type /margin to create a note region in the margin. The note will be placed to the right, left, or below the text block based on available space.',
     'mode': 'Switch canvas modes. /mode default for standard writing, /mode air for ephemeral text that doesn\'t save, /mode chat to talk with AI, /mode note for focused note-taking.',
     'note': 'Quick shortcut to enter note mode. This creates a focused writing space perfect for drafting ideas before placing them on your main canvas.',
     'chat': 'Quick shortcut to enter chat mode. Talk with AI to transform, expand, or generate text. The AI can help you develop ideas or create content based on your prompts.',
@@ -429,10 +431,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
 
         if (lowerInput === 'label') {
             const parts = input.split(' ');
-            
+
             if (parts.length > 1) {
                 const secondArg = parts[1];
-                
+
                 // Handle --distance flag
                 if (secondArg === '--distance') {
                     if (parts.length > 2) {
@@ -441,12 +443,48 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     }
                     // Just typed --distance, show example
                     return ['label --distance <number>'];
+                } else if (parts.length === 2 && secondArg.startsWith("'")) {
+                    // Typing quoted text - show as is
+                    return [input];
+                } else if (parts.length >= 2 && input.includes("'")) {
+                    // Check if user is typing color after quoted text
+                    const quoteMatch = input.match(/'([^']+)'\s*(\S*)$/);
+                    if (quoteMatch && quoteMatch[2]) {
+                        // User is typing color - show color suggestions
+                        const colorInput = quoteMatch[2].toLowerCase();
+                        const colorNames = Object.keys(COLOR_MAP);
+                        const suggestions = colorNames
+                            .filter(color => color.startsWith(colorInput))
+                            .map(color => `label '${quoteMatch[1]}' ${color}`);
+                        return suggestions.length > 0 ? suggestions : [input];
+                    } else if (quoteMatch && quoteMatch[1] && input.endsWith("' ")) {
+                        // Completed quoted text, show color options
+                        const colorNames = Object.keys(COLOR_MAP);
+                        return colorNames.map(color => `label '${quoteMatch[1]}' ${color}`);
+                    }
+                    return [input];
                 } else {
-                    // Regular label command - show as typed (supports quoted strings)
+                    // Regular label command - show as typed
                     return [input];
                 }
             }
-            return ['label', 'label --distance', "label 'text with spaces'"];
+            return ['label', 'label --distance', "label 'text'", ...Object.keys(COLOR_MAP).map(color => `label 'text' ${color}`)];
+        }
+
+        if (lowerInput === 'task') {
+            const parts = input.split(' ');
+
+            if (parts.length > 1) {
+                // User is typing color argument - show color suggestions
+                const colorInput = parts[1].toLowerCase();
+                const colorNames = Object.keys(COLOR_MAP);
+                const suggestions = colorNames
+                    .filter(color => color.startsWith(colorInput))
+                    .map(color => `task ${color}`);
+                return suggestions.length > 0 ? suggestions : [input];
+            }
+            // Show color examples
+            return ['task', ...Object.keys(COLOR_MAP).map(color => `task ${color}`)];
         }
 
         if (lowerInput === 'text') {
@@ -3120,6 +3158,89 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
                 }
             } else {
+                setDialogueWithRevert("Make a selection first", setDialogueText);
+            }
+        } else if (commandName === 'margin') {
+            // /margin command - create a margin note for selected text
+            console.log('[/margin] Command triggered');
+            const existingSelection = getNormalizedSelection?.();
+            console.log('[/margin] Existing selection:', existingSelection);
+
+            if (existingSelection) {
+                const hasMeaningfulSelection =
+                    existingSelection.startX !== existingSelection.endX ||
+                    existingSelection.startY !== existingSelection.endY;
+                console.log('[/margin] Has meaningful selection:', hasMeaningfulSelection);
+                console.log('[/margin] Required deps available:', {
+                    setWorldData: !!setWorldData,
+                    worldData: !!worldData,
+                    setSelectionStart: !!setSelectionStart,
+                    setSelectionEnd: !!setSelectionEnd
+                });
+
+                if (hasMeaningfulSelection && setWorldData && worldData && setSelectionStart && setSelectionEnd) {
+                    console.log('[/margin] Loading margin calculation functions...');
+                    // Use dynamic import to load margin calculation functions
+                    import('./bit.blocks').then(({ findTextBlockForSelection, calculateMarginPlacement }) => {
+                        console.log('[/margin] Functions loaded, finding text block...');
+                        // Find the text block containing this selection
+                        const textBlock = findTextBlockForSelection(existingSelection, worldData);
+                        console.log('[/margin] Text block found:', textBlock);
+
+                        if (textBlock) {
+                            // Calculate margin placement (right, left, or bottom)
+                            const marginPlacement = calculateMarginPlacement(
+                                textBlock,
+                                existingSelection.startY,
+                                worldData
+                            );
+                            console.log('[/margin] Margin placement calculated:', marginPlacement);
+
+                            if (marginPlacement) {
+                                // Create note region data
+                                const noteRegion = {
+                                    startX: marginPlacement.startX,
+                                    endX: marginPlacement.endX,
+                                    startY: marginPlacement.startY,
+                                    endY: marginPlacement.endY,
+                                    timestamp: Date.now()
+                                };
+
+                                // Store note region in worldData with unique key
+                                const noteKey = `note_${marginPlacement.startX},${marginPlacement.startY}_${Date.now()}`;
+                                const newWorldData = { ...worldData };
+                                newWorldData[noteKey] = JSON.stringify(noteRegion);
+                                setWorldData(newWorldData);
+                                console.log('[/margin] Note region created with key:', noteKey, noteRegion);
+
+                                const width = marginPlacement.endX - marginPlacement.startX + 1;
+                                const height = marginPlacement.endY - marginPlacement.startY + 1;
+                                setDialogueWithRevert(
+                                    `Margin note created (${width}×${height}) on ${marginPlacement.position}`,
+                                    setDialogueText
+                                );
+
+                                // Clear selection
+                                setSelectionStart(null);
+                                setSelectionEnd(null);
+                            } else {
+                                console.log('[/margin] No available margin space found');
+                                setDialogueWithRevert("Could not find available margin space", setDialogueText);
+                            }
+                        } else {
+                            console.log('[/margin] No text block found for selection');
+                            setDialogueWithRevert("Could not find text block for selection", setDialogueText);
+                        }
+                    }).catch((error) => {
+                        console.error('[/margin] Error loading margin functions:', error);
+                        setDialogueWithRevert("Error creating margin note", setDialogueText);
+                    });
+                } else {
+                    console.log('[/margin] Selection validation failed');
+                    setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
+                }
+            } else {
+                console.log('[/margin] No selection exists');
                 setDialogueWithRevert("Make a selection first", setDialogueText);
             }
         } else if (commandName === 'publish') {
