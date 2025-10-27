@@ -3953,10 +3953,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const selectionColor = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
             ctx.fillStyle = selectionColor;
 
-            // Check if selection started on a character OR within a text block (text-aware selection mode)
+            // Check if selection started on a character (including spaces - text-aware selection mode)
             const startKey = `${Math.floor(start.x)},${Math.floor(start.y)}`;
             const startData = engine.worldData[startKey];
-            const startedOnChar = startData && !engine.isImageData(startData) && engine.getCharacter(startData).trim() !== '';
+            // Include spaces - any character data triggers text-aware mode
+            const startedOnChar = startData && !engine.isImageData(startData) && engine.getCharacter(startData) !== '';
 
             // Only check for label/task overlap if we started on a character (optimization)
             let overlapsLabelOrTask = false;
@@ -4012,8 +4013,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const blockMaxX = textBlock ? textBlock.maxX : maxX;
 
                 for (let worldY = minY; worldY <= maxY; worldY++) {
-                    const isFirstLine = worldY === minY;
-                    const isLastLine = worldY === maxY;
+                    const isFirstLine = worldY === Math.floor(start.y);
+                    const isLastLine = worldY === Math.floor(end.y);
 
                     // Only scan within the text block's horizontal boundaries
                     let contentStartX = Number.MAX_SAFE_INTEGER;
@@ -4033,15 +4034,17 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                     // Only draw if there's content on this line
                     if (contentStartX <= contentEndX) {
-                        // Constrain to selection bounds only on first and last lines
+                        // Constrain to actual start/end positions (not min/max)
                         let drawStartX = contentStartX;
                         let drawEndX = contentEndX;
 
                         if (isFirstLine) {
-                            drawStartX = Math.max(contentStartX, minX);
+                            // On the line where selection started, constrain to start.x
+                            drawStartX = Math.max(contentStartX, Math.floor(start.x));
                         }
                         if (isLastLine) {
-                            drawEndX = Math.min(contentEndX, maxX);
+                            // On the line where selection ended, constrain to end.x
+                            drawEndX = Math.min(contentEndX, Math.floor(end.x));
                         }
 
                         // Draw a continuous rectangle for this line segment
