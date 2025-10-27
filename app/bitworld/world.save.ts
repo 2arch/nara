@@ -187,11 +187,20 @@ export function useWorldSave(
                 if (!initialDataLoaded) {
                     initialData[key] = value;
                 } else if (autoLoadData) {
+                    // Always update lastSyncedDataRef - this is confirmed Firebase data
+                    if (lastSyncedDataRef.current) {
+                        lastSyncedDataRef.current[key] = value;
+                    }
+
+                    // Update local state if different from current
                     setLocalWorldData((prevData: WorldData) => {
-                        if (prevData[key] && JSON.stringify(prevData[key]) === JSON.stringify(value)) return prevData;
-                        const newData = { ...prevData, [key]: value };
-                        if (lastSyncedDataRef.current) lastSyncedDataRef.current[key] = value;
-                        return newData;
+                        const isDuplicate = prevData[key] && JSON.stringify(prevData[key]) === JSON.stringify(value);
+                        if (isDuplicate) {
+                            logger.debug(`📥 Received duplicate for ${key}, skipping render`);
+                            return prevData; // No render needed, but lastSyncedDataRef is updated above
+                        }
+                        logger.debug(`📥 Received new data for ${key}`);
+                        return { ...prevData, [key]: value };
                     });
                 }
             }),
@@ -200,11 +209,20 @@ export function useWorldSave(
                 const value = snapshot.val();
                 if (!key || !autoLoadData) return;
 
+                // Always update lastSyncedDataRef - this is confirmed Firebase data
+                if (lastSyncedDataRef.current) {
+                    lastSyncedDataRef.current[key] = value;
+                }
+
+                // Update local state if different from current
                 setLocalWorldData((prevData: WorldData) => {
-                    if (prevData[key] && JSON.stringify(prevData[key]) === JSON.stringify(value)) return prevData;
-                    const newData = { ...prevData, [key]: value };
-                    if (lastSyncedDataRef.current) lastSyncedDataRef.current[key] = value;
-                    return newData;
+                    const isDuplicate = prevData[key] && JSON.stringify(prevData[key]) === JSON.stringify(value);
+                    if (isDuplicate) {
+                        logger.debug(`📥 Received duplicate change for ${key}, skipping render`);
+                        return prevData; // No render needed, but lastSyncedDataRef is updated above
+                    }
+                    logger.debug(`📥 Received changed data for ${key}`);
+                    return { ...prevData, [key]: value };
                 });
             }),
             onChildRemoved(dataRef, (snapshot) => {
@@ -315,10 +333,45 @@ export function useWorldSave(
                 const cleanWorldData = cleanObject(localWorldData);
 
                 if (USE_DIRECT_SAVES) {
-                    // Direct save - write entire data to canonical path
-                    const dataRef = ref(database, savePath);
-                    await set(dataRef, cleanWorldData);
-                    lastSyncedDataRef.current = { ...localWorldData };
+                    // Direct save - write only changed keys to avoid overwriting other users' data
+                    const updates: Record<string, any> = {};
+
+                    // Add/update changed keys
+                    for (const [key, value] of Object.entries(cleanWorldData)) {
+                        const lastSyncedValue = lastSyncedDataRef.current?.[key];
+                        if (JSON.stringify(value) !== JSON.stringify(lastSyncedValue)) {
+                            updates[`${savePath}/${key}`] = value;
+                        }
+                    }
+
+                    // Delete removed keys
+                    const lastSyncedKeys = Object.keys(lastSyncedDataRef.current || {});
+                    const currentKeys = Object.keys(cleanWorldData);
+                    const deletedKeys = lastSyncedKeys.filter(k => !currentKeys.includes(k));
+
+                    for (const key of deletedKeys) {
+                        updates[`${savePath}/${key}`] = null;
+                    }
+
+                    // Only write if there are changes
+                    if (Object.keys(updates).length > 0) {
+                        logger.debug(`📤 Sending ${Object.keys(updates).length} updates to Firebase`, updates);
+                        await update(ref(database), updates);
+
+                        // Only update lastSyncedDataRef for keys we successfully wrote
+                        // Note: Firebase listeners will update lastSyncedDataRef when confirmed
+                        // But we optimistically update here to prevent re-sending same keys
+                        for (const key of Object.keys(updates)) {
+                            const pathParts = key.split('/');
+                            const dataKey = pathParts[pathParts.length - 1];
+                            if (updates[key] === null) {
+                                delete lastSyncedDataRef.current?.[dataKey];
+                            } else if (lastSyncedDataRef.current) {
+                                lastSyncedDataRef.current[dataKey] = updates[key];
+                            }
+                        }
+                        logger.debug(`✅ Write complete, lastSyncedDataRef now has ${Object.keys(lastSyncedDataRef.current || {}).length} keys`);
+                    }
                 } else {
                     // Client channel save with timestamps
                     const updates: Record<string, any> = {};

@@ -106,11 +106,11 @@ const READ_ONLY_COMMANDS = ['signin', 'share'];
 // Commands organized by category for logical ordering
 const AVAILABLE_COMMANDS = [
     // Navigation & View
-    'nav', 'search', 'cam', 'indent',
+    'nav', 'search', 'cam', 'indent', 'zoom',
     // Content Creation
     'label', 'task', 'tape', 'clip', 'upload', 'margin',
     // Special
-    'mode', 'note', 'chat', 'tutorial', 'help',
+    'mode', 'note', 'chat', 'tutorial', 'help', 'agent', 'artefacts',
     // Styling & Display
     'bg', 'text', 'font',
     // State Management
@@ -125,9 +125,9 @@ const AVAILABLE_COMMANDS = [
 
 // Category mapping for visual organization
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
-    'nav': ['nav', 'search', 'cam', 'indent'],
+    'nav': ['nav', 'search', 'cam', 'indent', 'zoom'],
     'create': ['label', 'task', 'tape', 'clip', 'upload', 'margin'],
-    'special': ['mode', 'note', 'chat', 'tutorial', 'help'],
+    'special': ['mode', 'note', 'chat', 'tutorial', 'help', 'agent', 'artefacts'],
     'style': ['bg', 'text', 'font'],
     'state': ['state', 'random', 'clear'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],

@@ -1999,16 +1999,16 @@ export function useWorldEngine({
                             const char = greeting[charIndex];
                             const charPos = { x: startPos.x + charIndex, y: startPos.y };
 
-                            // Add ephemeral text for each character (including spaces) with pink bg and white text
-                            addEphemeralText(
-                                charPos,
+                            // Place permanent character with pink bg and white text
+                            const styledChar: StyledCharacter = {
                                 char,
-                                {
-                                    animationDelay: 3000,
+                                style: {
                                     color: '#FFFFFF',
                                     background: '#FF69B4'
                                 }
-                            );
+                            };
+                            const key = `${charPos.x},${charPos.y}`;
+                            setWorldData(prev => ({ ...prev, [key]: styledChar }));
 
                             charIndex++;
 
@@ -2044,16 +2044,16 @@ export function useWorldEngine({
                             const char = command[charIndex];
                             const charPos = { x: startPos.x + charIndex, y: startPos.y };
 
-                            // Add ephemeral text with pink bg and white text
-                            addEphemeralText(
-                                charPos,
+                            // Place permanent character with pink bg and white text
+                            const styledChar: StyledCharacter = {
                                 char,
-                                {
-                                    animationDelay: 2000,
+                                style: {
                                     color: '#FFFFFF',
                                     background: '#FF69B4'
                                 }
-                            );
+                            };
+                            const key = `${charPos.x},${charPos.y}`;
+                            setWorldData(prev => ({ ...prev, [key]: styledChar }));
 
                             charIndex++;
                             setAgentPos({ x: startPos.x + charIndex, y: startPos.y });
@@ -2113,7 +2113,7 @@ export function useWorldEngine({
         }, 100); // Tick every 100ms for smooth movement
 
         return () => clearInterval(agentInterval);
-    }, [agentEnabled, agentState, agentPos, agentTargetPos, addEphemeralText, switchBackgroundMode, updateSettings]);
+    }, [agentEnabled, agentState, agentPos, agentTargetPos, switchBackgroundMode, updateSettings, setWorldData]);
 
     // Agent follows viewport when panning
     useEffect(() => {

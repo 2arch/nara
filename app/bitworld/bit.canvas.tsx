@@ -5260,6 +5260,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     const isTouchSelectingRef = useRef<boolean>(false);
     const touchHasMovedRef = useRef<boolean>(false);
 
+    // Double-tap detection state
+    const lastTapTimeRef = useRef<number>(0);
+    const lastTapPosRef = useRef<{ x: number; y: number } | null>(null);
+    const DOUBLE_TAP_THRESHOLD = 300; // ms - time window for double-tap
+    const DOUBLE_TAP_DISTANCE = 30; // px - max distance between taps
+    const isDoubleTapModeRef = useRef<boolean>(false);
+
     const handleTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return;
@@ -5294,8 +5301,41 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const dy = touches[1].y - touches[0].y;
             lastPinchDistanceRef.current = Math.sqrt(dx * dx + dy * dy);
         } else if (touches.length === 1) {
-            // Single touch - prepare for potential drag selection
-            isTouchSelectingRef.current = true;
+            // Single touch - detect double-tap or prepare for pan
+            const now = Date.now();
+            const currentPos = { x: touches[0].x, y: touches[0].y };
+
+            // Check if this is a double-tap (within time and distance threshold)
+            const timeSinceLastTap = now - lastTapTimeRef.current;
+            const isDoubleTap = lastTapPosRef.current &&
+                timeSinceLastTap < DOUBLE_TAP_THRESHOLD &&
+                Math.sqrt(
+                    Math.pow(currentPos.x - lastTapPosRef.current.x, 2) +
+                    Math.pow(currentPos.y - lastTapPosRef.current.y, 2)
+                ) < DOUBLE_TAP_DISTANCE;
+
+            if (isDoubleTap) {
+                // Double-tap detected - enter selection/click mode
+                isDoubleTapModeRef.current = true;
+                isTouchSelectingRef.current = true;
+                // Prevent iOS Safari double-tap-to-zoom
+                e.preventDefault();
+            } else {
+                // Single tap - prepare for pan (primary gesture)
+                isDoubleTapModeRef.current = false;
+                isTouchPanningRef.current = true;
+                const info = engine.handlePanStart(touches[0].clientX, touches[0].clientY);
+                panStartInfoRef.current = info;
+                intermediatePanOffsetRef.current = { ...engine.viewOffset };
+                panStartPosRef.current = { ...engine.viewOffset };
+                setIsPanning(true);
+                setPanDistance(0);
+                lastPanMilestoneRef.current = 0;
+            }
+
+            // Update last tap tracking
+            lastTapTimeRef.current = now;
+            lastTapPosRef.current = currentPos;
         }
 
         canvasRef.current?.focus();
@@ -5347,8 +5387,36 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
 
             lastPinchDistanceRef.current = currentDistance;
-        } else if (touches.length === 1 && isTouchSelectingRef.current && touchStartRef.current) {
-            // Single touch drag - check if movement threshold reached
+        } else if (touches.length === 1 && isTouchPanningRef.current && !isDoubleTapModeRef.current && panStartInfoRef.current) {
+            // Single-finger pan (primary gesture)
+            e.preventDefault();
+
+            const newOffset = engine.handlePanMove(touches[0].clientX, touches[0].clientY, panStartInfoRef.current);
+            intermediatePanOffsetRef.current = newOffset;
+
+            // Calculate pan distance (for display only)
+            if (panStartPosRef.current) {
+                const dx = newOffset.x - panStartPosRef.current.x;
+                const dy = newOffset.y - panStartPosRef.current.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const roundedDistance = Math.round(distance);
+                setPanDistance(roundedDistance);
+            }
+
+            // Mark as moved to prevent double-tap from triggering click
+            if (!touchHasMovedRef.current) {
+                const startTouch = touchStartRef.current?.touches[0];
+                if (startTouch) {
+                    const dx = touches[0].x - startTouch.x;
+                    const dy = touches[0].y - startTouch.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    if (distance > 5) {
+                        touchHasMovedRef.current = true;
+                    }
+                }
+            }
+        } else if (touches.length === 1 && isTouchSelectingRef.current && isDoubleTapModeRef.current && touchStartRef.current) {
+            // Double-tap drag for selection
             const startTouch = touchStartRef.current.touches[0];
             const dx = touches[0].x - startTouch.x;
             const dy = touches[0].y - startTouch.y;
