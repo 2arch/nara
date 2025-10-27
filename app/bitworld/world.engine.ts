@@ -3050,13 +3050,13 @@ export function useWorldEngine({
                                         logger.error('Failed to fetch image for conversion:', error);
                                         setAiProcessingRegion(null); // Clear visual feedback
                                         setDialogueWithRevert("Could not load image for editing", setDialogueText);
-                                        return;
+                                        return true;
                                     }
                                 } else {
                                     logger.error('Invalid image format:', selectedImageData);
                                     setAiProcessingRegion(null); // Clear visual feedback
                                     setDialogueWithRevert("Invalid image format", setDialogueText);
-                                    return;
+                                    return true;
                                 }
 
                                 loadAI().then(ai => ai.generateImage(aiPrompt, base64ImageData, userUid || undefined)).then(async (result) => {
@@ -3065,7 +3065,7 @@ export function useWorldEngine({
                                     if (upgradeFlowHandlerRef.current) {
                                         upgradeFlowHandlerRef.current();
                                     }
-                                    return;
+                                    return true;
                                 }
 
                                 if (result.imageData) {
@@ -3173,7 +3173,7 @@ export function useWorldEngine({
                                     if (upgradeFlowHandlerRef.current) {
                                         upgradeFlowHandlerRef.current();
                                     }
-                                    return;
+                                    return true;
                                 }
 
                                 if (result.imageData) {
@@ -3290,7 +3290,7 @@ export function useWorldEngine({
                                 if (upgradeFlowHandlerRef.current) {
                                     upgradeFlowHandlerRef.current();
                                 }
-                                return;
+                                return true;
                             }
 
                             const newWorldData = { ...worldData };
@@ -3418,12 +3418,12 @@ export function useWorldEngine({
                                 } catch (error) {
                                     logger.error('Failed to fetch image for conversion:', error);
                                     setDialogueWithRevert("Could not load image for editing", setDialogueText);
-                                    return;
+                                    return true;
                                 }
                             } else {
                                 logger.error('Invalid image format:', existingImageData);
                                 setDialogueWithRevert("Invalid image format", setDialogueText);
-                                return;
+                                return true;
                             }
 
                             // Calculate aspect ratio from image region
@@ -3440,7 +3440,7 @@ export function useWorldEngine({
                                 if (upgradeFlowHandlerRef.current) {
                                     upgradeFlowHandlerRef.current();
                                 }
-                                return;
+                                return true;
                             }
 
                             if (result.imageData) {
@@ -3624,7 +3624,7 @@ export function useWorldEngine({
                                 if (upgradeFlowHandlerRef.current) {
                                     upgradeFlowHandlerRef.current();
                                 }
-                                return;
+                                return true;
                             }
 
                             // Replace text in the bounding box with AI response
@@ -3874,7 +3874,7 @@ export function useWorldEngine({
                                 // Validate hex color
                                 if (!/^#[0-9A-F]{6}$/i.test(labelColor)) {
                                     setDialogueWithRevert(`Invalid color: ${colorArg}. Use hex code or name.`, setDialogueText);
-                                    return;
+                                    return true;
                                 }
                             }
                         } else {
@@ -3888,7 +3888,7 @@ export function useWorldEngine({
                                 // Validate hex color
                                 if (!/^#[0-9A-F]{6}$/i.test(labelColor)) {
                                     setDialogueWithRevert(`Invalid color: ${colorArg}. Use hex code or name.`, setDialogueText);
-                                    return;
+                                    return true;
                                 }
                             }
                         }
@@ -5295,7 +5295,7 @@ export function useWorldEngine({
                                                 img.src = dataUrl;
                                             };
                                             reader.readAsDataURL(file);
-                                            return;
+                                            return true;
                                         }
 
                                         // Calculate selection dimensions
@@ -5618,7 +5618,7 @@ export function useWorldEngine({
                                     upgradeFlowHandlerRef.current();
                                 }
                                 setChatMode(prev => ({ ...prev, isProcessing: false }));
-                                return;
+                                return true;
                             }
 
                             // Show response in dialogue system
@@ -5715,7 +5715,7 @@ export function useWorldEngine({
                                     upgradeFlowHandlerRef.current();
                                 }
                                 setChatMode(prev => ({ ...prev, isProcessing: false }));
-                                return;
+                                return true;
                             }
 
                             // Show response in dialogue system (subtitle-style)
@@ -6066,7 +6066,7 @@ export function useWorldEngine({
                                     if (upgradeFlowHandlerRef.current) {
                                         upgradeFlowHandlerRef.current();
                                     }
-                                    return;
+                                    return true;
                                 }
 
                                 createSubtitleCycler(result, setDialogueText);
@@ -6085,7 +6085,7 @@ export function useWorldEngine({
                                 if (upgradeFlowHandlerRef.current) {
                                     upgradeFlowHandlerRef.current();
                                 }
-                                return;
+                                return true;
                             }
 
                             createSubtitleCycler(result, setDialogueText);
@@ -6103,7 +6103,7 @@ export function useWorldEngine({
                                 if (upgradeFlowHandlerRef.current) {
                                     upgradeFlowHandlerRef.current();
                                 }
-                                return;
+                                return true;
                             }
 
                             createSubtitleCycler(result, setDialogueText);
@@ -6409,12 +6409,12 @@ export function useWorldEngine({
                                 if (upgradeFlowHandlerRef.current) {
                                     upgradeFlowHandlerRef.current();
                                 }
-                                return;
+                                return true;
                             }
 
                             if (!result.imageData) {
                                 setDialogueWithRevert("Image generation failed", setDialogueText);
-                                return;
+                                return true;
                             }
 
                             setDialogueWithRevert("Image generated successfully", setDialogueText);
@@ -6543,7 +6543,7 @@ export function useWorldEngine({
                                 if (upgradeFlowHandlerRef.current) {
                                     upgradeFlowHandlerRef.current();
                                 }
-                                return;
+                                return true;
                             }
 
                             // Don't show response in dialogue - write directly to target region
