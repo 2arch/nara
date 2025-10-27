@@ -1078,7 +1078,35 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     // --- Bounds Spatial Index Cache ---
     const boundsIndexRef = useRef<Map<string, {isFocused: boolean, textColor: string}> | null>(null);
     const lastBoundsDataRef = useRef<string>('');
-    
+    const tasksIndexRef = useRef<Map<string, boolean>>(new Map());
+    const lastTasksDataRef = useRef<string>('');
+
+    const updateTasksIndex = useCallback(() => {
+        // Create a spatial index of all active (non-completed) tasks for O(1) lookup
+        const tasksIndex = new Map<string, boolean>();
+
+        for (const taskKey in engine.worldData) {
+            if (taskKey.startsWith('task_')) {
+                try {
+                    const taskData = JSON.parse(engine.worldData[taskKey] as string);
+                    if (!taskData.completed) {
+                        // Index every position within the task bounds
+                        for (let y = taskData.startY; y <= taskData.endY; y++) {
+                            for (let x = taskData.startX; x <= taskData.endX; x++) {
+                                const key = `${x},${y}`;
+                                tasksIndex.set(key, true);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Skip invalid task data
+                }
+            }
+        }
+
+        tasksIndexRef.current = tasksIndex;
+    }, [engine.worldData]);
+
     const updateBoundsIndex = useCallback(() => {
         // Create a spatial index of all bound top bars for O(1) lookup
         const boundsIndex = new Map<string, {isFocused: boolean, textColor: string}>();
@@ -1616,6 +1644,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         if (currentBoundsData !== lastBoundsDataRef.current) {
             updateBoundsIndex();
             lastBoundsDataRef.current = currentBoundsData;
+        }
+
+        // Update tasks index if world data changed
+        const currentTasksData = JSON.stringify(Object.keys(engine.worldData).filter(k => k.startsWith('task_')));
+        if (currentTasksData !== lastTasksDataRef.current) {
+            updateTasksIndex();
+            lastTasksDataRef.current = currentTasksData;
         }
 
         // Use intermediate offset if panning (mouse or touch), otherwise use engine's state
@@ -2344,21 +2379,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const posKey = `${worldX},${worldY}`;
                         const boundInfo = boundsIndexRef.current?.get(posKey);
 
-                        // Check if this position is within an active (non-completed) task
-                        let isInActiveTask = false;
-                        for (const key in engine.worldData) {
-                            if (key.startsWith('task_')) {
-                                try {
-                                    const taskData = JSON.parse(engine.worldData[key] as string);
-                                    if (!taskData.completed &&
-                                        worldX >= taskData.startX && worldX <= taskData.endX &&
-                                        worldY >= taskData.startY && worldY <= taskData.endY) {
-                                        isInActiveTask = true;
-                                        break;
-                                    }
-                                } catch (e) {}
-                            }
-                        }
+                        // O(1) lookup for active task using spatial index
+                        const isInActiveTask = tasksIndexRef.current?.get(posKey) || false;
 
                         // Apply text color based on context
                         if (isInActiveTask) {
@@ -3936,50 +3958,46 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const startData = engine.worldData[startKey];
             const startedOnChar = startData && !engine.isImageData(startData) && engine.getCharacter(startData).trim() !== '';
 
-            // Check if selection actually overlaps with any label or task bounds
+            // Only check for label/task overlap if we started on a character (optimization)
             let overlapsLabelOrTask = false;
-            for (const key in engine.worldData) {
-                if (key.startsWith('label_')) {
-                    try {
-                        const labelData = JSON.parse(engine.worldData[key] as string);
-                        const coordsStr = key.substring('label_'.length);
-                        const [lxStr, lyStr] = coordsStr.split(',');
-                        const lx = parseInt(lxStr, 10);
-                        const ly = parseInt(lyStr, 10);
-                        const labelWidth = labelData.text?.length || 0;
-                        const labelEndX = lx + labelWidth - 1;
-                        // Check for actual 2D overlap (both X and Y)
-                        const xOverlap = !(maxX < lx || minX > labelEndX);
-                        const yOverlap = !(maxY < ly || minY > ly);
-                        if (xOverlap && yOverlap) {
-                            overlapsLabelOrTask = true;
-                            break;
-                        }
-                    } catch (e) {}
-                } else if (key.startsWith('task_')) {
-                    try {
-                        const taskData = JSON.parse(engine.worldData[key] as string);
-                        // Check for actual 2D overlap (both X and Y)
-                        const xOverlap = !(maxX < taskData.startX || minX > taskData.endX);
-                        const yOverlap = !(maxY < taskData.startY || minY > taskData.endY);
-                        if (xOverlap && yOverlap) {
-                            overlapsLabelOrTask = true;
-                            break;
-                        }
-                    } catch (e) {}
+            if (startedOnChar) {
+                // Check if selection actually overlaps with any label or task bounds
+                for (const key in engine.worldData) {
+                    if (key.startsWith('label_')) {
+                        try {
+                            const labelData = JSON.parse(engine.worldData[key] as string);
+                            const coordsStr = key.substring('label_'.length);
+                            const [lxStr, lyStr] = coordsStr.split(',');
+                            const lx = parseInt(lxStr, 10);
+                            const ly = parseInt(lyStr, 10);
+                            const labelWidth = labelData.text?.length || 0;
+                            const labelEndX = lx + labelWidth - 1;
+                            // Check for actual 2D overlap (both X and Y)
+                            const xOverlap = !(maxX < lx || minX > labelEndX);
+                            const yOverlap = !(maxY < ly || minY > ly);
+                            if (xOverlap && yOverlap) {
+                                overlapsLabelOrTask = true;
+                                break;
+                            }
+                        } catch (e) {}
+                    } else if (key.startsWith('task_')) {
+                        try {
+                            const taskData = JSON.parse(engine.worldData[key] as string);
+                            // Check for actual 2D overlap (both X and Y)
+                            const xOverlap = !(maxX < taskData.startX || minX > taskData.endX);
+                            const yOverlap = !(maxY < taskData.startY || minY > taskData.endY);
+                            if (xOverlap && yOverlap) {
+                                overlapsLabelOrTask = true;
+                                break;
+                            }
+                        } catch (e) {}
+                    }
                 }
             }
 
-            // Also check if the starting position is within a text block (even if it's a space)
-            const potentialTextBlock = findTextBlockForSelection(
-                { startX: Math.floor(start.x), endX: Math.floor(start.x), startY: Math.floor(start.y), endY: Math.floor(start.y) },
-                engine.worldData
-            );
-            const startedInTextBlock = potentialTextBlock !== null;
-
             // Use text-aware selection ONLY if:
             // 1. Selection doesn't overlap with any label/task
-            // 2. Started on an actual character (not just near a text block)
+            // 2. Started on an actual character
             // This ensures clicking near labels/tasks falls through to box selection
             if (!overlapsLabelOrTask && startedOnChar) {
                 // Text-editor-style selection: highlight only cells with characters, line by line
@@ -4532,7 +4550,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, selectedNoteKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
+    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, selectedNoteKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, updateTasksIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
 
 
     // --- Drawing Loop Effect ---
