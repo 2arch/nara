@@ -8,7 +8,7 @@ import type { WorldData } from './world.engine'; // Adjust path if needed
 import type { WorldSettings } from './settings';
 
 // Debounce delay for saving (in milliseconds)
-const SAVE_DEBOUNCE_DELAY = 10; // Instant saves
+const SAVE_DEBOUNCE_DELAY = 0; // No debouncing - immediate saves
 const MERGE_INTERVAL = 100; // Merge every 100ms for instant updates
 
 // Enable direct saves (bypass client channel system)
