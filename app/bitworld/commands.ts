@@ -110,7 +110,7 @@ const AVAILABLE_COMMANDS = [
     // Content Creation
     'label', 'task', 'tape', 'clip', 'upload', 'margin',
     // Special
-    'mode', 'note', 'chat', 'tutorial', 'help', 'agent', 'artefacts',
+    'mode', 'note', 'chat', 'tutorial', 'help', 'artefacts',
     // Styling & Display
     'bg', 'text', 'font',
     // State Management
@@ -127,7 +127,7 @@ const AVAILABLE_COMMANDS = [
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent', 'zoom'],
     'create': ['label', 'task', 'tape', 'clip', 'upload', 'margin'],
-    'special': ['mode', 'note', 'chat', 'tutorial', 'help', 'agent', 'artefacts'],
+    'special': ['mode', 'note', 'chat', 'tutorial', 'help', 'artefacts'],
     'style': ['bg', 'text', 'font'],
     'state': ['state', 'random', 'clear'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
@@ -2499,27 +2499,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             // Return command execution for world engine to handle zoom animation
             return {
                 command: 'zoom',
-                args: [],
-                commandStartPos: commandState.commandStartPos
-            };
-        }
-
-        if (commandToExecute.startsWith('agent')) {
-            // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
-
-            // Return command execution for world engine to handle agent toggle
-            return {
-                command: 'agent',
                 args: [],
                 commandStartPos: commandState.commandStartPos
             };

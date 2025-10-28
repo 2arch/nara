@@ -1894,15 +1894,19 @@ export function useWorldEngine({
 
     // Track cursor position changes for camera updates in chat/command modes
     const prevCursorPosRef = useRef<Point>(cursorPos);
+    const prevCommandStateActiveRef = useRef<boolean>(commandState.isActive);
     useEffect(() => {
         // Only update camera if cursor actually moved
         if (prevCursorPosRef.current.x !== cursorPos.x || prevCursorPosRef.current.y !== cursorPos.y) {
             // Update camera if in chat or command mode
-            if (chatMode.isActive || commandState.isActive) {
+            // BUT: Don't update if we just exited command mode (prevents viewport jump when command completes)
+            const justExitedCommandMode = prevCommandStateActiveRef.current && !commandState.isActive;
+            if ((chatMode.isActive || commandState.isActive) && !justExitedCommandMode) {
                 updateCameraTracking(cursorPos);
             }
             prevCursorPosRef.current = cursorPos;
         }
+        prevCommandStateActiveRef.current = commandState.isActive;
     }, [cursorPos, chatMode.isActive, commandState.isActive, updateCameraTracking]);
 
     // === Agent Behavior System ===
@@ -3827,9 +3831,9 @@ export function useWorldEngine({
                             if (selectedText) {
                                 // Create label at selection start position
                                 const labelKey = `label_${minX},${minY}`;
+                                // Don't save color - let it adapt to current canvas colors dynamically
                                 const newLabel = {
-                                    text: selectedText,
-                                    color: textColor // Label bg uses text color, label text uses bg color (inverted)
+                                    text: selectedText
                                 };
 
                                 setWorldData(prev => ({
@@ -3859,7 +3863,7 @@ export function useWorldEngine({
                         const commandParts = fullCommand.split(' ');
 
                         let text = '';
-                        let labelColor = textColor; // Label bg uses text color, label text uses bg color (inverted)
+                        let labelColor: string | undefined = undefined; // Don't set default - let it adapt dynamically
 
                         // Check for quoted text (single quotes)
                         const quotedMatch = fullCommand.match(/label\s+'([^']+)'(?:\s+(\S+))?/);
@@ -3895,10 +3899,14 @@ export function useWorldEngine({
                         }
 
                         const labelKey = `label_${exec.commandStartPos.x},${exec.commandStartPos.y}`;
-                        const newLabel = {
-                            text,
-                            color: labelColor
+                        const newLabel: any = {
+                            text
                         };
+
+                        // Only save color if explicitly provided
+                        if (labelColor) {
+                            newLabel.color = labelColor;
+                        }
 
                         setWorldData(prev => ({
                             ...prev,
@@ -3922,42 +3930,50 @@ export function useWorldEngine({
                         if (hasSelection) {
                             const normalized = getNormalizedSelection();
                             if (normalized) {
-                                // Get color argument (default to sulfur)
-                                const highlightColor = exec.args.length > 0 ? exec.args[0] : 'sulfur';
+                                // Get color argument (no default - let it adapt dynamically)
+                                let hexColor: string | undefined = undefined;
 
-                                // Resolve color name to hex
-                                const hexColor = (COLOR_MAP[highlightColor.toLowerCase()] || highlightColor).toUpperCase();
+                                if (exec.args.length > 0) {
+                                    const highlightColor = exec.args[0];
+                                    // Resolve color name to hex
+                                    hexColor = (COLOR_MAP[highlightColor.toLowerCase()] || highlightColor).toUpperCase();
 
-                                // Validate hex color
-                                if (!/^#[0-9A-F]{6}$/i.test(hexColor)) {
-                                    setDialogueWithRevert(`Invalid color: ${highlightColor}. Use hex code or name.`, setDialogueText);
-                                } else {
-                                    // Create task data
-                                    const taskKey = `task_${normalized.startX},${normalized.startY}_${Date.now()}`;
-                                    const taskData = {
-                                        startX: normalized.startX,
-                                        endX: normalized.endX,
-                                        startY: normalized.startY,
-                                        endY: normalized.endY,
-                                        color: hexColor,
-                                        completed: false,
-                                        timestamp: Date.now()
-                                    };
-
-                                    // Store task in worldData
-                                    setWorldData(prev => ({
-                                        ...prev,
-                                        [taskKey]: JSON.stringify(taskData)
-                                    }));
-
-                                    const width = normalized.endX - normalized.startX + 1;
-                                    const height = normalized.endY - normalized.startY + 1;
-                                    setDialogueWithRevert(`Task created (${width}×${height}). Click to toggle completion.`, setDialogueText);
-
-                                    // Clear selection
-                                    setSelectionStart(null);
-                                    setSelectionEnd(null);
+                                    // Validate hex color
+                                    if (!/^#[0-9A-F]{6}$/i.test(hexColor)) {
+                                        setDialogueWithRevert(`Invalid color: ${highlightColor}. Use hex code or name.`, setDialogueText);
+                                        return true;
+                                    }
                                 }
+
+                                // Create task data
+                                const taskKey = `task_${normalized.startX},${normalized.startY}_${Date.now()}`;
+                                const taskData: any = {
+                                    startX: normalized.startX,
+                                    endX: normalized.endX,
+                                    startY: normalized.startY,
+                                    endY: normalized.endY,
+                                    completed: false,
+                                    timestamp: Date.now()
+                                };
+
+                                // Only save color if explicitly provided
+                                if (hexColor) {
+                                    taskData.color = hexColor;
+                                }
+
+                                // Store task in worldData
+                                setWorldData(prev => ({
+                                    ...prev,
+                                    [taskKey]: JSON.stringify(taskData)
+                                }));
+
+                                const width = normalized.endX - normalized.startX + 1;
+                                const height = normalized.endY - normalized.startY + 1;
+                                setDialogueWithRevert(`Task created (${width}×${height}). Click to toggle completion.`, setDialogueText);
+
+                                // Clear selection
+                                setSelectionStart(null);
+                                setSelectionEnd(null);
                             }
                         } else {
                             setDialogueWithRevert("Selection must span more than one cell", setDialogueText);

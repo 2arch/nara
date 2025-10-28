@@ -1079,22 +1079,32 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     const boundsIndexRef = useRef<Map<string, {isFocused: boolean, textColor: string}> | null>(null);
     const lastBoundsDataRef = useRef<string>('');
     const tasksIndexRef = useRef<Map<string, boolean>>(new Map());
+    const completedTasksIndexRef = useRef<Map<string, boolean>>(new Map());
     const lastTasksDataRef = useRef<string>('');
 
     const updateTasksIndex = useCallback(() => {
         // Create a spatial index of all active (non-completed) tasks for O(1) lookup
         const tasksIndex = new Map<string, boolean>();
+        const completedTasksIndex = new Map<string, boolean>();
 
         for (const taskKey in engine.worldData) {
             if (taskKey.startsWith('task_')) {
                 try {
                     const taskData = JSON.parse(engine.worldData[taskKey] as string);
                     if (!taskData.completed) {
-                        // Index every position within the task bounds
+                        // Index every position within active task bounds
                         for (let y = taskData.startY; y <= taskData.endY; y++) {
                             for (let x = taskData.startX; x <= taskData.endX; x++) {
                                 const key = `${x},${y}`;
                                 tasksIndex.set(key, true);
+                            }
+                        }
+                    } else {
+                        // Index every position within completed task bounds
+                        for (let y = taskData.startY; y <= taskData.endY; y++) {
+                            for (let x = taskData.startX; x <= taskData.endX; x++) {
+                                const key = `${x},${y}`;
+                                completedTasksIndex.set(key, true);
                             }
                         }
                     }
@@ -1105,6 +1115,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         tasksIndexRef.current = tasksIndex;
+        completedTasksIndexRef.current = completedTasksIndex;
     }, [engine.worldData]);
 
     const updateBoundsIndex = useCallback(() => {
@@ -1646,8 +1657,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             lastBoundsDataRef.current = currentBoundsData;
         }
 
-        // Update tasks index if world data changed
-        const currentTasksData = JSON.stringify(Object.keys(engine.worldData).filter(k => k.startsWith('task_')));
+        // Update tasks index if task data has changed (check values, not just keys)
+        const taskEntries = Object.entries(engine.worldData).filter(([k]) => k.startsWith('task_'));
+        const currentTasksData = JSON.stringify(taskEntries);
         if (currentTasksData !== lastTasksDataRef.current) {
             updateTasksIndex();
             lastTasksDataRef.current = currentTasksData;
@@ -1908,6 +1920,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     const taskData = JSON.parse(engine.worldData[key] as string);
                     const { startX, endX, startY, endY, color, completed } = taskData;
 
+                    // Use provided color or default to textColor (full opacity)
+                    const taskColor = color || engine.textColor;
+
                     // Render task highlight (only if not completed)
                     if (!completed) {
                         for (let y = startY; y <= endY; y++) {
@@ -1916,7 +1931,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     const screenPos = engine.worldToScreen(x, y, currentZoom, currentOffset);
                                     if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
                                         screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-                                        ctx.fillStyle = color;
+                                        ctx.fillStyle = taskColor;
                                         ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
                                     }
                                 }
@@ -1924,7 +1939,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         }
                     }
 
-                    // Render strikethrough if completed
+                    // Render strikethrough if completed (using engine's text color)
                     if (completed) {
                         for (let y = startY; y <= endY; y++) {
                             const strikeY = y; // Center strikethrough vertically in the cell
@@ -2381,9 +2396,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                         // O(1) lookup for active task using spatial index
                         const isInActiveTask = tasksIndexRef.current?.get(posKey) || false;
+                        const isInCompletedTask = completedTasksIndexRef.current?.get(posKey) || false;
 
                         // Apply text color based on context
-                        if (isInActiveTask) {
+                        if (isInCompletedTask) {
+                            // Text within completed task uses text color
+                            ctx.fillStyle = engine.textColor;
+                        } else if (isInActiveTask) {
                             // Text within task highlight uses background color for contrast
                             ctx.fillStyle = engine.backgroundColor;
                         } else if (boundInfo) {

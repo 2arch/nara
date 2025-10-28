@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { useWorldEngine } from '../bitworld/world.engine';
@@ -13,7 +13,8 @@ const Grid3DBackground = dynamic(
   { ssr: false }
 );
 
-export default function BasePage() {
+// Component that uses useSearchParams - needs to be wrapped in Suspense
+function BasePageContent() {
   const [cursorAlternate, setCursorAlternate] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -132,5 +133,13 @@ export default function BasePage() {
         onPanDistanceChange={setPanDistance}
       />
     </div>
+  );
+}
+
+export default function BasePage() {
+  return (
+    <Suspense fallback={<div className="w-screen h-screen bg-black" />}>
+      <BasePageContent />
+    </Suspense>
   );
 }
