@@ -1675,6 +1675,7 @@ export function useWorldEngine({
 
     // === Persistence ===
     // Only enable world save when userUid is available to prevent permission errors on refresh
+    // Special case: allow public worlds
     const shouldEnableWorldSave = worldId && (userUid !== undefined);
     const {
         isLoading: isLoadingWorld,

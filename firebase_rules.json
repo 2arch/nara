@@ -19,7 +19,7 @@
 
     "worlds": {
       ".indexOn": ["public"],
-      
+
       "blog": {
         ".read": true,
         ".write": "auth != null"
@@ -33,6 +33,27 @@
       "homeWorld": {
         ".read": true,
         ".write": "auth != null"
+      },
+
+      "public": {
+        ".read": true,
+        ".write": "auth != null",
+        "$publicWorldId": {
+          ".read": true,
+          ".write": "auth != null",
+          "data": {
+            ".read": true,
+            ".write": "auth != null"
+          },
+          "settings": {
+            ".read": true,
+            ".write": "auth != null"
+          },
+          "clipboard": {
+            ".read": true,
+            ".write": "auth != null"
+          }
+        }
       },
 
       "$userId": {

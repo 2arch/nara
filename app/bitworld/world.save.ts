@@ -131,9 +131,11 @@ export function useWorldSave(
 
         const handleSettings = (snapshot: DataSnapshot) => {
             const settings = snapshot.val() as WorldSettings | null;
+            logger.debug(`📥 Settings received from Firebase:`, settings);
             if (settings) {
                 setLocalSettings(settings);
                 lastSyncedSettingsRef.current = { ...settings };
+                logger.debug(`📥 Applied settings locally:`, settings);
             }
         };
 
@@ -380,12 +382,16 @@ export function useWorldSave(
 
     // --- Save Settings on Change (Debounced) ---
     useEffect(() => {
+        logger.debug(`🔍 Settings save effect triggered. Loading: ${isLoading}, worldId: ${worldId}, settingsRefPath: ${settingsRefPath}, readOnly: ${isReadOnly}`);
+
         if (isLoading || !worldId || !settingsRefPath || !lastSyncedSettingsRef.current) {
+            logger.debug(`🔍 Settings save skipped - missing requirements`);
             return;
         }
 
         // Skip settings saves in read-only mode
         if (isReadOnly) {
+            logger.debug(`🔍 Settings save skipped - read-only mode`);
             return;
         }
 
@@ -393,13 +399,21 @@ export function useWorldSave(
             clearTimeout(settingsSaveTimeoutRef.current);
         }
 
-        if (JSON.stringify(localSettings) === JSON.stringify(lastSyncedSettingsRef.current)) {
+        const currentSettingsStr = JSON.stringify(localSettings);
+        const lastSyncedStr = JSON.stringify(lastSyncedSettingsRef.current);
+        logger.debug(`🔍 Settings comparison - Current: ${currentSettingsStr.slice(0, 100)}..., LastSynced: ${lastSyncedStr.slice(0, 100)}...`);
+
+        if (currentSettingsStr === lastSyncedStr) {
+            logger.debug(`🔍 Settings save skipped - no changes detected`);
             return;
         }
+
+        logger.debug(`🔍 Settings changed - scheduling save`);
 
         settingsSaveTimeoutRef.current = setTimeout(async () => {
             if (!worldId || !settingsRefPath) return;
 
+            logger.debug(`📤 Saving settings to ${settingsRefPath}:`, localSettings);
             setIsSaving(true);
             setError(null);
             const dbRef = ref(database, settingsRefPath);
@@ -410,11 +424,11 @@ export function useWorldSave(
                     if (obj === null || typeof obj !== 'object') {
                         return obj;
                     }
-                    
+
                     if (Array.isArray(obj)) {
                         return obj.map(cleanObject);
                     }
-                    
+
                     return Object.entries(obj).reduce((acc, [key, value]) => {
                         if (value !== undefined) {
                             acc[key] = typeof value === 'object' ? cleanObject(value) : value;
@@ -422,11 +436,13 @@ export function useWorldSave(
                         return acc;
                     }, {} as any);
                 };
-                
+
                 const cleanSettings = cleanObject(localSettings);
-                
+                logger.debug(`📤 Clean settings to save:`, cleanSettings);
+
                 await set(dbRef, cleanSettings);
                 lastSyncedSettingsRef.current = { ...localSettings };
+                logger.debug(`✅ Settings saved successfully to Firebase`);
             } catch (err: any) {
                 logger.error("Firebase: Error saving settings:", err);
                 setError(`Failed to save settings: ${err.message}`);
