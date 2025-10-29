@@ -1965,6 +1965,39 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Links (underline) ===
+        for (const key in engine.worldData) {
+            if (key.startsWith('link_')) {
+                try {
+                    const linkData = JSON.parse(engine.worldData[key] as string);
+                    const { startX, endX, startY, endY, color } = linkData;
+
+                    // Use provided color or default to textColor
+                    const linkColor = color || engine.textColor;
+
+                    // Render underline for each row of the link
+                    for (let y = startY; y <= endY; y++) {
+                        if (y >= startWorldY - 5 && y <= endWorldY + 5) {
+                            const leftScreenPos = engine.worldToScreen(startX, y, currentZoom, currentOffset);
+                            const rightScreenPos = engine.worldToScreen(endX + 1, y, currentZoom, currentOffset);
+
+                            if (leftScreenPos.x < cssWidth + effectiveCharWidth && rightScreenPos.x > -effectiveCharWidth) {
+                                ctx.strokeStyle = linkColor;
+                                ctx.lineWidth = Math.max(1, effectiveCharHeight * 0.08);
+                                const underlineY = leftScreenPos.y + effectiveCharHeight - ctx.lineWidth;
+                                ctx.beginPath();
+                                ctx.moveTo(Math.max(0, leftScreenPos.x), underlineY);
+                                ctx.lineTo(Math.min(cssWidth, rightScreenPos.x), underlineY);
+                                ctx.stroke();
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Skip invalid link data
+                }
+            }
+        }
+
         // === Render List Content (No borders - just content + scrollbar) ===
         for (const key in engine.worldData) {
             if (key.startsWith('list_')) {
@@ -4978,6 +5011,41 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             if (monogramEnabled && monogramSystem.options.interactiveTrails) {
                 monogramSystem.updateMousePosition(worldPos);
             }
+
+            // Check if hovering over a link or task and update cursor
+            let isOverLink = false;
+            let isOverTask = false;
+
+            for (const key in engine.worldData) {
+                if (key.startsWith('link_')) {
+                    try {
+                        const linkData = JSON.parse(engine.worldData[key] as string);
+                        if (baseX >= linkData.startX && baseX <= linkData.endX &&
+                            baseY >= linkData.startY && baseY <= linkData.endY) {
+                            isOverLink = true;
+                            break;
+                        }
+                    } catch (e) {
+                        // Skip invalid link data
+                    }
+                } else if (key.startsWith('task_')) {
+                    try {
+                        const taskData = JSON.parse(engine.worldData[key] as string);
+                        if (baseX >= taskData.startX && baseX <= taskData.endX &&
+                            baseY >= taskData.startY && baseY <= taskData.endY) {
+                            isOverTask = true;
+                            break;
+                        }
+                    } catch (e) {
+                        // Skip invalid task data
+                    }
+                }
+            }
+
+            // Update cursor style
+            if (canvasRef.current) {
+                canvasRef.current.style.cursor = (isOverLink || isOverTask) ? 'pointer' : 'text';
+            }
         }
 
         // Handle resize drag
@@ -5808,6 +5876,62 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     </div>
                 );
             })()} */}
+            {/* Render iframes for iframe regions */}
+            {(() => {
+                const iframes: JSX.Element[] = [];
+
+                for (const key in engine.worldData) {
+                    if (key.startsWith('iframe_')) {
+                        try {
+                            const iframeData = JSON.parse(engine.worldData[key] as string);
+                            const { startX, endX, startY, endY, url } = iframeData;
+
+                            // Convert world coordinates to screen coordinates
+                            const topLeft = engine.worldToScreen(startX, startY, engine.zoomLevel, engine.viewOffset);
+                            const bottomRight = engine.worldToScreen(endX + 1, endY + 1, engine.zoomLevel, engine.viewOffset);
+
+                            const left = topLeft.x;
+                            const top = topLeft.y;
+                            const width = bottomRight.x - topLeft.x;
+                            const height = bottomRight.y - topLeft.y;
+
+                            // Only render if visible on screen
+                            const rect = canvasRef.current?.getBoundingClientRect();
+                            if (rect &&
+                                left < rect.width &&
+                                top < rect.height &&
+                                left + width > 0 &&
+                                top + height > 0) {
+
+                                iframes.push(
+                                    <iframe
+                                        key={key}
+                                        src={url}
+                                        style={{
+                                            position: 'absolute',
+                                            left: `${left}px`,
+                                            top: `${top}px`,
+                                            width: `${width}px`,
+                                            height: `${height}px`,
+                                            border: '1px solid rgba(100, 100, 100, 0.3)',
+                                            borderRadius: '2px',
+                                            backgroundColor: '#fff',
+                                            zIndex: 10,
+                                            pointerEvents: 'auto'
+                                        }}
+                                        sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+                                        referrerPolicy="no-referrer"
+                                    />
+                                );
+                            }
+                        } catch (e) {
+                            // Skip invalid iframe data
+                        }
+                    }
+                }
+
+                return iframes.length > 0 ? <>{iframes}</> : null;
+            })()}
             {/* Hidden input for IME composition and mobile keyboard - only in write mode OR host mode */}
             {(!engine.isReadOnly || hostDialogue.isHostActive) && (
                 <input

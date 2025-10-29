@@ -164,17 +164,22 @@ export function useWorldSave(
                 if (!initialDataLoaded) {
                     initialData[key] = value;
                 } else if (autoLoadData) {
-                    // Always update lastSyncedDataRef - this is confirmed Firebase data
-                    if (lastSyncedDataRef.current) {
-                        lastSyncedDataRef.current[key] = value;
-                    }
-
-                    // Update local state if different from current
+                    // Update local state and lastSyncedDataRef atomically
                     setLocalWorldData((prevData: WorldData) => {
                         const isDuplicate = prevData[key] && JSON.stringify(prevData[key]) === JSON.stringify(value);
                         if (isDuplicate) {
+                            // Confirmed echo - safe to update lastSyncedDataRef
+                            if (lastSyncedDataRef.current) {
+                                lastSyncedDataRef.current[key] = value;
+                            }
                             logger.debug(`📥 Received duplicate for ${key}, skipping render`);
-                            return prevData; // No render needed, but lastSyncedDataRef is updated above
+                            return prevData;
+                        }
+
+                        // New data from Firebase (possibly from another client or initial sync)
+                        // Only update lastSyncedDataRef if we're actually applying this change
+                        if (lastSyncedDataRef.current) {
+                            lastSyncedDataRef.current[key] = value;
                         }
                         logger.debug(`📥 Received new data for ${key}`);
                         return { ...prevData, [key]: value };
@@ -186,17 +191,22 @@ export function useWorldSave(
                 const value = snapshot.val();
                 if (!key || !autoLoadData) return;
 
-                // Always update lastSyncedDataRef - this is confirmed Firebase data
-                if (lastSyncedDataRef.current) {
-                    lastSyncedDataRef.current[key] = value;
-                }
-
-                // Update local state if different from current
+                // Update local state and lastSyncedDataRef atomically
                 setLocalWorldData((prevData: WorldData) => {
                     const isDuplicate = prevData[key] && JSON.stringify(prevData[key]) === JSON.stringify(value);
                     if (isDuplicate) {
+                        // Confirmed echo - safe to update lastSyncedDataRef
+                        if (lastSyncedDataRef.current) {
+                            lastSyncedDataRef.current[key] = value;
+                        }
                         logger.debug(`📥 Received duplicate change for ${key}, skipping render`);
-                        return prevData; // No render needed, but lastSyncedDataRef is updated above
+                        return prevData;
+                    }
+
+                    // New data from Firebase (possibly from another client or initial sync)
+                    // Only update lastSyncedDataRef if we're actually applying this change
+                    if (lastSyncedDataRef.current) {
+                        lastSyncedDataRef.current[key] = value;
                     }
                     logger.debug(`📥 Received changed data for ${key}`);
                     return { ...prevData, [key]: value };

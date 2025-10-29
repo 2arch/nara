@@ -108,7 +108,7 @@ const AVAILABLE_COMMANDS = [
     // Navigation & View
     'nav', 'search', 'cam', 'indent', 'zoom',
     // Content Creation
-    'label', 'task', 'tape', 'clip', 'upload', 'margin',
+    'label', 'task', 'link', 'iframe', 'tape', 'clip', 'upload', 'margin',
     // Special
     'mode', 'note', 'chat', 'tutorial', 'help', 'artefacts',
     // Styling & Display
@@ -126,7 +126,7 @@ const AVAILABLE_COMMANDS = [
 // Category mapping for visual organization
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent', 'zoom'],
-    'create': ['label', 'task', 'tape', 'clip', 'upload', 'margin'],
+    'create': ['label', 'task', 'link', 'iframe', 'tape', 'clip', 'upload', 'margin'],
     'special': ['mode', 'note', 'chat', 'tutorial', 'help', 'artefacts'],
     'style': ['bg', 'text', 'font'],
     'state': ['state', 'random', 'clear'],
@@ -149,6 +149,8 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'indent': 'Toggle text indentation. This affects how new lines are indented when you press Enter, helping you organize thoughts hierarchically.',
     'label': 'Create a spatial label at your current selection. Type /label \'text\' [color]. Defaults to current text color (accent). Custom colors: /label \'text\' crimson. Labels show as colored cells with cutout text.',
     'task': 'Create a toggleable task from selected text. Select text, then type /task [color]. Click the highlighted task to toggle completion (adds strikethrough). Click again to un-complete it.',
+    'link': 'Create a clickable link from selected text. Select text, then type /link [url]. Click the underlined link to open the URL in a new tab. URLs are auto-detected when pasted.',
+    'iframe': 'Embed a website in a region. Select a rectangular region, then type /iframe [url] to embed that URL as an interactive iframe. The iframe scales to fit the region size.',
     'tape': 'Record and transcribe your voice. Type /tape to start recording, speak your thoughts, then press Enter. Your speech will be transcribed and placed on the canvas at your cursor position.',
     'clip': 'Save selected text to your clipboard. Select text, then type /clip to capture it. Access your clips later to paste them anywhere on the canvas.',
     'upload': 'Upload an image to your canvas. Type /upload, then select an image file. The image will be placed at your current cursor position and saved to your canvas.',
@@ -159,7 +161,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'tutorial': 'Start the interactive tutorial. Learn the basics of spatial writing through hands-on exercises that teach you core commands and concepts.',
     'help': 'Show this detailed help menu. The command list stays open with descriptions for every available command, so you can explore what\'s possible.',
     'tab': 'Toggle AI-powered autocomplete suggestions. When enabled, type and see AI suggestions appear as gray text. Press Tab to accept suggestions.',
-    'bg': 'Change background color or mode. Type /bg followed by a color name (red, blue, chalk, etc.) or a mode: /bg clear for transparent, /bg live for screen sharing, /bg web for image/video generation.',
+    'bg': 'Change background color or mode. Type /bg over an image to set it as background temporarily (ESC to restore). Use /bg [color] for solid colors, /bg clear [prompt] for AI backgrounds, /bg live for screen sharing, /bg web for image/video generation.',
     'text': 'Change text color. Type /text followed by a color name (garden, sky, sunset, etc.). This sets the color for all new text you write on the canvas.',
     'font': 'Change font family. Type /font followed by a font name: "IBM Plex Mono" for a clean monospace font, or "Neureal" for a more stylized aesthetic.',
     'state': 'Save or load canvas states. Type /state to see saved states, /state save [name] to save current canvas, /state load [name] to restore a saved state. Perfect for versioning your work.',
@@ -191,6 +193,14 @@ export const COLOR_MAP: { [name: string]: string } = {
 export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, userUid, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
+    const previousBackgroundStateRef = useRef<{
+        mode: BackgroundMode;
+        color?: string;
+        image?: string;
+        video?: string;
+        textColor: string;
+        textBackground?: string;
+    } | null>(null);
     const [commandState, setCommandState] = useState<CommandState>({
         isActive: false,
         input: '',
@@ -200,7 +210,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         originalCursorPos: { x: 0, y: 0 },
         hasNavigated: false
     });
-    
+
     const [commandData, setCommandData] = useState<WorldData>({});
     const [pendingCommand, setPendingCommand] = useState<PendingCommand | null>(null);
     
@@ -1302,6 +1312,51 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             const param3 = inputParts.length > 3 ? inputParts[3] : undefined;
             const restOfInput = inputParts.slice(1).join(' '); // Everything after /bg
 
+            // Check if /bg was called with no args and there's an image at cursor position
+            if (!bgArg && worldData) {
+                // Look for an image at the command start position
+                for (const key in worldData) {
+                    if (key.startsWith('image_')) {
+                        const imgData = worldData[key];
+                        if (imgData && typeof imgData === 'object' && 'type' in imgData && imgData.type === 'image') {
+                            const img = imgData as any;
+                            // Check if command was typed over this image
+                            if (commandState.commandStartPos.x >= img.startX && commandState.commandStartPos.x <= img.endX &&
+                                commandState.commandStartPos.y >= img.startY && commandState.commandStartPos.y <= img.endY) {
+
+                                // Store previous background state
+                                previousBackgroundStateRef.current = {
+                                    mode: modeState.backgroundMode,
+                                    color: modeState.backgroundColor,
+                                    image: modeState.backgroundImage,
+                                    video: modeState.backgroundVideo,
+                                    textColor: modeState.textColor,
+                                    textBackground: modeState.textBackground
+                                };
+
+                                // Set image as background temporarily
+                                switchBackgroundMode('image', img.src, '#FFFFFF');
+                                setDialogueWithRevert("Press ESC to restore background", setDialogueText);
+
+                                // Clear command mode
+                                setCommandState({
+                                    isActive: false,
+                                    input: '',
+                                    matchedCommands: [],
+                                    selectedIndex: 0,
+                                    commandStartPos: { x: 0, y: 0 },
+                                    originalCursorPos: { x: 0, y: 0 },
+                                    hasNavigated: false
+                                });
+                                setCommandData({});
+
+                                return null;
+                            }
+                        }
+                    }
+                }
+            }
+
             // Check if the input is descriptive text for image generation
             const imageIntent = detectImageIntent(restOfInput);
 
@@ -2191,6 +2246,75 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 args: [],
                 commandStartPos: commandState.commandStartPos
             };
+        }
+
+        if (commandToExecute.startsWith('iframe')) {
+            // /iframe [url] command - create iframe region from selection
+            const inputParts = commandState.input.trim().split(/\s+/);
+            const url = inputParts.length > 1 ? inputParts.slice(1).join(' ') : '';
+
+            // Check if there's already a selection
+            const existingSelection = getNormalizedSelection?.();
+
+            if (existingSelection) {
+                // Selection exists - create iframe region immediately
+                const hasMeaningfulSelection =
+                    existingSelection.startX !== existingSelection.endX ||
+                    existingSelection.startY !== existingSelection.endY;
+
+                if (!hasMeaningfulSelection) {
+                    setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
+                } else if (!url) {
+                    setDialogueWithRevert("Usage: /iframe [url]", setDialogueText);
+                } else if (setWorldData && worldData && setSelectionStart && setSelectionEnd) {
+                    // Validate URL
+                    let validUrl = url;
+                    if (!url.match(/^https?:\/\//i)) {
+                        validUrl = 'https://' + url;
+                    }
+
+                    // Create iframe region data
+                    const iframeRegion = {
+                        startX: existingSelection.startX,
+                        endX: existingSelection.endX,
+                        startY: existingSelection.startY,
+                        endY: existingSelection.endY,
+                        url: validUrl,
+                        timestamp: Date.now()
+                    };
+
+                    // Store iframe region in worldData with unique key
+                    const iframeKey = `iframe_${existingSelection.startX},${existingSelection.startY}_${Date.now()}`;
+                    const newWorldData = { ...worldData };
+                    newWorldData[iframeKey] = JSON.stringify(iframeRegion);
+                    setWorldData(newWorldData);
+
+                    const width = existingSelection.endX - existingSelection.startX + 1;
+                    const height = existingSelection.endY - existingSelection.startY + 1;
+                    setDialogueWithRevert(`Iframe region created (${width}×${height})`, setDialogueText);
+
+                    // Clear selection
+                    setSelectionStart(null);
+                    setSelectionEnd(null);
+                }
+            } else {
+                // No selection - show error
+                setDialogueWithRevert("Make a selection first, then type /iframe [url]", setDialogueText);
+            }
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            return null;
         }
 
         if (commandToExecute.startsWith('note')) {
@@ -3336,6 +3460,29 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         });
     }, [matchCommands]);
 
+    // Function to restore previous background (for ESC after /bg over image)
+    const restorePreviousBackground = useCallback(() => {
+        if (previousBackgroundStateRef.current) {
+            const prev = previousBackgroundStateRef.current;
+
+            if (prev.mode === 'color') {
+                switchBackgroundMode('color', prev.color, prev.textColor, prev.textBackground);
+            } else if (prev.mode === 'image') {
+                switchBackgroundMode('image', prev.image, prev.textColor, prev.textBackground);
+            } else if (prev.mode === 'video') {
+                switchBackgroundMode('video', prev.video, prev.textColor, prev.textBackground);
+            } else if (prev.mode === 'space') {
+                switchBackgroundMode('space', undefined, prev.textColor, prev.textBackground);
+            } else if (prev.mode === 'transparent') {
+                switchBackgroundMode('transparent', undefined, prev.textColor, prev.textBackground);
+            }
+
+            previousBackgroundStateRef.current = null;
+            return true;
+        }
+        return false;
+    }, [switchBackgroundMode]);
+
     return {
         commandState,
         commandData,
@@ -3355,6 +3502,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         modeState,
         switchMode,
         switchBackgroundMode,
+        restorePreviousBackground,
         addEphemeralText,
         addAIResponse,
         addInstantAIResponse,

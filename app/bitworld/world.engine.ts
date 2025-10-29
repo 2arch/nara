@@ -1039,6 +1039,7 @@ export function useWorldEngine({
         setFullscreenMode,
         exitFullscreenMode,
         switchBackgroundMode,
+        restorePreviousBackground,
         executeCommandString,
         startCommand,
         startCommandWithInput,
@@ -1827,6 +1828,25 @@ export function useWorldEngine({
         return null;
     }, [worldData]);
 
+    const findLinkAt = useCallback((x: number, y: number): { key: string, data: any } | null => {
+        for (const key in worldData) {
+            if (key.startsWith('link_')) {
+                try {
+                    const linkData = JSON.parse(worldData[key] as string);
+                    const { startX, endX, startY, endY } = linkData;
+
+                    // Check if the cursor position is within the link bounds
+                    if (x >= startX && x <= endX && y >= startY && y <= endY) {
+                        return { key, data: linkData };
+                    }
+                } catch (e) {
+                    // Ignore parsing errors
+                }
+            }
+        }
+        return null;
+    }, [worldData]);
+
     // === Character Utility Functions ===
     const getCharacter = useCallback((data: string | StyledCharacter): string => {
         if (typeof data === 'string') {
@@ -2393,6 +2413,32 @@ export function useWorldEngine({
             });
         }
 
+        // Find and delete links intersecting with selection
+        const linksToDelete = new Set<string>();
+        for (const key in newWorldData) {
+            if (key.startsWith('link_')) {
+                try {
+                    const linkData = JSON.parse(newWorldData[key] as string);
+                    const { startX, endX, startY, endY } = linkData;
+
+                    // Check for intersection between link bounds and selection bounds
+                    if (startX <= selection.endX && endX >= selection.startX &&
+                        startY <= selection.endY && endY >= selection.startY) {
+                        linksToDelete.add(key);
+                    }
+                } catch (e) {
+                    // ignore
+                }
+            }
+        }
+
+        if (linksToDelete.size > 0) {
+            deleted = true;
+            linksToDelete.forEach(key => {
+                delete newWorldData[key];
+            });
+        }
+
         if (deleted) {
             setWorldData(newWorldData);
             // Move cursor to the start of the deleted selection
@@ -2651,6 +2697,39 @@ export function useWorldEngine({
             setCursorPos({ x: finalCursorX, y: finalCursorY });
             setSelectionStart(null);
             setSelectionEnd(null);
+
+            // Auto-detect URLs in pasted text and create links
+            // Check if pasted text is a single line URL
+            if (linesToPaste.length === 1) {
+                const pastedText = linesToPaste[0].trim();
+                const urlRegex = /^(https?:\/\/)?([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(\/[^\s]*)?$/;
+
+                if (urlRegex.test(pastedText)) {
+                    // Auto-create link for single-line URL paste
+                    let validUrl = pastedText;
+                    if (!pastedText.match(/^https?:\/\//i)) {
+                        validUrl = 'https://' + pastedText;
+                    }
+
+                    const linkKey = `link_${pasteStartX},${pasteStartY}_${Date.now()}`;
+                    const linkData = {
+                        startX: pasteStartX,
+                        endX: finalCursorX - 1,
+                        startY: pasteStartY,
+                        endY: finalCursorY,
+                        url: validUrl,
+                        timestamp: Date.now()
+                    };
+
+                    // Add link data after a short delay to ensure paste is rendered
+                    setTimeout(() => {
+                        setWorldData(prev => ({
+                            ...prev,
+                            [linkKey]: JSON.stringify(linkData)
+                        }));
+                    }, 50);
+                }
+            }
 
             return true;
         } catch (err) {
@@ -3964,6 +4043,64 @@ export function useWorldEngine({
                                 // Clear selection
                                 setSelectionStart(null);
                                 setSelectionEnd(null);
+                            }
+                        } else {
+                            setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
+                        }
+                    } else {
+                        setDialogueWithRevert("Make a selection first", setDialogueText);
+                    }
+                } else if (exec.command === 'link') {
+                    // /link command - create a clickable link from selection
+                    if (selectionStart && selectionEnd) {
+                        const hasSelection = selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y;
+
+                        if (hasSelection) {
+                            const normalized = getNormalizedSelection();
+                            if (normalized && exec.args.length > 0) {
+                                const url = exec.args[0];
+
+                                // Basic URL validation
+                                let validUrl = url;
+                                if (!url.match(/^https?:\/\//i)) {
+                                    validUrl = 'https://' + url;
+                                }
+
+                                // Create link data
+                                const linkKey = `link_${normalized.startX},${normalized.startY}_${Date.now()}`;
+                                const linkData: any = {
+                                    startX: normalized.startX,
+                                    endX: normalized.endX,
+                                    startY: normalized.startY,
+                                    endY: normalized.endY,
+                                    url: validUrl,
+                                    timestamp: Date.now()
+                                };
+
+                                // Get optional color argument
+                                if (exec.args.length > 1) {
+                                    const colorArg = exec.args[1];
+                                    const hexColor = (COLOR_MAP[colorArg.toLowerCase()] || colorArg).toUpperCase();
+                                    if (/^#[0-9A-F]{6}$/i.test(hexColor)) {
+                                        linkData.color = hexColor;
+                                    }
+                                }
+
+                                // Store link in worldData
+                                setWorldData(prev => ({
+                                    ...prev,
+                                    [linkKey]: JSON.stringify(linkData)
+                                }));
+
+                                const width = normalized.endX - normalized.startX + 1;
+                                const height = normalized.endY - normalized.startY + 1;
+                                setDialogueWithRevert(`Link created (${width}×${height}). Click to open.`, setDialogueText);
+
+                                // Clear selection
+                                setSelectionStart(null);
+                                setSelectionEnd(null);
+                            } else {
+                                setDialogueWithRevert("Usage: /link [url] [color]", setDialogueText);
                             }
                         } else {
                             setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
@@ -5484,6 +5621,13 @@ export function useWorldEngine({
                 // Command mode handled the key, but didn't execute a command
                 return true;
             }
+        }
+
+        // === Restore Previous Background (from /bg over image) ===
+        // Only runs if command mode didn't consume the ESC key
+        if (key === 'Escape' && restorePreviousBackground()) {
+            setDialogueWithRevert("Background restored", setDialogueText);
+            return true;
         }
 
         // === State Prompt Handling ===
@@ -7745,6 +7889,42 @@ export function useWorldEngine({
                         if (deletedAny) {
                             worldDataChanged = true;
                             nextCursorPos.x = currentBlock.start; // Position cursor at start of deleted block
+
+                            // Also delete any tasks/links/labels that intersect the deleted region
+                            for (const key in nextWorldData) {
+                                if (key.startsWith('task_') || key.startsWith('link_')) {
+                                    try {
+                                        const data = JSON.parse(nextWorldData[key] as string);
+                                        const { startX, endX, startY, endY } = data;
+                                        // Check if intersects deleted region
+                                        if (startX <= currentBlock.end && endX >= currentBlock.start && startY === cursorPos.y && endY === cursorPos.y) {
+                                            delete nextWorldData[key];
+                                        }
+                                    } catch (e) {
+                                        // ignore
+                                    }
+                                } else if (key.startsWith('label_')) {
+                                    const coordsStr = key.substring('label_'.length);
+                                    const [lxStr, lyStr] = coordsStr.split(',');
+                                    const lx = parseInt(lxStr, 10);
+                                    const ly = parseInt(lyStr, 10);
+                                    try {
+                                        const charData = nextWorldData[key];
+                                        if (!isImageData(charData)) {
+                                            const charString = getCharacter(charData);
+                                            const data = JSON.parse(charString);
+                                            const text = data.text || '';
+                                            const endX = lx + text.length - 1;
+                                            // Check if intersects deleted region
+                                            if (lx <= currentBlock.end && endX >= currentBlock.start && ly === cursorPos.y) {
+                                                delete nextWorldData[key];
+                                            }
+                                        }
+                                    } catch (e) {
+                                        // ignore
+                                    }
+                                }
+                            }
                         } else {
                             nextCursorPos.x = cursorPos.x;
                         }
@@ -7819,6 +7999,44 @@ export function useWorldEngine({
                             if (deletedAny) {
                                 worldDataChanged = true;
                                 nextCursorPos.x = x + 1;
+
+                                // Also delete any tasks/links/labels that intersect the deleted region
+                                const deletedStartX = x + 1;
+                                const deletedEndX = cursorPos.x - 1;
+                                for (const key in nextWorldData) {
+                                    if (key.startsWith('task_') || key.startsWith('link_')) {
+                                        try {
+                                            const data = JSON.parse(nextWorldData[key] as string);
+                                            const { startX, endX, startY, endY } = data;
+                                            // Check if intersects deleted region
+                                            if (startX <= deletedEndX && endX >= deletedStartX && startY === cursorPos.y && endY === cursorPos.y) {
+                                                delete nextWorldData[key];
+                                            }
+                                        } catch (e) {
+                                            // ignore
+                                        }
+                                    } else if (key.startsWith('label_')) {
+                                        const coordsStr = key.substring('label_'.length);
+                                        const [lxStr, lyStr] = coordsStr.split(',');
+                                        const lx = parseInt(lxStr, 10);
+                                        const ly = parseInt(lyStr, 10);
+                                        try {
+                                            const charData = nextWorldData[key];
+                                            if (!isImageData(charData)) {
+                                                const charString = getCharacter(charData);
+                                                const data = JSON.parse(charString);
+                                                const text = data.text || '';
+                                                const endX = lx + text.length - 1;
+                                                // Check if intersects deleted region
+                                                if (lx <= deletedEndX && endX >= deletedStartX && ly === cursorPos.y) {
+                                                    delete nextWorldData[key];
+                                                }
+                                            }
+                                        } catch (e) {
+                                            // ignore
+                                        }
+                                    }
+                                }
                             } else {
                                 // Nothing deleted, fallback to regular backspace
                                 const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
@@ -7840,7 +8058,7 @@ export function useWorldEngine({
                     }
                 }
             } else {
-                // Regular Backspace: Check for task first, then label
+                // Regular Backspace: Check for task first, then link, then label
                 const taskToDelete = findTaskAt(cursorPos.x - 1, cursorPos.y);
                 if (taskToDelete) {
                     nextWorldData = { ...worldData };
@@ -7850,17 +8068,26 @@ export function useWorldEngine({
                     nextCursorPos.x = taskToDelete.data.startX;
                     nextCursorPos.y = taskToDelete.data.startY;
                 } else {
-                    const labelToDelete = findLabelAt(cursorPos.x - 1, cursorPos.y);
-                    if (labelToDelete) {
+                    const linkToDelete = findLinkAt(cursorPos.x - 1, cursorPos.y);
+                    if (linkToDelete) {
                         nextWorldData = { ...worldData };
-                        delete nextWorldData[labelToDelete.key];
+                        delete nextWorldData[linkToDelete.key];
                         worldDataChanged = true;
-                        // Move cursor to the start of where the label was
-                        const coordsStr = labelToDelete.key.substring('label_'.length);
-                        const [lxStr, lyStr] = coordsStr.split(',');
-                        nextCursorPos.x = parseInt(lxStr, 10);
-                        nextCursorPos.y = parseInt(lyStr, 10);
+                        // Move cursor to the start of where the link was
+                        nextCursorPos.x = linkToDelete.data.startX;
+                        nextCursorPos.y = linkToDelete.data.startY;
                     } else {
+                        const labelToDelete = findLabelAt(cursorPos.x - 1, cursorPos.y);
+                        if (labelToDelete) {
+                            nextWorldData = { ...worldData };
+                            delete nextWorldData[labelToDelete.key];
+                            worldDataChanged = true;
+                            // Move cursor to the start of where the label was
+                            const coordsStr = labelToDelete.key.substring('label_'.length);
+                            const [lxStr, lyStr] = coordsStr.split(',');
+                            nextCursorPos.x = parseInt(lxStr, 10);
+                            nextCursorPos.y = parseInt(lyStr, 10);
+                        } else {
                         // Check if we're within a note region first
                         const noteRegion = getNoteRegion(worldData, cursorPos);
                         if (noteRegion && cursorPos.x === noteRegion.startX && cursorPos.y > noteRegion.startY) {
@@ -7930,6 +8157,7 @@ export function useWorldEngine({
                                 }
                                 nextCursorPos.x -= 1; // Move cursor left regardless
                             }
+                        }
                         }
                     }
                 }
@@ -8067,7 +8295,7 @@ export function useWorldEngine({
                     nextCursorPos = { x: selectionStart?.x ?? cursorPos.x, y: selectionStart?.y ?? cursorPos.y };
                  }
             } else {
-                // Delete char at current cursor pos, check for task first, then label
+                // Delete char at current cursor pos, check for task first, then link, then label
                 const taskToDelete = findTaskAt(cursorPos.x, cursorPos.y);
                 if (taskToDelete) {
                     nextWorldData = { ...worldData };
@@ -8075,18 +8303,26 @@ export function useWorldEngine({
                     worldDataChanged = true;
                     // Cursor does not move
                 } else {
-                    const labelToDelete = findLabelAt(cursorPos.x, cursorPos.y);
-                    if (labelToDelete) {
+                    const linkToDelete = findLinkAt(cursorPos.x, cursorPos.y);
+                    if (linkToDelete) {
                         nextWorldData = { ...worldData };
-                        delete nextWorldData[labelToDelete.key];
+                        delete nextWorldData[linkToDelete.key];
                         worldDataChanged = true;
                         // Cursor does not move
                     } else {
-                        const deleteKey = `${cursorPos.x},${cursorPos.y}`;
-                        if (worldData[deleteKey]) {
-                            nextWorldData = { ...worldData }; // Create copy before modifying
-                            delete nextWorldData[deleteKey];
+                        const labelToDelete = findLabelAt(cursorPos.x, cursorPos.y);
+                        if (labelToDelete) {
+                            nextWorldData = { ...worldData };
+                            delete nextWorldData[labelToDelete.key];
                             worldDataChanged = true;
+                            // Cursor does not move
+                        } else {
+                            const deleteKey = `${cursorPos.x},${cursorPos.y}`;
+                            if (worldData[deleteKey]) {
+                                nextWorldData = { ...worldData }; // Create copy before modifying
+                                delete nextWorldData[deleteKey];
+                                worldDataChanged = true;
+                            }
                         }
                     }
                 }
@@ -8964,6 +9200,29 @@ export function useWorldEngine({
                     }
                 } catch (e) {
                     // Skip invalid task data
+                }
+            }
+        }
+
+        // === Click to Open Link ===
+        // Check if clicked within a link region
+        for (const key in worldData) {
+            if (key.startsWith('link_')) {
+                try {
+                    const linkData = JSON.parse(worldData[key] as string);
+                    const { startX, endX, startY, endY, url } = linkData;
+
+                    // Check if click is within link bounds
+                    if (newCursorPos.x >= startX && newCursorPos.x <= endX &&
+                        newCursorPos.y >= startY && newCursorPos.y <= endY) {
+                        // Open link in new tab
+                        window.open(url, '_blank', 'noopener,noreferrer');
+                        setDialogueWithRevert(`Opening link...`, setDialogueText);
+
+                        return; // Don't process regular click behavior
+                    }
+                } catch (e) {
+                    // Skip invalid link data
                 }
             }
         }
