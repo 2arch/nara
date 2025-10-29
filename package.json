@@ -1,6 +1,6 @@
 {
   "name": "nara",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -45,8 +45,8 @@
     "wait-on": "^8.0.3"
   },
   "build": {
-    "appId": "com.j72n.cb2",
-    "productName": "CB2",
+    "appId": "com.j72n.nara",
+    "productName": "Nara",
     "mac": {
       "category": "public.app.category.productivity",
       "target": "dmg",
