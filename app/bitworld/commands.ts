@@ -80,6 +80,7 @@ interface UseCommandSystemProps {
     availableStates?: string[];
     username?: string;
     userUid?: string | null;
+    membershipLevel?: string; // User's membership level (e.g., 'super', 'pro', etc.)
     updateSettings?: (settings: Partial<WorldSettings>) => void;
     settings?: WorldSettings;
     getEffectiveCharDims: (zoom: number) => { width: number; height: number; fontSize: number; };
@@ -108,9 +109,9 @@ const AVAILABLE_COMMANDS = [
     // Navigation & View
     'nav', 'search', 'cam', 'indent', 'zoom',
     // Content Creation
-    'label', 'task', 'link', 'iframe', 'tape', 'clip', 'upload', 'margin',
+    'label', 'task', 'link', 'clip', 'upload',
     // Special
-    'mode', 'note', 'mail', 'chat', 'tutorial', 'help', 'artefacts',
+    'mode', 'note', 'mail', 'chat', 'tutorial', 'help',
     // Styling & Display
     'bg', 'text', 'font',
     // State Management
@@ -126,8 +127,8 @@ const AVAILABLE_COMMANDS = [
 // Category mapping for visual organization
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent', 'zoom'],
-    'create': ['label', 'task', 'link', 'iframe', 'tape', 'clip', 'upload', 'margin'],
-    'special': ['mode', 'note', 'mail', 'chat', 'tutorial', 'help', 'artefacts'],
+    'create': ['label', 'task', 'link', 'clip', 'upload'],
+    'special': ['mode', 'note', 'mail', 'chat', 'tutorial', 'help'],
     'style': ['bg', 'text', 'font'],
     'state': ['state', 'random', 'clear'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
@@ -136,7 +137,7 @@ export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
 };
 
 const MODE_COMMANDS = ['default', 'air', 'chat', 'note'];
-const BG_COMMANDS = ['clear', 'live', 'web'];
+const BG_COMMANDS: string[] = []; // Removed 'clear', 'live', 'web' options
 const FONT_COMMANDS = ['IBM Plex Mono', 'Neureal'];
 const NAV_COMMANDS: string[] = [];
 const CAMERA_COMMANDS = ['default', 'focus'];
@@ -150,19 +151,16 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'label': 'Create a spatial label at your current selection. Type /label \'text\' [color]. Defaults to current text color (accent). Custom colors: /label \'text\' crimson. Labels show as colored cells with cutout text.',
     'task': 'Create a toggleable task from selected text. Select text, then type /task [color]. Click the highlighted task to toggle completion (adds strikethrough). Click again to un-complete it.',
     'link': 'Create a clickable link from selected text. Select text, then type /link [url]. Click the underlined link to open the URL in a new tab. URLs are auto-detected when pasted.',
-    'iframe': 'Embed a website in a region. Select a rectangular region, then type /iframe [url] to embed that URL as an interactive iframe. The iframe scales to fit the region size.',
-    'tape': 'Record and transcribe your voice. Type /tape to start recording, speak your thoughts, then press Enter. Your speech will be transcribed and placed on the canvas at your cursor position.',
     'clip': 'Save selected text to your clipboard. Select text, then type /clip to capture it. Access your clips later to paste them anywhere on the canvas.',
     'upload': 'Upload an image to your canvas. Type /upload, then select an image file. The image will be placed at your current cursor position and saved to your canvas.',
-    'margin': 'Create a margin note for selected text. Select text, then type /margin to create a note region in the margin. The note will be placed to the right, left, or below the text block based on available space.',
     'mode': 'Switch canvas modes. /mode default for standard writing, /mode air for ephemeral text that doesn\'t save, /mode chat to talk with AI, /mode note for focused note-taking.',
     'note': 'Quick shortcut to enter note mode. This creates a focused writing space perfect for drafting ideas before placing them on your main canvas.',
-    'mail': 'Create an email region. Select a rectangular area, type /mail. Row 1 = recipient email, Row 2 = subject line, Row 3+ = message body. Click the send button to deliver the email.',
+    'mail': '[SUPER ONLY] Create an email region. Select a rectangular area, type /mail. Row 1 = recipient email, Row 2 = subject line, Row 3+ = message body. Click the send button to deliver the email.',
     'chat': 'Quick shortcut to enter chat mode. Talk with AI to transform, expand, or generate text. The AI can help you develop ideas or create content based on your prompts.',
     'tutorial': 'Start the interactive tutorial. Learn the basics of spatial writing through hands-on exercises that teach you core commands and concepts.',
     'help': 'Show this detailed help menu. The command list stays open with descriptions for every available command, so you can explore what\'s possible.',
     'tab': 'Toggle AI-powered autocomplete suggestions. When enabled, type and see AI suggestions appear as gray text. Press Tab to accept suggestions.',
-    'bg': 'Change background color or mode. Type /bg over an image to set it as background temporarily (ESC to restore). Use /bg [color] for solid colors, /bg clear [prompt] for AI backgrounds, /bg live for screen sharing, /bg web for image/video generation.',
+    'bg': 'Change background color. Use /bg [color] for solid colors like /bg white, /bg black, /bg sulfur, etc.',
     'text': 'Change text color. Type /text followed by a color name (garden, sky, sunset, etc.). This sets the color for all new text you write on the canvas.',
     'font': 'Change font family. Type /font followed by a font name: "IBM Plex Mono" for a clean monospace font, or "Neureal" for a more stylized aesthetic.',
     'state': 'Save or load canvas states. Type /state to see saved states, /state save [name] to save current canvas, /state load [name] to restore a saved state. Perfect for versioning your work.',
@@ -191,7 +189,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, userUid, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const previousBackgroundStateRef = useRef<{
@@ -291,6 +289,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         commandList = commandList.filter(cmd => {
             if (isAuthenticated && cmd === 'signin') return false; // Hide signin when authenticated
             if (!isAuthenticated && cmd === 'signout') return false; // Hide signout when not authenticated
+            if (cmd === 'mail' && membershipLevel !== 'super') return false; // Hide mail unless super member
             return true;
         });
 
@@ -583,7 +582,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         }
 
         return commandList.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
-    }, [getAllLabels, getAllBounds, availableStates, clipboardItems, isReadOnly, userUid]);
+    }, [getAllLabels, getAllBounds, availableStates, clipboardItems, isReadOnly, userUid, membershipLevel]);
 
     // Mode switching functionality
     const switchMode = useCallback((newMode: CanvasMode) => {
@@ -1069,10 +1068,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         // Draw all available commands below with category labels
         let currentY = cursorPos.y + 1;
         Object.entries(COMMAND_CATEGORIES).forEach(([categoryName, commands]) => {
-            // Filter commands in this category based on auth state
+            // Filter commands in this category based on auth state and membership
             const filteredCommands = commands.filter(cmd => {
                 if (isAuthenticated && cmd === 'signin') return false;
                 if (!isAuthenticated && cmd === 'signout') return false;
+                if (cmd === 'mail' && membershipLevel !== 'super') return false; // Hide mail unless super
                 return true;
             });
 
@@ -1113,7 +1113,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             originalCursorPos: { x: cursorPos.x, y: cursorPos.y }, // Store original position
             hasNavigated: false
         });
-    }, [isReadOnly, matchCommands, userUid]);
+    }, [isReadOnly, matchCommands, userUid, membershipLevel]);
 
     // Handle character input in command mode
     const addCharacter = useCallback((char: string) => {
@@ -1358,241 +1358,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 }
             }
 
-            // Check if the input is descriptive text for image generation
-            const imageIntent = detectImageIntent(restOfInput);
-
-            // Also check if it's a multi-word descriptive phrase (not just command keywords)
-            const isMultiWordDescriptive = restOfInput.trim().split(/\s+/).length >= 3 &&
-                bgArg !== 'clear' && bgArg !== 'live' && bgArg !== 'web';
-
-            // If high confidence image intent OR multi-word descriptive phrase, generate image
-            if ((imageIntent.intent === 'image' && imageIntent.confidence > 0.8 && restOfInput.trim()) ||
-                isMultiWordDescriptive) {
-                setDialogueWithRevert("Generating background image...", setDialogueText);
-
-                generateImage(restOfInput.trim(), undefined, userUid || undefined).then(async (result) => {
-                    // Check if quota exceeded
-                    if (result.text && result.text.startsWith('AI limit reached')) {
-                        if (triggerUpgradeFlow) {
-                            triggerUpgradeFlow();
-                        }
-                        return;
-                    }
-
-                    if (result.imageData) {
-                        // Upload to storage for persistence
-                        if (uploadImageToStorage) {
-                            const storageUrl = await uploadImageToStorage(result.imageData);
-                            switchBackgroundMode('image', storageUrl, '#000000', undefined, restOfInput.trim());
-                            setDialogueWithRevert(`"${restOfInput.trim()}"`, setDialogueText);
-                        } else {
-                            switchBackgroundMode('image', result.imageData, '#000000', undefined, restOfInput.trim());
-                            setDialogueWithRevert(`"${restOfInput.trim()}"`, setDialogueText);
-                        }
-                    } else {
-                        console.error('Image generation returned no imageData:', result);
-                        setDialogueWithRevert("Image generation failed", setDialogueText);
-                    }
-                }).catch((error) => {
-                    console.error('Image generation error:', error);
-                    setDialogueWithRevert(`Image generation failed: ${error.message || 'Unknown error'}`, setDialogueText);
-                });
-
-                // Clear command mode
-                setCommandState({
-                    isActive: false,
-                    input: '',
-                    matchedCommands: [],
-                    selectedIndex: 0,
-                    commandStartPos: { x: 0, y: 0 },
-                    originalCursorPos: { x: 0, y: 0 },
-                    hasNavigated: false
-                });
-                setCommandData({});
-
-                return null;
-            }
-
-            if (bgArg === 'clear') {
-                // Parse quoted prompt and color parameters
-                let prompt = '';
-                let textColorParam: string | undefined;
-                let textBgParam: string | undefined;
-                
-                // Join all parts after 'bg clear' to handle quoted strings
-                const fullInput = inputParts.slice(2).join(' ');
-                
-                // Check if there's a quoted prompt
-                const quoteMatch = fullInput.match(/^'([^']*)'(.*)$/);
-                
-                if (quoteMatch) {
-                    // Quoted prompt found
-                    prompt = quoteMatch[1];
-                    const remainingParams = quoteMatch[2].trim().split(/\s+/).filter(p => p.length > 0);
-                    
-                    if (remainingParams.length > 0) {
-                        textColorParam = remainingParams[0];
-                    }
-                    if (remainingParams.length > 1) {
-                        textBgParam = remainingParams[1];
-                    }
-                } else {
-                    // No quotes - use the old behavior for backward compatibility
-                    // Just take first two params as colors if they exist
-                    if (param2) {
-                        textColorParam = param2;
-                    }
-                    if (param3) {
-                        textBgParam = param3;
-                    }
-                }
-                
-                if (prompt.trim()) {
-                    // 'bg clear' with a prompt - generate AI image
-                    setDialogueWithRevert("Generating background image...", setDialogueText);
-                    generateImage(prompt, undefined, userUid || undefined).then(async (result) => {
-                        // Check if quota exceeded
-                        if (result.text && result.text.startsWith('AI limit reached')) {
-                            if (triggerUpgradeFlow) {
-                                triggerUpgradeFlow();
-                            }
-                            return;
-                        }
-
-                        if (result.imageData) {
-                            // Upload to storage for persistence
-                            // Default to black text for AI-generated backgrounds (most are light/colorful)
-                            const finalTextColor = textColorParam || '#000000';
-                            if (uploadImageToStorage) {
-                                const storageUrl = await uploadImageToStorage(result.imageData);
-                                switchBackgroundMode('image', storageUrl, finalTextColor, textBgParam, prompt);
-                                setDialogueWithRevert(`"${prompt}"`, setDialogueText);
-                            } else {
-                                switchBackgroundMode('image', result.imageData, finalTextColor, textBgParam, prompt);
-                                setDialogueWithRevert(`"${prompt}"`, setDialogueText);
-                            }
-                        } else {
-                            console.error('Image generation returned no imageData:', result);
-                            setDialogueWithRevert("Image generation failed", setDialogueText);
-                        }
-                    }).catch((error) => {
-                        console.error('Image generation error:', error);
-                        setDialogueWithRevert(`Image generation failed: ${error.message || 'Unknown error'}`, setDialogueText);
-                    });
-                } else {
-                    // 'bg clear' without prompt - show space background
-                    switchBackgroundMode('space', undefined, param2, param3);
-                }
-            } else if (bgArg === 'live') {
-                // Parse quoted prompt and color parameters
-                let prompt = '';
-                let textColorParam: string | undefined;
-                let textBgParam: string | undefined;
-                
-                // Join all parts after 'bg live' to handle quoted strings
-                const fullInput = inputParts.slice(2).join(' ');
-                
-                // Check if there's a quoted prompt
-                const quoteMatch = fullInput.match(/^'([^']*)'(.*)$/);
-                
-                if (quoteMatch) {
-                    // Quoted prompt found
-                    prompt = quoteMatch[1];
-                    const remainingParams = quoteMatch[2].trim().split(/\s+/).filter(p => p.length > 0);
-                    
-                    if (remainingParams.length > 0) {
-                        textColorParam = remainingParams[0];
-                    }
-                    if (remainingParams.length > 1) {
-                        textBgParam = remainingParams[1];
-                    }
-                } else {
-                    // No quotes - use the old behavior for backward compatibility
-                    // Just take first two params as colors if they exist
-                    if (param2) {
-                        textColorParam = param2;
-                    }
-                    if (param3) {
-                        textBgParam = param3;
-                    }
-                }
-                
-                if (prompt.trim()) {
-                    // 'bg live' with a prompt - generate AI video
-                    setDialogueWithRevert("Generating background video...", setDialogueText);
-                    generateVideo(prompt).then((videoUrl) => {
-                        if (videoUrl && (videoUrl.startsWith('data:') || videoUrl.startsWith('http'))) {
-                            // Validate that we have a proper video URL/data URL
-                            switchBackgroundMode('video', videoUrl, textColorParam, textBgParam, prompt);
-                            setDialogueWithRevert(`"${prompt}"`, setDialogueText);
-                        } else {
-                            // Fallback to space background if video generation fails or returns invalid data
-                            switchBackgroundMode('space', undefined, textColorParam, textBgParam);
-                            setDialogueWithRevert("Video generation not available, using space background.", setDialogueText);
-                        }
-                    }).catch(() => {
-                        switchBackgroundMode('space', undefined, textColorParam, textBgParam);
-                        setDialogueWithRevert("Video generation failed, using space background.", setDialogueText);
-                    });
-                } else {
-                    // 'bg live' without prompt - show space background
-                    switchBackgroundMode('space', undefined, param2, param3);
-                    setDialogueWithRevert("Video generation requires a prompt. Use: /bg live 'your prompt'", setDialogueText);
-                }
-            } else if (bgArg === 'web') {
-                // Handle web screen sharing with optional text color and background
-                const textColorArg = param2 || '#FFFFFF'; // Default to white text
-                const textBgArg = param3; // Optional text background
-                
-                if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
-                    navigator.mediaDevices.getDisplayMedia({
-                        video: true,
-                        audio: false
-                    }).then((stream) => {
-                        // Store stream in ref to persist across renders
-                        backgroundStreamRef.current = stream;
-                        
-                        // Validate and set text color
-                        const hexTextColor = (COLOR_MAP[textColorArg.toLowerCase()] || textColorArg).toUpperCase();
-                        const validTextColor = /^#[0-9A-F]{6}$/i.test(hexTextColor) ? hexTextColor : '#FFFFFF';
-                        
-                        // Validate text background if provided
-                        let validTextBg: string | undefined;
-                        if (textBgArg) {
-                            const hexTextBg = (COLOR_MAP[textBgArg.toLowerCase()] || textBgArg).toUpperCase();
-                            validTextBg = /^#[0-9A-F]{6}$/i.test(hexTextBg) ? hexTextBg : undefined;
-                        }
-                        
-                        setModeState(prev => ({
-                            ...prev,
-                            backgroundMode: 'stream',
-                            backgroundStream: stream,
-                            textColor: validTextColor,
-                            textBackground: validTextBg,
-                        }));
-                        setDialogueWithRevert("Screen sharing active", setDialogueText);
-
-                        // Listen for stream end
-                        stream.getVideoTracks()[0].onended = () => {
-                            backgroundStreamRef.current = undefined;
-                            setModeState(prev => ({
-                                ...prev,
-                                backgroundMode: 'color',
-                                backgroundColor: '#FFFFFF',
-                                backgroundStream: undefined,
-                                textColor: '#000000',
-                                textBackground: undefined,
-                            }));
-                            setDialogueWithRevert("Screen sharing ended", setDialogueText);
-                        };
-                    }).catch((err) => {
-                        console.error('Error accessing screen share:', err);
-                        setDialogueWithRevert("Screen sharing cancelled or not available", setDialogueText);
-                    });
-                } else {
-                    setDialogueWithRevert("Screen sharing not supported in this browser", setDialogueText);
-                }
-            } else if (bgArg) {
+            if (bgArg) {
                 // Format: /bg {backgroundColor} {textColor} {textBackground}
                 // All parameters are optional
                 switchBackgroundMode('color', bgArg, param2, param3);
@@ -2159,29 +1925,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             return null;
         }
 
-        if (commandToExecute.startsWith('tape')) {
-            // Toggle tape recording
-            if (toggleRecording) {
-                toggleRecording();
-            } else {
-                setDialogueWithRevert("Tape recording not available", setDialogueText);
-            }
-
-            // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
-
-            return null;
-        }
-
         if (commandToExecute.startsWith('indent')) {
             // Toggle smart indentation
             setModeState(prev => ({
@@ -2249,77 +1992,27 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             };
         }
 
-        if (commandToExecute.startsWith('iframe')) {
-            // /iframe [url] command - create iframe region from selection
-            const inputParts = commandState.input.trim().split(/\s+/);
-            const url = inputParts.length > 1 ? inputParts.slice(1).join(' ') : '';
-
-            // Check if there's already a selection
-            const existingSelection = getNormalizedSelection?.();
-
-            if (existingSelection) {
-                // Selection exists - create iframe region immediately
-                const hasMeaningfulSelection =
-                    existingSelection.startX !== existingSelection.endX ||
-                    existingSelection.startY !== existingSelection.endY;
-
-                if (!hasMeaningfulSelection) {
-                    setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
-                } else if (!url) {
-                    setDialogueWithRevert("Usage: /iframe [url]", setDialogueText);
-                } else if (setWorldData && worldData && setSelectionStart && setSelectionEnd) {
-                    // Validate URL
-                    let validUrl = url;
-                    if (!url.match(/^https?:\/\//i)) {
-                        validUrl = 'https://' + url;
-                    }
-
-                    // Create iframe region data
-                    const iframeRegion = {
-                        startX: existingSelection.startX,
-                        endX: existingSelection.endX,
-                        startY: existingSelection.startY,
-                        endY: existingSelection.endY,
-                        url: validUrl,
-                        timestamp: Date.now()
-                    };
-
-                    // Store iframe region in worldData with unique key
-                    const iframeKey = `iframe_${existingSelection.startX},${existingSelection.startY}_${Date.now()}`;
-                    const newWorldData = { ...worldData };
-                    newWorldData[iframeKey] = JSON.stringify(iframeRegion);
-                    setWorldData(newWorldData);
-
-                    const width = existingSelection.endX - existingSelection.startX + 1;
-                    const height = existingSelection.endY - existingSelection.startY + 1;
-                    setDialogueWithRevert(`Iframe region created (${width}×${height})`, setDialogueText);
-
-                    // Clear selection
-                    setSelectionStart(null);
-                    setSelectionEnd(null);
-                }
-            } else {
-                // No selection - show error
-                setDialogueWithRevert("Make a selection first, then type /iframe [url]", setDialogueText);
-            }
-
-            // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
-
-            return null;
-        }
-
         if (commandToExecute.startsWith('mail')) {
             // /mail command - create mail region from selection
+            // Check if user has 'super' membership
+            if (membershipLevel !== 'super') {
+                setDialogueWithRevert("Mail command requires Super membership", setDialogueText);
+
+                // Clear command mode
+                setCommandState({
+                    isActive: false,
+                    input: '',
+                    matchedCommands: [],
+                    selectedIndex: 0,
+                    commandStartPos: { x: 0, y: 0 },
+                    originalCursorPos: { x: 0, y: 0 },
+                    hasNavigated: false
+                });
+                setCommandData({});
+
+                return null;
+            }
+
             const existingSelection = getNormalizedSelection?.();
 
             if (existingSelection) {
@@ -2611,7 +2304,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         if (commandToExecute.startsWith('help')) {
             // Keep command mode active to show all commands
             // Help text will only be shown on hover
-            const allCommands = isReadOnly ? READ_ONLY_COMMANDS : AVAILABLE_COMMANDS;
+            let allCommands = isReadOnly ? READ_ONLY_COMMANDS : AVAILABLE_COMMANDS;
+
+            // Filter out mail command for non-super users
+            allCommands = allCommands.filter(cmd => {
+                if (cmd === 'mail' && membershipLevel !== 'super') return false;
+                return true;
+            });
 
             // Build command data - just show commands, no help text yet
             const newCommandData: WorldData = {};
@@ -2709,52 +2408,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             };
         }
 
-        if (commandToExecute.startsWith('artefacts')) {
-            const inputParts = commandState.input.trim().split(/\s+/);
-            const typeArg = inputParts.length > 1 ? inputParts[1] : undefined;
-            
-            if (typeArg === '--images') {
-                // Switch to images artifact type and enable artifacts
-                setModeState(prev => ({
-                    ...prev,
-                    artefactsEnabled: true,
-                    artifactType: 'images'
-                }));
-                setDialogueWithRevert("3D image artifacts enabled", setDialogueText);
-            } else if (typeArg === '--questions') {
-                // Switch to questions artifact type and enable artifacts
-                setModeState(prev => ({
-                    ...prev,
-                    artefactsEnabled: true,
-                    artifactType: 'questions'
-                }));
-                setDialogueWithRevert("3D question artifacts enabled", setDialogueText);
-            } else {
-                // No type specified - toggle artifacts enabled state
-                setModeState(prev => ({
-                    ...prev,
-                    artefactsEnabled: !prev.artefactsEnabled
-                }));
-                
-                const newState = !modeState.artefactsEnabled;
-                setDialogueWithRevert(newState ? "3D artifacts enabled" : "3D artifacts disabled", setDialogueText);
-            }
-            
-            // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
-            
-            return null;
-        }
-        
         // Handle commands that need text selection
         if (['transform', 'explain', 'summarize'].includes(commandToExecute.toLowerCase().split(' ')[0])) {
             // Clear command mode
@@ -3342,89 +2995,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                     setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
                 }
             } else {
-                setDialogueWithRevert("Make a selection first", setDialogueText);
-            }
-        } else if (commandName === 'margin') {
-            // /margin command - create a margin note for selected text
-            console.log('[/margin] Command triggered');
-            const existingSelection = getNormalizedSelection?.();
-            console.log('[/margin] Existing selection:', existingSelection);
-
-            if (existingSelection) {
-                const hasMeaningfulSelection =
-                    existingSelection.startX !== existingSelection.endX ||
-                    existingSelection.startY !== existingSelection.endY;
-                console.log('[/margin] Has meaningful selection:', hasMeaningfulSelection);
-                console.log('[/margin] Required deps available:', {
-                    setWorldData: !!setWorldData,
-                    worldData: !!worldData,
-                    setSelectionStart: !!setSelectionStart,
-                    setSelectionEnd: !!setSelectionEnd
-                });
-
-                if (hasMeaningfulSelection && setWorldData && worldData && setSelectionStart && setSelectionEnd) {
-                    console.log('[/margin] Loading margin calculation functions...');
-                    // Use dynamic import to load margin calculation functions
-                    import('./bit.blocks').then(({ findTextBlockForSelection, calculateMarginPlacement }) => {
-                        console.log('[/margin] Functions loaded, finding text block...');
-                        // Find the text block containing this selection
-                        const textBlock = findTextBlockForSelection(existingSelection, worldData);
-                        console.log('[/margin] Text block found:', textBlock);
-
-                        if (textBlock) {
-                            // Calculate margin placement (right, left, or bottom)
-                            const marginPlacement = calculateMarginPlacement(
-                                textBlock,
-                                existingSelection.startY,
-                                worldData
-                            );
-                            console.log('[/margin] Margin placement calculated:', marginPlacement);
-
-                            if (marginPlacement) {
-                                // Create note region data
-                                const noteRegion = {
-                                    startX: marginPlacement.startX,
-                                    endX: marginPlacement.endX,
-                                    startY: marginPlacement.startY,
-                                    endY: marginPlacement.endY,
-                                    timestamp: Date.now()
-                                };
-
-                                // Store note region in worldData with unique key
-                                const noteKey = `note_${marginPlacement.startX},${marginPlacement.startY}_${Date.now()}`;
-                                const newWorldData = { ...worldData };
-                                newWorldData[noteKey] = JSON.stringify(noteRegion);
-                                setWorldData(newWorldData);
-                                console.log('[/margin] Note region created with key:', noteKey, noteRegion);
-
-                                const width = marginPlacement.endX - marginPlacement.startX + 1;
-                                const height = marginPlacement.endY - marginPlacement.startY + 1;
-                                setDialogueWithRevert(
-                                    `Margin note created (${width}×${height}) on ${marginPlacement.position}`,
-                                    setDialogueText
-                                );
-
-                                // Clear selection
-                                setSelectionStart(null);
-                                setSelectionEnd(null);
-                            } else {
-                                console.log('[/margin] No available margin space found');
-                                setDialogueWithRevert("Could not find available margin space", setDialogueText);
-                            }
-                        } else {
-                            console.log('[/margin] No text block found for selection');
-                            setDialogueWithRevert("Could not find text block for selection", setDialogueText);
-                        }
-                    }).catch((error) => {
-                        console.error('[/margin] Error loading margin functions:', error);
-                        setDialogueWithRevert("Error creating margin note", setDialogueText);
-                    });
-                } else {
-                    console.log('[/margin] Selection validation failed');
-                    setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
-                }
-            } else {
-                console.log('[/margin] No selection exists');
                 setDialogueWithRevert("Make a selection first", setDialogueText);
             }
         } else if (commandName === 'publish') {

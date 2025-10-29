@@ -58,7 +58,7 @@ if (typeof window !== 'undefined') {
 }
 
 // Authentication functions
-export type MembershipTier = 'fresh' | 'pro';
+export type MembershipTier = 'fresh' | 'pro' | 'super';
 
 export interface UserProfileData {
   firstName: string;
@@ -282,7 +282,8 @@ export const getUidByUsername = async (username: string): Promise<string | null>
 // Subscription and usage management
 export const TIER_LIMITS = {
   fresh: { daily: 5, monthly: 50 },
-  pro: { daily: -1, monthly: -1 } // -1 = unlimited
+  pro: { daily: -1, monthly: -1 }, // -1 = unlimited
+  super: { daily: -1, monthly: -1 } // -1 = unlimited
 } as const;
 
 export const getUserProfile = async (uid: string): Promise<UserProfileData | null> => {

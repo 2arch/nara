@@ -577,25 +577,24 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
               monthly: {},
               total: 0,
               lastReset: new Date().toISOString()
-            },
-            worlds: {
-              home: {
-                settings: {
-                  backgroundColor: hostBackgroundColor || '#FFFFFF',
-                  textColor: textColor
-                }
-              }
             }
           };
 
           await set(ref(database, `users/${user.uid}`), userProfileData);
+
+          // Store world settings in separate worlds tree
+          const worldSettings = {
+            backgroundColor: hostBackgroundColor || '#FFFFFF',
+            textColor: textColor
+          };
+          await set(ref(database, `worlds/${user.uid}/home/settings`), worldSettings);
         } else {
           // Update existing profile with username and initial world settings
           await set(ref(database, `users/${user.uid}/username`), username);
 
           if (hostBackgroundColor) {
             const textColor = hostBackgroundColor === '#F0FF6A' ? '#000000' : '#FFFFFF';
-            await set(ref(database, `users/${user.uid}/worlds/home/settings`), {
+            await set(ref(database, `worlds/${user.uid}/home/settings`), {
               backgroundColor: hostBackgroundColor,
               textColor: textColor
             });
@@ -724,18 +723,17 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
             monthly: {},
             total: 0,
             lastReset: new Date().toISOString()
-          },
-          worlds: {
-            home: {
-              settings: {
-                backgroundColor: hostBackgroundColor || '#FFFFFF',
-                textColor: hostBackgroundColor === '#F0FF6A' ? '#000000' : '#FFFFFF'
-              }
-            }
           }
         };
 
         await set(ref(database, `users/${user.uid}`), userProfileData);
+
+        // Store world settings in separate worlds tree
+        const worldSettings = {
+          backgroundColor: hostBackgroundColor || '#FFFFFF',
+          textColor: hostBackgroundColor === '#F0FF6A' ? '#000000' : '#FFFFFF'
+        };
+        await set(ref(database, `worlds/${user.uid}/home/settings`), worldSettings);
 
         // Show success message
         const successMessage = flow.messages['account_created'];

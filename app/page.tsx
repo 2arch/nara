@@ -45,13 +45,8 @@ export default function Home() {
       setUser(user);
       setAuthLoading(false);
 
-      // If user is authenticated, redirect to their world
-      if (user) {
-        const username = await getUsernameByUid(user.uid);
-        if (username) {
-          router.push(`/@${username}`);
-        }
-      }
+      // Don't auto-redirect on home page - handleAuthSuccess will do it
+      // This prevents race condition where auth state changes before username is written to DB
     });
 
     return () => unsubscribe();

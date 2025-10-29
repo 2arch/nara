@@ -5,7 +5,7 @@ import { useCommandSystem, CommandState, CommandExecution, BackgroundMode, COLOR
 import { getSmartIndentation, calculateWordDeletion, extractLineCharacters, detectTextBlocks, findClosestBlock, findBlockForDeletion, extractAllTextBlocks, groupTextBlocksIntoClusters, filterClustersForLabeling, generateTextBlockFrames, generateHierarchicalFrames, HierarchicalFrameSystem, HierarchicalFrame, HierarchyLevel, defaultDistanceConfig, DistanceBasedConfig } from './bit.blocks'; // Import block detection utilities
 import { useWorldSettings, WorldSettings } from './settings';
 import { set, ref, increment, runTransaction } from 'firebase/database';
-import { database, auth, storage } from '@/app/firebase';
+import { database, auth, storage, getUserProfile } from '@/app/firebase';
 import { ref as storageRef, uploadString, getDownloadURL } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
@@ -415,6 +415,7 @@ export function useWorldEngine({
     const [boundCycleIndex, setBoundCycleIndex] = useState<number>(0); // Track which bound to cycle to next
     const [dialogueText, setDialogueText] = useState('');
     const tapeRecordingCallbackRef = useRef<(() => Promise<void> | void) | null>(null);
+    const [membershipLevel, setMembershipLevel] = useState<string | undefined>(undefined);
 
     // Inline autocomplete state
     const [suggestionData, setSuggestionData] = useState<WorldData>({});
@@ -450,6 +451,24 @@ export function useWorldEngine({
     useEffect(() => {
         cursorPosRef.current = cursorPos;
     }, [cursorPos]);
+
+    // Fetch user membership level
+    useEffect(() => {
+        const fetchMembership = async () => {
+            if (userUid) {
+                try {
+                    const profile = await getUserProfile(userUid);
+                    if (profile && profile.membership) {
+                        setMembershipLevel(profile.membership);
+                    }
+                } catch (error) {
+                    console.error('Error fetching membership:', error);
+                }
+            }
+        };
+
+        fetchMembership();
+    }, [userUid]);
 
     // Effect to detect when cursor is on a bounded region
     useEffect(() => {
@@ -1045,7 +1064,7 @@ export function useWorldEngine({
         startCommandWithInput,
         addComposedText,
         removeCompositionTrigger,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, userUid, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, triggerUpgradeFlow: () => {
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
         }
