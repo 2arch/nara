@@ -9478,6 +9478,7 @@ export function useWorldEngine({
 
                         // Send email via API
                         setDialogueWithRevert('Sending email...', setDialogueText);
+                        setAiProcessingRegion({ startX, endX, startY, endY });
 
                         fetch('/api/mail/send', {
                             method: 'POST',
@@ -9495,6 +9496,9 @@ export function useWorldEngine({
                         .catch(error => {
                             setDialogueWithRevert('Error sending email', setDialogueText);
                             console.error(error);
+                        })
+                        .finally(() => {
+                            setAiProcessingRegion(null);
                         });
 
                         return; // Don't process regular click behavior
