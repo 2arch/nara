@@ -71,7 +71,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     type ResizeHandle = 'top-left' | 'top-right' | 'bottom-right' | 'bottom-left';
     const [resizeState, setResizeState] = useState<{
         active: boolean;
-        type: 'image' | 'note' | null;
+        type: 'image' | 'note' | 'iframe' | null;
         key: string | null;
         handle: ResizeHandle | null;
         originalBounds: { startX: number; startY: number; endX: number; endY: number } | null;
@@ -82,6 +82,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         handle: null,
         originalBounds: null
     });
+
+    const [selectedIframeKey, setSelectedIframeKey] = useState<string | null>(null);
+    const [activeIframeKey, setActiveIframeKey] = useState<string | null>(null); // Double-click activated iframe
 
     const [clipboardFlashBounds, setClipboardFlashBounds] = useState<Map<string, number>>(new Map()); // boundKey -> timestamp
     const lastCursorPosRef = useRef<Point | null>(null);
@@ -1252,6 +1255,24 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         pos.y >= imageData.startY && pos.y <= imageData.endY) {
                         return imageData;
                     }
+                }
+            }
+        }
+        return null;
+    }, [engine]);
+
+    const findIframeAtPosition = useCallback((pos: Point): { key: string, data: any } | null => {
+        for (const key in engine.worldData) {
+            if (key.startsWith('iframe_')) {
+                try {
+                    const iframeData = JSON.parse(engine.worldData[key] as string);
+                    // Check if position is within iframe bounds
+                    if (pos.x >= iframeData.startX && pos.x <= iframeData.endX &&
+                        pos.y >= iframeData.startY && pos.y <= iframeData.endY) {
+                        return { key, data: iframeData };
+                    }
+                } catch (e) {
+                    // Skip invalid iframe data
                 }
             }
         }
@@ -4208,6 +4229,46 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Selected Iframe Border ===
+        if (selectedIframeKey) {
+            try {
+                const selectedIframeData = JSON.parse(engine.worldData[selectedIframeKey] as string);
+                // Draw selection border around the selected iframe
+                const topLeftScreen = engine.worldToScreen(selectedIframeData.startX, selectedIframeData.startY, currentZoom, currentOffset);
+                const bottomRightScreen = engine.worldToScreen(selectedIframeData.endX + 1, selectedIframeData.endY + 1, currentZoom, currentOffset);
+
+                // Use text accent color for selection border
+                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
+                const lineWidth = 3; // Slightly thicker to indicate selection
+                ctx.lineWidth = lineWidth;
+                const halfWidth = lineWidth / 2;
+                ctx.strokeRect(
+                    topLeftScreen.x + halfWidth,
+                    topLeftScreen.y + halfWidth,
+                    bottomRightScreen.x - topLeftScreen.x - lineWidth,
+                    bottomRightScreen.y - topLeftScreen.y - lineWidth
+                );
+
+                // Draw resize thumbs (handles) at corners only
+                const thumbSize = 8;
+                const thumbColor = `rgba(${hexToRgb(engine.textColor)}, 1)`;
+                ctx.fillStyle = thumbColor;
+
+                const left = topLeftScreen.x;
+                const right = bottomRightScreen.x;
+                const top = topLeftScreen.y;
+                const bottom = bottomRightScreen.y;
+
+                // Corner thumbs
+                ctx.fillRect(left - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-left
+                ctx.fillRect(right - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-right
+                ctx.fillRect(left - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-left
+                ctx.fillRect(right - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-right
+            } catch (e) {
+                // Skip invalid iframe data
+            }
+        }
+
         // === Render Clipboard Flash ===
         if (clipboardFlashBounds.size > 0) {
             const recentItem = engine.clipboardItems[0];
@@ -4801,19 +4862,38 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     engine.handleSelectionEnd();
                     setSelectedImageKey(null);
                     setSelectedNoteKey(planAtPosition.key);
+                    setSelectedIframeKey(null);
 
                     // Set flag to prevent trail creation
                     isClickMovementRef.current = true;
                 } else {
-                    // Clear any selections if clicking on empty space
-                    setSelectedImageKey(null);
-                    setSelectedNoteKey(null);
+                    // If no text block, image, or note found, check for iframe
+                    const iframeAtPosition = findIframeAtPosition(snappedWorldPos);
+
+                    if (iframeAtPosition) {
+                        // Double-click on iframe activates it for interaction
+                        setActiveIframeKey(iframeAtPosition.key);
+                        setSelectedIframeKey(iframeAtPosition.key);
+                        setSelectedImageKey(null);
+                        setSelectedNoteKey(null);
+                        engine.handleSelectionStart(0, 0);
+                        engine.handleSelectionEnd();
+
+                        // Set flag to prevent trail creation
+                        isClickMovementRef.current = true;
+                    } else {
+                        // Clear any selections if clicking on empty space
+                        setSelectedImageKey(null);
+                        setSelectedNoteKey(null);
+                        setSelectedIframeKey(null);
+                        setActiveIframeKey(null);
+                    }
                 }
             }
         }
 
         canvasRef.current?.focus(); // Ensure focus for keyboard
-    }, [engine, findTextBlock, findImageAtPosition, findPlanAtPosition]);
+    }, [engine, findTextBlock, findImageAtPosition, findPlanAtPosition, findIframeAtPosition]);
     
     const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -4919,6 +4999,45 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
             }
 
+            // Check iframe resize handles
+            if (selectedIframeKey) {
+                try {
+                    const selectedIframeData = JSON.parse(engine.worldData[selectedIframeKey] as string);
+                    const topLeftScreen = engine.worldToScreen(selectedIframeData.startX, selectedIframeData.startY, engine.zoomLevel, engine.viewOffset);
+                    const bottomRightScreen = engine.worldToScreen(selectedIframeData.endX + 1, selectedIframeData.endY + 1, engine.zoomLevel, engine.viewOffset);
+
+                    const left = topLeftScreen.x;
+                    const right = bottomRightScreen.x;
+                    const top = topLeftScreen.y;
+                    const bottom = bottomRightScreen.y;
+
+                    // Check each corner handle
+                    let handle: ResizeHandle | null = null;
+                    if (isWithinThumb(x, y, left, top)) handle = 'top-left';
+                    else if (isWithinThumb(x, y, right, top)) handle = 'top-right';
+                    else if (isWithinThumb(x, y, right, bottom)) handle = 'bottom-right';
+                    else if (isWithinThumb(x, y, left, bottom)) handle = 'bottom-left';
+
+                    if (handle) {
+                        setResizeState({
+                            active: true,
+                            type: 'iframe',
+                            key: selectedIframeKey,
+                            handle,
+                            originalBounds: {
+                                startX: selectedIframeData.startX,
+                                startY: selectedIframeData.startY,
+                                endX: selectedIframeData.endX,
+                                endY: selectedIframeData.endY
+                            }
+                        });
+                        return; // Early return, don't process other mouse events
+                    }
+                } catch (e) {
+                    // Skip invalid iframe data
+                }
+            }
+
             if (e.shiftKey) {
                 // Shift+drag: prioritize selection, fallback to text block
                 isSelectingMouseDownRef.current = false;
@@ -4950,18 +5069,43 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     engine.handleCanvasClick(x, y, true, false, e.metaKey, e.ctrlKey);
                 }
             } else {
-                // Clear image and note selections when starting regular selection
-                setSelectedImageKey(null);
-                setSelectedNoteKey(null);
+                // Check if clicking on an iframe (single click selects it)
+                const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
+                const snappedWorldPos = {
+                    x: Math.floor(worldPos.x),
+                    y: Math.floor(worldPos.y)
+                };
+                const iframeAtPosition = findIframeAtPosition(snappedWorldPos);
 
-                // Regular selection start
-                isSelectingMouseDownRef.current = true; // Track mouse down state
-                engine.handleSelectionStart(x, y); // Let the engine manage selection state
+                if (iframeAtPosition) {
+                    // Single click on iframe selects it (shows resize handles)
+                    setSelectedIframeKey(iframeAtPosition.key);
+                    setSelectedImageKey(null);
+                    setSelectedNoteKey(null);
+                    // Deactivate if clicking outside the currently active iframe
+                    if (activeIframeKey && activeIframeKey !== iframeAtPosition.key) {
+                        setActiveIframeKey(null);
+                    }
+                    isSelectingMouseDownRef.current = false;
+                } else {
+                    // Clear image, note, and iframe selections when starting regular selection
+                    setSelectedImageKey(null);
+                    setSelectedNoteKey(null);
+                    setSelectedIframeKey(null);
+                    // Deactivate any active iframe when clicking outside
+                    if (activeIframeKey) {
+                        setActiveIframeKey(null);
+                    }
+
+                    // Regular selection start
+                    isSelectingMouseDownRef.current = true; // Track mouse down state
+                    engine.handleSelectionStart(x, y); // Let the engine manage selection state
+                }
             }
 
             canvasRef.current?.focus();
         }
-    }, [engine, selectedImageKey, selectedNoteKey]);
+    }, [engine, selectedImageKey, selectedNoteKey, selectedIframeKey, activeIframeKey, findIframeAtPosition]);
 
     const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -5108,6 +5252,22 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 } catch (e) {
                     // Invalid note data
                 }
+            } else if (resizeState.type === 'iframe' && resizeState.key) {
+                try {
+                    const iframeData = JSON.parse(engine.worldData[resizeState.key] as string);
+                    engine.setWorldData(prev => ({
+                        ...prev,
+                        [resizeState.key!]: JSON.stringify({
+                            ...iframeData,
+                            startX: newBounds.startX,
+                            startY: newBounds.startY,
+                            endX: newBounds.endX,
+                            endY: newBounds.endY
+                        })
+                    }));
+                } catch (e) {
+                    // Invalid iframe data
+                }
             }
 
             return; // Don't process other mouse move events during resize
@@ -5246,6 +5406,36 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 setSelectedNoteKey(newPlanKey);
                             } catch (e) {
                                 // Invalid note data, skip move
+                            }
+                        } else if (selectedIframeKey) {
+                            // Check if we're moving a selected iframe region
+                            try {
+                                const iframeData = JSON.parse(engine.worldData[selectedIframeKey] as string);
+
+                                // Create new iframe region with shifted coordinates
+                                const newIframeData = {
+                                    startX: iframeData.startX + distanceX,
+                                    endX: iframeData.endX + distanceX,
+                                    startY: iframeData.startY + distanceY,
+                                    endY: iframeData.endY + distanceY,
+                                    url: iframeData.url,
+                                    timestamp: Date.now()
+                                };
+
+                                // Delete old iframe and create new one with shifted position
+                                const newIframeKey = `iframe_${newIframeData.startX},${newIframeData.startY}_${Date.now()}`;
+
+                                engine.setWorldData(prev => {
+                                    const newData = { ...prev };
+                                    delete newData[selectedIframeKey];
+                                    newData[newIframeKey] = JSON.stringify(newIframeData);
+                                    return newData;
+                                });
+
+                                // Update selected key to the new iframe region
+                                setSelectedIframeKey(newIframeKey);
+                            } catch (e) {
+                                // Invalid iframe data, skip move
                             }
                         } else {
                             // Check if we have an active selection to move
@@ -5733,6 +5923,21 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             return;
         }
 
+        // Handle iframe region-specific keys before passing to engine
+        if (selectedIframeKey && e.key === 'Backspace') {
+            // Delete the selected iframe region
+            engine.setWorldData(prev => {
+                const newData = { ...prev };
+                delete newData[selectedIframeKey];
+                return newData;
+            });
+            setSelectedIframeKey(null); // Clear selection
+            setActiveIframeKey(null); // Clear active state as well
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+
         // Let engine handle all key input (including regular typing)
         const preventDefault = engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey, e.shiftKey, e.altKey);
         if (preventDefault) {
@@ -5903,6 +6108,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 left + width > 0 &&
                                 top + height > 0) {
 
+                                const isActive = activeIframeKey === key;
+                                const isSelected = selectedIframeKey === key;
+
                                 iframes.push(
                                     <iframe
                                         key={key}
@@ -5913,11 +6121,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                             top: `${top}px`,
                                             width: `${width}px`,
                                             height: `${height}px`,
-                                            border: '1px solid rgba(100, 100, 100, 0.3)',
+                                            // border: isSelected
+                                            //     ? '5px solid rgba(100, 150, 255, 0.8)'
+                                            //     : '5px solid rgba(100, 100, 100, 0.3)',
                                             borderRadius: '2px',
                                             backgroundColor: '#fff',
                                             zIndex: 10,
-                                            pointerEvents: 'auto'
+                                            pointerEvents: isActive ? 'auto' : 'none'
                                         }}
                                         sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
                                         referrerPolicy="no-referrer"
