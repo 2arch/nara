@@ -71,7 +71,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     type ResizeHandle = 'top-left' | 'top-right' | 'bottom-right' | 'bottom-left';
     const [resizeState, setResizeState] = useState<{
         active: boolean;
-        type: 'image' | 'note' | 'iframe' | null;
+        type: 'image' | 'note' | 'iframe' | 'mail' | null;
         key: string | null;
         handle: ResizeHandle | null;
         originalBounds: { startX: number; startY: number; endX: number; endY: number } | null;
@@ -85,6 +85,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
     const [selectedIframeKey, setSelectedIframeKey] = useState<string | null>(null);
     const [activeIframeKey, setActiveIframeKey] = useState<string | null>(null); // Double-click activated iframe
+    const [selectedMailKey, setSelectedMailKey] = useState<string | null>(null);
 
     const [clipboardFlashBounds, setClipboardFlashBounds] = useState<Map<string, number>>(new Map()); // boundKey -> timestamp
     const lastCursorPosRef = useRef<Point | null>(null);
@@ -1298,6 +1299,25 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         return null;
     }, [engine]);
 
+    const findMailAtPosition = useCallback((pos: Point): { key: string, data: any } | null => {
+        // Check all mail regions in worldData
+        for (const key in engine.worldData) {
+            if (key.startsWith('mail_')) {
+                try {
+                    const mailData = JSON.parse(engine.worldData[key] as string);
+                    // Check if position is within mail bounds
+                    if (pos.x >= mailData.startX && pos.x <= mailData.endX &&
+                        pos.y >= mailData.startY && pos.y <= mailData.endY) {
+                        return { key, data: mailData };
+                    }
+                } catch (e) {
+                    // Skip invalid mail data
+                }
+            }
+        }
+        return null;
+    }, [engine]);
+
     // Helper to get chronological list of note regions and text blocks
     const getChronologicalItems = useCallback((): Array<{
         type: 'note' | 'textblock',
@@ -2015,6 +2035,54 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     }
                 } catch (e) {
                     // Skip invalid link data
+                }
+            }
+        }
+
+        // === Render Mail Send Links ===
+        // Render "send" text with link-style underline at bottom-right of mail regions
+        for (const key in engine.worldData) {
+            if (key.startsWith('mail_')) {
+                try {
+                    const mailData = JSON.parse(engine.worldData[key] as string);
+                    const { startX, endX, startY, endY } = mailData;
+
+                    // Position "send" at bottom-right corner (endX-3 to endX for 4 chars: "send")
+                    const sendText = 'send';
+                    const sendStartX = endX - sendText.length + 1;
+                    const sendY = endY;
+
+                    // Only render if visible in viewport
+                    if (sendY >= startWorldY - 5 && sendY <= endWorldY + 5) {
+                        // Render "send" text
+                        for (let i = 0; i < sendText.length; i++) {
+                            const charX = sendStartX + i;
+                            if (charX >= startWorldX - 5 && charX <= endWorldX + 5) {
+                                const screenPos = engine.worldToScreen(charX, sendY, currentZoom, currentOffset);
+                                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                                    screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                                    ctx.fillStyle = engine.textColor;
+                                    ctx.fillText(sendText[i], screenPos.x, screenPos.y + verticalTextOffset);
+                                }
+                            }
+                        }
+
+                        // Render underline (link style)
+                        const leftScreenPos = engine.worldToScreen(sendStartX, sendY, currentZoom, currentOffset);
+                        const rightScreenPos = engine.worldToScreen(sendStartX + sendText.length, sendY, currentZoom, currentOffset);
+
+                        if (leftScreenPos.x < cssWidth + effectiveCharWidth && rightScreenPos.x > -effectiveCharWidth) {
+                            ctx.strokeStyle = engine.textColor;
+                            ctx.lineWidth = Math.max(1, effectiveCharHeight * 0.08);
+                            const underlineY = leftScreenPos.y + effectiveCharHeight - ctx.lineWidth;
+                            ctx.beginPath();
+                            ctx.moveTo(Math.max(0, leftScreenPos.x), underlineY);
+                            ctx.lineTo(Math.min(cssWidth, rightScreenPos.x), underlineY);
+                            ctx.stroke();
+                        }
+                    }
+                } catch (e) {
+                    // Skip invalid mail data
                 }
             }
         }
@@ -3988,6 +4056,37 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Mail Regions ===
+        // Render mail regions with distinctive yellow/amber overlay
+        for (const key in engine.worldData) {
+            if (key.startsWith('mail_')) {
+                try {
+                    const mailData = JSON.parse(engine.worldData[key] as string);
+                    const { startX, endX, startY, endY } = mailData;
+
+                    // Use yellow/amber semi-transparent overlay for mail regions
+                    const mailColor = 'rgba(255, 193, 7, 0.15)'; // Amber color
+                    ctx.fillStyle = mailColor;
+
+                    // Fill each cell in the mail region
+                    for (let worldY = startY; worldY <= endY; worldY++) {
+                        for (let worldX = startX; worldX <= endX; worldX++) {
+                            const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+
+                            // Only draw if cell is visible on screen
+                            if (screenPos.x >= -effectiveCharWidth && screenPos.x <= cssWidth &&
+                                screenPos.y >= -effectiveCharHeight && screenPos.y <= cssHeight) {
+                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Skip invalid mail data
+                }
+            }
+        }
+
+
         // === Render AI Processing Region ===
         if (engine.aiProcessingRegion) {
             const { startX, endX, startY, endY } = engine.aiProcessingRegion;
@@ -4269,6 +4368,46 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Selected Mail Border ===
+        if (selectedMailKey) {
+            try {
+                const selectedMailData = JSON.parse(engine.worldData[selectedMailKey] as string);
+                // Draw selection border around the selected mail region
+                const topLeftScreen = engine.worldToScreen(selectedMailData.startX, selectedMailData.startY, currentZoom, currentOffset);
+                const bottomRightScreen = engine.worldToScreen(selectedMailData.endX + 1, selectedMailData.endY + 1, currentZoom, currentOffset);
+
+                // Use amber color for mail selection border
+                ctx.strokeStyle = 'rgba(255, 193, 7, 0.8)';
+                const lineWidth = 3; // Slightly thicker to indicate selection
+                ctx.lineWidth = lineWidth;
+                const halfWidth = lineWidth / 2;
+                ctx.strokeRect(
+                    topLeftScreen.x + halfWidth,
+                    topLeftScreen.y + halfWidth,
+                    bottomRightScreen.x - topLeftScreen.x - lineWidth,
+                    bottomRightScreen.y - topLeftScreen.y - lineWidth
+                );
+
+                // Draw resize thumbs (handles) at corners only
+                const thumbSize = 8;
+                const thumbColor = 'rgba(255, 193, 7, 1)';
+                ctx.fillStyle = thumbColor;
+
+                const left = topLeftScreen.x;
+                const right = bottomRightScreen.x;
+                const top = topLeftScreen.y;
+                const bottom = bottomRightScreen.y;
+
+                // Corner thumbs
+                ctx.fillRect(left - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-left
+                ctx.fillRect(right - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-right
+                ctx.fillRect(left - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-left
+                ctx.fillRect(right - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-right
+            } catch (e) {
+                // Skip invalid mail data
+            }
+        }
+
         // === Render Clipboard Flash ===
         if (clipboardFlashBounds.size > 0) {
             const recentItem = engine.clipboardItems[0];
@@ -4343,6 +4482,48 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         }
                     } catch (e) {
                         // Invalid note data, skip preview
+                    }
+                } else if (selectedIframeKey) {
+                    // Draw preview for iframe region destination
+                    try {
+                        const iframeData = JSON.parse(engine.worldData[selectedIframeKey] as string);
+                        ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
+
+                        for (let y = iframeData.startY; y <= iframeData.endY; y++) {
+                            for (let x = iframeData.startX; x <= iframeData.endX; x++) {
+                                const destX = x + distanceX;
+                                const destY = y + distanceY;
+                                const destScreenPos = engine.worldToScreen(destX, destY, currentZoom, currentOffset);
+
+                                if (destScreenPos.x >= -effectiveCharWidth && destScreenPos.x <= cssWidth &&
+                                    destScreenPos.y >= -effectiveCharHeight && destScreenPos.y <= cssHeight) {
+                                    ctx.fillRect(destScreenPos.x, destScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Invalid iframe data, skip preview
+                    }
+                } else if (selectedMailKey) {
+                    // Draw preview for mail region destination
+                    try {
+                        const mailData = JSON.parse(engine.worldData[selectedMailKey] as string);
+                        ctx.fillStyle = 'rgba(255, 193, 7, 0.3)'; // Amber color for mail
+
+                        for (let y = mailData.startY; y <= mailData.endY; y++) {
+                            for (let x = mailData.startX; x <= mailData.endX; x++) {
+                                const destX = x + distanceX;
+                                const destY = y + distanceY;
+                                const destScreenPos = engine.worldToScreen(destX, destY, currentZoom, currentOffset);
+
+                                if (destScreenPos.x >= -effectiveCharWidth && destScreenPos.x <= cssWidth &&
+                                    destScreenPos.y >= -effectiveCharHeight && destScreenPos.y <= cssHeight) {
+                                    ctx.fillRect(destScreenPos.x, destScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Invalid mail data, skip preview
                     }
                 } else {
                     // Check if we have an active selection
@@ -4666,7 +4847,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, selectedNoteKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, updateTasksIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
+    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, selectedNoteKey, selectedIframeKey, selectedMailKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, updateTasksIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
 
 
     // --- Drawing Loop Effect ---
@@ -4766,6 +4947,21 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         
         // Set flag to prevent trail creation from click movement
         isClickMovementRef.current = true;
+
+        // Check if clicking outside selected mail region - if so, clear it
+        if (selectedMailKey) {
+            const worldPos = engine.screenToWorld(clickX, clickY, engine.zoomLevel, engine.viewOffset);
+            const snappedWorldPos = {
+                x: Math.floor(worldPos.x),
+                y: Math.floor(worldPos.y)
+            };
+            const mailAtClick = findMailAtPosition(snappedWorldPos);
+            
+            // If clicking outside any mail region, or on a different mail region, clear selection
+            if (!mailAtClick || mailAtClick.key !== selectedMailKey) {
+                setSelectedMailKey(null);
+            }
+        }
 
         // Pass to engine's regular click handler
         engine.handleCanvasClick(clickX, clickY, false, e.shiftKey, e.metaKey, e.ctrlKey);
@@ -4876,24 +5072,43 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         setSelectedIframeKey(iframeAtPosition.key);
                         setSelectedImageKey(null);
                         setSelectedNoteKey(null);
+                        setSelectedMailKey(null);
                         engine.handleSelectionStart(0, 0);
                         engine.handleSelectionEnd();
 
                         // Set flag to prevent trail creation
                         isClickMovementRef.current = true;
                     } else {
-                        // Clear any selections if clicking on empty space
-                        setSelectedImageKey(null);
-                        setSelectedNoteKey(null);
-                        setSelectedIframeKey(null);
-                        setActiveIframeKey(null);
+                        // If no text block, image, note, or iframe found, check for mail
+                        const mailAtPosition = findMailAtPosition(snappedWorldPos);
+
+                        if (mailAtPosition) {
+                            // Double-click on mail selects it
+                            setSelectedMailKey(mailAtPosition.key);
+                            setSelectedImageKey(null);
+                            setSelectedNoteKey(null);
+                            setSelectedIframeKey(null);
+                            setActiveIframeKey(null);
+                            engine.handleSelectionStart(0, 0);
+                            engine.handleSelectionEnd();
+
+                            // Set flag to prevent trail creation
+                            isClickMovementRef.current = true;
+                        } else {
+                            // Clear any selections if clicking on empty space
+                            setSelectedImageKey(null);
+                            setSelectedNoteKey(null);
+                            setSelectedIframeKey(null);
+                            setActiveIframeKey(null);
+                            setSelectedMailKey(null);
+                        }
                     }
                 }
             }
         }
 
         canvasRef.current?.focus(); // Ensure focus for keyboard
-    }, [engine, findTextBlock, findImageAtPosition, findPlanAtPosition, findIframeAtPosition]);
+    }, [engine, findTextBlock, findImageAtPosition, findPlanAtPosition, findIframeAtPosition, findMailAtPosition]);
     
     const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -5038,6 +5253,45 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
             }
 
+            // Check mail resize handles
+            if (selectedMailKey) {
+                try {
+                    const selectedMailData = JSON.parse(engine.worldData[selectedMailKey] as string);
+                    const topLeftScreen = engine.worldToScreen(selectedMailData.startX, selectedMailData.startY, engine.zoomLevel, engine.viewOffset);
+                    const bottomRightScreen = engine.worldToScreen(selectedMailData.endX + 1, selectedMailData.endY + 1, engine.zoomLevel, engine.viewOffset);
+
+                    const left = topLeftScreen.x;
+                    const right = bottomRightScreen.x;
+                    const top = topLeftScreen.y;
+                    const bottom = bottomRightScreen.y;
+
+                    // Check each corner handle
+                    let handle: ResizeHandle | null = null;
+                    if (isWithinThumb(x, y, left, top)) handle = 'top-left';
+                    else if (isWithinThumb(x, y, right, top)) handle = 'top-right';
+                    else if (isWithinThumb(x, y, right, bottom)) handle = 'bottom-right';
+                    else if (isWithinThumb(x, y, left, bottom)) handle = 'bottom-left';
+
+                    if (handle) {
+                        setResizeState({
+                            active: true,
+                            type: 'mail',
+                            key: selectedMailKey,
+                            handle,
+                            originalBounds: {
+                                startX: selectedMailData.startX,
+                                startY: selectedMailData.startY,
+                                endX: selectedMailData.endX,
+                                endY: selectedMailData.endY
+                            }
+                        });
+                        return; // Early return, don't process other mouse events
+                    }
+                } catch (e) {
+                    // Skip invalid mail data
+                }
+            }
+
             if (e.shiftKey) {
                 // Shift+drag: prioritize selection, fallback to text block
                 isSelectingMouseDownRef.current = false;
@@ -5105,7 +5359,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
             canvasRef.current?.focus();
         }
-    }, [engine, selectedImageKey, selectedNoteKey, selectedIframeKey, activeIframeKey, findIframeAtPosition]);
+    }, [engine, selectedImageKey, selectedNoteKey, selectedIframeKey, activeIframeKey, selectedMailKey, findIframeAtPosition]);
 
     const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -5267,6 +5521,38 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     }));
                 } catch (e) {
                     // Invalid iframe data
+                }
+            } else if (resizeState.type === 'mail' && resizeState.key) {
+                try {
+                    const mailData = JSON.parse(engine.worldData[resizeState.key] as string);
+                    const buttonKey = `mailbutton_${resizeState.key}`;
+                    const buttonData = engine.worldData[buttonKey] ? JSON.parse(engine.worldData[buttonKey] as string) : null;
+
+                    engine.setWorldData(prev => {
+                        const updated = {
+                            ...prev,
+                            [resizeState.key!]: JSON.stringify({
+                                ...mailData,
+                                startX: newBounds.startX,
+                                startY: newBounds.startY,
+                                endX: newBounds.endX,
+                                endY: newBounds.endY
+                            })
+                        };
+
+                        // Update button position to stay at bottom-right corner
+                        if (buttonData) {
+                            updated[buttonKey] = JSON.stringify({
+                                ...buttonData,
+                                x: newBounds.endX,
+                                y: newBounds.endY
+                            });
+                        }
+
+                        return updated;
+                    });
+                } catch (e) {
+                    // Invalid mail data
                 }
             }
 
@@ -5436,6 +5722,50 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 setSelectedIframeKey(newIframeKey);
                             } catch (e) {
                                 // Invalid iframe data, skip move
+                            }
+                        } else if (selectedMailKey) {
+                            // Check if we're moving a selected mail region
+                            try {
+                                const mailData = JSON.parse(engine.worldData[selectedMailKey] as string);
+                                const oldButtonKey = `mailbutton_${selectedMailKey}`;
+                                const buttonData = engine.worldData[oldButtonKey] ? JSON.parse(engine.worldData[oldButtonKey] as string) : null;
+
+                                // Create new mail region with shifted coordinates
+                                const newMailData = {
+                                    startX: mailData.startX + distanceX,
+                                    endX: mailData.endX + distanceX,
+                                    startY: mailData.startY + distanceY,
+                                    endY: mailData.endY + distanceY,
+                                    timestamp: Date.now()
+                                };
+
+                                // Delete old mail and create new one with shifted position
+                                const newMailKey = `mail_${newMailData.startX},${newMailData.startY}_${Date.now()}`;
+                                const newButtonKey = `mailbutton_${newMailKey}`;
+
+                                engine.setWorldData(prev => {
+                                    const newData = { ...prev };
+                                    delete newData[selectedMailKey];
+                                    delete newData[oldButtonKey];
+                                    newData[newMailKey] = JSON.stringify(newMailData);
+
+                                    // Move button with the mail region
+                                    if (buttonData) {
+                                        newData[newButtonKey] = JSON.stringify({
+                                            ...buttonData,
+                                            mailKey: newMailKey,
+                                            x: newMailData.endX,
+                                            y: newMailData.endY
+                                        });
+                                    }
+
+                                    return newData;
+                                });
+
+                                // Update selected key to the new mail region
+                                setSelectedMailKey(newMailKey);
+                            } catch (e) {
+                                // Invalid mail data, skip move
                             }
                         } else {
                             // Check if we have an active selection to move
@@ -5938,13 +6268,30 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             return;
         }
 
+        // Handle mail region-specific keys before passing to engine
+        if (selectedMailKey && e.key === 'Backspace') {
+            // Delete the selected mail region and its button
+            engine.setWorldData(prev => {
+                const newData = { ...prev };
+                delete newData[selectedMailKey];
+                // Also delete associated send button
+                const buttonKey = `mailbutton_${selectedMailKey}`;
+                delete newData[buttonKey];
+                return newData;
+            });
+            setSelectedMailKey(null); // Clear selection
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+
         // Let engine handle all key input (including regular typing)
         const preventDefault = engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey, e.shiftKey, e.altKey);
         if (preventDefault) {
             e.preventDefault();
             e.stopPropagation();
         }
-    }, [engine, handleKeyDownFromController, selectedImageKey, selectedNoteKey, hostDialogue]);
+    }, [engine, handleKeyDownFromController, selectedImageKey, selectedNoteKey, selectedIframeKey, selectedMailKey, hostDialogue]);
 
     const hiddenInputRef = useRef<HTMLInputElement>(null);
 

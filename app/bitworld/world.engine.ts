@@ -2279,6 +2279,37 @@ export function useWorldEngine({
         return null;
     }, []);
 
+    const getMailRegion = useCallback((worldData: WorldData, cursorPos: Point): { startX: number; endX: number; startY: number; endY: number } | null => {
+        // Check if cursor is within any mail region
+        const cursorX = cursorPos.x;
+        const cursorY = cursorPos.y;
+
+        // Look through all mail_ entries
+        for (const key in worldData) {
+            if (key.startsWith('mail_')) {
+                try {
+                    const mailData = JSON.parse(worldData[key] as string);
+
+                    // Check if cursor is within this mail region
+                    if (cursorX >= mailData.startX && cursorX <= mailData.endX &&
+                        cursorY >= mailData.startY && cursorY <= mailData.endY) {
+
+                        return {
+                            startX: mailData.startX,
+                            endX: mailData.endX,
+                            startY: mailData.startY,
+                            endY: mailData.endY
+                        };
+                    }
+                } catch (e) {
+                    // Skip invalid mail data
+                }
+            }
+        }
+
+        return null;
+    }, []);
+
     // === List Detection ===
     const findListAt = useCallback((x: number, y: number): { key: string; data: ListData } | null => {
         for (const key in worldData) {
@@ -8809,6 +8840,98 @@ export function useWorldEngine({
                 }
             }
 
+            // Check for mail region word wrapping (if not already handled by note or bounded region)
+            if (!worldDataChanged) {
+                const mailRegion = getMailRegion(dataToDeleteFrom, cursorAfterDelete);
+                if (mailRegion && proposedCursorPos.x > mailRegion.endX) {
+                    // We're typing past the right edge of a mail region
+                    const nextLineY = cursorAfterDelete.y + 1;
+
+                    // Check if wrapping would exceed mail's height limit
+                    if (nextLineY <= mailRegion.endY) {
+                        // Simple word wrapping: scan backwards to find the last space, then move everything after it
+                        const currentLineY = cursorAfterDelete.y;
+                        let wrapPoint = mailRegion.startX; // Default to start of line if no space found
+
+                        // Scan backwards from the boundary to find the last space
+                        for (let x = mailRegion.endX; x >= mailRegion.startX; x--) {
+                            const charKey = `${x},${currentLineY}`;
+                            const charData = dataToDeleteFrom[charKey];
+                            const char = typeof charData === 'string' ? charData :
+                                        (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
+
+                            if (char === ' ') {
+                                wrapPoint = x + 1; // Start wrapping after the space
+                                break;
+                            }
+                        }
+
+                        // Only do word wrapping if we found a space and there's something to wrap
+                        if (wrapPoint > mailRegion.startX && wrapPoint <= cursorAfterDelete.x) {
+                            // Collect all characters from wrap point to cursor
+                            const textToWrap: Array<{x: number, char: string, style?: any}> = [];
+
+                            for (let x = wrapPoint; x <= cursorAfterDelete.x; x++) {
+                                const charKey = `${x},${currentLineY}`;
+                                const charData = dataToDeleteFrom[charKey];
+                                if (charData) {
+                                    const char = typeof charData === 'string' ? charData :
+                                               (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
+                                    const style = typeof charData === 'object' && 'style' in charData ? charData.style : undefined;
+                                    if (char) {
+                                        textToWrap.push({x, char, style});
+                                    }
+                                }
+                            }
+
+                            // Remove the text from current line (but keep the space)
+                            const updatedWorldData = { ...dataToDeleteFrom };
+                            for (let x = wrapPoint; x <= cursorAfterDelete.x; x++) {
+                                const charKey = `${x},${currentLineY}`;
+                                delete updatedWorldData[charKey];
+                            }
+
+                            // Add the text to next line
+                            let newX = mailRegion.startX;
+                            for (const {char, style} of textToWrap) {
+                                if (char !== ' ') { // Skip spaces when wrapping
+                                    const newKey = `${newX},${nextLineY}`;
+                                    updatedWorldData[newKey] = style ? {char, style} : char;
+                                    newX++;
+                                }
+                            }
+
+                            // Add the current character being typed
+                            const finalKey = `${newX},${nextLineY}`;
+                            updatedWorldData[finalKey] = key;
+
+                            // Update world data and cursor position
+                            setWorldData(updatedWorldData);
+                            setCursorPos({ x: newX + 1, y: nextLineY });
+                            worldDataChanged = true;
+
+                            // Skip normal character placement since we handled it above
+                            return true;
+                        } else {
+                            // No good wrap point found - just move to next line
+                            proposedCursorPos = {
+                                x: mailRegion.startX,
+                                y: nextLineY
+                            };
+                        }
+                    } else {
+                        // Can't wrap within mail region (would exceed endY) - don't allow typing beyond bounds
+                        // Keep cursor at current position
+                        proposedCursorPos = {
+                            x: cursorAfterDelete.x,
+                            y: cursorAfterDelete.y
+                        };
+                        // Don't type the character
+                        return true;
+                    }
+                }
+            }
+
             nextCursorPos = proposedCursorPos;
             moved = true;
 
@@ -9227,14 +9350,103 @@ export function useWorldEngine({
             }
         }
 
+        // === Click Mail Send Link ===
+        // Check if clicked on "send" link in mail regions
+        for (const key in worldData) {
+            if (key.startsWith('mail_')) {
+                try {
+                    const mailData = JSON.parse(worldData[key] as string);
+                    const { startX, endX, startY, endY } = mailData;
+
+                    // "send" text is positioned at bottom-right (endX-3 to endX, at endY)
+                    const sendText = 'send';
+                    const sendStartX = endX - sendText.length + 1;
+                    const sendEndX = endX;
+                    const sendY = endY;
+
+                    // Check if click is within "send" bounds
+                    if (newCursorPos.x >= sendStartX && newCursorPos.x <= sendEndX &&
+                        newCursorPos.y === sendY) {
+
+                        // Parse mail content
+                        let toLine = '';
+                        let subjectLine = '';
+                        let messageLines: string[] = [];
+
+                        // Extract row 1 (to)
+                        for (let x = startX; x <= endX; x++) {
+                            const row1Key = `${x},${startY}`;
+                            const row1Data = worldData[row1Key];
+                            if (row1Data && !isImageData(row1Data)) {
+                                toLine += getCharacter(row1Data) || '';
+                            }
+
+                            // Extract row 2 (subject)
+                            if (endY >= startY + 1) {
+                                const row2Key = `${x},${startY + 1}`;
+                                const row2Data = worldData[row2Key];
+                                if (row2Data && !isImageData(row2Data)) {
+                                    subjectLine += getCharacter(row2Data) || '';
+                                }
+                            }
+                        }
+
+                        // Extract message (row 3+)
+                        for (let y = startY + 2; y <= endY; y++) {
+                            let rowContent = '';
+                            for (let x = startX; x <= endX; x++) {
+                                const cellKey = `${x},${y}`;
+                                const cellData = worldData[cellKey];
+                                if (cellData && !isImageData(cellData)) {
+                                    rowContent += getCharacter(cellData) || '';
+                                }
+                            }
+                            if (rowContent.trim()) {
+                                messageLines.push(rowContent.trimEnd());
+                            }
+                        }
+
+                        const to = toLine.trim();
+                        const subject = subjectLine.trim();
+                        const message = messageLines.join('\n');
+
+                        if (!to || !subject || !message) {
+                            setDialogueWithRevert('Missing fields: To (row 1), Subject (row 2), Message (row 3+)', setDialogueText);
+                            return;
+                        }
+
+                        // Send email via API
+                        setDialogueWithRevert('Sending email...', setDialogueText);
+
+                        fetch('/api/mail/send', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ email: to, subject, message })
+                        })
+                        .then(response => response.json())
+                        .then(result => {
+                            if (result.success) {
+                                setDialogueWithRevert('Email sent successfully!', setDialogueText);
+                            } else {
+                                setDialogueWithRevert(`Failed to send: ${result.error}`, setDialogueText);
+                            }
+                        })
+                        .catch(error => {
+                            setDialogueWithRevert('Error sending email', setDialogueText);
+                            console.error(error);
+                        });
+
+                        return; // Don't process regular click behavior
+                    }
+                } catch (e) {
+                    // Skip invalid mail data
+                }
+            }
+        }
+
         // If in chat mode, clear previous input when clicking
         if (chatMode.isActive && chatMode.currentInput) {
             setChatData({});
-            setChatMode(prev => ({
-                ...prev,
-                currentInput: '',
-                inputPositions: []
-            }));
         }
 
         // Determine if click is inside current selection (if any)

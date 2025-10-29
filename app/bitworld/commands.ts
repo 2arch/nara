@@ -110,7 +110,7 @@ const AVAILABLE_COMMANDS = [
     // Content Creation
     'label', 'task', 'link', 'iframe', 'tape', 'clip', 'upload', 'margin',
     // Special
-    'mode', 'note', 'chat', 'tutorial', 'help', 'artefacts',
+    'mode', 'note', 'mail', 'chat', 'tutorial', 'help', 'artefacts',
     // Styling & Display
     'bg', 'text', 'font',
     // State Management
@@ -127,7 +127,7 @@ const AVAILABLE_COMMANDS = [
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent', 'zoom'],
     'create': ['label', 'task', 'link', 'iframe', 'tape', 'clip', 'upload', 'margin'],
-    'special': ['mode', 'note', 'chat', 'tutorial', 'help', 'artefacts'],
+    'special': ['mode', 'note', 'mail', 'chat', 'tutorial', 'help', 'artefacts'],
     'style': ['bg', 'text', 'font'],
     'state': ['state', 'random', 'clear'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
@@ -157,6 +157,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'margin': 'Create a margin note for selected text. Select text, then type /margin to create a note region in the margin. The note will be placed to the right, left, or below the text block based on available space.',
     'mode': 'Switch canvas modes. /mode default for standard writing, /mode air for ephemeral text that doesn\'t save, /mode chat to talk with AI, /mode note for focused note-taking.',
     'note': 'Quick shortcut to enter note mode. This creates a focused writing space perfect for drafting ideas before placing them on your main canvas.',
+    'mail': 'Create an email region. Select a rectangular area, type /mail. Row 1 = recipient email, Row 2 = subject line, Row 3+ = message body. Click the send button to deliver the email.',
     'chat': 'Quick shortcut to enter chat mode. Talk with AI to transform, expand, or generate text. The AI can help you develop ideas or create content based on your prompts.',
     'tutorial': 'Start the interactive tutorial. Learn the basics of spatial writing through hands-on exercises that teach you core commands and concepts.',
     'help': 'Show this detailed help menu. The command list stays open with descriptions for every available command, so you can explore what\'s possible.',
@@ -2315,6 +2316,86 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             setCommandData({});
 
             return null;
+        }
+
+        if (commandToExecute.startsWith('mail')) {
+            // /mail command - create mail region from selection
+            const existingSelection = getNormalizedSelection?.();
+
+            if (existingSelection) {
+                // Selection exists - create mail region immediately
+                const hasMeaningfulSelection =
+                    existingSelection.startX !== existingSelection.endX ||
+                    existingSelection.startY !== existingSelection.endY;
+
+                if (!hasMeaningfulSelection) {
+                    setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
+                } else if (setWorldData && worldData && setSelectionStart && setSelectionEnd) {
+                    // Create mail region data
+                    const mailRegion = {
+                        startX: existingSelection.startX,
+                        endX: existingSelection.endX,
+                        startY: existingSelection.startY,
+                        endY: existingSelection.endY,
+                        timestamp: Date.now()
+                    };
+
+                    // Store mail region in worldData with unique key
+                    const mailKey = `mail_${existingSelection.startX},${existingSelection.startY}_${Date.now()}`;
+
+                    // Create send button bound to this mail region (bottom-right corner)
+                    const sendButton = {
+                        mailKey: mailKey,
+                        x: existingSelection.endX,
+                        y: existingSelection.endY,
+                        text: 'Send',
+                        timestamp: Date.now()
+                    };
+                    const buttonKey = `mailbutton_${mailKey}`;
+
+                    const newWorldData = { ...worldData };
+                    newWorldData[mailKey] = JSON.stringify(mailRegion);
+                    newWorldData[buttonKey] = JSON.stringify(sendButton);
+                    setWorldData(newWorldData);
+
+                    const width = existingSelection.endX - existingSelection.startX + 1;
+                    const height = existingSelection.endY - existingSelection.startY + 1;
+                    setDialogueWithRevert(`Mail region created (${width}×${height}). Row 1: To, Row 2: Subject, Row 3+: Message`, setDialogueText);
+
+                    // Clear selection
+                    setSelectionStart(null);
+                    setSelectionEnd(null);
+                }
+            } else {
+                // No selection - set as pending command waiting for selection
+                setPendingCommand({
+                    command: 'mail',
+                    args: [],
+                    isWaitingForSelection: true
+                });
+
+                setDialogueWithRevert("Make a selection, then press Enter to create mail region", setDialogueText);
+            }
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            // Return special flag to indicate cursor should be restored
+            return {
+                command: 'mail',
+                args: [],
+                commandStartPos: commandState.commandStartPos,
+                restoreCursor: true
+            } as CommandExecution & { restoreCursor?: boolean };
         }
 
         if (commandToExecute.startsWith('note')) {
