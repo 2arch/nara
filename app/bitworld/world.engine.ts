@@ -8139,54 +8139,75 @@ export function useWorldEngine({
                             nextCursorPos.x -= 1;
                             moved = true;
                         } else {
-                            // Check if we're at the beginning of a line (need to merge with previous line)
-                            // Only merge if cursor is actually before any characters on this line, not at first character
-                            const currentLineChars = extractLineCharacters(worldData, cursorPos.y);
-                            const isAtLineStart = currentLineChars.length > 0 ?
-                                cursorPos.x < currentLineChars[0].x :
-                                cursorPos.x === 0;
-
-                            if (isAtLineStart && cursorPos.y > 0) {
-                                // Find the last character position on the previous line
-                                const prevLineChars = extractLineCharacters(worldData, cursorPos.y - 1);
-                                let targetX = 0; // Default to start of line if no characters
-
-                                if (prevLineChars.length > 0) {
-                                    // Find rightmost character on previous line
-                                    targetX = Math.max(...prevLineChars.map(c => c.x)) + 1;
-                                }
-
-                                // Collect all text from current line to move it
-                                nextWorldData = { ...worldData };
-                                const currentLineData = currentLineChars.map(c => ({
-                                    char: c.char,
-                                    originalKey: `${c.x},${cursorPos.y}`
-                                }));
-
-                                // Remove all characters from current line
-                                for (const charData of currentLineData) {
-                                    delete nextWorldData[charData.originalKey];
-                                }
-
-                                // Add characters to previous line starting from targetX
-                                for (let i = 0; i < currentLineData.length; i++) {
-                                    const newKey = `${targetX + i},${cursorPos.y - 1}`;
-                                    nextWorldData[newKey] = currentLineData[i].char;
-                                }
-
-                                // Move cursor to the junction point
-                                nextCursorPos.x = targetX;
+                            // Check if we're within a mail region
+                            const mailRegion = getMailRegion(worldData, cursorPos);
+                            if (mailRegion && cursorPos.x === mailRegion.startX && cursorPos.y > mailRegion.startY) {
+                                // We're at the start of a line within a mail region (but not the first line)
+                                // Move cursor to the end of the previous line within the mail
+                                nextCursorPos.x = mailRegion.endX + 1;
                                 nextCursorPos.y = cursorPos.y - 1;
-                                worldDataChanged = true;
-                            } else {
-                                // Delete one character to the left
+                                moved = true;
+                                // Don't delete anything, just move cursor
+                            } else if (mailRegion && cursorPos.x > mailRegion.startX) {
+                                // We're within a mail region but not at the start - do normal backspace
                                 const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
                                 if (worldData[deleteKey]) {
-                                    nextWorldData = { ...worldData }; // Create copy before modifying
-                                    delete nextWorldData[deleteKey]; // Remove char from world
+                                    nextWorldData = { ...worldData };
+                                    delete nextWorldData[deleteKey];
                                     worldDataChanged = true;
                                 }
-                                nextCursorPos.x -= 1; // Move cursor left regardless
+                                nextCursorPos.x -= 1;
+                                moved = true;
+                            } else {
+                                // Check if we're at the beginning of a line (need to merge with previous line)
+                                // Only merge if cursor is actually before any characters on this line, not at first character
+                                const currentLineChars = extractLineCharacters(worldData, cursorPos.y);
+                                const isAtLineStart = currentLineChars.length > 0 ?
+                                    cursorPos.x < currentLineChars[0].x :
+                                    cursorPos.x === 0;
+
+                                if (isAtLineStart && cursorPos.y > 0) {
+                                    // Find the last character position on the previous line
+                                    const prevLineChars = extractLineCharacters(worldData, cursorPos.y - 1);
+                                    let targetX = 0; // Default to start of line if no characters
+
+                                    if (prevLineChars.length > 0) {
+                                        // Find rightmost character on previous line
+                                        targetX = Math.max(...prevLineChars.map(c => c.x)) + 1;
+                                    }
+
+                                    // Collect all text from current line to move it
+                                    nextWorldData = { ...worldData };
+                                    const currentLineData = currentLineChars.map(c => ({
+                                        char: c.char,
+                                        originalKey: `${c.x},${cursorPos.y}`
+                                    }));
+
+                                    // Remove all characters from current line
+                                    for (const charData of currentLineData) {
+                                        delete nextWorldData[charData.originalKey];
+                                    }
+
+                                    // Add characters to previous line starting from targetX
+                                    for (let i = 0; i < currentLineData.length; i++) {
+                                        const newKey = `${targetX + i},${cursorPos.y - 1}`;
+                                        nextWorldData[newKey] = currentLineData[i].char;
+                                    }
+
+                                    // Move cursor to the junction point
+                                    nextCursorPos.x = targetX;
+                                    nextCursorPos.y = cursorPos.y - 1;
+                                    worldDataChanged = true;
+                                } else {
+                                    // Delete one character to the left
+                                    const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
+                                    if (worldData[deleteKey]) {
+                                        nextWorldData = { ...worldData }; // Create copy before modifying
+                                        delete nextWorldData[deleteKey]; // Remove char from world
+                                        worldDataChanged = true;
+                                    }
+                                    nextCursorPos.x -= 1; // Move cursor left regardless
+                                }
                             }
                         }
                         }
@@ -9127,7 +9148,7 @@ export function useWorldEngine({
         cursorPos, worldData, selectionStart, selectionEnd, commandState, chatMode, chatData, // State dependencies
         currentMode, addEphemeralText, cameraMode, viewOffset, zoomLevel, getEffectiveCharDims, // Mode system dependencies
         getNormalizedSelection, deleteSelectedCharacters, copySelectedCharacters, cutSelection, pasteText, getSelectedText, // Callback dependencies
-        handleCommandKeyDown, textColor, currentTextStyle, findListAt
+        handleCommandKeyDown, textColor, currentTextStyle, findListAt, getNoteRegion, getMailRegion
         // Include setters used directly in the handler (if any, preferably avoid)
         // setCursorPos, setWorldData, setSelectionStart, setSelectionEnd // Setters are stable, no need to list
     ]);
@@ -9392,6 +9413,11 @@ export function useWorldEngine({
                         }
 
                         // Extract message (row 3+)
+                        // Treat consecutive non-empty lines as continuous text (word-wrapped)
+                        // Only break paragraphs on empty lines
+                        let currentParagraph = '';
+                        const paragraphs: string[] = [];
+                        
                         for (let y = startY + 2; y <= endY; y++) {
                             let rowContent = '';
                             for (let x = startX; x <= endX; x++) {
@@ -9401,14 +9427,30 @@ export function useWorldEngine({
                                     rowContent += getCharacter(cellData) || '';
                                 }
                             }
-                            if (rowContent.trim()) {
-                                messageLines.push(rowContent.trimEnd());
+                            
+                            const trimmedRow = rowContent.trim();
+                            if (trimmedRow) {
+                                // Non-empty line - add to current paragraph with space
+                                if (currentParagraph) {
+                                    currentParagraph += ' ' + trimmedRow;
+                                } else {
+                                    currentParagraph = trimmedRow;
+                                }
+                            } else if (currentParagraph) {
+                                // Empty line - end current paragraph
+                                paragraphs.push(currentParagraph);
+                                currentParagraph = '';
                             }
+                        }
+                        
+                        // Add final paragraph if exists
+                        if (currentParagraph) {
+                            paragraphs.push(currentParagraph);
                         }
 
                         const to = toLine.trim();
                         const subject = subjectLine.trim();
-                        const message = messageLines.join('\n');
+                        const message = paragraphs.join('\n\n'); // Double newline between paragraphs
 
                         if (!to || !subject || !message) {
                             setDialogueWithRevert('Missing fields: To (row 1), Subject (row 2), Message (row 3+)', setDialogueText);

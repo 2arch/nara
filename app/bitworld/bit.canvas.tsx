@@ -6430,7 +6430,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             })()} */}
             {/* Render iframes for iframe regions */}
             {(() => {
-                const iframes: JSX.Element[] = [];
+                const iframes: React.JSX.Element[] = [];
 
                 for (const key in engine.worldData) {
                     if (key.startsWith('iframe_')) {
