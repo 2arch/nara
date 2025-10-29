@@ -119,33 +119,40 @@ export function calculateDistanceToBlock(block: TextBlock, cursorX: number): num
  * @returns Sorted array of characters on the line
  */
 export function extractLineCharacters(
-    worldData: WorldData, 
-    lineY: number, 
+    worldData: WorldData,
+    lineY: number,
     includeSpaces: boolean = false
 ): LineCharacter[] {
     const lineChars: LineCharacter[] = [];
-    
+
     for (const key in worldData) {
+        // Skip special keys that aren't regular character coordinates
+        if (key.startsWith('label_') || key.startsWith('task_') || key.startsWith('block_') ||
+            key.startsWith('bound_') || key.startsWith('note_') || key.startsWith('image_') ||
+            key.startsWith('glitched_')) {
+            continue;
+        }
+
         const [xStr, yStr] = key.split(',');
         const y = parseInt(yStr, 10);
         if (y === lineY) {
             const x = parseInt(xStr, 10);
             const charData = worldData[key];
-            
+
             // Skip image data - we only process text characters
             if (isImageData(charData)) {
                 continue;
             }
-            
+
             const char = getCharacter(charData);
-            
+
             // Include character if it's non-empty or we want spaces
             if (char && (includeSpaces || char.trim() !== '')) {
                 lineChars.push({x, char});
             }
         }
     }
-    
+
     // Sort by x position
     return lineChars.sort((a, b) => a.x - b.x);
 }
@@ -316,16 +323,23 @@ export function extractAllTextBlocks(
 ): Map<number, TextBlock[]> {
     const lineBlocks = new Map<number, TextBlock[]>();
     const lines = new Set<number>();
-    
+
     // Find all lines with content
     for (const key in worldData) {
+        // Skip special keys that aren't regular character coordinates
+        if (key.startsWith('label_') || key.startsWith('task_') || key.startsWith('block_') ||
+            key.startsWith('bound_') || key.startsWith('note_') || key.startsWith('image_') ||
+            key.startsWith('glitched_')) {
+            continue;
+        }
+
         const [, yStr] = key.split(',');
         const y = parseInt(yStr, 10);
-        
+
         if (viewport) {
             if (y < viewport.minY || y > viewport.maxY) continue;
         }
-        
+
         lines.add(y);
     }
     

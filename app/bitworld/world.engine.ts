@@ -2621,46 +2621,36 @@ export function useWorldEngine({
             const finalCursorX = pasteStartX + (linesToPaste[linesToPaste.length - 1]?.length || 0);
             const finalCursorY = pasteStartY + linesToPaste.length - 1;
 
-            // Optimistically update cursor and clear selection
-            setCursorPos({ x: finalCursorX, y: finalCursorY });
-            setSelectionStart(null);
-            setSelectionEnd(null);
+            // Build complete paste data in one pass (no chunking to avoid hundreds of re-renders)
+            const worldUpdate: WorldData = {};
+            for (let i = 0; i < linesToPaste.length; i++) {
+                const line = linesToPaste[i];
+                for (let j = 0; j < line.length; j++) {
+                    worldUpdate[`${pasteStartX + j},${pasteStartY + i}`] = line[j];
+                }
+            }
 
-            // Apply deletion first
-            if (selection) {
-                setWorldData(prev => {
-                    const updated = { ...prev };
+            // Single atomic update: delete selection + paste text
+            setWorldData(prev => {
+                const updated = { ...prev };
+
+                // Delete selection area
+                if (selection) {
                     for (let y = selection.startY; y <= selection.endY; y++) {
                         for (let x = selection.startX; x <= selection.endX; x++) {
                             delete updated[`${x},${y}`];
                         }
                     }
-                    return updated;
-                });
-            }
-
-            // Process paste in chunks
-            const processChunk = (lineIndex = 0) => {
-                const chunkSize = 50; // lines per chunk
-                const chunkEnd = Math.min(lineIndex + chunkSize, linesToPaste.length);
-                
-                const worldUpdateChunk: WorldData = {};
-                for (let i = lineIndex; i < chunkEnd; i++) {
-                    const line = linesToPaste[i];
-                    for (let j = 0; j < line.length; j++) {
-                        worldUpdateChunk[`${pasteStartX + j},${pasteStartY + i}`] = line[j];
-                    }
                 }
 
-                setWorldData(prev => ({ ...prev, ...worldUpdateChunk }));
+                // Apply paste
+                return { ...updated, ...worldUpdate };
+            });
 
-                if (chunkEnd < linesToPaste.length) {
-                    setTimeout(() => processChunk(chunkEnd), 16);
-                }
-            };
-
-            // Start chunking after a short delay to allow deletion to render
-            setTimeout(() => processChunk(0), 16);
+            // Update cursor and clear selection after state update
+            setCursorPos({ x: finalCursorX, y: finalCursorY });
+            setSelectionStart(null);
+            setSelectionEnd(null);
 
             return true;
         } catch (err) {

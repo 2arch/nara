@@ -8,7 +8,7 @@ import type { WorldData } from './world.engine'; // Adjust path if needed
 import type { WorldSettings } from './settings';
 
 // Debounce delay for saving (in milliseconds)
-const SAVE_DEBOUNCE_DELAY = 0; // No debouncing - immediate saves
+const SAVE_DEBOUNCE_DELAY = 300; // Debounce saves to batch rapid changes (like paste)
 
 export function useWorldSave(
     worldId: string | null,
@@ -325,9 +325,19 @@ export function useWorldSave(
                 // Add/update changed keys (direct values, no conflict resolution)
                 for (const [key, value] of Object.entries(cleanWorldData)) {
                     const lastSyncedValue = lastSyncedDataRef.current?.[key];
-                    if (JSON.stringify(value) !== JSON.stringify(lastSyncedValue)) {
-                        updates[`${worldDataRefPath}/${key}`] = value;
-                        logger.debug(`📤 Sending ${key} from client ${clientIdRef.current}`);
+
+                    // Fast path for simple string values (most common case)
+                    if (typeof value === 'string' && typeof lastSyncedValue === 'string') {
+                        if (value !== lastSyncedValue) {
+                            updates[`${worldDataRefPath}/${key}`] = value;
+                            logger.debug(`📤 Sending ${key} from client ${clientIdRef.current}`);
+                        }
+                    } else {
+                        // Slow path for objects/complex values
+                        if (JSON.stringify(value) !== JSON.stringify(lastSyncedValue)) {
+                            updates[`${worldDataRefPath}/${key}`] = value;
+                            logger.debug(`📤 Sending ${key} from client ${clientIdRef.current}`);
+                        }
                     }
                 }
 
