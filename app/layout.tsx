@@ -2,10 +2,10 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Nara — tools for boundless thinking",
+  title: "Nara — A space for boundless creation",
   description: "An infinite canvas for thinking, writing, and creating. Let your ideas roam free across boundless space.",
   icons: {
-    icon: '/apple-icon.svg',
+    icon: '/nara.ico',
   },
 };
 

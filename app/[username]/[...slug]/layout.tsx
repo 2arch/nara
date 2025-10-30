@@ -18,7 +18,7 @@ export async function generateMetadata({ params }: LayoutProps): Promise<Metadat
   const screenshotUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'https://nara.ws'}/api/screenshot/${username}/${stateName}`;
 
   const title = `Nara · ${username}/${stateName}`;
-  const description = `view ${stateName} on Nara — a tool for thinking, writing, and creating across boundless space.`;
+  const description = `view ${stateName} on Nara — a space for boundless creation.`;
 
   return {
     title,
