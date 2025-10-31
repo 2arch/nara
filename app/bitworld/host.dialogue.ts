@@ -25,6 +25,7 @@ export interface UseHostDialogueProps {
   addEphemeralText?: (pos: Point, char: string, options?: { animationDelay?: number; color?: string; background?: string }) => void;
   setWorldData?: (updater: (prev: Record<string, any>) => Record<string, any>) => void;
   hostBackgroundColor?: string; // Host greeting background color to set as initial world bg
+  isPublicWorld?: boolean; // Whether user is signing up in a public world (e.g., /base)
 }
 
 // Helper to map message IDs to field names
@@ -41,7 +42,7 @@ function getFieldNameFromMessageId(messageId: string): string {
   return fieldMap[messageId] || 'username'; // Default to username for verification flow
 }
 
-export function useHostDialogue({ setHostData, getViewportCenter, setDialogueText, onAuthSuccess, onTriggerZoom, setHostMode, setChatMode, addEphemeralText, setWorldData, hostBackgroundColor }: UseHostDialogueProps) {
+export function useHostDialogue({ setHostData, getViewportCenter, setDialogueText, onAuthSuccess, onTriggerZoom, setHostMode, setChatMode, addEphemeralText, setWorldData, hostBackgroundColor, isPublicWorld }: UseHostDialogueProps) {
   const [state, setState] = useState<HostDialogueState>({
     isActive: false,
     currentFlowId: null,
@@ -743,48 +744,73 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           timestamp: Date.now()
         });
 
-        // End flow immediately
-        setState(prev => ({
-          ...prev,
-          currentMessageId: 'account_created',
-          isProcessing: false,
-          isActive: false
-        }));
-
-        // Clear host text and disable modes
-        setHostData(null);
-
-        // Clean up all labels spawned during dialogue
-        if (setWorldData) {
-          setWorldData(prev => {
-            const newData = { ...prev };
-            Object.keys(newData).forEach(key => {
-              if (key.startsWith('label_')) {
-                delete newData[key];
-              }
+        // Check if we're in a public world
+        if (isPublicWorld) {
+          // In public world: ask if they want to navigate to home
+          const askNavMessage = flow.messages['ask_navigation'];
+          
+          // Small delay before asking navigation choice
+          setTimeout(() => {
+            setHostData({
+              text: askNavMessage.text,
+              centerPos: getViewportCenter(),
+              timestamp: Date.now()
             });
-            return newData;
-          });
-        }
+          }, 1500);
 
-        if (setHostMode) {
-          setHostMode({ isActive: false, currentInputType: null });
-        }
-        if (setChatMode) {
-          setChatMode({
-            isActive: false,
-            currentInput: '',
-            inputPositions: [],
-            isProcessing: false
-          });
-        }
+          setState(prev => ({
+            ...prev,
+            currentMessageId: 'ask_navigation',
+            isProcessing: false,
+            isActive: true, // Keep flow active for navigation choice
+            collectedData: newCollectedData // Preserve username
+          }));
 
-        // Redirect immediately to user's world
-        if (onAuthSuccess) {
-          onAuthSuccess(newCollectedData.username);
-        }
+          return true;
+        } else {
+          // In personal world: redirect immediately (original behavior)
+          setState(prev => ({
+            ...prev,
+            currentMessageId: 'account_created',
+            isProcessing: false,
+            isActive: false
+          }));
 
-        return true;
+          // Clear host text and disable modes
+          setHostData(null);
+
+          // Clean up all labels spawned during dialogue
+          if (setWorldData) {
+            setWorldData(prev => {
+              const newData = { ...prev };
+              Object.keys(newData).forEach(key => {
+                if (key.startsWith('label_')) {
+                  delete newData[key];
+                }
+              });
+              return newData;
+            });
+          }
+
+          if (setHostMode) {
+            setHostMode({ isActive: false, currentInputType: null });
+          }
+          if (setChatMode) {
+            setChatMode({
+              isActive: false,
+              currentInput: '',
+              inputPositions: [],
+              isProcessing: false
+            });
+          }
+
+          // Redirect immediately to user's world
+          if (onAuthSuccess) {
+            onAuthSuccess(newCollectedData.username);
+          }
+
+          return true;
+        }
       } catch (error: any) {
         setHostData({
           text: error.message || 'failed to create account',

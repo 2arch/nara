@@ -4,8 +4,9 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { useWorldEngine } from '../bitworld/world.engine';
 import { BitCanvas } from '../bitworld/bit.canvas';
-import { auth } from '../firebase';
+import { auth, database } from '../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
+import { ref, set, serverTimestamp } from 'firebase/database';
 
 // Lazy load Grid3DBackground (Three.js) - only loads when backgroundMode === 'space'
 const Grid3DBackground = dynamic(
@@ -22,16 +23,6 @@ function BasePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Log all visits to Firebase for analysis (non-blocking, after canvas loads)
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    // Delay logging until after initial render
-    const timeoutId = setTimeout(() => {
-      fetch(`/api/log-visit?url=${encodeURIComponent(window.location.href)}`).catch(() => {});
-    }, 1000);
-    return () => clearTimeout(timeoutId);
-  }, []);
-
   // Parse URL coordinate parameters (supports both new and legacy formats)
   const viewParam = searchParams.get('v'); // New format: v=x.y.zoom
   const urlX = searchParams.get('x'); // Legacy format
@@ -41,6 +32,7 @@ function BasePageContent() {
   // Parse view parameter (dot-separated: x.y.zoom)
   let initialViewOffset: { x: number; y: number } | undefined;
   let initialZoomLevel: number | undefined;
+  let isSharedLink = false;
 
   if (viewParam) {
     const parts = viewParam.split('.');
@@ -49,6 +41,7 @@ function BasePageContent() {
       const y = parseFloat(parts[1]);
       if (!isNaN(x) && !isNaN(y)) {
         initialViewOffset = { x, y };
+        isSharedLink = true; // Mark as shared link visit
       }
       if (parts.length >= 3) {
         const zoom = parseFloat(parts[2]);
@@ -63,6 +56,7 @@ function BasePageContent() {
     const y = parseFloat(urlY);
     if (!isNaN(x) && !isNaN(y)) {
       initialViewOffset = { x, y };
+      isSharedLink = true; // Mark as shared link visit
     }
     if (urlZoom) {
       const zoom = parseFloat(urlZoom);
@@ -71,6 +65,35 @@ function BasePageContent() {
       }
     }
   }
+
+  // Log all visits to Firebase for analysis (non-blocking, after canvas loads)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    // Delay logging until after initial render
+    const timeoutId = setTimeout(() => {
+      fetch(`/api/log-visit?url=${encodeURIComponent(window.location.href)}`).catch(() => {});
+    }, 1000);
+    return () => clearTimeout(timeoutId);
+  }, []);
+
+  // Log shared link visits (when someone arrives via ?v= parameter)
+  useEffect(() => {
+    if (!isSharedLink || !initialViewOffset) return;
+
+    // Log this visit to Firebase for share analytics
+    const visitPath = `worlds/public/base/shares/visits/${Date.now()}`;
+    const visitData = {
+      position: initialViewOffset,
+      zoom: initialZoomLevel || 1.0,
+      timestamp: serverTimestamp(),
+      url: window.location.href,
+      referrer: document.referrer || null
+    };
+
+    set(ref(database, visitPath), visitData).catch((error: any) => {
+      console.error('Failed to log share visit:', error);
+    });
+  }, [isSharedLink, initialViewOffset, initialZoomLevel]);
 
   // Auth state management
   useEffect(() => {
@@ -131,6 +154,7 @@ function BasePageContent() {
         hostModeEnabled={!user} // Enable host mode when not authenticated
         onAuthSuccess={handleAuthSuccess}
         onPanDistanceChange={setPanDistance}
+        isPublicWorld={true} // Enable public world sign-up flow
       />
     </div>
   );

@@ -4367,7 +4367,43 @@ export function useWorldEngine({
                             });
                         }
                     } else {
-                        setDialogueWithRevert("No current state to share", setDialogueText);
+                        // No state name (e.g., public worlds like /base) - just share current URL with coordinates
+                        const baseUrl = window.location.href.split('?')[0]; // Current URL without query params
+                        let targetX, targetY;
+
+                        // Check if there's an active selection
+                        if (selectionStart !== null && selectionEnd !== null) {
+                            // Use center of selection
+                            const normalized = getNormalizedSelection();
+                            if (normalized) {
+                                targetX = Math.floor((normalized.startX + normalized.endX) / 2);
+                                targetY = Math.floor((normalized.startY + normalized.endY) / 2);
+                            }
+                        } else {
+                            // Use cursor position
+                            targetX = cursorPos.x;
+                            targetY = cursorPos.y;
+                        }
+
+                        const urlWithCoords = `${baseUrl}?v=${targetX}.${targetY}.${zoomLevel.toFixed(2)}`;
+                        navigator.clipboard.writeText(urlWithCoords).then(() => {
+                            setDialogueWithRevert(`Share link copied to clipboard`, setDialogueText);
+                        });
+
+                        // Log share event for analytics (public worlds only)
+                        if (userUid === 'public' && worldId) {
+                            const sharePath = `worlds/public/${worldId}/shares/${Date.now()}`;
+                            const shareData = {
+                                position: { x: targetX, y: targetY },
+                                zoom: zoomLevel,
+                                timestamp: serverTimestamp(),
+                                url: urlWithCoords,
+                                hasSelection: selectionStart !== null && selectionEnd !== null
+                            };
+                            set(ref(database, sharePath), shareData).catch((error) => {
+                                logger.error('Failed to log share event:', error);
+                            });
+                        }
                     }
                 } else if (exec.command === 'unpublish') {
                     // Unpublish current state

@@ -52,9 +52,10 @@ interface BitCanvasProps {
     hostBackgroundColor?: string; // Host background color to save as initial world setting
     onPanDistanceChange?: (distance: number) => void; // Callback for pan distance tracking
     hostDimBackground?: boolean; // Whether to dim background when host dialogue appears
+    isPublicWorld?: boolean; // Whether this is a public world (affects sign-up flow)
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true, isPublicWorld = false }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -104,6 +105,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const lastCenterCellRef = useRef<Point | null>(null);
     const lastDistanceMilestoneRef = useRef<number>(0);
     const hasTriggeredSignupPromptRef = useRef<boolean>(false); // Track if we've already prompted signup
+    const hasInitializedPanTrackingRef = useRef<boolean>(false); // Track if we've set initial position
 
     // Canvas recorder for /tape command
     const recorderRef = useRef<CanvasRecorder | null>(null);
@@ -492,6 +494,13 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             // Calculate center cell coordinate
             const centerCellX = Math.round(engine.viewOffset.x + (viewportWidth / 2) / effectiveCharWidth);
             const centerCellY = Math.round(engine.viewOffset.y + (viewportHeight / 2) / effectiveCharHeight);
+
+            // Initialize position on first run (don't count as panning)
+            if (!hasInitializedPanTrackingRef.current) {
+                lastCenterCellRef.current = { x: centerCellX, y: centerCellY };
+                hasInitializedPanTrackingRef.current = true;
+                return;
+            }
 
             if (lastCenterCellRef.current) {
                 const dx = centerCellX - lastCenterCellRef.current.x;

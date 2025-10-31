@@ -117,7 +117,7 @@ export const welcomeFlow: HostFlow = {
     },
     'welcome': {
       id: 'welcome',
-      text: 'Type your email and hit enter to begin your journey. \n \n Welcome to Nara. It\'s great to see you.',
+      text: 'Type your email and hit enter to begin your journey.',
       expectsInput: true,
       inputType: 'email',
       inputValidator: (input: string) => {
@@ -185,6 +185,34 @@ export const welcomeFlow: HostFlow = {
     'account_created': {
       id: 'account_created',
       text: 'welcome to nara!',
+      expectsInput: false
+    },
+
+    // Public world navigation choice
+    'ask_navigation': {
+      id: 'ask_navigation',
+      text: 'would you like to navigate to your home world? \n \n (yes / no)',
+      expectsInput: true,
+      inputType: 'choice',
+      choices: ['yes', 'no'],
+      branchLogic: (input: string) => {
+        const normalized = input.toLowerCase().trim();
+        if (normalized === 'yes' || normalized === 'y') return 'navigate_home';
+        if (normalized === 'no' || normalized === 'n') return 'stay_in_public';
+        return 'ask_navigation'; // Invalid input, ask again
+      },
+      previousMessageId: 'account_created'
+    },
+
+    'navigate_home': {
+      id: 'navigate_home',
+      text: 'taking you to your world...',
+      expectsInput: false
+    },
+
+    'stay_in_public': {
+      id: 'stay_in_public',
+      text: 'sounds good! you can always navigate to your home world using the /state command. \n \n enjoy!',
       expectsInput: false
     }
   }
