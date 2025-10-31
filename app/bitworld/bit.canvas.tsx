@@ -243,16 +243,24 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         return () => clearTimeout(timer);
     }, [engine.worldData, showScreenshot]);
 
-    // Reset input focus when entering command mode to disable IME
+    // Reset input focus when entering command mode to disable IME (desktop only)
     useEffect(() => {
         if (engine.commandState.isActive && hiddenInputRef.current) {
-            // Blur and refocus to reset IME state
-            hiddenInputRef.current.blur();
-            setTimeout(() => {
-                if (hiddenInputRef.current) {
-                    hiddenInputRef.current.focus();
-                }
-            }, 0);
+            // Check if we're on mobile (touch device)
+            const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+            
+            if (isMobile) {
+                // Mobile: just maintain focus to keep keyboard open
+                hiddenInputRef.current.focus();
+            } else {
+                // Desktop: blur and refocus to reset IME composition state
+                hiddenInputRef.current.blur();
+                setTimeout(() => {
+                    if (hiddenInputRef.current) {
+                        hiddenInputRef.current.focus();
+                    }
+                }, 0);
+            }
         }
     }, [engine.commandState.isActive]);
 
@@ -6708,20 +6716,32 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 <input
                     ref={hiddenInputRef}
                     type="text"
+                    value=""
+                    readOnly={false}
                     autoComplete="off"
                     autoCorrect="off"
                     autoCapitalize="off"
                     spellCheck="false"
                     lang="en"
                     inputMode="text"
+                    enterKeyHint="done"
+                    onChange={(e) => {
+                        // Prevent controlled input warnings
+                        // Actual input is handled via onKeyDown
+                        if (hiddenInputRef.current) {
+                            hiddenInputRef.current.value = '';
+                        }
+                    }}
                     style={{
-                        position: 'absolute',
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        width: '100vw',
+                        height: '50px',
                         opacity: 0,
                         pointerEvents: 'none',
-                        left: -9999,
-                        top: -9999,
-                        width: 1,
-                        height: 1
+                        zIndex: -1,
+                        fontSize: '16px' // Prevents iOS auto-zoom
                     }}
                     onKeyDown={(e) => {
                         // Forward key events to canvas handler
