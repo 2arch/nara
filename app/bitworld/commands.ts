@@ -1362,12 +1362,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
                 // Check if this is a webcam request
                 if (bgArg.toLowerCase() === 'webcam') {
                     try {
-                        // Request webcam access
+                        // Request webcam access (uses back camera on mobile)
                         const stream = await navigator.mediaDevices.getUserMedia({ 
                             video: { 
                                 width: { ideal: 1920 },
                                 height: { ideal: 1080 },
-                                facingMode: 'user'
+                                facingMode: 'environment' // Back camera on mobile, default on desktop
                             }, 
                             audio: false 
                         });

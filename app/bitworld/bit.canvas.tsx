@@ -6713,7 +6713,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     autoCapitalize="off"
                     spellCheck="false"
                     lang="en"
-                    inputMode={engine.commandState.isActive ? "none" : "text"}
+                    inputMode="text"
                     style={{
                         position: 'absolute',
                         opacity: 0,
