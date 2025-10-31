@@ -155,6 +155,7 @@ function BasePageContent() {
         onAuthSuccess={handleAuthSuccess}
         onPanDistanceChange={setPanDistance}
         isPublicWorld={true} // Enable public world sign-up flow
+        hostMonogramMode="user-settings" // Use user's monogram settings in public world sign-up
       />
     </div>
   );

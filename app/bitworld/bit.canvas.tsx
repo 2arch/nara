@@ -53,9 +53,10 @@ interface BitCanvasProps {
     onPanDistanceChange?: (distance: number) => void; // Callback for pan distance tracking
     hostDimBackground?: boolean; // Whether to dim background when host dialogue appears
     isPublicWorld?: boolean; // Whether this is a public world (affects sign-up flow)
+    hostMonogramMode?: 'perlin' | 'user-settings' | 'off'; // Monogram mode during host flow
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true, isPublicWorld = false }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true, isPublicWorld = false, hostMonogramMode = 'perlin' }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -106,6 +107,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const lastDistanceMilestoneRef = useRef<number>(0);
     const hasTriggeredSignupPromptRef = useRef<boolean>(false); // Track if we've already prompted signup
     const hasInitializedPanTrackingRef = useRef<boolean>(false); // Track if we've set initial position
+    const [isWorldReady, setIsWorldReady] = useState<boolean>(false); // Track if world is ready for signup prompts
 
     // Canvas recorder for /tape command
     const recorderRef = useRef<CanvasRecorder | null>(null);
@@ -324,7 +326,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 });
             } : undefined,
         setWorldData: engine.setWorldData,
-        hostBackgroundColor: hostBackgroundColor
+        hostBackgroundColor: hostBackgroundColor,
+        isPublicWorld: isPublicWorld
     });
 
     // Handle email verification flow
@@ -480,6 +483,16 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         }
     }, [hostDialogue.isHostActive, hostDialogue.hostState.currentMessageId]);
 
+    // Mark world as ready after initial settling period (2 seconds after mount)
+    // This allows spawn points and initial view to settle before enabling signup prompts
+    useEffect(() => {
+        const readyTimeout = setTimeout(() => {
+            setIsWorldReady(true);
+        }, 2000);
+        
+        return () => clearTimeout(readyTimeout);
+    }, []); // Run once on mount
+
     // Track viewport center cell position and calculate total panned distance
     useEffect(() => {
         const interval = setInterval(() => {
@@ -523,7 +536,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                     }
 
                     // Check for 100 cell threshold - trigger signup for unauthenticated users
-                    if (newTotal >= 100 && !hasTriggeredSignupPromptRef.current) {
+                    // Only trigger after world is ready (settled from spawn points, etc.)
+                    if (newTotal >= 100 && !hasTriggeredSignupPromptRef.current && isWorldReady) {
                         hasTriggeredSignupPromptRef.current = true;
 
                         // Check if user is authenticated
@@ -617,14 +631,39 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Debug dialogue system
     const { debugText } = useDebugDialogue(engine);
     
+    // Determine monogram state based on host mode context
+    const getMonogramConfig = () => {
+        if (!hostModeEnabled) {
+            // Not in host mode - use user settings
+            return {
+                mode: engine.settings.monogramMode || 'clear',
+                enabled: engine.settings.monogramEnabled || false
+            };
+        }
+        
+        // In host mode - check hostMonogramMode prop
+        if (hostMonogramMode === 'perlin') {
+            return { mode: 'perlin' as const, enabled: true };
+        } else if (hostMonogramMode === 'off') {
+            return { mode: 'clear' as const, enabled: false };
+        } else { // 'user-settings'
+            return {
+                mode: engine.settings.monogramMode || 'clear',
+                enabled: engine.settings.monogramEnabled || false
+            };
+        }
+    };
+
+    const monogramConfig = getMonogramConfig();
+    
     // Monogram system for psychedelic patterns - load from settings and sync changes
     const monogramSystem = useMonogramSystem(
         {
-            mode: hostModeEnabled ? 'perlin' : (engine.settings.monogramMode || 'clear'),
+            mode: monogramConfig.mode,
             speed: 0.5,
             complexity: 1.0,
             colorShift: 0,
-            enabled: hostModeEnabled ? true : (engine.settings.monogramEnabled || false),
+            enabled: monogramConfig.enabled,
             geometryType: 'octahedron',
             interactiveTrails: true,
             trailIntensity: 1.0,

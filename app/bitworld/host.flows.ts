@@ -212,7 +212,16 @@ export const welcomeFlow: HostFlow = {
 
     'stay_in_public': {
       id: 'stay_in_public',
-      text: 'sounds good! you can always navigate to your home world using the /state command. \n \n enjoy!',
+      text: 'sounds good! you can always navigate to your home world using the /state command. \n \n enjoy! (press enter to continue)',
+      expectsInput: true,
+      inputType: 'text',
+      inputValidator: () => ({ valid: true }), // Accept any input including empty
+      nextMessageId: 'dismiss_flow'
+    },
+
+    'dismiss_flow': {
+      id: 'dismiss_flow',
+      text: '',
       expectsInput: false
     }
   }

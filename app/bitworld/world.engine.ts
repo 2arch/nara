@@ -4,7 +4,7 @@ import { useWorldSave } from './world.save'; // Import the new hook
 import { useCommandSystem, CommandState, CommandExecution, BackgroundMode, COLOR_MAP } from './commands'; // Import command system
 import { getSmartIndentation, calculateWordDeletion, extractLineCharacters, detectTextBlocks, findClosestBlock, findBlockForDeletion, extractAllTextBlocks, groupTextBlocksIntoClusters, filterClustersForLabeling, generateTextBlockFrames, generateHierarchicalFrames, HierarchicalFrameSystem, HierarchicalFrame, HierarchyLevel, defaultDistanceConfig, DistanceBasedConfig } from './bit.blocks'; // Import block detection utilities
 import { useWorldSettings, WorldSettings } from './settings';
-import { set, ref, increment, runTransaction } from 'firebase/database';
+import { set, ref, increment, runTransaction, serverTimestamp } from 'firebase/database';
 import { database, auth, storage, getUserProfile } from '@/app/firebase';
 import { ref as storageRef, uploadString, getDownloadURL } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
@@ -399,6 +399,35 @@ export function useWorldEngine({
     // === Router ===
     const router = useRouter();
 
+    // Calculate centered initial view offset to prevent pan tracking from seeing initialization jump
+    const calculateCenteredOffset = (targetX: number, targetY: number, zoomLvl: number): Point => {
+        if (typeof window === 'undefined') return { x: targetX, y: targetY };
+        
+        // Use approximate char dimensions for initial calculation
+        const baseCharWidth = 10;
+        const baseCharHeight = 16;
+        const zoomFactor = Math.pow(1.2, zoomLvl - 1);
+        const effectiveCharWidth = baseCharWidth * zoomFactor;
+        const effectiveCharHeight = baseCharHeight * zoomFactor;
+        
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        const charsInViewportWidth = viewportWidth / effectiveCharWidth;
+        const charsInViewportHeight = viewportHeight / effectiveCharHeight;
+        
+        return {
+            x: targetX - (charsInViewportWidth / 2),
+            y: targetY - (charsInViewportHeight / 2)
+        };
+    };
+    
+    // Calculate initial centered offset if initialViewOffset is provided (non-zero)
+    const initialCenteredOffset = (initialViewOffset.x !== 0 || initialViewOffset.y !== 0)
+        ? calculateCenteredOffset(initialViewOffset.x, initialViewOffset.y, initialZoomLevel)
+        : initialViewOffset;
+    
+    // Track if we've already applied initial positioning to prevent useEffect from reapplying
+    const hasAppliedSpawnRef = useRef(initialViewOffset.x !== 0 || initialViewOffset.y !== 0);
 
     const [isSelecting, setIsSelecting] = useState(false);
     const [selectionStart, setSelectionStart] = useState<Point | null>(null);
@@ -409,7 +438,7 @@ export function useWorldEngine({
     const [worldData, setWorldData] = useState<WorldData>(initialWorldData);
     const [cursorPos, setCursorPos] = useState<Point>(initialCursorPos);
     const cursorPosRef = useRef<Point>(initialCursorPos); // Ref for synchronous cursor position access
-    const [viewOffset, setViewOffset] = useState<Point>(initialViewOffset);
+    const [viewOffset, setViewOffset] = useState<Point>(initialCenteredOffset);
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
     const [focusedBoundKey, setFocusedBoundKey] = useState<string | null>(null); // Track which bound is focused
     const [boundCycleIndex, setBoundCycleIndex] = useState<number>(0); // Track which bound to cycle to next
@@ -1717,7 +1746,6 @@ export function useWorldEngine({
     ); // Only enable when userUid is available
 
     // === Apply spawn point or URL coordinates when settings load ===
-    const hasAppliedSpawnRef = useRef(false);
     useEffect(() => {
         // Only apply once when settings first load
         if (!hasAppliedSpawnRef.current && !isLoadingWorld) {

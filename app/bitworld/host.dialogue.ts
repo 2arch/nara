@@ -823,6 +823,123 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       }
     }
 
+    // Handle flow dismissal (after stay_in_public - any key to continue)
+    if (nextMessageId === 'dismiss_flow') {
+      // Immediately cleanup and exit
+      setHostData(null);
+
+      // Clean up all labels spawned during dialogue
+      if (setWorldData) {
+        setWorldData(prev => {
+          const newData = { ...prev };
+          Object.keys(newData).forEach(key => {
+            if (key.startsWith('label_')) {
+              delete newData[key];
+            }
+          });
+          return newData;
+        });
+      }
+
+      if (setHostMode) {
+        setHostMode({ isActive: false, currentInputType: null });
+      }
+      if (setChatMode) {
+        setChatMode({
+          isActive: false,
+          currentInput: '',
+          inputPositions: [],
+          isProcessing: false
+        });
+      }
+
+      setState(prev => ({
+        ...prev,
+        currentMessageId: 'dismiss_flow',
+        isProcessing: false,
+        isActive: false
+      }));
+
+      return true;
+    }
+
+    // Handle navigation choice - redirect to home world
+    if (nextMessageId === 'navigate_home') {
+      const flow = HOST_FLOWS[state.currentFlowId!];
+      const navigateMessage = flow.messages['navigate_home'];
+      
+      setHostData({
+        text: navigateMessage.text,
+        centerPos: getViewportCenter(),
+        timestamp: Date.now()
+      });
+
+      setState(prev => ({
+        ...prev,
+        currentMessageId: 'navigate_home',
+        isProcessing: false,
+        isActive: false
+      }));
+
+      // Clear host text and disable modes
+      setTimeout(() => {
+        setHostData(null);
+
+        // Clean up all labels spawned during dialogue
+        if (setWorldData) {
+          setWorldData(prev => {
+            const newData = { ...prev };
+            Object.keys(newData).forEach(key => {
+              if (key.startsWith('label_')) {
+                delete newData[key];
+              }
+            });
+            return newData;
+          });
+        }
+
+        if (setHostMode) {
+          setHostMode({ isActive: false, currentInputType: null });
+        }
+        if (setChatMode) {
+          setChatMode({
+            isActive: false,
+            currentInput: '',
+            inputPositions: [],
+            isProcessing: false
+          });
+        }
+
+        // Navigate to user's world
+        if (onAuthSuccess && newCollectedData.username) {
+          onAuthSuccess(newCollectedData.username);
+        }
+      }, 1000);
+
+      return true;
+    }
+
+    // Handle navigation choice - stay in public world (shows message, waits for any key)
+    if (nextMessageId === 'stay_in_public') {
+      const flow = HOST_FLOWS[state.currentFlowId!];
+      const stayMessage = flow.messages['stay_in_public'];
+      
+      setHostData({
+        text: stayMessage.text,
+        centerPos: getViewportCenter(),
+        timestamp: Date.now()
+      });
+
+      setState(prev => ({
+        ...prev,
+        currentMessageId: 'stay_in_public',
+        isProcessing: false,
+        isActive: true // Keep active to wait for dismissal input
+      }));
+
+      return true;
+    }
+
     // Regular flow progression
     if (nextMessageId) {
       const flow = HOST_FLOWS[state.currentFlowId!];
