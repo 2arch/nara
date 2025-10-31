@@ -575,6 +575,13 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const backgroundImageRef = useRef<HTMLImageElement | null>(null);
     const backgroundImageUrlRef = useRef<string | null>(null);
     
+    // Cache for background videos to avoid reloading
+    const backgroundVideoRef = useRef<HTMLVideoElement | null>(null);
+    const backgroundVideoUrlRef = useRef<string | null>(null);
+    
+    // Cache for background stream (webcam) video element
+    const backgroundStreamVideoRef = useRef<HTMLVideoElement | null>(null);
+    
     // Cache for uploaded images to avoid reloading
     const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
 
@@ -1805,12 +1812,57 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             if (backgroundImageRef.current && backgroundImageRef.current.complete) {
                 ctx.drawImage(backgroundImageRef.current, 0, 0, cssWidth, cssHeight);
             }
+        } else if (engine.backgroundMode === 'video' && engine.backgroundVideo) {
+            // Clear canvas first
+            ctx.clearRect(0, 0, cssWidth, cssHeight);
+            
+            // Check if we need to load a new video
+            if (backgroundVideoUrlRef.current !== engine.backgroundVideo || !backgroundVideoRef.current) {
+                backgroundVideoUrlRef.current = engine.backgroundVideo;
+                backgroundVideoRef.current = document.createElement('video');
+                backgroundVideoRef.current.src = engine.backgroundVideo;
+                backgroundVideoRef.current.loop = true;
+                backgroundVideoRef.current.muted = true;
+                backgroundVideoRef.current.playsInline = true;
+                backgroundVideoRef.current.onloadeddata = () => {
+                    // Video loaded, start playing
+                    backgroundVideoRef.current?.play().catch(err => {
+                        console.warn('Failed to autoplay video:', err);
+                    });
+                };
+            }
+            
+            // Draw the video if it's loaded and playing
+            if (backgroundVideoRef.current && backgroundVideoRef.current.readyState >= 2) {
+                ctx.drawImage(backgroundVideoRef.current, 0, 0, cssWidth, cssHeight);
+            }
         } else if (engine.backgroundMode === 'space') {
             // Clear canvas for space background (handled by SpaceBackground component)
             ctx.clearRect(0, 0, cssWidth, cssHeight);
-        } else if (engine.backgroundMode === 'stream') {
-            // Clear canvas for stream background (handled by video element in parent)
+        } else if (engine.backgroundMode === 'stream' && engine.backgroundStream) {
+            // Clear canvas first
             ctx.clearRect(0, 0, cssWidth, cssHeight);
+            
+            // Set up video element for stream if not already created
+            if (!backgroundStreamVideoRef.current) {
+                backgroundStreamVideoRef.current = document.createElement('video');
+                backgroundStreamVideoRef.current.autoplay = true;
+                backgroundStreamVideoRef.current.playsInline = true;
+                backgroundStreamVideoRef.current.muted = true;
+            }
+            
+            // Set the stream as the video source if it changed
+            if (backgroundStreamVideoRef.current.srcObject !== engine.backgroundStream) {
+                backgroundStreamVideoRef.current.srcObject = engine.backgroundStream;
+                backgroundStreamVideoRef.current.play().catch((err: unknown) => {
+                    console.warn('Failed to play stream:', err);
+                });
+            }
+            
+            // Draw the stream if video is ready
+            if (backgroundStreamVideoRef.current.readyState >= 2) {
+                ctx.drawImage(backgroundStreamVideoRef.current, 0, 0, cssWidth, cssHeight);
+            }
         } else {
             // Default transparent mode
             ctx.clearRect(0, 0, cssWidth, cssHeight);
@@ -4900,49 +4952,36 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     // Draw arrow pointing to offscreen cursor
                     drawArrow(ctx, adjustedX, adjustedY, intersection.angle, cursor.color);
 
-                    // Draw username label next to arrow
+                    // Draw username label next to arrow (using angle-based positioning like labels)
                     if (cursor.username && cursor.username !== 'Anonymous') {
-                        ctx.save();
                         ctx.fillStyle = cursor.color;
                         ctx.font = `${Math.max(10, effectiveFontSize * 0.8)}px ${fontFamily}`;
-                        ctx.textBaseline = 'middle';
+                        const textOffset = ARROW_SIZE * 1.5;
+                        
+                        // Position text inward from arrow using angle
+                        let textX = adjustedX - Math.cos(intersection.angle) * textOffset;
+                        let textY = adjustedY - Math.sin(intersection.angle) * textOffset;
 
-                        // Detect which edge and position text inward
-                        const textPadding = 20;
-                        let textX = adjustedX;
-                        let textY = adjustedY;
-
-                        // Determine which edge based on arrow position
-                        const isLeftEdge = adjustedX < cssWidth / 2;
-                        const isRightEdge = adjustedX > cssWidth / 2;
-                        const isTopEdge = adjustedY < cssHeight / 2;
-                        const isBottomEdge = adjustedY > cssHeight / 2;
-
-                        // Position text inward from edge
-                        if (isRightEdge && Math.abs(adjustedX - cssWidth) < Math.abs(adjustedY - cssHeight / 2)) {
-                            // Right edge - position text to the left of arrow
+                        // Adjust alignment based on angle quadrants
+                        if (Math.abs(intersection.angle) < Math.PI / 2) {
                             ctx.textAlign = 'right';
-                            textX = adjustedX - textPadding;
-                        } else if (isLeftEdge && Math.abs(adjustedX) < Math.abs(adjustedY - cssHeight / 2)) {
-                            // Left edge - position text to the right of arrow
-                            ctx.textAlign = 'left';
-                            textX = adjustedX + textPadding;
-                        } else if (isBottomEdge) {
-                            // Bottom edge - position text above arrow
-                            ctx.textBaseline = 'bottom';
-                            textY = adjustedY - textPadding;
                         } else {
-                            // Top edge - position text below arrow
+                            ctx.textAlign = 'left';
+                        }
+
+                        if (intersection.angle > Math.PI / 4 && intersection.angle < 3 * Math.PI / 4) {
+                            ctx.textBaseline = 'bottom';
+                        } else if (intersection.angle < -Math.PI / 4 && intersection.angle > -3 * Math.PI / 4) {
                             ctx.textBaseline = 'top';
-                            textY = adjustedY + textPadding;
+                        } else {
+                            ctx.textBaseline = 'middle';
                         }
 
                         ctx.fillText(cursor.username, textX, textY);
-
-                        // Reset alignment
+                        
+                        // Reset to defaults
                         ctx.textAlign = 'left';
                         ctx.textBaseline = 'top';
-                        ctx.restore();
                     }
                 }
             }
@@ -6324,7 +6363,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         engine.handleCompositionEnd(e.data || '');
     }, [engine]);
 
-    const handleCanvasKeyDown = useCallback((e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    const handleCanvasKeyDown = useCallback(async (e: React.KeyboardEvent<HTMLCanvasElement>) => {
         // Host mode: check if we're on a non-input message that needs manual advancement
         if (hostDialogue.isHostActive) {
             const currentMessage = hostDialogue.getCurrentMessage();
@@ -6461,7 +6500,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         // Let engine handle all key input (including regular typing)
-        const preventDefault = engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey, e.shiftKey, e.altKey);
+        const preventDefault = await engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey, e.shiftKey, e.altKey);
         if (preventDefault) {
             e.preventDefault();
             e.stopPropagation();

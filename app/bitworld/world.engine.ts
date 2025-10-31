@@ -137,6 +137,7 @@ export interface WorldEngine {
     backgroundColor: string;
     backgroundImage?: string;
     backgroundVideo?: string;
+    backgroundStream?: MediaStream;
     textColor: string;
     fontFamily: string;
     currentTextStyle: {
@@ -156,7 +157,7 @@ export interface WorldEngine {
     handlePanStart: (clientX: number, clientY: number) => PanStartInfo | null;
     handlePanMove: (clientX: number, clientY: number, panStartInfo: PanStartInfo) => Point;
     handlePanEnd: (newOffset: Point) => void;
-    handleKeyDown: (key: string, ctrlKey: boolean, metaKey: boolean, shiftKey: boolean, altKey?: boolean) => boolean;
+    handleKeyDown: (key: string, ctrlKey: boolean, metaKey: boolean, shiftKey: boolean, altKey?: boolean) => Promise<boolean>;
     setViewOffset: React.Dispatch<React.SetStateAction<Point>>;
     setZoomLevel: React.Dispatch<React.SetStateAction<number>>;
     selectionStart: Point | null;
@@ -1081,6 +1082,7 @@ export function useWorldEngine({
         backgroundColor,
         backgroundImage,
         backgroundVideo,
+        backgroundStream,
         textColor,
         fontFamily,
         currentTextStyle,
@@ -2953,7 +2955,7 @@ export function useWorldEngine({
         currentSuggestionRef.current = ''; // Also clear the ref
     }, []);
 
-    const handleKeyDown = useCallback((key: string, ctrlKey: boolean, metaKey: boolean, shiftKey: boolean, altKey: boolean = false): boolean => {
+    const handleKeyDown = useCallback(async (key: string, ctrlKey: boolean, metaKey: boolean, shiftKey: boolean, altKey: boolean = false): Promise<boolean> => {
         // Clear autocomplete on ANY key press (except Tab which handles suggestions)
         if (key !== 'Tab') {
             clearAutocompleteSuggestions();
@@ -3192,7 +3194,7 @@ export function useWorldEngine({
                 justTypedCharRef.current = true;
             }
 
-            const commandResult = handleCommandKeyDown(key, cursorPos, setCursorPos, ctrlKey, metaKey, shiftKey, altKey, isComposingRef.current);
+            const commandResult = await handleCommandKeyDown(key, cursorPos, setCursorPos, ctrlKey, metaKey, shiftKey, altKey, isComposingRef.current);
             if (commandResult && typeof commandResult === 'object') {
                 // It's a command execution object - handle it
                 const exec = commandResult as CommandExecution;
@@ -10388,6 +10390,7 @@ export function useWorldEngine({
         backgroundColor,
         backgroundImage,
         backgroundVideo,
+        backgroundStream,
         textColor,
         fontFamily,
         currentTextStyle,

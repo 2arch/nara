@@ -1225,7 +1225,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
     }, []);
 
     // Execute selected command
-    const executeCommand = useCallback((isPermanent: boolean = false): CommandExecution | null => {
+    const executeCommand = useCallback(async (isPermanent: boolean = false): Promise<CommandExecution | null> => {
         // If user hasn't navigated with arrow keys, use their raw input instead of selected suggestion
         const fullInput = commandState.input.trim();
 
@@ -1359,9 +1359,71 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
             }
 
             if (bgArg) {
-                // Format: /bg {backgroundColor} {textColor} {textBackground}
-                // All parameters are optional
-                switchBackgroundMode('color', bgArg, param2, param3);
+                // Check if this is a webcam request
+                if (bgArg.toLowerCase() === 'webcam') {
+                    try {
+                        // Request webcam access
+                        const stream = await navigator.mediaDevices.getUserMedia({ 
+                            video: { 
+                                width: { ideal: 1920 },
+                                height: { ideal: 1080 },
+                                facingMode: 'user'
+                            }, 
+                            audio: false 
+                        });
+                        
+                        // Stop any existing stream
+                        if (backgroundStreamRef.current) {
+                            backgroundStreamRef.current.getTracks().forEach(track => track.stop());
+                        }
+                        
+                        // Store stream reference
+                        backgroundStreamRef.current = stream;
+                        
+                        // Switch to stream background mode
+                        switchBackgroundMode('stream', undefined, param2, param3);
+                        setDialogueWithRevert("Webcam background active", setDialogueText);
+                    } catch (error) {
+                        console.error('Failed to access webcam:', error);
+                        setDialogueWithRevert("Failed to access webcam. Please grant camera permission.", setDialogueText);
+                    }
+                    
+                    // Clear command mode
+                    setCommandState({
+                        isActive: false,
+                        input: '',
+                        matchedCommands: [],
+                        selectedIndex: 0,
+                        commandStartPos: { x: 0, y: 0 },
+                        originalCursorPos: { x: 0, y: 0 },
+                        hasNavigated: false
+                    });
+                    setCommandData({});
+                    
+                    return null;
+                }
+                // Check if this is a video background request
+                else if (bgArg.toLowerCase() === 'video' || bgArg.toLowerCase().endsWith('.mp4')) {
+                    // Determine video URL
+                    let videoUrl: string;
+                    if (bgArg.toLowerCase() === 'video') {
+                        // Default to forest.mp4 in public directory
+                        videoUrl = '/forest.mp4';
+                    } else if (bgArg.startsWith('http://') || bgArg.startsWith('https://') || bgArg.startsWith('/')) {
+                        // Use provided URL or path directly
+                        videoUrl = bgArg;
+                    } else {
+                        // Assume it's in public directory
+                        videoUrl = `/${bgArg}`;
+                    }
+                    
+                    // Switch to video background mode
+                    switchBackgroundMode('video', videoUrl, param2, param3);
+                } else {
+                    // Format: /bg {backgroundColor} {textColor} {textBackground}
+                    // All parameters are optional
+                    switchBackgroundMode('color', bgArg, param2, param3);
+                }
             } else {
                 // No arguments - default to white background
                 switchBackgroundMode('color', '#FFFFFF');
@@ -2641,7 +2703,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
     }, [commandState.isActive, matchCommands]);
 
     // Handle keyboard events for command mode
-    const handleKeyDown = useCallback((
+    const handleKeyDown = useCallback(async (
         key: string,
         cursorPos: Point,
         setCursorPos: (pos: Point | ((prev: Point) => Point)) => void,
@@ -2650,7 +2712,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
         shiftKey: boolean = false,
         altKey: boolean = false,
         isComposing: boolean = false
-    ): boolean | CommandExecution | null => {
+    ): Promise<boolean | CommandExecution | null> => {
         const isPermanent = metaKey || ctrlKey; // Track if Cmd/Ctrl+Enter
         // Handle paste in command mode (Cmd+V or Ctrl+V)
         if (commandState.isActive && key === 'v' && (ctrlKey || metaKey)) {
