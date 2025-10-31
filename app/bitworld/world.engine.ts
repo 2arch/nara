@@ -4,7 +4,7 @@ import { useWorldSave } from './world.save'; // Import the new hook
 import { useCommandSystem, CommandState, CommandExecution, BackgroundMode, COLOR_MAP } from './commands'; // Import command system
 import { getSmartIndentation, calculateWordDeletion, extractLineCharacters, detectTextBlocks, findClosestBlock, findBlockForDeletion, extractAllTextBlocks, groupTextBlocksIntoClusters, filterClustersForLabeling, generateTextBlockFrames, generateHierarchicalFrames, HierarchicalFrameSystem, HierarchicalFrame, HierarchyLevel, defaultDistanceConfig, DistanceBasedConfig } from './bit.blocks'; // Import block detection utilities
 import { useWorldSettings, WorldSettings } from './settings';
-import { set, ref, increment, runTransaction, serverTimestamp } from 'firebase/database';
+import { set, ref, increment, runTransaction, serverTimestamp, onValue } from 'firebase/database';
 import { database, auth, storage, getUserProfile } from '@/app/firebase';
 import { ref as storageRef, uploadString, getDownloadURL } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
@@ -93,6 +93,15 @@ export interface ClipboardItem {
     title?: string;
     color?: string;
     timestamp: number;
+}
+
+export interface MultiplayerCursor {
+    uid: string;
+    username: string;
+    x: number;
+    y: number;
+    color: string;
+    lastUpdate: number;
 }
 
 export interface WorldData { [key: string]: string | StyledCharacter | ImageData; }
@@ -229,6 +238,8 @@ export interface WorldEngine {
     agentState: 'idle' | 'typing' | 'moving' | 'walking' | 'selecting';
     agentSelectionStart: Point | null;
     agentSelectionEnd: Point | null;
+    // Multiplayer cursors
+    multiplayerCursors: MultiplayerCursor[];
     // Host mode for onboarding
     hostMode: {
         isActive: boolean;
@@ -618,6 +629,9 @@ export function useWorldEngine({
     const justCancelledCompositionRef = useRef<boolean>(false); // Track if we just cancelled composition with backspace
     const compositionCancelledByModeExitRef = useRef<boolean>(false); // Track if composition was cancelled by exiting mode
 
+     // === Multiplayer Cursors ===
+ const [multiplayerCursors, setMultiplayerCursors] = useState<MultiplayerCursor[]>([]);
+
     // === Agent System ===
     const [agentEnabled, setAgentEnabled] = useState<boolean>(false);
     const [agentPos, setAgentPos] = useState<Point>({ x: 0, y: 0 });
@@ -629,6 +643,7 @@ export function useWorldEngine({
     const [agentSelectionEnd, setAgentSelectionEnd] = useState<Point | null>(null);
     const lastViewOffsetRef = useRef<Point>(viewOffset);
 
+    
     // Agent greetings
     const AGENT_GREETINGS = [
         'hello',
@@ -1744,6 +1759,109 @@ export function useWorldEngine({
         clipboardItems, // Clipboard items
         setClipboardItems // Clipboard setter
     ); // Only enable when userUid is available
+
+    // === Multiplayer Cursor Sync ===
+    const lastCursorUpdateRef = useRef<number>(0);
+    const cursorUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const CURSOR_UPDATE_THROTTLE = 100; // Update every 100ms max
+    const CURSOR_STALE_TIMEOUT = 10000; // Remove cursors not updated in 10 seconds
+
+    // Send cursor position to Firebase (throttled)
+    useEffect(() => {
+        if (!userUid || !username || isReadOnly || !worldId) return;
+        // Only sync cursors for public worlds (userUid === 'public')
+        if (userUid !== 'public') return;
+
+        const now = Date.now();
+        const timeSinceLastUpdate = now - lastCursorUpdateRef.current;
+
+        // Clear any pending update
+        if (cursorUpdateTimeoutRef.current) {
+            clearTimeout(cursorUpdateTimeoutRef.current);
+        }
+
+        // Throttle updates
+        const delay = Math.max(0, CURSOR_UPDATE_THROTTLE - timeSinceLastUpdate);
+
+        cursorUpdateTimeoutRef.current = setTimeout(async () => {
+            try {
+                // Use the authenticated user's UID for cursor tracking
+                const currentUser = auth.currentUser;
+                if (!currentUser) return;
+
+                const cursorPath = `worlds/${userUid}/${worldId}/cursors/${currentUser.uid}`;
+                const cursorRef = ref(database, cursorPath);
+                await set(cursorRef, {
+                    x: cursorPos.x,
+                    y: cursorPos.y,
+                    username,
+                    color: textColor || '#FF69B4',
+                    lastUpdate: serverTimestamp()
+                });
+                lastCursorUpdateRef.current = Date.now();
+            } catch (error) {
+                // Silently fail - cursor sync is non-critical
+                logger.debug('Failed to update cursor position:', error);
+            }
+        }, delay);
+
+        return () => {
+            if (cursorUpdateTimeoutRef.current) {
+                clearTimeout(cursorUpdateTimeoutRef.current);
+            }
+        };
+    }, [cursorPos.x, cursorPos.y, userUid, username, worldId, isReadOnly, textColor]);
+
+    // Listen to other users' cursors
+    useEffect(() => {
+        if (!worldId || !userUid || userUid !== 'public') return;
+
+        const cursorsPath = `worlds/${userUid}/${worldId}/cursors`;
+        const cursorsRef = ref(database, cursorsPath);
+        
+        const unsubscribe = onValue(cursorsRef, (snapshot) => {
+            const cursorsData = snapshot.val() || {};
+            const now = Date.now();
+            const currentUser = auth.currentUser;
+            
+            const cursors: MultiplayerCursor[] = Object.entries(cursorsData)
+                .filter(([uid]) => uid !== currentUser?.uid) // Exclude own cursor
+                .map(([uid, data]: [string, any]) => ({
+                    uid,
+                    username: data.username || 'Anonymous',
+                    x: data.x || 0,
+                    y: data.y || 0,
+                    color: data.color || '#FF69B4',
+                    lastUpdate: data.lastUpdate || now
+                }))
+                .filter(cursor => {
+                    // Filter out stale cursors
+                    const age = now - cursor.lastUpdate;
+                    return age < CURSOR_STALE_TIMEOUT;
+                });
+
+            setMultiplayerCursors(cursors);
+        }, (error) => {
+            logger.debug('Failed to listen to cursors:', error);
+        });
+
+        return () => {
+            unsubscribe();
+        };
+    }, [worldId, userUid]);
+
+    // Cleanup own cursor on unmount
+    useEffect(() => {
+        return () => {
+            if (!worldId || !userUid || isReadOnly || userUid !== 'public') return;
+            const currentUser = auth.currentUser;
+            if (!currentUser) return;
+
+            const cursorPath = `worlds/${userUid}/${worldId}/cursors/${currentUser.uid}`;
+            const cursorRef = ref(database, cursorPath);
+            set(cursorRef, null).catch(() => {});
+        };
+    }, [userUid, worldId, isReadOnly]);
 
     // === Apply spawn point or URL coordinates when settings load ===
     useEffect(() => {
@@ -10382,6 +10500,8 @@ export function useWorldEngine({
         agentState,
         agentSelectionStart,
         agentSelectionEnd,
+        // Multiplayer cursors
+        multiplayerCursors,
         getCharacter,
         getCharacterStyle,
         isImageData,

@@ -4,9 +4,9 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { useWorldEngine } from '../bitworld/world.engine';
 import { BitCanvas } from '../bitworld/bit.canvas';
-import { auth, database } from '../firebase';
+import { auth, database, getUserProfile } from '../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { ref, set, serverTimestamp } from 'firebase/database';
+import { ref, set, serverTimestamp, get } from 'firebase/database';
 
 // Lazy load Grid3DBackground (Three.js) - only loads when backgroundMode === 'space'
 const Grid3DBackground = dynamic(
@@ -19,6 +19,7 @@ function BasePageContent() {
   const [cursorAlternate, setCursorAlternate] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [username, setUsername] = useState<string>('base'); // Default to 'base' for unauthenticated
   const [panDistance, setPanDistance] = useState(0);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -97,9 +98,28 @@ function BasePageContent() {
 
   // Auth state management
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       setAuthLoading(false);
+      
+      if (user) {
+        // Fetch username from Firebase
+        try {
+          const usernameRef = ref(database, `users/${user.uid}/username`);
+          const snapshot = await get(usernameRef);
+          if (snapshot.exists()) {
+            setUsername(snapshot.val());
+          } else {
+            // Fallback to displayName or email
+            setUsername(user.displayName || user.email?.split('@')[0] || 'anonymous');
+          }
+        } catch (error) {
+          console.error('Failed to fetch username:', error);
+          setUsername(user.displayName || user.email?.split('@')[0] || 'anonymous');
+        }
+      } else {
+        setUsername('base'); // Reset to default when logged out
+      }
     });
 
     return () => unsubscribe();
@@ -109,7 +129,7 @@ function BasePageContent() {
   const engine = useWorldEngine({
     worldId: 'base',
     userUid: 'public', // 'public' userUid groups all public collaborative spaces
-    username: 'base',
+    username, // Use actual user's username from Firebase
     initialStateName: null, // No state name for base
     initialViewOffset,
     initialZoomLevel,

@@ -261,6 +261,7 @@ export function createCommandController(actions: {
     openCommandPalette: () => void;
     openSearch: () => void;
     executeLabel: () => void;
+    executeTask: () => void;
 }): ControllerGroup {
     return {
         name: 'commands',
@@ -296,6 +297,13 @@ export function createCommandController(actions: {
                 ctrlOrMeta: true,
                 description: 'Create label from selection (/label)',
                 action: actions.executeLabel
+            },
+            {
+                key: 'l',
+                ctrlOrMeta: true,
+                shift: true,
+                description: 'Create task from selection (/task)',
+                action: actions.executeTask
             }
         ]
     };

@@ -996,7 +996,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             executePublish: () => engine.commandSystem.executeCommandString('publish'),
             openCommandPalette: () => engine.commandSystem.startCommand(engine.cursorPos),
             openSearch: () => engine.commandSystem.startCommandWithInput(engine.cursorPos, 'search '),
-            executeLabel: () => engine.commandSystem.executeCommandString('label')
+            executeLabel: () => engine.commandSystem.executeCommandString('label'),
+            executeTask: () => engine.commandSystem.executeCommandString('task')
         }));
     }, [registerGroup, engine.cycleGridMode, toggleRecording, engine.commandSystem, engine.cursorPos]);
     
@@ -4817,6 +4818,132 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     const char = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
                     ctx.fillStyle = '#FFFFFF'; // White text on pink background
                     renderText(ctx, char, agentScreenPos.x, agentScreenPos.y + verticalTextOffset);
+                }
+            }
+        }
+
+        // === Render Multiplayer Cursors ===
+        if (engine.multiplayerCursors && engine.multiplayerCursors.length > 0) {
+            for (const cursor of engine.multiplayerCursors) {
+                const cursorScreenPos = engine.worldToScreen(cursor.x, cursor.y, currentZoom, currentOffset);
+
+                // Only draw if visible on screen
+                if (cursorScreenPos.x >= -effectiveCharWidth &&
+                    cursorScreenPos.x <= cssWidth &&
+                    cursorScreenPos.y >= -effectiveCharHeight &&
+                    cursorScreenPos.y <= cssHeight) {
+
+                    // Draw cursor rectangle with user's color
+                    ctx.fillStyle = cursor.color;
+                    ctx.globalAlpha = 0.7; // Slight transparency
+                    ctx.fillRect(cursorScreenPos.x, cursorScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                    ctx.globalAlpha = 1.0;
+
+                    // Check if there's a character at cursor position and render it
+                    const cursorKey = `${cursor.x},${cursor.y}`;
+                    const charData = engine.worldData[cursorKey];
+                    if (charData) {
+                        const char = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
+                        if (char && char.trim() !== '') {
+                            ctx.fillStyle = '#FFFFFF'; // White text on colored background
+                            renderText(ctx, char, cursorScreenPos.x, cursorScreenPos.y + verticalTextOffset);
+                        }
+                    }
+
+                    // Draw username label above cursor
+                    if (cursor.username && cursor.username !== 'Anonymous') {
+                        ctx.save();
+                        ctx.font = `${Math.max(10, effectiveFontSize * 0.7)}px ${fontFamily}`;
+                        ctx.fillStyle = cursor.color;
+                        ctx.textBaseline = 'bottom';
+                        const labelY = cursorScreenPos.y - 2;
+                        ctx.fillText(cursor.username, cursorScreenPos.x, labelY);
+                        ctx.restore();
+                    }
+                }
+            }
+        }
+
+        // === Render Offscreen Multiplayer Cursor Arrows ===
+        if (engine.multiplayerCursors && engine.multiplayerCursors.length > 0) {
+            const viewportCenterScreen = { x: cssWidth / 2, y: cssHeight / 2 };
+            const edgeBuffer = 20; // Buffer from viewport edge
+
+            for (const cursor of engine.multiplayerCursors) {
+                const cursorScreenPos = engine.worldToScreen(cursor.x, cursor.y, currentZoom, currentOffset);
+
+                // Check if cursor is offscreen
+                const isOffscreen = cursorScreenPos.x < -effectiveCharWidth ||
+                                    cursorScreenPos.x > cssWidth ||
+                                    cursorScreenPos.y < -effectiveCharHeight ||
+                                    cursorScreenPos.y > cssHeight;
+
+                if (isOffscreen) {
+                    // Find intersection point on viewport edge
+                    const intersection = getViewportEdgeIntersection(
+                        viewportCenterScreen.x,
+                        viewportCenterScreen.y,
+                        cursorScreenPos.x,
+                        cursorScreenPos.y,
+                        cssWidth,
+                        cssHeight
+                    );
+
+                    if (!intersection) continue; // Skip if no valid intersection
+
+                    // Adjust arrow position with buffer from edge
+                    let adjustedX = intersection.x;
+                    let adjustedY = intersection.y;
+                    adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
+                    adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
+
+                    // Draw arrow pointing to offscreen cursor
+                    drawArrow(ctx, adjustedX, adjustedY, intersection.angle, cursor.color);
+
+                    // Draw username label next to arrow
+                    if (cursor.username && cursor.username !== 'Anonymous') {
+                        ctx.save();
+                        ctx.fillStyle = cursor.color;
+                        ctx.font = `${Math.max(10, effectiveFontSize * 0.8)}px ${fontFamily}`;
+                        ctx.textBaseline = 'middle';
+
+                        // Detect which edge and position text inward
+                        const textPadding = 20;
+                        let textX = adjustedX;
+                        let textY = adjustedY;
+
+                        // Determine which edge based on arrow position
+                        const isLeftEdge = adjustedX < cssWidth / 2;
+                        const isRightEdge = adjustedX > cssWidth / 2;
+                        const isTopEdge = adjustedY < cssHeight / 2;
+                        const isBottomEdge = adjustedY > cssHeight / 2;
+
+                        // Position text inward from edge
+                        if (isRightEdge && Math.abs(adjustedX - cssWidth) < Math.abs(adjustedY - cssHeight / 2)) {
+                            // Right edge - position text to the left of arrow
+                            ctx.textAlign = 'right';
+                            textX = adjustedX - textPadding;
+                        } else if (isLeftEdge && Math.abs(adjustedX) < Math.abs(adjustedY - cssHeight / 2)) {
+                            // Left edge - position text to the right of arrow
+                            ctx.textAlign = 'left';
+                            textX = adjustedX + textPadding;
+                        } else if (isBottomEdge) {
+                            // Bottom edge - position text above arrow
+                            ctx.textBaseline = 'bottom';
+                            textY = adjustedY - textPadding;
+                        } else {
+                            // Top edge - position text below arrow
+                            ctx.textBaseline = 'top';
+                            textY = adjustedY + textPadding;
+                        }
+
+                        ctx.fillText(cursor.username, textX, textY);
+
+                        // Reset alignment
+                        ctx.textAlign = 'left';
+                        ctx.textBaseline = 'top';
+                        ctx.restore();
+                    }
                 }
             }
         }
