@@ -9328,9 +9328,10 @@ export function useWorldEngine({
             // Only use shift for selection when using navigation keys, not when typing
             if (shiftKey && (key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight')) {
                  updateSelection(nextCursorPos);
-            } else if (!isMod && key !== 'Delete' && key !== 'Backspace') {
+            } else if (!isMod && key !== 'Delete' && key !== 'Backspace' && key !== '/') {
                  // Clear selection if moving without Shift/Mod,
                  // unless it was Backspace/Delete which handle selection internally
+                 // Also preserve selection when typing '/' to open command mode
                  clearSelectionState();
             } else if (key === 'Delete' || key === 'Backspace') {
                  // Backspace/Delete already cleared selection if needed via deleteSelectedCharacters
