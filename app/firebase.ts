@@ -80,34 +80,83 @@ export interface UserProfileData {
 
 export const signUpUser = async (email: string, password: string, firstName: string, lastName: string, username: string): Promise<{success: boolean, user?: User, error?: string}> => {
   try {
-    // Create user with email and password
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
+    let user: User;
+    let existingUser = false;
+
+    try {
+      // Try to create user with email and password
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      user = userCredential.user;
+    } catch (createError: any) {
+      // If email already in use, check if it's from email link auth (no password)
+      if (createError.code === 'auth/email-already-in-use') {
+        logger.info('Email already in use, attempting to link password credential');
+        
+        // Check if there's a current user (from email link)
+        if (auth.currentUser && auth.currentUser.email === email) {
+          // Link password to existing account
+          const { EmailAuthProvider, linkWithCredential } = await import('firebase/auth');
+          const credential = EmailAuthProvider.credential(email, password);
+          
+          try {
+            await linkWithCredential(auth.currentUser, credential);
+            user = auth.currentUser;
+            existingUser = true;
+            logger.info('Successfully linked password to existing account');
+          } catch (linkError: any) {
+            logger.error('Failed to link password:', linkError);
+            return {
+              success: false,
+              error: 'Unable to link password to existing account'
+            };
+          }
+        } else {
+          // User exists but not currently signed in
+          return {
+            success: false,
+            error: 'An account with this email already exists. Please sign in instead.'
+          };
+        }
+      } else {
+        throw createError;
+      }
+    }
     
     // Update the user's display name
     await updateProfile(user, {
       displayName: `${firstName} ${lastName}`
     });
     
-    // Store additional user data in the database
-    const userProfileData: UserProfileData = {
-      firstName,
-      lastName,
-      username,
-      email,
-      uid: user.uid,
-      createdAt: new Date().toISOString(),
-      membership: 'fresh',
-      aiUsage: {
-        daily: {},
-        monthly: {},
-        total: 0,
-        lastReset: new Date().toISOString()
-      }
-    };
+    // Check if profile already exists (for linked accounts)
+    const existingProfileSnapshot = await get(ref(database, `users/${user.uid}`));
     
-    // Store user profile in database
-    await set(ref(database, `users/${user.uid}`), userProfileData);
+    if (!existingProfileSnapshot.exists()) {
+      // Store additional user data in the database
+      const userProfileData: UserProfileData = {
+        firstName,
+        lastName,
+        username,
+        email,
+        uid: user.uid,
+        createdAt: new Date().toISOString(),
+        membership: 'fresh',
+        aiUsage: {
+          daily: {},
+          monthly: {},
+          total: 0,
+          lastReset: new Date().toISOString()
+        }
+      };
+      
+      // Store user profile in database
+      await set(ref(database, `users/${user.uid}`), userProfileData);
+    } else if (existingUser) {
+      // Update existing profile with the new information
+      await set(ref(database, `users/${user.uid}/firstName`), firstName);
+      await set(ref(database, `users/${user.uid}/lastName`), lastName);
+      await set(ref(database, `users/${user.uid}/username`), username);
+      logger.info('Updated existing profile with new credentials');
+    }
     
     return { success: true, user };
   } catch (error: any) {

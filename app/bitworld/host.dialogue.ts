@@ -685,9 +685,9 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
 
       // Actually create the account
       try {
-        const { auth, database } = await import('../firebase');
-        const { createUserWithEmailAndPassword, updateProfile } = await import('firebase/auth');
-        const { ref, set } = await import('firebase/database');
+        const { auth, database, getUserProfile } = await import('../firebase');
+        const { createUserWithEmailAndPassword, updateProfile, signInWithEmailAndPassword, EmailAuthProvider, linkWithCredential } = await import('firebase/auth');
+        const { ref, set, get } = await import('firebase/database');
 
         // Use newCollectedData which has all accumulated data
         // Validate email and password before creating account
@@ -701,33 +701,76 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           throw new Error('Missing required information. Please try again.');
         }
 
-        // Create user with email and password
-        const userCredential = await createUserWithEmailAndPassword(auth, newCollectedData.email, newCollectedData.password);
-        const user = userCredential.user;
+        let user;
+        let isLinkingToExisting = false;
+
+        try {
+          // Try to create user with email and password
+          const userCredential = await createUserWithEmailAndPassword(auth, newCollectedData.email, newCollectedData.password);
+          user = userCredential.user;
+        } catch (createError: any) {
+          // If email already exists, link password to their existing account
+          if (createError.code === 'auth/email-already-in-use') {
+            console.log('Email already in use - linking password to existing account');
+            isLinkingToExisting = true;
+            
+            // Current user should already be signed in from email link
+            if (auth.currentUser) {
+              const credential = EmailAuthProvider.credential(newCollectedData.email, newCollectedData.password);
+              try {
+                await linkWithCredential(auth.currentUser, credential);
+                user = auth.currentUser;
+                console.log('Successfully linked password to existing account');
+              } catch (linkError: any) {
+                console.error('Failed to link credential:', linkError);
+                throw new Error('Unable to link password. Please try signing in instead.');
+              }
+            } else {
+              // If not currently signed in, try signing in with the password
+              // (shouldn't happen but defensive)
+              throw new Error('Please sign in with your email link first.');
+            }
+          } else {
+            throw createError;
+          }
+        }
+
+        if (!user) {
+          throw new Error('Failed to create or link account.');
+        }
 
         // Update display name
         await updateProfile(user, {
           displayName: newCollectedData.username
         });
 
-        // Create user profile in database
-        const userProfileData = {
-          firstName: '',
-          lastName: '',
-          username: newCollectedData.username,
-          email: newCollectedData.email,
-          uid: user.uid,
-          createdAt: new Date().toISOString(),
-          membership: 'fresh',
-          aiUsage: {
-            daily: {},
-            monthly: {},
-            total: 0,
-            lastReset: new Date().toISOString()
-          }
-        };
+        // Check if profile already exists (for linked accounts)
+        const existingProfile = await get(ref(database, `users/${user.uid}`));
+        
+        if (!existingProfile.exists()) {
+          // Create new user profile in database
+          const userProfileData = {
+            firstName: '',
+            lastName: '',
+            username: newCollectedData.username,
+            email: newCollectedData.email,
+            uid: user.uid,
+            createdAt: new Date().toISOString(),
+            membership: 'fresh',
+            aiUsage: {
+              daily: {},
+              monthly: {},
+              total: 0,
+              lastReset: new Date().toISOString()
+            }
+          };
 
-        await set(ref(database, `users/${user.uid}`), userProfileData);
+          await set(ref(database, `users/${user.uid}`), userProfileData);
+        } else {
+          // Update existing profile with username
+          await set(ref(database, `users/${user.uid}/username`), newCollectedData.username);
+          console.log('Updated existing profile with username:', newCollectedData.username);
+        }
 
         // Store world settings in separate worlds tree
         const worldSettings = {
@@ -819,6 +862,103 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
         });
 
         setState(prev => ({ ...prev, isProcessing: false }));
+        return false;
+      }
+    }
+
+    // Handle password reset flow
+    if (nextMessageId === 'resetting_password') {
+      const flow = HOST_FLOWS[state.currentFlowId!];
+      const resettingMessage = flow.messages['resetting_password'];
+      
+      setHostData({
+        text: resettingMessage.text,
+        centerPos: getViewportCenter(),
+        timestamp: Date.now()
+      });
+      
+      setState(prev => ({ ...prev, currentMessageId: 'resetting_password', isProcessing: true }));
+      
+      try {
+        const { auth, database } = await import('../firebase');
+        const { signInWithEmailAndPassword, updatePassword } = await import('firebase/auth');
+        const { ref, query, orderByChild, equalTo, get } = await import('firebase/database');
+        
+        // First check if user exists in database
+        const usersQuery = query(ref(database, 'users'), orderByChild('email'), equalTo(newCollectedData.email));
+        const snapshot = await get(usersQuery);
+        
+        if (!snapshot.exists()) {
+          throw new Error('No account found with this email.');
+        }
+        
+        // Check if user is currently signed in via email link
+        if (auth.currentUser && auth.currentUser.email === newCollectedData.email) {
+          // User is already signed in via email link - just update their password
+          await updatePassword(auth.currentUser, newCollectedData.password);
+          console.log('Password updated successfully');
+          
+          // Get username and redirect
+          const userData = snapshot.val();
+          const uid = Object.keys(userData)[0];
+          const profile = userData[uid];
+          
+          setHostData({
+            text: 'password reset! signing you in...',
+            color: '#00AA00',
+            centerPos: getViewportCenter(),
+            timestamp: Date.now()
+          });
+          
+          setState(prev => ({ ...prev, currentMessageId: 'reset_complete', isProcessing: false }));
+          
+          // Clean up and redirect
+          setTimeout(() => {
+            setHostData(null);
+            
+            if (setWorldData) {
+              setWorldData(prev => {
+                const newData = { ...prev };
+                Object.keys(newData).forEach(key => {
+                  if (key.startsWith('label_')) {
+                    delete newData[key];
+                  }
+                });
+                return newData;
+              });
+            }
+            
+            if (setHostMode) {
+              setHostMode({ isActive: false, currentInputType: null });
+            }
+            if (setChatMode) {
+              setChatMode({
+                isActive: false,
+                currentInput: '',
+                inputPositions: [],
+                isProcessing: false
+              });
+            }
+            
+            if (onAuthSuccess && profile.username) {
+              onAuthSuccess(profile.username);
+            }
+          }, 1500);
+          
+          return true;
+        } else {
+          // User not signed in - they need to come from password reset email
+          throw new Error('Please use the password reset link from your email.');
+        }
+      } catch (error: any) {
+        console.error('Password reset error:', error);
+        setHostData({
+          text: error.message || 'failed to reset password. please try again.',
+          centerPos: getViewportCenter(),
+          timestamp: Date.now()
+        });
+        
+        setState(prev => ({ ...prev, isProcessing: false, isActive: true }));
         return false;
       }
     }

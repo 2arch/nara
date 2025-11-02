@@ -439,10 +439,66 @@ export const tutorialFlow: HostFlow = {
   }
 };
 
+// Password reset flow for existing users
+export const passwordResetFlow: HostFlow = {
+  flowId: 'password_reset',
+  startMessageId: 'reset_welcome',
+  messages: {
+    'reset_welcome': {
+      id: 'reset_welcome',
+      text: 'Welcome back! Let\'s reset your password.',
+      expectsInput: false,
+      nextMessageId: 'collect_email'
+    },
+
+    'collect_email': {
+      id: 'collect_email',
+      text: 'Enter your email address:',
+      expectsInput: true,
+      inputType: 'email',
+      inputValidator: (input: string) => {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(input)) return { valid: false, error: 'that doesn\'t look like a valid email' };
+        return { valid: true };
+      },
+      nextMessageId: 'collect_new_password',
+      previousMessageId: 'reset_welcome'
+    },
+
+    'collect_new_password': {
+      id: 'collect_new_password',
+      text: 'Choose a new password (at least 6 characters):',
+      expectsInput: true,
+      inputType: 'password',
+      inputValidator: (input: string) => {
+        if (input.length < 6) return { valid: false, error: 'password must be at least 6 characters' };
+        return { valid: true };
+      },
+      onResponse: async (input: string, collectedData: Record<string, any>) => {
+        return 'resetting_password';
+      },
+      previousMessageId: 'collect_email'
+    },
+
+    'resetting_password': {
+      id: 'resetting_password',
+      text: 'resetting your password...',
+      expectsInput: false
+    },
+
+    'reset_complete': {
+      id: 'reset_complete',
+      text: 'Password reset! Signing you in...',
+      expectsInput: false
+    }
+  }
+};
+
 // Export all flows
 export const HOST_FLOWS: Record<string, HostFlow> = {
   'welcome': welcomeFlow,
   'verification': verificationFlow,
   'upgrade': upgradeFlow,
-  'tutorial': tutorialFlow
+  'tutorial': tutorialFlow,
+  'password_reset': passwordResetFlow
 };

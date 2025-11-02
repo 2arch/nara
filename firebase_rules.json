@@ -6,7 +6,7 @@
     },
 
     "users": {
-      ".indexOn": ["username"],
+      ".indexOn": ["username", "email"],
       ".read": true,
       "$userId": {
         ".read": "auth != null && auth.uid == $userId",

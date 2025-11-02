@@ -119,7 +119,7 @@ const AVAILABLE_COMMANDS = [
     // Sharing & Publishing
     'publish', 'unpublish', 'share', 'spawn', 'monogram',
     // Account
-    'signin', 'signout',
+    'signin', 'signout', 'account',
     // Debug
     'debug'
 ];
@@ -132,7 +132,7 @@ export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'style': ['bg', 'text', 'font'],
     'state': ['state', 'random', 'clear'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
-    'account': ['signin', 'signout'],
+    'account': ['signin', 'signout', 'account'],
     'debug': ['debug']
 };
 
@@ -173,6 +173,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'monogram': 'Add your monogram to the canvas. Places your personal identifier at the current cursor position.',
     'signin': 'Sign in to your Nara account. Required for saving work, publishing canvases, and accessing AI features.',
     'signout': 'Sign out of your Nara account. You\'ll return to read-only mode.',
+    'account': 'Manage your account settings. Use /account reset to reset your password.',
     'debug': 'Toggle debug mode. Shows technical information about canvas state, performance, and rendering. Useful for troubleshooting or understanding the system.'
 };
 
