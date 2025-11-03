@@ -1,10 +1,10 @@
 "use client";
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { auth } from '../../firebase';
 import { confirmPasswordReset, verifyPasswordResetCode } from 'firebase/auth';
 
-export default function AuthActionPage() {
+function AuthActionContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [mode, setMode] = useState<string | null>(null);
@@ -215,5 +215,24 @@ export default function AuthActionPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function AuthActionPage() {
+  return (
+    <Suspense fallback={
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '100vh',
+        backgroundColor: '#F8F8F0',
+        fontFamily: 'IBM Plex Mono, monospace'
+      }}>
+        <div>Loading...</div>
+      </div>
+    }>
+      <AuthActionContent />
+    </Suspense>
   );
 }
