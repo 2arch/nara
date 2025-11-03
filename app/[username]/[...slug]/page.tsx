@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { useWorldEngine } from '../../bitworld/world.engine';
@@ -13,7 +13,7 @@ const Grid3DBackground = dynamic(
   { ssr: false }
 );
 
-export default function UserState() {
+function UserStateContent() {
   const [cursorAlternate, setCursorAlternate] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -160,5 +160,13 @@ export default function UserState() {
 
       {/* Pan distance indicator removed - no longer shown in read-only mode */}
     </div>
+  );
+}
+
+export default function UserState() {
+  return (
+    <Suspense fallback={<div className="w-screen h-screen bg-black" />}>
+      <UserStateContent />
+    </Suspense>
   );
 }
