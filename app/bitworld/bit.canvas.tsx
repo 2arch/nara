@@ -6319,26 +6319,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     // User dragged - finalize the selection
                     engine.handleSelectionEnd();
                 } else if (touchStartRef.current && touchStartRef.current.touches.length === 1) {
-                    // User tapped (didn't drag) - treat as click
-                    const startTouch = touchStartRef.current.touches[0];
-                    const endTouches = Array.from(e.changedTouches).map(touch => ({
-                        x: touch.clientX - rect.left,
-                        y: touch.clientY - rect.top
-                    }));
+                    // User tapped (didn't drag)
+                    // If there's already an active selection, just focus the input to bring up keyboard
+                    // Don't treat as click to avoid clearing the selection
+                    const hasActiveSelection = engine.selectionStart !== null && engine.selectionEnd !== null;
 
-                    if (endTouches.length > 0) {
-                        // Create synthetic event for handleCanvasClick
-                        const syntheticEvent = {
-                            button: 0,
-                            clientX: endTouches[0].x + rect.left,
-                            clientY: endTouches[0].y + rect.top,
-                            shiftKey: false,
-                            preventDefault: () => {},
-                            stopPropagation: () => {}
-                        } as React.MouseEvent<HTMLCanvasElement>;
-                        handleCanvasClick(syntheticEvent);
-
-                        // Focus hidden input for iOS keyboard
+                    if (hasActiveSelection) {
+                        // Just focus the hidden input to trigger keyboard, preserve selection
                         if (hiddenInputRef.current) {
                             if (hostDialogue.isHostActive) {
                                 if (hostDialogue.isExpectingInput()) {
@@ -6347,6 +6334,38 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             } else {
                                 // Not in host mode - focus for regular typing
                                 hiddenInputRef.current.focus();
+                            }
+                        }
+                    } else {
+                        // No selection - treat as regular click
+                        const startTouch = touchStartRef.current.touches[0];
+                        const endTouches = Array.from(e.changedTouches).map(touch => ({
+                            x: touch.clientX - rect.left,
+                            y: touch.clientY - rect.top
+                        }));
+
+                        if (endTouches.length > 0) {
+                            // Create synthetic event for handleCanvasClick
+                            const syntheticEvent = {
+                                button: 0,
+                                clientX: endTouches[0].x + rect.left,
+                                clientY: endTouches[0].y + rect.top,
+                                shiftKey: false,
+                                preventDefault: () => {},
+                                stopPropagation: () => {}
+                            } as React.MouseEvent<HTMLCanvasElement>;
+                            handleCanvasClick(syntheticEvent);
+
+                            // Focus hidden input for iOS keyboard
+                            if (hiddenInputRef.current) {
+                                if (hostDialogue.isHostActive) {
+                                    if (hostDialogue.isExpectingInput()) {
+                                        hiddenInputRef.current.focus();
+                                    }
+                                } else {
+                                    // Not in host mode - focus for regular typing
+                                    hiddenInputRef.current.focus();
+                                }
                             }
                         }
                     }
