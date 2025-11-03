@@ -6,10 +6,20 @@ import { createAIAbortController } from './ai.utils';
 // Re-export utilities for backward compatibility
 export { abortCurrentAI, isAIActive, setDialogueWithRevert, createSubtitleCycler } from './ai.utils';
 
-// Initialize the Google GenAI client
-const ai = new GoogleGenAI({
-    apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY
-});
+// Lazy initialization of the Google GenAI client
+// This ensures the client is only created when needed, not at module load time
+let ai: GoogleGenAI | null = null;
+
+function getAIClient(): GoogleGenAI {
+    if (!ai) {
+        const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+        if (!apiKey) {
+            throw new Error('GEMINI_API_KEY environment variable is not set');
+        }
+        ai = new GoogleGenAI({ apiKey });
+    }
+    return ai;
+}
 
 // Global cache management
 let currentCachedContent: string | null = null;
@@ -35,7 +45,7 @@ export async function transformText(text: string, instructions: string, userId?:
         }
 
         const response = await Promise.race([
-            ai.models.generateContent({
+            getAIClient().models.generateContent({
                 model: 'gemini-2.5-flash-lite',
                 contents: `Transform: "${instructions}"
 
@@ -101,7 +111,7 @@ export async function explainText(text: string, analysisType: string = 'analysis
 "${text}"`;
 
         const response = await Promise.race([
-            ai.models.generateContent({
+            getAIClient().models.generateContent({
                 model: 'gemini-2.5-flash-lite',
                 contents: prompt,
                 config: {
@@ -163,7 +173,7 @@ export async function summarizeText(text: string, focus?: string, userId?: strin
 "${text}"`;
 
         const response = await Promise.race([
-            ai.models.generateContent({
+            getAIClient().models.generateContent({
                 model: 'gemini-2.5-flash-lite',
                 contents: prompt,
                 config: {
@@ -245,7 +255,7 @@ export async function generateImage(
         }
 
         const response = await Promise.race([
-            ai.models.generateContent({
+            getAIClient().models.generateContent({
                 model: 'gemini-2.5-flash-image',
                 contents,
                 config: {
@@ -375,7 +385,7 @@ export async function chatWithAI(message: string, useCache: boolean = true, user
                 if (cachedContentName) {
                     // Use cached content with user message
                     response = await Promise.race([
-                        ai.models.generateContent({
+                        getAIClient().models.generateContent({
                             model: 'gemini-2.5-flash-lite',
                             contents: message,
                             config: {
@@ -396,7 +406,7 @@ export async function chatWithAI(message: string, useCache: boolean = true, user
                     const contextContent = `User query: ${message}\n\nCanvas context (for reference): ${currentWorldContext.compiledText}\nLabels: ${currentWorldContext.labels.map(l => l.text).join(', ')}`;
 
                     response = await Promise.race([
-                        ai.models.generateContent({
+                        getAIClient().models.generateContent({
                             model: 'gemini-2.5-flash-lite',
                             contents: contextContent,
                             config: {
@@ -430,7 +440,7 @@ export async function chatWithAI(message: string, useCache: boolean = true, user
             }
 
             response = await Promise.race([
-                ai.models.generateContent({
+                getAIClient().models.generateContent({
                     model: 'gemini-2.5-flash-lite',
                     contents: `Previous conversation:
 ${conversationContext}
@@ -527,7 +537,7 @@ This context represents the current state of the canvas/world that the user is w
         ];
 
         // Create cached content with 1 hour TTL
-        const cachedContent = await ai.caches.create({
+        const cachedContent = await getAIClient().caches.create({
             model: 'gemini-2.5-flash-lite',
             config: {
                 contents: worldContextContent,
@@ -557,7 +567,7 @@ This context represents the current state of the canvas/world that the user is w
 export async function clearWorldContextCache(): Promise<void> {
     if (currentCachedContent) {
         try {
-            await ai.caches.delete({ name: currentCachedContent });
+            await getAIClient().caches.delete({ name: currentCachedContent });
         } catch (error) {
             logger.error('Error deleting cache:', error);
         }
@@ -579,9 +589,9 @@ export function getChatHistory(): ChatMessage[] {
  */
 export async function generateVideo(prompt: string): Promise<string | null> {
     try {
-        
+
         // Start the video generation operation
-        let operation = await ai.models.generateVideos({
+        let operation = await getAIClient().models.generateVideos({
             model: 'veo-3.0-generate-preview',
             prompt: prompt,
         });
@@ -597,7 +607,7 @@ export async function generateVideo(prompt: string): Promise<string | null> {
             
             try {
                 // The getVideosOperation expects an object with the operation
-                operation = await ai.operations.getVideosOperation({
+                operation = await getAIClient().operations.getVideosOperation({
                     operation: operation
                 });
             } catch (pollError) {
@@ -689,7 +699,7 @@ export async function generateVideo(prompt: string): Promise<string | null> {
 export async function generateClusterLabel(clusterContent: string): Promise<string | null> {
     try {
 
-        const response = await ai.models.generateContent({
+        const response = await getAIClient().models.generateContent({
             model: 'gemini-2.5-flash-lite',
             contents: `Create a very short, descriptive label (2-4 words max) for this text cluster:
 
@@ -744,7 +754,7 @@ export async function getAutocompleteSuggestions(
             ? `${context}\n${currentText}`
             : currentText;
 
-        const response = await ai.models.generateContent({
+        const response = await getAIClient().models.generateContent({
             model: 'gemini-2.5-flash-lite',
             contents: prompt,
             config: {
