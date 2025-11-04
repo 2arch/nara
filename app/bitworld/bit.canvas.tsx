@@ -6622,6 +6622,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     if (engine.selectionStart && engine.selectionEnd) {
                         engine.commandSystem.startCommand(engine.cursorPos);
                         commandMenuJustOpenedRef.current = true;
+
+                        // Focus hidden input to bring up keyboard
+                        if (hiddenInputRef.current) {
+                            hiddenInputRef.current.focus();
+                        }
                     }
                 }
             }
