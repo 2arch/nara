@@ -75,6 +75,7 @@ export interface ModeState {
 interface UseCommandSystemProps {
     setDialogueText: (text: string) => void;
     initialBackgroundColor?: string;
+    initialTextColor?: string;
     getAllLabels?: () => Array<{text: string, x: number, y: number, color: string}>;
     getAllBounds?: () => Array<{startX: number, endX: number, startY: number, endY: number, color: string, title?: string}>;
     availableStates?: string[];
@@ -192,7 +193,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, getAllLabels, getAllBounds, availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const previousBackgroundStateRef = useRef<{
@@ -794,9 +795,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, getA
 
     useEffect(() => {
         if (initialBackgroundColor && modeState.backgroundMode !== 'stream') {
-            switchBackgroundMode('color', initialBackgroundColor);
+            switchBackgroundMode('color', initialBackgroundColor, initialTextColor);
         }
-    }, [initialBackgroundColor]); // Removed switchBackgroundMode to avoid dependency issues
+    }, [initialBackgroundColor, initialTextColor]); // Removed switchBackgroundMode to avoid dependency issues
 
     // Load color preferences from settings when they change
     useEffect(() => {

@@ -133,6 +133,8 @@ function BdayPageContent() {
     initialStateName: null, // No state name for bday
     initialViewOffset,
     initialZoomLevel,
+    initialBackgroundColor: '#10B981', // Shamrock green for birthday vibes
+    initialTextColor: '#D4FF00', // Spring yellow-green text
     isReadOnly: !user // Read-only if not authenticated
   });
 
