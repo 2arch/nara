@@ -5162,12 +5162,22 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     if (engine.commandSystem && typeof engine.commandSystem.selectCommand === 'function') {
                         engine.commandSystem.selectCommand(selectedCommand);
                     }
+
+                    // Focus hidden input to keep keyboard visible for text-driven command menu
+                    if (hiddenInputRef.current) {
+                        hiddenInputRef.current.focus();
+                    }
+
                     return; // Command was selected, don't process as regular click
                 }
             }
 
             // If command menu is active but click wasn't on a command suggestion,
-            // still return early to preserve selection (don't process as regular click)
+            // still return early to preserve selection and maintain keyboard focus
+            // Focus hidden input to keep keyboard visible since command menu is text-driven
+            if (hiddenInputRef.current) {
+                hiddenInputRef.current.focus();
+            }
             return;
         }
 
