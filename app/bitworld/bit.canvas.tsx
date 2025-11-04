@@ -5149,15 +5149,15 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const worldPos = engine.screenToWorld(clickX, clickY, engine.zoomLevel, engine.viewOffset);
             const clickedWorldX = Math.floor(worldPos.x);
             const clickedWorldY = Math.floor(worldPos.y);
-            
+
             // Check if click is on a command suggestion (not the typed command line)
-            if (clickedWorldY > engine.commandState.commandStartPos.y && 
+            if (clickedWorldY > engine.commandState.commandStartPos.y &&
                 clickedWorldY <= engine.commandState.commandStartPos.y + engine.commandState.matchedCommands.length) {
-                
+
                 const suggestionIndex = clickedWorldY - engine.commandState.commandStartPos.y - 1;
                 if (suggestionIndex >= 0 && suggestionIndex < engine.commandState.matchedCommands.length) {
                     const selectedCommand = engine.commandState.matchedCommands[suggestionIndex];
-                    
+
                     // Use the command system to populate the input with the selected command
                     if (engine.commandSystem && typeof engine.commandSystem.selectCommand === 'function') {
                         engine.commandSystem.selectCommand(selectedCommand);
@@ -5165,8 +5165,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     return; // Command was selected, don't process as regular click
                 }
             }
+
+            // If command menu is active but click wasn't on a command suggestion,
+            // still return early to preserve selection (don't process as regular click)
+            return;
         }
-        
+
         // Set flag to prevent trail creation from click movement
         isClickMovementRef.current = true;
 
@@ -6120,6 +6124,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     // Long press detection for command menu on selection
     const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
     const LONG_PRESS_DURATION = 500; // ms
+    const commandMenuJustOpenedRef = useRef<boolean>(false); // Prevent immediate command selection after long press
 
     const handleTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -6135,6 +6140,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         touchStartRef.current = { touches };
         touchHasMovedRef.current = false;
+
+        // Clear the command menu just opened flag on new touch
+        commandMenuJustOpenedRef.current = false;
 
         if (touches.length === 2) {
             // Two-finger gesture - prepare for pan or pinch
@@ -6215,6 +6223,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     longPressTimerRef.current = setTimeout(() => {
                         // Trigger command menu at current cursor position
                         engine.commandSystem.startCommand(engine.cursorPos);
+
+                        // Set flag to prevent immediate command selection on touch end
+                        commandMenuJustOpenedRef.current = true;
 
                         // Cancel panning since we're showing command menu
                         isTouchPanningRef.current = false;
@@ -6379,6 +6390,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     const hasActiveSelection = engine.selectionStart !== null && engine.selectionEnd !== null;
 
                     if (hasActiveSelection) {
+                        // Don't handle touch end if command menu was just opened
+                        // This prevents accidental command selection when releasing after long press
+                        if (commandMenuJustOpenedRef.current) {
+                            return;
+                        }
+
                         // Just focus the hidden input to trigger keyboard, preserve selection
                         if (hiddenInputRef.current) {
                             if (hostDialogue.isHostActive) {
@@ -6391,6 +6408,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             }
                         }
                     } else {
+                        // Don't create click if command menu was just opened
+                        // This prevents accidental command selection when releasing after long press
+                        if (commandMenuJustOpenedRef.current) {
+                            return;
+                        }
+
                         // No selection - treat as regular click
                         const startTouch = touchStartRef.current.touches[0];
                         const endTouches = Array.from(e.changedTouches).map(touch => ({
