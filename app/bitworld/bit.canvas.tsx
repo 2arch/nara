@@ -6673,8 +6673,40 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         if (isTouchPanningRef.current) {
-            // End two-finger pan
+            // End two-finger pan (or single-touch pan/tap)
             isTouchPanningRef.current = false;
+
+            // If there's a selection and command menu is active, check if this was a tap on a command
+            // This handles single taps on commands (which go through the pan path)
+            const hasActiveSelection = engine.selectionStart !== null && engine.selectionEnd !== null;
+            if (hasActiveSelection && engine.commandState.isActive && !touchHasMovedRef.current && e.changedTouches.length === 1) {
+                // Single tap with no movement while command menu is active - route through handleCanvasClick
+                const endTouches = Array.from(e.changedTouches).map(touch => ({
+                    x: touch.clientX - rect.left,
+                    y: touch.clientY - rect.top
+                }));
+
+                if (endTouches.length > 0) {
+                    // Create synthetic event for handleCanvasClick
+                    const syntheticEvent = {
+                        button: 0,
+                        clientX: endTouches[0].x + rect.left,
+                        clientY: endTouches[0].y + rect.top,
+                        shiftKey: false,
+                        preventDefault: () => {},
+                        stopPropagation: () => {}
+                    } as React.MouseEvent<HTMLCanvasElement>;
+                    handleCanvasClick(syntheticEvent);
+
+                    // Don't call handlePanEnd since we're treating this as a click
+                    panStartInfoRef.current = null;
+                    panStartPosRef.current = null;
+                    lastPinchDistanceRef.current = null;
+                    return;
+                }
+            }
+
+            // Normal pan end
             engine.handlePanEnd(intermediatePanOffsetRef.current);
             panStartInfoRef.current = null;
             panStartPosRef.current = null;
