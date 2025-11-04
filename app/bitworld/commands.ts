@@ -184,6 +184,8 @@ export const COLOR_MAP: { [name: string]: string } = {
     'sulfur': '#F0FF6A',
     'chalk': '#69AED6',
     'cobalt': '#0B109F',
+    'shamrock': '#10B981',
+    'spring': '#D4FF00',
     'garden': '#162400',
     'crimson': '#FF5200',
     'orchid': '#FFC0CB',
