@@ -6636,15 +6636,25 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         }
                     }
                 } else {
-                    // No movement or minimal movement - open command menu (only for selections)
+                    // No movement or minimal movement after long press
                     if (engine.selectionStart && engine.selectionEnd) {
-                        // Prevent default touch behavior that might clear selection
+                        // Selection: open command menu
                         e.preventDefault();
 
                         engine.commandSystem.startCommand(engine.cursorPos);
                         commandMenuJustOpenedRef.current = true;
 
                         // Focus hidden input to bring up keyboard (use setTimeout to ensure selection is preserved)
+                        setTimeout(() => {
+                            if (hiddenInputRef.current) {
+                                hiddenInputRef.current.focus();
+                            }
+                        }, 10);
+                    } else {
+                        // Image/Note/Iframe/Mail: just focus keyboard for deletion via backspace
+                        e.preventDefault();
+
+                        // Focus hidden input to bring up keyboard
                         setTimeout(() => {
                             if (hiddenInputRef.current) {
                                 hiddenInputRef.current.focus();
