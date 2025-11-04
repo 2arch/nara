@@ -6192,11 +6192,19 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 ) < DOUBLE_TAP_DISTANCE;
 
             if (isDoubleTap) {
-                // Double-tap detected - enter selection/click mode
-                isDoubleTapModeRef.current = true;
-                isTouchSelectingRef.current = true;
-                // Prevent iOS Safari double-tap-to-zoom
-                e.preventDefault();
+                // Double-tap detected
+                e.preventDefault(); // Prevent iOS Safari double-tap-to-zoom
+
+                // If command menu is active, dismiss it (mobile alternative to ESC key)
+                if (engine.commandState.isActive) {
+                    // Dismiss command menu by simulating ESC key press through engine
+                    engine.handleKeyDown('Escape', false, false, false, false);
+                    // Don't enter selection mode, just dismiss the menu
+                } else {
+                    // Normal double-tap behavior - enter selection/click mode
+                    isDoubleTapModeRef.current = true;
+                    isTouchSelectingRef.current = true;
+                }
             } else {
                 // Single tap - prepare for pan (primary gesture)
                 isDoubleTapModeRef.current = false;
