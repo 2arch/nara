@@ -6679,7 +6679,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             // If there's a selection and command menu is active, check if this was a tap on a command
             // This handles single taps on commands (which go through the pan path)
             const hasActiveSelection = engine.selectionStart !== null && engine.selectionEnd !== null;
-            if (hasActiveSelection && engine.commandState.isActive && !touchHasMovedRef.current && e.changedTouches.length === 1) {
+            if (hasActiveSelection && engine.commandState.isActive && !touchHasMovedRef.current && !commandMenuJustOpenedRef.current && e.changedTouches.length === 1) {
                 // Single tap with no movement while command menu is active - route through handleCanvasClick
                 const endTouches = Array.from(e.changedTouches).map(touch => ({
                     x: touch.clientX - rect.left,
