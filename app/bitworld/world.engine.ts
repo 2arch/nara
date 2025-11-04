@@ -355,6 +355,7 @@ interface UseWorldEngineProps {
     initialZoomLevel?: number;
     worldId: string | null; // Add worldId for persistence
     initialBackgroundColor?: string;
+    initialTextColor?: string; // Initial text color
     userUid?: string | null; // Add user UID for user-specific persistence
     username?: string; // Add username for routing
     enableCommands?: boolean; // Enable/disable command system (default: true)
@@ -401,6 +402,7 @@ export function useWorldEngine({
     initialZoomLevel = 1, // Default zoom level index
     worldId = null,      // Default to no persistence
     initialBackgroundColor,
+    initialTextColor,
     userUid = null,      // Default to no user-specific persistence
     enableCommands = true, // Default to enabled
     username,            // Username for routing
@@ -1110,7 +1112,7 @@ export function useWorldEngine({
         startCommandWithInput,
         addComposedText,
         removeCompositionTrigger,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, getAllLabels, getAllBounds, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, triggerUpgradeFlow: () => {
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, getAllLabels, getAllBounds, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
         }
