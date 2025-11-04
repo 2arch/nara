@@ -6630,13 +6630,18 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 } else {
                     // No movement or minimal movement - open command menu (only for selections)
                     if (engine.selectionStart && engine.selectionEnd) {
+                        // Prevent default touch behavior that might clear selection
+                        e.preventDefault();
+
                         engine.commandSystem.startCommand(engine.cursorPos);
                         commandMenuJustOpenedRef.current = true;
 
-                        // Focus hidden input to bring up keyboard
-                        if (hiddenInputRef.current) {
-                            hiddenInputRef.current.focus();
-                        }
+                        // Focus hidden input to bring up keyboard (use setTimeout to ensure selection is preserved)
+                        setTimeout(() => {
+                            if (hiddenInputRef.current) {
+                                hiddenInputRef.current.focus();
+                            }
+                        }, 10);
                     }
                 }
             }
