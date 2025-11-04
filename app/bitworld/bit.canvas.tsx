@@ -6117,6 +6117,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     const DOUBLE_TAP_DISTANCE = 30; // px - max distance between taps
     const isDoubleTapModeRef = useRef<boolean>(false);
 
+    // Long press detection for command menu on selection
+    const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const LONG_PRESS_DURATION = 500; // ms
+
     const handleTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return;
@@ -6186,6 +6190,44 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             // Update last tap tracking
             lastTapTimeRef.current = now;
             lastTapPosRef.current = currentPos;
+
+            // Long press detection for command menu on selection
+            // Clear any existing timer
+            if (longPressTimerRef.current) {
+                clearTimeout(longPressTimerRef.current);
+                longPressTimerRef.current = null;
+            }
+
+            // Check if touch is over an active selection
+            if (engine.selectionStart && engine.selectionEnd) {
+                const worldPos = engine.screenToWorld(touches[0].x, touches[0].y, engine.zoomLevel, engine.viewOffset);
+                const minX = Math.floor(Math.min(engine.selectionStart.x, engine.selectionEnd.x));
+                const maxX = Math.floor(Math.max(engine.selectionStart.x, engine.selectionEnd.x));
+                const minY = Math.floor(Math.min(engine.selectionStart.y, engine.selectionEnd.y));
+                const maxY = Math.floor(Math.max(engine.selectionStart.y, engine.selectionEnd.y));
+
+                const touchWorldX = Math.floor(worldPos.x);
+                const touchWorldY = Math.floor(worldPos.y);
+
+                // If touch is within selection bounds, start long press timer
+                if (touchWorldX >= minX && touchWorldX <= maxX &&
+                    touchWorldY >= minY && touchWorldY <= maxY) {
+                    longPressTimerRef.current = setTimeout(() => {
+                        // Trigger command menu at current cursor position
+                        engine.commandSystem.startCommand(engine.cursorPos);
+
+                        // Cancel panning since we're showing command menu
+                        isTouchPanningRef.current = false;
+                        panStartInfoRef.current = null;
+                        setIsPanning(false);
+
+                        // Haptic feedback if available
+                        if ('vibrate' in navigator) {
+                            navigator.vibrate(50);
+                        }
+                    }, LONG_PRESS_DURATION);
+                }
+            }
         }
 
         canvasRef.current?.focus();
@@ -6202,6 +6244,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             clientX: touch.clientX,
             clientY: touch.clientY
         }));
+
+        // Cancel long press timer on any movement
+        if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+        }
 
         if (touches.length === 2 && isTouchPanningRef.current && panStartInfoRef.current) {
             e.preventDefault();
@@ -6295,6 +6343,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     const handleTouchEnd = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return;
+
+        // Cancel long press timer on touch end
+        if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+        }
 
         if (isTouchPanningRef.current) {
             // End two-finger pan
