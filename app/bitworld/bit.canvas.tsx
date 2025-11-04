@@ -6121,10 +6121,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     const DOUBLE_TAP_DISTANCE = 30; // px - max distance between taps
     const isDoubleTapModeRef = useRef<boolean>(false);
 
-    // Long press detection for command menu on selection
+    // Long press detection for command menu and move operations
     const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
     const LONG_PRESS_DURATION = 500; // ms
     const commandMenuJustOpenedRef = useRef<boolean>(false); // Prevent immediate command selection after long press
+    const longPressActivatedRef = useRef<boolean>(false); // Track if long press activated (for move vs command menu)
+    const touchMoveStartPosRef = useRef<Point | null>(null); // Starting world position for move operation
+    const MOVE_THRESHOLD = 10; // px - movement threshold to trigger move instead of command menu
 
     const handleTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -6143,6 +6146,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         // Clear the command menu just opened flag on new touch
         commandMenuJustOpenedRef.current = false;
+        longPressActivatedRef.current = false;
+        touchMoveStartPosRef.current = null;
 
         if (touches.length === 2) {
             // Two-finger gesture - prepare for pan or pinch
@@ -6199,50 +6204,100 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             lastTapTimeRef.current = now;
             lastTapPosRef.current = currentPos;
 
-            // Long press detection for command menu on selection
+            // Long press detection for move operations and command menu
             // Clear any existing timer
             if (longPressTimerRef.current) {
                 clearTimeout(longPressTimerRef.current);
                 longPressTimerRef.current = null;
             }
 
-            // Check if touch is over an active selection
+            const worldPos = engine.screenToWorld(touches[0].x, touches[0].y, engine.zoomLevel, engine.viewOffset);
+            const touchWorldX = Math.floor(worldPos.x);
+            const touchWorldY = Math.floor(worldPos.y);
+            const touchWorldPos = { x: touchWorldX, y: touchWorldY };
+
+            // Check if touch is over a moveable object (selection, image, note, iframe, mail)
+            let isOverMoveableObject = false;
+
+            // Check for active selection
             if (engine.selectionStart && engine.selectionEnd) {
-                const worldPos = engine.screenToWorld(touches[0].x, touches[0].y, engine.zoomLevel, engine.viewOffset);
                 const minX = Math.floor(Math.min(engine.selectionStart.x, engine.selectionEnd.x));
                 const maxX = Math.floor(Math.max(engine.selectionStart.x, engine.selectionEnd.x));
                 const minY = Math.floor(Math.min(engine.selectionStart.y, engine.selectionEnd.y));
                 const maxY = Math.floor(Math.max(engine.selectionStart.y, engine.selectionEnd.y));
 
-                const touchWorldX = Math.floor(worldPos.x);
-                const touchWorldY = Math.floor(worldPos.y);
-
-                // If touch is within selection bounds, start long press timer
                 if (touchWorldX >= minX && touchWorldX <= maxX &&
                     touchWorldY >= minY && touchWorldY <= maxY) {
-                    longPressTimerRef.current = setTimeout(() => {
-                        // Trigger command menu at current cursor position
-                        engine.commandSystem.startCommand(engine.cursorPos);
-
-                        // Set flag to prevent immediate command selection on touch end
-                        commandMenuJustOpenedRef.current = true;
-
-                        // Cancel panning since we're showing command menu
-                        isTouchPanningRef.current = false;
-                        panStartInfoRef.current = null;
-                        setIsPanning(false);
-
-                        // Haptic feedback if available
-                        if ('vibrate' in navigator) {
-                            navigator.vibrate(50);
-                        }
-                    }, LONG_PRESS_DURATION);
+                    isOverMoveableObject = true;
                 }
+            }
+
+            // Check for images
+            if (!isOverMoveableObject && findImageAtPosition(touchWorldPos)) {
+                isOverMoveableObject = true;
+            }
+
+            // Check for notes
+            if (!isOverMoveableObject && selectedNoteKey) {
+                try {
+                    const noteData = JSON.parse(engine.worldData[selectedNoteKey] as string);
+                    if (touchWorldX >= noteData.startX && touchWorldX <= noteData.endX &&
+                        touchWorldY >= noteData.startY && touchWorldY <= noteData.endY) {
+                        isOverMoveableObject = true;
+                    }
+                } catch (e) {
+                    // Invalid note data
+                }
+            }
+
+            // Check for iframes
+            if (!isOverMoveableObject && selectedIframeKey) {
+                try {
+                    const iframeData = JSON.parse(engine.worldData[selectedIframeKey] as string);
+                    if (touchWorldX >= iframeData.startX && touchWorldX <= iframeData.endX &&
+                        touchWorldY >= iframeData.startY && touchWorldY <= iframeData.endY) {
+                        isOverMoveableObject = true;
+                    }
+                } catch (e) {
+                    // Invalid iframe data
+                }
+            }
+
+            // Check for mail
+            if (!isOverMoveableObject && selectedMailKey) {
+                try {
+                    const mailData = JSON.parse(engine.worldData[selectedMailKey] as string);
+                    if (touchWorldX >= mailData.startX && touchWorldX <= mailData.endX &&
+                        touchWorldY >= mailData.startY && touchWorldY <= mailData.endY) {
+                        isOverMoveableObject = true;
+                    }
+                } catch (e) {
+                    // Invalid mail data
+                }
+            }
+
+            // If touch is over a moveable object, start long press timer
+            if (isOverMoveableObject) {
+                longPressTimerRef.current = setTimeout(() => {
+                    // Activate long press mode (ready to move or open command menu)
+                    longPressActivatedRef.current = true;
+                    touchMoveStartPosRef.current = touchWorldPos;
+
+                    // Cancel panning since we're in long press mode
+                    isTouchPanningRef.current = false;
+                    panStartInfoRef.current = null;
+                    setIsPanning(false);
+
+                    // Haptic feedback if available
+                    if ('vibrate' in navigator) {
+                        navigator.vibrate(50);
+                    }
+                }, LONG_PRESS_DURATION);
             }
         }
 
         canvasRef.current?.focus();
-    }, [engine]);
+    }, [engine, findImageAtPosition, selectedNoteKey, selectedIframeKey, selectedMailKey]);
 
     const handleTouchMove = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -6256,10 +6311,17 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             clientY: touch.clientY
         }));
 
-        // Cancel long press timer on any movement
+        // Cancel long press timer on any movement (before timer fires)
         if (longPressTimerRef.current) {
             clearTimeout(longPressTimerRef.current);
             longPressTimerRef.current = null;
+        }
+
+        // If long press is activated, we're in move mode - don't do pan/zoom/selection
+        // Just track that movement occurred for touch end
+        if (longPressActivatedRef.current && touches.length === 1) {
+            touchHasMovedRef.current = true;
+            return; // Don't process other gestures while in move mode
         }
 
         if (touches.length === 2 && isTouchPanningRef.current && panStartInfoRef.current) {
@@ -6361,6 +6423,217 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             longPressTimerRef.current = null;
         }
 
+        // Handle long press activated mode (move operation or command menu)
+        if (longPressActivatedRef.current && touchMoveStartPosRef.current) {
+            const endTouches = Array.from(e.changedTouches);
+
+            if (endTouches.length > 0) {
+                const endTouch = endTouches[0];
+                const endWorldPos = engine.screenToWorld(
+                    endTouch.clientX - rect.left,
+                    endTouch.clientY - rect.top,
+                    engine.zoomLevel,
+                    engine.viewOffset
+                );
+                const endPos = {
+                    x: Math.floor(endWorldPos.x),
+                    y: Math.floor(endWorldPos.y)
+                };
+
+                // Calculate distance vector
+                const distanceX = endPos.x - touchMoveStartPosRef.current.x;
+                const distanceY = endPos.y - touchMoveStartPosRef.current.y;
+
+                // Check if user dragged (movement beyond threshold)
+                if (touchHasMovedRef.current && (distanceX !== 0 || distanceY !== 0)) {
+                    // Execute move operation
+                    const imageAtPosition = findImageAtPosition(touchMoveStartPosRef.current);
+
+                    if (imageAtPosition) {
+                        // Move image (similar to shift+drag logic)
+                        const stagedImageIndex = engine.stagedImageData.findIndex(img => img === imageAtPosition);
+
+                        if (stagedImageIndex !== -1) {
+                            // Move staged image
+                            const newImageData = {
+                                ...imageAtPosition,
+                                startX: imageAtPosition.startX + distanceX,
+                                startY: imageAtPosition.startY + distanceY,
+                                endX: imageAtPosition.endX + distanceX,
+                                endY: imageAtPosition.endY + distanceY
+                            };
+
+                            engine.setStagedImageData(prev => {
+                                const newArray = [...prev];
+                                newArray[stagedImageIndex] = newImageData;
+                                return newArray;
+                            });
+                        } else {
+                            // Find and move persisted image
+                            let imageKey = null;
+                            for (const key in engine.worldData) {
+                                if (key.startsWith('image_')) {
+                                    const data = engine.worldData[key];
+                                    if (engine.isImageData(data) && data === imageAtPosition) {
+                                        imageKey = key;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (imageKey) {
+                                engine.moveImage(imageKey, distanceX, distanceY);
+                            }
+                        }
+                    } else if (selectedNoteKey) {
+                        // Move note
+                        try {
+                            const noteData = JSON.parse(engine.worldData[selectedNoteKey] as string);
+                            const newNoteData = {
+                                startX: noteData.startX + distanceX,
+                                endX: noteData.endX + distanceX,
+                                startY: noteData.startY + distanceY,
+                                endY: noteData.endY + distanceY,
+                                timestamp: Date.now()
+                            };
+
+                            const newNoteKey = `note_${newNoteData.startX},${newNoteData.startY}_${Date.now()}`;
+                            engine.setWorldData(prev => {
+                                const newData = { ...prev };
+                                delete newData[selectedNoteKey];
+                                newData[newNoteKey] = JSON.stringify(newNoteData);
+                                return newData;
+                            });
+
+                            setSelectedNoteKey(newNoteKey);
+                        } catch (e) {
+                            // Invalid note data
+                        }
+                    } else if (selectedIframeKey) {
+                        // Move iframe
+                        try {
+                            const iframeData = JSON.parse(engine.worldData[selectedIframeKey] as string);
+                            const newIframeData = {
+                                startX: iframeData.startX + distanceX,
+                                endX: iframeData.endX + distanceX,
+                                startY: iframeData.startY + distanceY,
+                                endY: iframeData.endY + distanceY,
+                                url: iframeData.url,
+                                timestamp: Date.now()
+                            };
+
+                            const newIframeKey = `iframe_${newIframeData.startX},${newIframeData.startY}_${Date.now()}`;
+                            engine.setWorldData(prev => {
+                                const newData = { ...prev };
+                                delete newData[selectedIframeKey];
+                                newData[newIframeKey] = JSON.stringify(newIframeData);
+                                return newData;
+                            });
+
+                            setSelectedIframeKey(newIframeKey);
+                        } catch (e) {
+                            // Invalid iframe data
+                        }
+                    } else if (selectedMailKey) {
+                        // Move mail
+                        try {
+                            const mailData = JSON.parse(engine.worldData[selectedMailKey] as string);
+                            const oldButtonKey = `mailbutton_${selectedMailKey}`;
+                            const buttonData = engine.worldData[oldButtonKey] ? JSON.parse(engine.worldData[oldButtonKey] as string) : null;
+
+                            const newMailData = {
+                                startX: mailData.startX + distanceX,
+                                endX: mailData.endX + distanceX,
+                                startY: mailData.startY + distanceY,
+                                endY: mailData.endY + distanceY,
+                                timestamp: Date.now()
+                            };
+
+                            const newMailKey = `mail_${newMailData.startX},${newMailData.startY}_${Date.now()}`;
+                            const newButtonKey = `mailbutton_${newMailKey}`;
+
+                            engine.setWorldData(prev => {
+                                const newData = { ...prev };
+                                delete newData[selectedMailKey];
+                                delete newData[oldButtonKey];
+                                newData[newMailKey] = JSON.stringify(newMailData);
+
+                                if (buttonData) {
+                                    newData[newButtonKey] = JSON.stringify({
+                                        ...buttonData,
+                                        mailKey: newMailKey,
+                                        x: newMailData.endX,
+                                        y: newMailData.endY
+                                    });
+                                }
+
+                                return newData;
+                            });
+
+                            setSelectedMailKey(newMailKey);
+                        } catch (e) {
+                            // Invalid mail data
+                        }
+                    } else if (engine.selectionStart && engine.selectionEnd) {
+                        // Move text selection
+                        const minX = Math.floor(Math.min(engine.selectionStart.x, engine.selectionEnd.x));
+                        const maxX = Math.floor(Math.max(engine.selectionStart.x, engine.selectionEnd.x));
+                        const minY = Math.floor(Math.min(engine.selectionStart.y, engine.selectionEnd.y));
+                        const maxY = Math.floor(Math.max(engine.selectionStart.y, engine.selectionEnd.y));
+
+                        const capturedChars: Array<{x: number, y: number, char: string}> = [];
+
+                        for (let y = minY; y <= maxY; y++) {
+                            for (let x = minX; x <= maxX; x++) {
+                                const key = `${x},${y}`;
+                                const data = engine.worldData[key];
+                                if (data && !engine.isImageData(data)) {
+                                    const char = engine.getCharacter(data);
+                                    if (char) {
+                                        capturedChars.push({ x, y, char });
+                                    }
+                                }
+                            }
+                        }
+
+                        if (capturedChars.length > 0) {
+                            const moves = capturedChars.map(({ x, y, char }) => ({
+                                fromX: x,
+                                fromY: y,
+                                toX: x + distanceX,
+                                toY: y + distanceY,
+                                char
+                            }));
+
+                            engine.batchMoveCharacters(moves);
+
+                            // Clear selection after successful move by clicking at the new position
+                            const newCenterScreenPos = engine.worldToScreen(
+                                minX + distanceX,
+                                minY + distanceY,
+                                engine.zoomLevel,
+                                engine.viewOffset
+                            );
+                            engine.handleCanvasClick(newCenterScreenPos.x, newCenterScreenPos.y, true, false, false, false);
+                        }
+                    }
+                } else {
+                    // No movement or minimal movement - open command menu (only for selections)
+                    if (engine.selectionStart && engine.selectionEnd) {
+                        engine.commandSystem.startCommand(engine.cursorPos);
+                        commandMenuJustOpenedRef.current = true;
+                    }
+                }
+            }
+
+            // Clear long press flags
+            longPressActivatedRef.current = false;
+            touchMoveStartPosRef.current = null;
+            touchStartRef.current = null;
+            touchHasMovedRef.current = false;
+            return; // Don't process other touch end events
+        }
+
         if (isTouchPanningRef.current) {
             // End two-finger pan
             isTouchPanningRef.current = false;
@@ -6452,7 +6725,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         touchStartRef.current = null;
         touchHasMovedRef.current = false;
-    }, [engine, handleCanvasClick]);
+    }, [engine, handleCanvasClick, findImageAtPosition, selectedNoteKey, setSelectedNoteKey, selectedIframeKey, setSelectedIframeKey, selectedMailKey, setSelectedMailKey]);
 
     // === IME Composition Handlers ===
     const handleCompositionStart = useCallback((e: React.CompositionEvent<HTMLCanvasElement>) => {
