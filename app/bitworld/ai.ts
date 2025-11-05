@@ -12,10 +12,10 @@ let ai: GoogleGenAI | null = null;
 
 function getAIClient(): GoogleGenAI {
     if (!ai) {
-        // Check server-side first, then client-side
-        const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+        // Server-side only - called from API routes
+        const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) {
-            throw new Error('GEMINI_API_KEY or NEXT_PUBLIC_GEMINI_API_KEY environment variable is not set');
+            throw new Error('GEMINI_API_KEY environment variable is not set');
         }
         ai = new GoogleGenAI({ apiKey });
     }
@@ -345,7 +345,12 @@ export function getCurrentWorldContext() {
 /**
  * Chat with AI maintaining conversation history
  */
-export async function chatWithAI(message: string, useCache: boolean = true, userId?: string): Promise<string> {
+export async function chatWithAI(
+    message: string,
+    useCache: boolean = true,
+    userId?: string,
+    worldContext?: { compiledText: string; labels: Array<{ text: string; x: number; y: number; }>; metadata?: string }
+): Promise<string> {
     const abortController = createAIAbortController();
 
     try {
@@ -371,14 +376,17 @@ export async function chatWithAI(message: string, useCache: boolean = true, user
             .join('\n');
 
         let response;
-        
+
         // Check for abort before making requests
         if (abortController.signal.aborted) {
             throw new Error('AI operation was interrupted');
         }
-        
+
+        // Use provided worldContext or fall back to global currentWorldContext
+        const contextToUse = worldContext || currentWorldContext;
+
         // Use world context cache if available and enabled
-        if (useCache && currentWorldContext) {
+        if (useCache && contextToUse) {
             try {
                 // Create or get cached content for world context
                 const cachedContentName = await createWorldContextCache();
@@ -404,7 +412,7 @@ export async function chatWithAI(message: string, useCache: boolean = true, user
                     ]);
                 } else {
                     // Fallback to old method if caching fails
-                    const contextContent = `User query: ${message}\n\nCanvas context (for reference): ${currentWorldContext.compiledText}\nLabels: ${currentWorldContext.labels.map(l => l.text).join(', ')}`;
+                    const contextContent = `User query: ${message}\n\nCanvas context (for reference): ${contextToUse.compiledText}\nLabels: ${contextToUse.labels.map(l => l.text).join(', ')}`;
 
                     response = await Promise.race([
                         getAIClient().models.generateContent({

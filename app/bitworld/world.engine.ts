@@ -16,19 +16,61 @@ import { useAutoDialogue } from './dialogue';
 import { get } from 'firebase/database';
 import { parseGIFFromArrayBuffer, getCurrentFrame, isGIFUrl } from './gif.parser';
 
-// Lazy-load heavy AI functions
-const loadAI = async () => {
+// API route helper functions for AI operations
+const callTransformAPI = async (text: string, instructions: string, userId?: string): Promise<string> => {
+    const response = await fetch('/api/transform', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, instructions, userId })
+    });
+    const data = await response.json();
+    return data.result;
+};
+
+const callExplainAPI = async (text: string, analysisType?: string, userId?: string): Promise<string> => {
+    const response = await fetch('/api/explain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, analysisType, userId })
+    });
+    const data = await response.json();
+    return data.result;
+};
+
+const callSummarizeAPI = async (text: string, focus?: string, userId?: string): Promise<string> => {
+    const response = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, focus, userId })
+    });
+    const data = await response.json();
+    return data.result;
+};
+
+const callChatAPI = async (prompt: string, addToHistory: boolean, userId?: string, worldContext?: any): Promise<string> => {
+    const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, addToHistory, userId, worldContext })
+    });
+    const data = await response.json();
+    return data.result;
+};
+
+const callGenerateImageAPI = async (prompt: string, referenceImage?: string, userId?: string, aspectRatio?: string): Promise<any> => {
+    const response = await fetch('/api/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, referenceImage, userId, aspectRatio })
+    });
+    const data = await response.json();
+    return data.result;
+};
+
+// Keep clearChatHistory as a local import since it's a simple utility
+const clearChatHistory = async () => {
     const ai = await import('./ai');
-    return {
-        transformText: ai.transformText,
-        explainText: ai.explainText,
-        summarizeText: ai.summarizeText,
-        chatWithAI: ai.chatWithAI,
-        clearChatHistory: ai.clearChatHistory,
-        updateWorldContext: ai.updateWorldContext,
-        generateImage: ai.generateImage,
-        getAutocompleteSuggestions: ai.getAutocompleteSuggestions
-    };
+    return ai.clearChatHistory();
 };
 
 // --- Constants --- (Copied and relevant ones kept)
@@ -3333,7 +3375,7 @@ export function useWorldEngine({
                                     return true;
                                 }
 
-                                loadAI().then(ai => ai.generateImage(aiPrompt, base64ImageData, userUid || undefined)).then(async (result) => {
+                                callGenerateImageAPI(aiPrompt, base64ImageData, userUid || undefined).then(async (result) => {
                                 // Check if quota exceeded
                                 if (result.text && result.text.startsWith('AI limit reached')) {
                                     if (upgradeFlowHandlerRef.current) {
@@ -3441,7 +3483,7 @@ export function useWorldEngine({
                             // Show visual feedback for image generation
                             setAiProcessingRegion({ startX: minX, endX: maxX, startY: minY, endY: maxY });
 
-                            loadAI().then(ai => ai.generateImage(aiPrompt, undefined, userUid || undefined)).then(async (result) => {
+                            callGenerateImageAPI(aiPrompt, undefined, userUid || undefined).then(async (result) => {
                                 // Check if quota exceeded
                                 if (result.text && result.text.startsWith('AI limit reached')) {
                                     if (upgradeFlowHandlerRef.current) {
@@ -3558,7 +3600,7 @@ export function useWorldEngine({
                             : aiPrompt;
 
                         setDialogueWithRevert(selectedText ? "Transforming text..." : "Generating text...", setDialogueText);
-                        loadAI().then(ai => ai.chatWithAI(fullPrompt, true, userUid || undefined)).then((response) => {
+                        callChatAPI(fullPrompt, true, userUid || undefined).then((response) => {
                             // Check if quota exceeded
                             if (response.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
@@ -3708,7 +3750,7 @@ export function useWorldEngine({
                             // Show visual feedback for image generation
                             setAiProcessingRegion(imageRegion);
 
-                            loadAI().then(ai => ai.generateImage(aiPrompt, base64ImageData, userUid || undefined, aspectRatio)).then(async (result) => {
+                            callGenerateImageAPI(aiPrompt, base64ImageData, userUid || undefined, aspectRatio).then(async (result) => {
                             // Check if quota exceeded
                             if (result.text && result.text.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
@@ -3892,7 +3934,7 @@ export function useWorldEngine({
                         const fullPrompt = `${aiPrompt}\n\nExisting text:\n${existingText}`;
 
                         setDialogueWithRevert("Transforming text...", setDialogueText);
-                        loadAI().then(ai => ai.chatWithAI(fullPrompt, true, userUid || undefined)).then((response) => {
+                        callChatAPI(fullPrompt, true, userUid || undefined).then((response) => {
                             // Check if quota exceeded
                             if (response.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
@@ -3965,7 +4007,7 @@ export function useWorldEngine({
 
                     // Priority 4: Default text-based AI chat (no selection, no image, no text block)
                     setDialogueWithRevert("Asking AI...", setDialogueText);
-                    loadAI().then(ai => ai.chatWithAI(aiPrompt, true, userUid || undefined)).then((response) => {
+                    callChatAPI(aiPrompt, true, userUid || undefined).then((response) => {
                         // Check if quota exceeded
                         if (response.startsWith('AI limit reached')) {
                             if (upgradeFlowHandlerRef.current) {
@@ -5998,7 +6040,7 @@ export function useWorldEngine({
                         setChatMode(prev => ({ ...prev, isProcessing: true }));
                         setDialogueWithRevert("Processing...", setDialogueText);
 
-                        loadAI().then(ai => ai.chatWithAI(chatMode.currentInput.trim(), true, userUid || undefined)).then((response) => {
+                        callChatAPI(chatMode.currentInput.trim(), true, userUid || undefined).then((response) => {
                             // Check if quota exceeded
                             if (response.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
@@ -6095,7 +6137,7 @@ export function useWorldEngine({
                         setChatMode(prev => ({ ...prev, isProcessing: true }));
                         setDialogueWithRevert("Processing...", setDialogueText);
 
-                        loadAI().then(ai => ai.chatWithAI(chatMode.currentInput.trim(), true, userUid || undefined)).then((response) => {
+                        callChatAPI(chatMode.currentInput.trim(), true, userUid || undefined).then((response) => {
                             // Check if quota exceeded
                             if (response.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
@@ -6447,7 +6489,7 @@ export function useWorldEngine({
                         
                         if (selectedText && instructions) {
                             setDialogueWithRevert("Processing transformation...", setDialogueText);
-                            loadAI().then(ai => ai.transformText(selectedText, instructions, userUid || undefined)).then((result) => {
+                            callTransformAPI(selectedText, instructions, userUid || undefined).then((result) => {
                                 // Check if quota exceeded
                                 if (result.startsWith('AI limit reached')) {
                                     if (upgradeFlowHandlerRef.current) {
@@ -6464,9 +6506,9 @@ export function useWorldEngine({
                     } else if (exec.command === 'explain') {
                         const selectedText = exec.args[0];
                         const instructions = exec.args.length > 1 ? exec.args.slice(1).join(' ') : 'analysis';
-                        
+
                         setDialogueWithRevert("Processing explanation...", setDialogueText);
-                        loadAI().then(ai => ai.explainText(selectedText, instructions, userUid || undefined)).then((result) => {
+                        callExplainAPI(selectedText, instructions, userUid || undefined).then((result) => {
                             // Check if quota exceeded
                             if (result.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
@@ -6484,7 +6526,7 @@ export function useWorldEngine({
                         const focus = exec.args.length > 1 ? exec.args.slice(1).join(' ') : undefined;
 
                         setDialogueWithRevert("Processing summary...", setDialogueText);
-                        loadAI().then(ai => ai.summarizeText(selectedText, focus, userUid || undefined)).then((result) => {
+                        callSummarizeAPI(selectedText, focus, userUid || undefined).then((result) => {
                             // Check if quota exceeded
                             if (result.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
@@ -6788,9 +6830,7 @@ export function useWorldEngine({
                         // Image generation/editing path
                         setDialogueWithRevert("Generating image...", setDialogueText);
 
-                        loadAI().then(ai => {
-                            return ai.generateImage(textToSend.trim(), existingImageData || undefined, userUid || undefined);
-                        }).then(async (result) => {
+                        callGenerateImageAPI(textToSend.trim(), existingImageData || undefined, userUid || undefined).then(async (result) => {
                             // Check if quota exceeded
                             if (result.text && result.text.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
@@ -6917,14 +6957,13 @@ export function useWorldEngine({
                         // Create enhanced prompt with character count target
                         const enhancedPrompt = `${textToSend.trim()}\n\n[Write a detailed response of approximately ${targetChars} characters to fill the available space. Be expansive and thorough.]`;
 
-                        loadAI().then(ai => {
-                            ai.updateWorldContext({
-                                compiledText: compiledTextString,
-                                labels: currentLabels,
-                                metadata: `Canvas viewport center: ${JSON.stringify(getViewportCenter())}, Current cursor: ${JSON.stringify(cursorPos)}`
-                            });
-                            return ai.chatWithAI(enhancedPrompt, true, userUid || undefined);
-                        }).then((response) => {
+                        const worldContext = {
+                            compiledText: compiledTextString,
+                            labels: currentLabels,
+                            metadata: `Canvas viewport center: ${JSON.stringify(getViewportCenter())}, Current cursor: ${JSON.stringify(cursorPos)}`
+                        };
+
+                        callChatAPI(enhancedPrompt, true, userUid || undefined, worldContext).then((response) => {
                             // Check if quota exceeded
                             if (response.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
@@ -7088,17 +7127,15 @@ export function useWorldEngine({
                     .map(([lineY, text]) => `Line ${lineY}: ${text}`)
                     .join('\n');
                 
-                // Update world context first, then chat
-                loadAI().then(ai => {
-                    ai.updateWorldContext({
-                        compiledText: compiledTextString,
-                        labels: currentLabels,
-                        metadata: `Canvas viewport center: ${JSON.stringify(getViewportCenter())}, Current cursor: ${JSON.stringify(cursorPos)}`
-                    });
+                // Prepare world context and chat
+                const worldContext = {
+                    compiledText: compiledTextString,
+                    labels: currentLabels,
+                    metadata: `Canvas viewport center: ${JSON.stringify(getViewportCenter())}, Current cursor: ${JSON.stringify(cursorPos)}`
+                };
 
-                    // Use world context for AI chat
-                    return ai.chatWithAI(textToSend.trim(), true, userUid || undefined); // true = use context
-                }).then((response) => {
+                // Use world context for AI chat
+                callChatAPI(textToSend.trim(), true, userUid || undefined, worldContext).then((response) => {
                     // Check if quota exceeded
                     if (response.startsWith('AI limit reached')) {
                         if (upgradeFlowHandlerRef.current) {
