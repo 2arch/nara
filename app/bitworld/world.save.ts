@@ -40,6 +40,9 @@ export function useWorldSave(
     const isSendingRef = useRef(false);
     const pendingSaveRef = useRef(false);
 
+    // Replay sequence counter
+    const replayCounterRef = useRef<number>(0);
+
     // Build world paths directly under /worlds/{userUid}/ when userUid is provided
     const getWorldPath = (worldPath: string) => userUid ? `worlds/${userUid}/${worldPath}` : `worlds/${worldPath}`;
 
@@ -63,6 +66,12 @@ export function useWorldSave(
         (currentStateName ?
             (isBlogs ? `worlds/blog/posts/${currentStateName}/clipboard` : getWorldPath(`${currentStateName}/clipboard`)) :
             (isBlogs ? null : getWorldPath(`${worldId}/clipboard`))) :
+        null;
+
+    const replayRefPath = worldId ?
+        (currentStateName ?
+            (isBlogs ? `worlds/blog/posts/${currentStateName}/replay` : getWorldPath(`${currentStateName}/replay`)) :
+            (isBlogs ? null : getWorldPath(`${worldId}/replay`))) :
         null;
 
     // --- Load Initial Data & Settings ---
@@ -226,7 +235,7 @@ export function useWorldSave(
             })
         ];
 
-        get(dataRef).then(() => {
+        get(dataRef).then(async () => {
             clearTimeout(timeoutId);
             if (autoLoadData) {
                 setLocalWorldData(initialData);
@@ -235,6 +244,28 @@ export function useWorldSave(
                 lastSyncedDataRef.current = initialData;
             }
             initialDataLoaded = true;
+
+            // Initialize replay counter by finding max index in replay log
+            if (replayRefPath) {
+                try {
+                    const replayRef = ref(database, replayRefPath);
+                    const replaySnapshot = await get(replayRef);
+                    if (replaySnapshot.exists()) {
+                        const replayData = replaySnapshot.val();
+                        const indices = Object.keys(replayData).map(k => parseInt(k, 10));
+                        const maxIndex = Math.max(...indices);
+                        replayCounterRef.current = maxIndex + 1;
+                        logger.debug(`📼 Replay counter initialized to ${replayCounterRef.current}`);
+                    } else {
+                        replayCounterRef.current = 0;
+                        logger.debug(`📼 Replay log empty, counter initialized to 0`);
+                    }
+                } catch (err) {
+                    logger.warn('Failed to initialize replay counter:', err);
+                    replayCounterRef.current = 0;
+                }
+            }
+
             setIsLoading(false);
         }).catch(handleError);
 
@@ -364,6 +395,24 @@ export function useWorldSave(
                 // Only write if there are changes
                 if (Object.keys(updates).length > 0) {
                     logger.debug(`📤 Sending ${Object.keys(updates).length} updates to Firebase`, updates);
+
+                    // Add replay log entries for each change
+                    if (replayRefPath) {
+                        for (const [fullPath, value] of Object.entries(updates)) {
+                            // Extract the key from the full path (e.g., "worlds/uid/home/data/5,10" -> "5,10")
+                            const key = fullPath.split('/').pop();
+                            if (key) {
+                                const replayEntry = {
+                                    key,
+                                    value,
+                                    timestamp: Date.now()
+                                };
+                                updates[`${replayRefPath}/${replayCounterRef.current}`] = replayEntry;
+                                replayCounterRef.current++;
+                            }
+                        }
+                    }
+
                     await update(ref(database), updates);
 
                     // Note: Firebase listeners will update lastSyncedDataRef when data is confirmed
@@ -575,6 +624,32 @@ export function useWorldSave(
         }
     }, [worldId, worldDataRefPath, clipboardRefPath, isReadOnly, isBlogs]);
 
-    return { isLoading, isSaving, error, clearWorldData };
+    // Function to fetch replay log
+    const fetchReplayLog = useCallback(async (): Promise<Array<{ key: string; value: any; timestamp: number }>> => {
+        if (!replayRefPath) {
+            return [];
+        }
+
+        try {
+            const replayRef = ref(database, replayRefPath);
+            const snapshot = await get(replayRef);
+
+            if (!snapshot.exists()) {
+                return [];
+            }
+
+            const replayData = snapshot.val();
+
+            // Convert to array and sort by index
+            return Object.entries(replayData)
+                .sort(([a], [b]) => parseInt(a, 10) - parseInt(b, 10))
+                .map(([_, entry]) => entry as { key: string; value: any; timestamp: number });
+        } catch (err: any) {
+            logger.error('Firebase: Error fetching replay log:', err);
+            return [];
+        }
+    }, [replayRefPath]);
+
+    return { isLoading, isSaving, error, clearWorldData, fetchReplayLog };
 }
  
