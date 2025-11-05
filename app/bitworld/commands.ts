@@ -1366,32 +1366,47 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 // Check if this is a webcam request
                 if (bgArg.toLowerCase() === 'webcam') {
                     try {
-                        // Request webcam access (uses back camera on mobile)
-                        const stream = await navigator.mediaDevices.getUserMedia({ 
-                            video: { 
+                        // Determine which camera to use based on param2
+                        let facingMode: 'user' | 'environment' = 'environment'; // Default to back camera
+                        let cameraLabel = 'back';
+
+                        if (param2) {
+                            const cameraArg = param2.toLowerCase();
+                            if (cameraArg === 'front') {
+                                facingMode = 'user';
+                                cameraLabel = 'front';
+                            } else if (cameraArg === 'back') {
+                                facingMode = 'environment';
+                                cameraLabel = 'back';
+                            }
+                        }
+
+                        // Request webcam access
+                        const stream = await navigator.mediaDevices.getUserMedia({
+                            video: {
                                 width: { ideal: 1920 },
                                 height: { ideal: 1080 },
-                                facingMode: 'environment' // Back camera on mobile, default on desktop
-                            }, 
-                            audio: false 
+                                facingMode: facingMode
+                            },
+                            audio: false
                         });
-                        
+
                         // Stop any existing stream
                         if (backgroundStreamRef.current) {
                             backgroundStreamRef.current.getTracks().forEach(track => track.stop());
                         }
-                        
+
                         // Store stream reference
                         backgroundStreamRef.current = stream;
-                        
-                        // Switch to stream background mode
-                        switchBackgroundMode('stream', undefined, param2, param3);
-                        setDialogueWithRevert("Webcam background active", setDialogueText);
+
+                        // Switch to stream background mode (use param3 for text color if provided)
+                        switchBackgroundMode('stream', undefined, param3);
+                        setDialogueWithRevert(`Webcam background active (${cameraLabel} camera)`, setDialogueText);
                     } catch (error) {
                         console.error('Failed to access webcam:', error);
                         setDialogueWithRevert("Failed to access webcam. Please grant camera permission.", setDialogueText);
                     }
-                    
+
                     // Clear command mode
                     setCommandState({
                         isActive: false,
@@ -1403,7 +1418,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         hasNavigated: false
                     });
                     setCommandData({});
-                    
+
                     return null;
                 }
                 // Check if this is a video background request
