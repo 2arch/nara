@@ -3327,31 +3327,44 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         }
 
                         if (isHovered) {
-                            // Hovered category label - use 90% opacity background
-                            ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                            // Text uses full opacity text color for prominence
-                            ctx.fillStyle = useStreamMode ? '#FFFFFF' : engine.textColor;
+                            // Hovered category label
+                            if (useStreamMode) {
+                                // Stream mode - no background, just white text
+                                ctx.fillStyle = '#FFFFFF';
+                            } else {
+                                // Normal mode - use background
+                                ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
+                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                ctx.fillStyle = engine.textColor;
+                            }
                         } else if (isSelected) {
-                            // Selected category label - use 80% opacity background
-                            ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.8)`;
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                            // Text uses full opacity text color for prominence
-                            ctx.fillStyle = useStreamMode ? '#FFFFFF' : engine.textColor;
+                            // Selected category label
+                            if (useStreamMode) {
+                                // Stream mode - no background, just white text
+                                ctx.fillStyle = '#FFFFFF';
+                            } else {
+                                // Normal mode - use background
+                                ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.8)`;
+                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                ctx.fillStyle = engine.textColor;
+                            }
                         } else {
-                            // Other category labels - use 60% opacity background
-                            ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.6)`;
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                            // Text uses 60% opacity text color
-                            ctx.fillStyle = `rgba(${textR}, ${textG}, ${textB}, 0.6)`;
+                            // Other category labels
+                            if (useStreamMode) {
+                                // Stream mode - no background, just white text with opacity
+                                ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+                            } else {
+                                // Normal mode - use background
+                                ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.6)`;
+                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                ctx.fillStyle = `rgba(${textR}, ${textG}, ${textB}, 0.6)`;
+                            }
                         }
                     } else if (worldY === engine.commandState.commandStartPos.y) {
                         // Command line (typed command) - use text color at full opacity
-                        // Special case: for stream/webcam mode with no background color, use semi-transparent dark background
+                        // Special case: for stream/webcam mode with no background color, don't draw background box
                         if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
-                            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                            // Text uses white color for visibility
+                            // No background - just white text
                             ctx.fillStyle = '#FFFFFF';
                         } else {
                             ctx.fillStyle = engine.textColor;
@@ -3372,9 +3385,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
                             ctx.fillStyle = luminance > 0.5 ? '#000000' : '#FFFFFF';
                         } else if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
-                            // Stream mode - use dark background for visibility
-                            ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            // Stream mode - no background, just white text
                             ctx.fillStyle = '#FFFFFF';
                         } else {
                             const hex = engine.textColor.replace('#', '');
@@ -3397,9 +3408,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
                             ctx.fillStyle = luminance > 0.5 ? '#000000' : '#FFFFFF';
                         } else if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
-                            // Stream mode - use dark background for visibility
-                            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            // Stream mode - no background, just white text
                             ctx.fillStyle = '#FFFFFF';
                         } else {
                             const hex = engine.textColor.replace('#', '');
@@ -3413,9 +3422,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     } else {
                         // Other suggestions - use text color at 60% opacity
                         if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
-                            // Stream mode - use dark background for visibility
-                            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            // Stream mode - no background, just white text with opacity
                             ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
                         } else {
                             const hex = engine.textColor.replace('#', '');
