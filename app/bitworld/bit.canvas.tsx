@@ -3302,12 +3302,15 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     // Draw background for command data
                     if (isCategoryLabel) {
                         // Category label - flip colors with alpha matching command suggestions
-                        const bgHex = (engine.backgroundColor || '#FFFFFF').replace('#', '');
+                        // Special handling for stream mode
+                        const useStreamMode = engine.backgroundMode === 'stream' && !engine.backgroundColor;
+
+                        const bgHex = useStreamMode ? '000000' : (engine.backgroundColor || '#FFFFFF').replace('#', '');
                         const bgR = parseInt(bgHex.substring(0, 2), 16);
                         const bgG = parseInt(bgHex.substring(2, 4), 16);
                         const bgB = parseInt(bgHex.substring(4, 6), 16);
 
-                        const textHex = engine.textColor.replace('#', '');
+                        const textHex = useStreamMode ? 'FFFFFF' : engine.textColor.replace('#', '');
                         const textR = parseInt(textHex.substring(0, 2), 16);
                         const textG = parseInt(textHex.substring(2, 4), 16);
                         const textB = parseInt(textHex.substring(4, 6), 16);
@@ -3328,13 +3331,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
                             ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
                             // Text uses full opacity text color for prominence
-                            ctx.fillStyle = engine.textColor;
+                            ctx.fillStyle = useStreamMode ? '#FFFFFF' : engine.textColor;
                         } else if (isSelected) {
                             // Selected category label - use 80% opacity background
                             ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.8)`;
                             ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
                             // Text uses full opacity text color for prominence
-                            ctx.fillStyle = engine.textColor;
+                            ctx.fillStyle = useStreamMode ? '#FFFFFF' : engine.textColor;
                         } else {
                             // Other category labels - use 60% opacity background
                             ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.6)`;
@@ -3368,6 +3371,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             const b = parseInt(hex.substring(4, 6), 16);
                             const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
                             ctx.fillStyle = luminance > 0.5 ? '#000000' : '#FFFFFF';
+                        } else if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
+                            // Stream mode - use dark background for visibility
+                            ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            ctx.fillStyle = '#FFFFFF';
                         } else {
                             const hex = engine.textColor.replace('#', '');
                             const r = parseInt(hex.substring(0, 2), 16);
@@ -3388,6 +3396,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
                             const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
                             ctx.fillStyle = luminance > 0.5 ? '#000000' : '#FFFFFF';
+                        } else if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
+                            // Stream mode - use dark background for visibility
+                            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            ctx.fillStyle = '#FFFFFF';
                         } else {
                             const hex = engine.textColor.replace('#', '');
                             const r = parseInt(hex.substring(0, 2), 16);
@@ -3399,18 +3412,25 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         }
                     } else {
                         // Other suggestions - use text color at 60% opacity
-                        const hex = engine.textColor.replace('#', '');
-                        const r = parseInt(hex.substring(0, 2), 16);
-                        const g = parseInt(hex.substring(2, 4), 16);
-                        const b = parseInt(hex.substring(4, 6), 16);
-                        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.6)`;
-                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                        // Text uses background color at higher opacity for readability
-                        const bgHex = (engine.backgroundColor || '#FFFFFF').replace('#', '');
-                        const bgR = parseInt(bgHex.substring(0, 2), 16);
-                        const bgG = parseInt(bgHex.substring(2, 4), 16);
-                        const bgB = parseInt(bgHex.substring(4, 6), 16);
-                        ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
+                        if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
+                            // Stream mode - use dark background for visibility
+                            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                        } else {
+                            const hex = engine.textColor.replace('#', '');
+                            const r = parseInt(hex.substring(0, 2), 16);
+                            const g = parseInt(hex.substring(2, 4), 16);
+                            const b = parseInt(hex.substring(4, 6), 16);
+                            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.6)`;
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            // Text uses background color at higher opacity for readability
+                            const bgHex = (engine.backgroundColor || '#FFFFFF').replace('#', '');
+                            const bgR = parseInt(bgHex.substring(0, 2), 16);
+                            const bgG = parseInt(bgHex.substring(2, 4), 16);
+                            const bgB = parseInt(bgHex.substring(4, 6), 16);
+                            ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
+                        }
                     }
 
                     // Draw text (only if not a space)
