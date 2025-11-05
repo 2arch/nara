@@ -3344,10 +3344,18 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         }
                     } else if (worldY === engine.commandState.commandStartPos.y) {
                         // Command line (typed command) - use text color at full opacity
-                        ctx.fillStyle = engine.textColor;
-                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                        // Text uses background color
-                        ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                        // Special case: for stream/webcam mode with no background color, use semi-transparent dark background
+                        if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
+                            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            // Text uses white color for visibility
+                            ctx.fillStyle = '#FFFFFF';
+                        } else {
+                            ctx.fillStyle = engine.textColor;
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            // Text uses background color
+                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                        }
                     } else if (isHovered) {
                         // Hovered suggestion - use swatch color if available, otherwise text color
                         if (highlightColor) {
