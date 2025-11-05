@@ -1816,9 +1816,29 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 backgroundImageRef.current.src = engine.backgroundImage;
             }
             
-            // Draw the cached image if it's loaded
+            // Draw the cached image if it's loaded, maintaining aspect ratio
             if (backgroundImageRef.current && backgroundImageRef.current.complete) {
-                ctx.drawImage(backgroundImageRef.current, 0, 0, cssWidth, cssHeight);
+                const image = backgroundImageRef.current;
+                const imageAspect = image.naturalWidth / image.naturalHeight;
+                const canvasAspect = cssWidth / cssHeight;
+
+                let drawWidth, drawHeight, drawX, drawY;
+
+                if (imageAspect > canvasAspect) {
+                    // Image is wider than canvas - fit to height and crop sides
+                    drawHeight = cssHeight;
+                    drawWidth = cssHeight * imageAspect;
+                    drawX = (cssWidth - drawWidth) / 2;
+                    drawY = 0;
+                } else {
+                    // Image is taller than canvas - fit to width and crop top/bottom
+                    drawWidth = cssWidth;
+                    drawHeight = cssWidth / imageAspect;
+                    drawX = 0;
+                    drawY = (cssHeight - drawHeight) / 2;
+                }
+
+                ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
             }
         } else if (engine.backgroundMode === 'video' && engine.backgroundVideo) {
             // Clear canvas first
@@ -6262,6 +6282,90 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             lastTapTimeRef.current = now;
             lastTapPosRef.current = currentPos;
 
+            // Check for resize thumb touches (highest priority - before long press or move)
+            const x = touches[0].x;
+            const y = touches[0].y;
+            const thumbSize = 8;
+            const thumbHitArea = thumbSize + 8; // Larger hit area for touch (was +4 for mouse)
+
+            const isWithinThumb = (px: number, py: number, tx: number, ty: number): boolean => {
+                return Math.abs(px - tx) <= thumbHitArea / 2 && Math.abs(py - ty) <= thumbHitArea / 2;
+            };
+
+            // Check image resize handles
+            if (selectedImageKey) {
+                const selectedImageData = engine.worldData[selectedImageKey];
+                if (engine.isImageData(selectedImageData)) {
+                    const topLeftScreen = engine.worldToScreen(selectedImageData.startX, selectedImageData.startY, engine.zoomLevel, engine.viewOffset);
+                    const bottomRightScreen = engine.worldToScreen(selectedImageData.endX + 1, selectedImageData.endY + 1, engine.zoomLevel, engine.viewOffset);
+
+                    const left = topLeftScreen.x;
+                    const right = bottomRightScreen.x;
+                    const top = topLeftScreen.y;
+                    const bottom = bottomRightScreen.y;
+
+                    let handle: ResizeHandle | null = null;
+                    if (isWithinThumb(x, y, left, top)) handle = 'top-left';
+                    else if (isWithinThumb(x, y, right, top)) handle = 'top-right';
+                    else if (isWithinThumb(x, y, right, bottom)) handle = 'bottom-right';
+                    else if (isWithinThumb(x, y, left, bottom)) handle = 'bottom-left';
+
+                    if (handle) {
+                        setResizeState({
+                            active: true,
+                            type: 'image',
+                            key: selectedImageKey,
+                            handle,
+                            originalBounds: {
+                                startX: selectedImageData.startX,
+                                startY: selectedImageData.startY,
+                                endX: selectedImageData.endX,
+                                endY: selectedImageData.endY
+                            }
+                        });
+                        return; // Early return - don't process other touch events
+                    }
+                }
+            }
+
+            // Check note resize handles
+            if (selectedNoteKey) {
+                try {
+                    const selectedNoteData = JSON.parse(engine.worldData[selectedNoteKey] as string);
+                    const topLeftScreen = engine.worldToScreen(selectedNoteData.startX, selectedNoteData.startY, engine.zoomLevel, engine.viewOffset);
+                    const bottomRightScreen = engine.worldToScreen(selectedNoteData.endX + 1, selectedNoteData.endY + 1, engine.zoomLevel, engine.viewOffset);
+
+                    const left = topLeftScreen.x;
+                    const right = bottomRightScreen.x;
+                    const top = topLeftScreen.y;
+                    const bottom = bottomRightScreen.y;
+
+                    let handle: ResizeHandle | null = null;
+                    if (isWithinThumb(x, y, left, top)) handle = 'top-left';
+                    else if (isWithinThumb(x, y, right, top)) handle = 'top-right';
+                    else if (isWithinThumb(x, y, right, bottom)) handle = 'bottom-right';
+                    else if (isWithinThumb(x, y, left, bottom)) handle = 'bottom-left';
+
+                    if (handle) {
+                        setResizeState({
+                            active: true,
+                            type: 'note',
+                            key: selectedNoteKey,
+                            handle,
+                            originalBounds: {
+                                startX: selectedNoteData.startX,
+                                startY: selectedNoteData.startY,
+                                endX: selectedNoteData.endX,
+                                endY: selectedNoteData.endY
+                            }
+                        });
+                        return; // Early return - don't process other touch events
+                    }
+                } catch (e) {
+                    // Skip invalid note data
+                }
+            }
+
             // Long press detection for move operations and command menu
             // Clear any existing timer
             if (longPressTimerRef.current) {
@@ -6375,6 +6479,73 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             longPressTimerRef.current = null;
         }
 
+        // Handle resize drag (highest priority)
+        if (resizeState.active && resizeState.handle && resizeState.originalBounds && touches.length === 1) {
+            const x = touches[0].x;
+            const y = touches[0].y;
+            const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
+            const snappedX = Math.floor(worldPos.x);
+            const snappedY = Math.floor(worldPos.y);
+
+            const { originalBounds, handle } = resizeState;
+            let newBounds = { ...originalBounds };
+
+            // Update bounds based on which corner handle is being dragged
+            switch (handle) {
+                case 'top-left':
+                    newBounds.startX = Math.min(snappedX, originalBounds.endX - 1);
+                    newBounds.startY = Math.min(snappedY, originalBounds.endY - 1);
+                    break;
+                case 'top-right':
+                    newBounds.endX = Math.max(snappedX, originalBounds.startX + 1);
+                    newBounds.startY = Math.min(snappedY, originalBounds.endY - 1);
+                    break;
+                case 'bottom-right':
+                    newBounds.endX = Math.max(snappedX, originalBounds.startX + 1);
+                    newBounds.endY = Math.max(snappedY, originalBounds.startY + 1);
+                    break;
+                case 'bottom-left':
+                    newBounds.startX = Math.min(snappedX, originalBounds.endX - 1);
+                    newBounds.endY = Math.max(snappedY, originalBounds.startY + 1);
+                    break;
+            }
+
+            // Apply the resize to the appropriate object type
+            if (resizeState.type === 'image' && resizeState.key) {
+                const imageData = engine.worldData[resizeState.key];
+                if (engine.isImageData(imageData)) {
+                    engine.setWorldData(prev => ({
+                        ...prev,
+                        [resizeState.key!]: {
+                            ...imageData,
+                            startX: newBounds.startX,
+                            startY: newBounds.startY,
+                            endX: newBounds.endX,
+                            endY: newBounds.endY
+                        }
+                    }));
+                }
+            } else if (resizeState.type === 'note' && resizeState.key) {
+                try {
+                    const noteData = JSON.parse(engine.worldData[resizeState.key] as string);
+                    engine.setWorldData(prev => ({
+                        ...prev,
+                        [resizeState.key!]: JSON.stringify({
+                            ...noteData,
+                            startX: newBounds.startX,
+                            startY: newBounds.startY,
+                            endX: newBounds.endX,
+                            endY: newBounds.endY
+                        })
+                    }));
+                } catch (e) {
+                    // Invalid note data
+                }
+            }
+
+            return; // Don't process other touch move events during resize
+        }
+
         // If long press is activated, we're in move mode - don't do pan/zoom/selection
         // Just track that movement occurred for touch end
         if (longPressActivatedRef.current && touches.length === 1) {
@@ -6479,6 +6650,18 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         if (longPressTimerRef.current) {
             clearTimeout(longPressTimerRef.current);
             longPressTimerRef.current = null;
+        }
+
+        // Reset resize state if active
+        if (resizeState.active) {
+            setResizeState({
+                active: false,
+                type: null,
+                key: null,
+                handle: null,
+                originalBounds: null
+            });
+            return; // Early return after resize complete
         }
 
         // Handle long press activated mode (move operation or command menu)
