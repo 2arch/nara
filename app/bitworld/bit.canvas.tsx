@@ -1823,7 +1823,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         } else if (engine.backgroundMode === 'video' && engine.backgroundVideo) {
             // Clear canvas first
             ctx.clearRect(0, 0, cssWidth, cssHeight);
-            
+
             // Check if we need to load a new video
             if (backgroundVideoUrlRef.current !== engine.backgroundVideo || !backgroundVideoRef.current) {
                 backgroundVideoUrlRef.current = engine.backgroundVideo;
@@ -1839,10 +1839,30 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     });
                 };
             }
-            
-            // Draw the video if it's loaded and playing
+
+            // Draw the video if it's loaded and playing, maintaining aspect ratio
             if (backgroundVideoRef.current && backgroundVideoRef.current.readyState >= 2) {
-                ctx.drawImage(backgroundVideoRef.current, 0, 0, cssWidth, cssHeight);
+                const video = backgroundVideoRef.current;
+                const videoAspect = video.videoWidth / video.videoHeight;
+                const canvasAspect = cssWidth / cssHeight;
+
+                let drawWidth, drawHeight, drawX, drawY;
+
+                if (videoAspect > canvasAspect) {
+                    // Video is wider than canvas - fit to height and crop sides
+                    drawHeight = cssHeight;
+                    drawWidth = cssHeight * videoAspect;
+                    drawX = (cssWidth - drawWidth) / 2;
+                    drawY = 0;
+                } else {
+                    // Video is taller than canvas - fit to width and crop top/bottom
+                    drawWidth = cssWidth;
+                    drawHeight = cssWidth / videoAspect;
+                    drawX = 0;
+                    drawY = (cssHeight - drawHeight) / 2;
+                }
+
+                ctx.drawImage(video, drawX, drawY, drawWidth, drawHeight);
             }
         } else if (engine.backgroundMode === 'space') {
             // Clear canvas for space background (handled by SpaceBackground component)
@@ -1850,7 +1870,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         } else if (engine.backgroundMode === 'stream' && engine.backgroundStream) {
             // Clear canvas first
             ctx.clearRect(0, 0, cssWidth, cssHeight);
-            
+
             // Set up video element for stream if not already created
             if (!backgroundStreamVideoRef.current) {
                 backgroundStreamVideoRef.current = document.createElement('video');
@@ -1858,7 +1878,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 backgroundStreamVideoRef.current.playsInline = true;
                 backgroundStreamVideoRef.current.muted = true;
             }
-            
+
             // Set the stream as the video source if it changed
             if (backgroundStreamVideoRef.current.srcObject !== engine.backgroundStream) {
                 backgroundStreamVideoRef.current.srcObject = engine.backgroundStream;
@@ -1866,10 +1886,30 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     console.warn('Failed to play stream:', err);
                 });
             }
-            
-            // Draw the stream if video is ready
+
+            // Draw the stream if video is ready, maintaining aspect ratio
             if (backgroundStreamVideoRef.current.readyState >= 2) {
-                ctx.drawImage(backgroundStreamVideoRef.current, 0, 0, cssWidth, cssHeight);
+                const video = backgroundStreamVideoRef.current;
+                const videoAspect = video.videoWidth / video.videoHeight;
+                const canvasAspect = cssWidth / cssHeight;
+
+                let drawWidth, drawHeight, drawX, drawY;
+
+                if (videoAspect > canvasAspect) {
+                    // Video is wider than canvas - fit to height and crop sides
+                    drawHeight = cssHeight;
+                    drawWidth = cssHeight * videoAspect;
+                    drawX = (cssWidth - drawWidth) / 2;
+                    drawY = 0;
+                } else {
+                    // Video is taller than canvas - fit to width and crop top/bottom
+                    drawWidth = cssWidth;
+                    drawHeight = cssWidth / videoAspect;
+                    drawX = 0;
+                    drawY = (cssHeight - drawHeight) / 2;
+                }
+
+                ctx.drawImage(video, drawX, drawY, drawWidth, drawHeight);
             }
         } else {
             // Default transparent mode
