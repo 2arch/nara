@@ -1791,7 +1791,8 @@ export function useWorldEngine({
         isLoading: isLoadingWorld,
         isSaving: isSavingWorld,
         error: worldPersistenceError,
-        clearWorldData
+        clearWorldData,
+        fetchReplayLog
     } = useWorldSave(
         shouldEnableWorldSave ? worldId : null,
         worldData,
@@ -5079,6 +5080,55 @@ export function useWorldEngine({
                         });
                     }
                     setDialogueWithRevert("Canvas cleared", setDialogueText);
+                } else if (exec.command === 'replay') {
+                    // Replay the canvas creation sequence
+                    const speed = exec.args && exec.args.length > 0 ? parseInt(exec.args[0], 10) : 100;
+
+                    setDialogueWithRevert("Loading replay...", setDialogueText);
+
+                    if (fetchReplayLog) {
+                        fetchReplayLog().then((replayLog) => {
+                            if (replayLog.length === 0) {
+                                setDialogueWithRevert("No replay data available", setDialogueText);
+                                return;
+                            }
+
+                            setDialogueWithRevert(`Replaying ${replayLog.length} changes at ${speed}ms per change...`, setDialogueText);
+
+                            // Clear canvas first
+                            setWorldData({});
+
+                            // Replay each change in sequence
+                            let index = 0;
+                            const replayInterval = setInterval(() => {
+                                if (index >= replayLog.length) {
+                                    clearInterval(replayInterval);
+                                    setDialogueWithRevert("Replay complete", setDialogueText);
+                                    return;
+                                }
+
+                                const entry = replayLog[index];
+                                setWorldData(prev => {
+                                    const next = { ...prev };
+                                    if (entry.value === null) {
+                                        // Deletion
+                                        delete next[entry.key];
+                                    } else {
+                                        // Addition or update
+                                        next[entry.key] = entry.value;
+                                    }
+                                    return next;
+                                });
+
+                                index++;
+                            }, speed);
+                        }).catch(err => {
+                            logger.error('Failed to fetch replay log:', err);
+                            setDialogueWithRevert("Failed to load replay data", setDialogueText);
+                        });
+                    } else {
+                        setDialogueWithRevert("Replay not available for this world", setDialogueText);
+                    }
                 } else if (exec.command === 'clip') {
                     // Paste clipboard content at cursor
                     if (exec.clipContent) {

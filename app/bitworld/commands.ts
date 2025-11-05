@@ -116,7 +116,7 @@ const AVAILABLE_COMMANDS = [
     // Styling & Display
     'bg', 'text', 'font',
     // State Management
-    'state', 'random', 'clear',
+    'state', 'random', 'clear', 'replay',
     // Sharing & Publishing
     'publish', 'unpublish', 'share', 'spawn', 'monogram',
     // Account
@@ -131,7 +131,7 @@ export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'create': ['label', 'task', 'link', 'clip', 'upload'],
     'special': ['mode', 'note', 'mail', 'chat', 'tutorial', 'help'],
     'style': ['bg', 'text', 'font'],
-    'state': ['state', 'random', 'clear'],
+    'state': ['state', 'random', 'clear', 'replay'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
     'account': ['signin', 'signout', 'account'],
     'debug': ['debug']
@@ -1836,6 +1836,31 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             return {
                 command: 'publish',
                 args: hasRegionFlag ? ['--region'] : [],
+                commandStartPos: commandState.commandStartPos
+            };
+        }
+
+        if (commandToExecute.startsWith('replay')) {
+            // Parse arguments for speed parameter (default 100ms between characters)
+            const parts = commandToExecute.split(/\s+/);
+            const speed = parts.length > 1 ? parseInt(parts[1], 10) : 100;
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            // Return command execution for world engine to handle
+            return {
+                command: 'replay',
+                args: [speed.toString()],
                 commandStartPos: commandState.commandStartPos
             };
         }
