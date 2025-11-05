@@ -12,7 +12,7 @@ let ai: GoogleGenAI | null = null;
 
 function getAIClient(): GoogleGenAI {
     if (!ai) {
-        const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+        const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) {
             throw new Error('GEMINI_API_KEY environment variable is not set');
         }
@@ -514,12 +514,7 @@ export async function createWorldContextCache(): Promise<string | null> {
         }
 
         // Create comprehensive world context content
-        const worldContextContent = [
-            {
-                role: 'user',
-                parts: [
-                    {
-                        text: `Canvas World Context:
+        const contextText = `Canvas World Context:
 
 Compiled Text Content:
 ${currentWorldContext.compiledText}
@@ -530,7 +525,23 @@ ${currentWorldContext.labels.map(l => `- "${l.text}" at (${l.x}, ${l.y})`).join(
 Metadata:
 ${currentWorldContext.metadata || 'No additional metadata'}
 
-This context represents the current state of the canvas/world that the user is working with. Use this information to provide contextually relevant responses about the canvas content, spatial relationships, and connections between elements.`
+This context represents the current state of the canvas/world that the user is working with. Use this information to provide contextually relevant responses about the canvas content, spatial relationships, and connections between elements.`;
+
+        // Gemini caching requires minimum 2048 tokens
+        // Rough estimate: 1 token ≈ 4 characters
+        const estimatedTokens = contextText.length / 4;
+
+        if (estimatedTokens < 2048) {
+            logger.debug(`Context too small for caching (estimated ${Math.floor(estimatedTokens)} tokens, need 2048+). Skipping cache.`);
+            return null;
+        }
+
+        const worldContextContent = [
+            {
+                role: 'user',
+                parts: [
+                    {
+                        text: contextText
                     }
                 ]
             }
@@ -754,55 +765,30 @@ export async function getAutocompleteSuggestions(
             ? `${context}\n${currentText}`
             : currentText;
 
+        // Note: Logprobs are not supported for gemini-2.5-flash-lite model
+        // Using simple text generation as fallback for autocomplete
         const response = await getAIClient().models.generateContent({
             model: 'gemini-2.5-flash-lite',
-            contents: prompt,
+            contents: `Continue this text with 3 possible next words (output format: "word1, word2, word3"): "${prompt}"`,
             config: {
-                responseLogprobs: true,
-                logprobs: 5, // top 5 token candidates
-                maxOutputTokens: 3, // Generate a few tokens to get alternatives
-                temperature: 0.9
+                maxOutputTokens: 20,
+                temperature: 0.7,
+                systemInstruction: 'Provide only 3 comma-separated word suggestions, no explanation.'
             }
         });
 
-        // Extract top candidates from logprobs
-        const logprobsResult = response.candidates?.[0]?.logprobsResult;
+        const result = response.text?.trim();
 
-        // Try topCandidates first - look through all steps to find one with candidates
-        let topCandidates = null;
-        if (logprobsResult?.topCandidates) {
-            for (let i = 0; i < logprobsResult.topCandidates.length; i++) {
-                if (logprobsResult.topCandidates[i]?.candidates && logprobsResult.topCandidates[i]?.candidates?.length && logprobsResult.topCandidates[i]?.candidates!.length > 0) {
-                    topCandidates = logprobsResult.topCandidates[i]?.candidates || null;
-                    break;
-                }
-            }
+        if (!result) {
+            return [];
         }
 
-        if (!topCandidates || topCandidates.length === 0) {
-            // Use chosenCandidates as fallback
-            const chosenCandidates = logprobsResult?.chosenCandidates;
-            if (chosenCandidates && chosenCandidates.length > 0) {
-                topCandidates = chosenCandidates;
-            } else {
-                return [];
-            }
-        }
-
-        // Convert candidates to suggestion strings, filter out non-word tokens
-        const suggestions = topCandidates
-            .filter(candidate => {
-                const token = candidate.token || '';
-                // Filter out special tokens, whitespace-only, punctuation-only
-                return token.trim().length > 0 && /[a-zA-Z]/.test(token);
-            })
-            .map(candidate => {
-                let token = candidate.token || '';
-                // Clean up token - remove leading whitespace but keep the word
-                token = token.trim();
-                return token;
-            })
-            .filter(token => token.length > 0);
+        // Parse comma-separated suggestions
+        const suggestions = result
+            .split(',')
+            .map(s => s.trim())
+            .filter(s => s.length > 0 && /^[a-zA-Z]+$/.test(s))
+            .slice(0, 3);
 
         return suggestions;
     } catch (error) {
