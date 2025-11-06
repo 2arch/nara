@@ -4234,6 +4234,89 @@ export function useWorldEngine({
                     } else {
                         setDialogueWithRevert("Usage: /label 'text' [textColor] [backgroundColor] or /label --distance <number>", setDialogueText);
                     }
+                } else if (exec.command === 'map') {
+                    // /map command - generate ephemeral procedural labels
+
+                    // Simple Perlin-like noise function for organic placement
+                    const simpleNoise = (x: number, y: number, seed: number = 0): number => {
+                        const n = Math.sin(x * 12.9898 + y * 78.233 + seed) * 43758.5453;
+                        return (n - Math.floor(n)) * 2 - 1; // -1 to 1
+                    };
+
+                    // Get viewport center
+                    const viewportCenter = getViewportCenter();
+                    const centerX = Math.floor(viewportCenter.x);
+                    const centerY = Math.floor(viewportCenter.y);
+
+                    // Generate labels with tasteful spacing
+                    const newLightData: WorldData = {};
+                    const mapRadius = 80; // Exploration radius
+                    const minSpacing = 25; // Minimum distance between labels
+                    const labelCount = 8; // Number of labels to generate
+                    const seed = Date.now(); // Random seed for this generation
+
+                    // Words for procedural labels (exploration-themed)
+                    const labelWords = [
+                        'vista', 'ridge', 'valley', 'peak', 'grove',
+                        'crossing', 'hollow', 'meadow', 'outlook', 'passage',
+                        'haven', 'clearing', 'ascent', 'trail', 'junction'
+                    ];
+
+                    const placedLabels: Array<{x: number, y: number}> = [];
+
+                    // Generate labels with Poisson-disk-like spacing
+                    let attempts = 0;
+                    const maxAttempts = 100;
+
+                    while (placedLabels.length < labelCount && attempts < maxAttempts) {
+                        attempts++;
+
+                        // Use noise to pick angle and radius for organic placement
+                        const angleNoise = simpleNoise(attempts * 0.1, seed * 0.001, 1);
+                        const radiusNoise = simpleNoise(attempts * 0.1, seed * 0.001, 2);
+
+                        const angle = angleNoise * Math.PI * 2;
+                        const radius = mapRadius * 0.4 + (radiusNoise + 1) * 0.5 * mapRadius * 0.6;
+
+                        const labelX = Math.floor(centerX + Math.cos(angle) * radius);
+                        const labelY = Math.floor(centerY + Math.sin(angle) * radius);
+
+                        // Check minimum spacing
+                        let tooClose = false;
+                        for (const placed of placedLabels) {
+                            const dx = labelX - placed.x;
+                            const dy = labelY - placed.y;
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+                            if (dist < minSpacing) {
+                                tooClose = true;
+                                break;
+                            }
+                        }
+
+                        if (!tooClose) {
+                            placedLabels.push({x: labelX, y: labelY});
+
+                            // Pick a word using noise
+                            const wordIndex = Math.floor((simpleNoise(labelX * 0.1, labelY * 0.1, seed) + 1) * 0.5 * labelWords.length) % labelWords.length;
+                            const word = labelWords[wordIndex];
+
+                            // Create styled character for each letter
+                            for (let i = 0; i < word.length; i++) {
+                                const key = `${labelX + i},${labelY}`;
+                                newLightData[key] = {
+                                    char: word[i],
+                                    style: {
+                                        color: textColor, // Use current text color
+                                    }
+                                };
+                            }
+                        }
+                    }
+
+                    // Set ephemeral data (cleared with Escape)
+                    setLightModeData(newLightData);
+                    setDialogueWithRevert(`Generated ${placedLabels.length} waypoints. Press Escape to clear.`, setDialogueText);
+
                 } else if (exec.command === 'task') {
                     // /task command - create a toggleable task from selection
                     if (selectionStart && selectionEnd) {
