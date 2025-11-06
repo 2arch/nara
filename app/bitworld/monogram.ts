@@ -863,9 +863,13 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                 const waveX = Math.sin(projY * waveFreq + wavePhase) * waveAmp;
                 const waveY = Math.cos(projX * waveFreq * 0.7 + wavePhase * 1.3) * waveAmp * 0.5;
 
+                // Fade distortion to zero at endpoints to keep them anchored
+                // sin(t * PI) gives 0 at both t=0 and t=1, peaks at t=0.5
+                const distortionFade = Math.sin(t * Math.PI);
+
                 // Apply all transformations to create the wavy line position
-                const wavyLineX = projX - distortX - waveX;
-                const wavyLineY = projY - distortY - waveY;
+                const wavyLineX = projX - (distortX + waveX) * distortionFade;
+                const wavyLineY = projY - (distortY + waveY) * distortionFade;
 
                 // Distance from current position to the wavy line
                 const distance = Math.sqrt((x - wavyLineX) ** 2 + (y - wavyLineY) ** 2);
@@ -937,8 +941,11 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                 const waveX = Math.sin(projY * waveFreq + wavePhase) * waveAmp;
                 const waveY = Math.cos(projX * waveFreq * 0.7 + wavePhase * 1.3) * waveAmp * 0.5;
 
-                const wavyLineX = projX - distortX - waveX;
-                const wavyLineY = projY - distortY - waveY;
+                // Fade distortion to zero at endpoints to keep them anchored
+                const distortionFade = Math.sin(t * Math.PI);
+
+                const wavyLineX = projX - (distortX + waveX) * distortionFade;
+                const wavyLineY = projY - (distortY + waveY) * distortionFade;
 
                 const distance = Math.sqrt((x - wavyLineX) ** 2 + (y - wavyLineY) ** 2);
                 const roadWidth = 2 + complexity * 2;
