@@ -426,25 +426,64 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
 
         // Sign in failed - check if it's wrong password or new user
         if (result.error && result.error.includes('invalid-credential')) {
-          // This is a new user, continue to username collection
-          const flow = HOST_FLOWS[state.currentFlowId!];
-          const usernameMessage = flow.messages['collect_username_welcome'];
+          // Check if user exists in database to distinguish between new user and wrong password
+          try {
+            const { ref, query, orderByChild, equalTo, get } = await import('firebase/database');
+            const usersQuery = query(ref(database, 'users'), orderByChild('email'), equalTo(newCollectedData.email));
+            const snapshot = await get(usersQuery);
 
-          setHostData({
-            text: usernameMessage.text,
-            centerPos: getViewportCenter(),
-            timestamp: Date.now()
-          });
+            if (snapshot.exists()) {
+              // User exists in database - this is a wrong password scenario
+              setHostData({
+                text: 'incorrect password. please try again.',
+                centerPos: getViewportCenter(),
+                timestamp: Date.now()
+              });
 
-          setState(prev => ({
-            ...prev,
-            currentMessageId: 'collect_username_welcome',
-            isProcessing: false,
-            isActive: true, // Reactivate flow for username collection
-            collectedData: newCollectedData // Explicitly preserve email and password
-          }));
+              setState(prev => ({
+                ...prev,
+                currentMessageId: 'collect_password',
+                isProcessing: false,
+                isActive: true // Reactivate flow so user can try again
+              }));
+              return false;
+            } else {
+              // User doesn't exist - this is a new user, continue to username collection
+              const flow = HOST_FLOWS[state.currentFlowId!];
+              const usernameMessage = flow.messages['collect_username_welcome'];
 
-          return true;
+              setHostData({
+                text: usernameMessage.text,
+                centerPos: getViewportCenter(),
+                timestamp: Date.now()
+              });
+
+              setState(prev => ({
+                ...prev,
+                currentMessageId: 'collect_username_welcome',
+                isProcessing: false,
+                isActive: true, // Reactivate flow for username collection
+                collectedData: newCollectedData // Explicitly preserve email and password
+              }));
+
+              return true;
+            }
+          } catch (dbError: any) {
+            console.error('Database check error:', dbError);
+            // Fallback to generic error if database check fails
+            setHostData({
+              text: 'something went wrong. please try again.',
+              centerPos: getViewportCenter(),
+              timestamp: Date.now()
+            });
+
+            setState(prev => ({
+              ...prev,
+              isProcessing: false,
+              isActive: true
+            }));
+            return false;
+          }
         } else {
           // Other error (wrong password, network issue, etc)
           setHostData({

@@ -10,7 +10,15 @@ interface MonogramTrailPosition {
 }
 
 // --- Monogram Pattern Types ---
-export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'geometry3d' | 'macintosh' | 'loading';
+export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'geometry3d' | 'macintosh' | 'loading' | 'road';
+
+// Label position interface for road mode
+export interface LabelPosition {
+    x: number;
+    y: number;
+    text: string;
+    color: string;
+}
 
 // 3D Geometry System - Extensible foundation for any 3D format
 export interface Vertex3D {
@@ -180,6 +188,7 @@ const useMonogramSystem = (
             geometry3d: [' ', '░', '▒', '▓', '█'], // Standard block progression for 3D
             macintosh: [' ', '░', '▒', '▓', '█'], // Standard block progression for Mac face
             loading: [' ', '░', '▒', '▓', '█'], // Standard block progression for loading text
+            road: [' ', '░', '▒', '▓', '█'], // Standard block progression for roads between labels
         };
 
         const charSet = chars[mode] || chars.perlin;
@@ -189,8 +198,8 @@ const useMonogramSystem = (
 
     // Get color from palette based on value
     const getColorFromPalette = useCallback((value: number, mode: MonogramMode, accentColor: string): string => {
-        if (mode === 'nara' || mode === 'macintosh' || mode === 'loading') {
-            // Use accent color for NARA, Macintosh, and Loading modes
+        if (mode === 'nara' || mode === 'macintosh' || mode === 'loading' || mode === 'road') {
+            // Use accent color for NARA, Macintosh, Loading, and Road modes
             return accentColor;
         }
 
@@ -795,6 +804,90 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
         return 0;
     }, [textToBitmap]);
 
+    // Road mode - Creates trails connecting all labels
+    const calculateRoad = useCallback((x: number, y: number, time: number, labels: LabelPosition[]): number => {
+        if (!labels || labels.length < 2) return 0;
+
+        const complexity = options.complexity;
+        let maxIntensity = 0;
+
+        // Create paths between consecutive labels
+        for (let i = 0; i < labels.length - 1; i++) {
+            const startLabel = labels[i];
+            const endLabel = labels[i + 1];
+
+            // Calculate distance from point to line segment between labels
+            const dx = endLabel.x - startLabel.x;
+            const dy = endLabel.y - startLabel.y;
+            const segmentLength = Math.sqrt(dx * dx + dy * dy);
+
+            if (segmentLength > 0) {
+                // Project point onto line segment
+                const t = Math.max(0, Math.min(1, ((x - startLabel.x) * dx + (y - startLabel.y) * dy) / (segmentLength * segmentLength)));
+                const projX = startLabel.x + t * dx;
+                const projY = startLabel.y + t * dy;
+
+                // Distance from current position to line segment
+                const distance = Math.sqrt((x - projX) ** 2 + (y - projY) ** 2);
+
+                // Road width based on complexity
+                const roadWidth = 2 + complexity * 2;
+
+                if (distance <= roadWidth) {
+                    // Calculate fade based on distance to path
+                    const distanceFade = 1 - (distance / roadWidth);
+
+                    // Add animated pulse along the road
+                    const progressAlongPath = t; // 0 to 1 along this segment
+                    const globalProgress = (i + progressAlongPath) / (labels.length - 1); // 0 to 1 across all segments
+
+                    // Create traveling wave effect
+                    const wavePhase = (globalProgress * Math.PI * 4) - (time * options.speed);
+                    const wavePulse = (Math.sin(wavePhase) * 0.5 + 0.5) * 0.3 + 0.7; // 0.7 to 1.0
+
+                    // Add distance-based variation for organic feel
+                    const noiseVariation = perlinNoise(
+                        projX * 0.1,
+                        projY * 0.1
+                    ) * 0.2 + 0.9; // 0.9 to 1.1
+
+                    const intensity = distanceFade * wavePulse * noiseVariation;
+                    maxIntensity = Math.max(maxIntensity, intensity);
+                }
+            }
+        }
+
+        // Optional: Add connections back to first label to create a loop
+        if (labels.length > 2) {
+            const startLabel = labels[labels.length - 1];
+            const endLabel = labels[0];
+
+            const dx = endLabel.x - startLabel.x;
+            const dy = endLabel.y - startLabel.y;
+            const segmentLength = Math.sqrt(dx * dx + dy * dy);
+
+            if (segmentLength > 0) {
+                const t = Math.max(0, Math.min(1, ((x - startLabel.x) * dx + (y - startLabel.y) * dy) / (segmentLength * segmentLength)));
+                const projX = startLabel.x + t * dx;
+                const projY = startLabel.y + t * dy;
+                const distance = Math.sqrt((x - projX) ** 2 + (y - projY) ** 2);
+                const roadWidth = 2 + complexity * 2;
+
+                if (distance <= roadWidth) {
+                    const distanceFade = 1 - (distance / roadWidth);
+                    const globalProgress = t;
+                    const wavePhase = (globalProgress * Math.PI * 4) - (time * options.speed);
+                    const wavePulse = (Math.sin(wavePhase) * 0.5 + 0.5) * 0.3 + 0.7;
+                    const noiseVariation = perlinNoise(projX * 0.1, projY * 0.1) * 0.2 + 0.9;
+                    const intensity = distanceFade * wavePulse * noiseVariation;
+                    maxIntensity = Math.max(maxIntensity, intensity);
+                }
+            }
+        }
+
+        return Math.min(1, maxIntensity);
+    }, [options.complexity, options.speed, perlinNoise]);
+
     // NARA text stretch distortion effect
     const calculateNara = useCallback((x: number, y: number, time: number, viewportBounds?: {
         startX: number,
@@ -955,7 +1048,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
         startY: number,
         endX: number,
         endY: number
-    }): number => {
+    }, labels?: LabelPosition[]): number => {
         switch (mode) {
             case 'clear': return 0; // No background pattern, only trails
             case 'perlin': return calculatePerlin(x, y, time);
@@ -963,9 +1056,10 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
             case 'geometry3d': return calculate3DGeometry(x, y, time, viewportBounds);
             case 'macintosh': return calculateMacintosh(x, y, time, viewportBounds);
             case 'loading': return calculateLoading(x, y, time, viewportBounds);
+            case 'road': return calculateRoad(x, y, time, labels || []);
             default: return calculatePerlin(x, y, time);
         }
-    }, [calculatePerlin, calculateNara, calculate3DGeometry, calculateMacintosh, calculateLoading]);
+    }, [calculatePerlin, calculateNara, calculate3DGeometry, calculateMacintosh, calculateLoading, calculateRoad]);
 
     // Calculate comet trail effect at a specific position
     const calculateTrailEffect = useCallback((x: number, y: number): number => {
@@ -1026,7 +1120,8 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
         startWorldY: number,
         endWorldX: number,
         endWorldY: number,
-        textColor?: string
+        textColor?: string,
+        labels?: LabelPosition[]
     ): MonogramPattern => {
         if (!options.enabled) return {};
 
@@ -1034,8 +1129,8 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
         const time = timeRef.current;
         const accentColor = textColor || '#000000'; // Default to black if not provided
 
-        // For NARA, Macintosh, Loading, and 3D geometry modes, use finer sampling for better quality
-        const step = (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading') ? 1 : Math.max(1, Math.floor(3 - options.complexity * 2));
+        // For NARA, Macintosh, Loading, Road, and 3D geometry modes, use finer sampling for better quality
+        const step = (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road') ? 1 : Math.max(1, Math.floor(3 - options.complexity * 2));
         
         for (let worldY = Math.floor(startWorldY); worldY <= Math.ceil(endWorldY); worldY += step) {
             for (let worldX = Math.floor(startWorldX); worldX <= Math.ceil(endWorldX); worldX += step) {
@@ -1043,15 +1138,15 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                 let rawValue: number;
                 let intensity: number;
 
-                // Special handling for nara, macintosh, loading, and geometry3d modes that need viewport bounds
-                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading') {
+                // Special handling for nara, macintosh, loading, road, and geometry3d modes that need viewport bounds or labels
+                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road') {
                     const viewportBounds = {
                         startX: startWorldX,
                         startY: startWorldY,
                         endX: endWorldX,
                         endY: endWorldY
                     };
-                    rawValue = calculatePattern(worldX, worldY, time, options.mode, viewportBounds);
+                    rawValue = calculatePattern(worldX, worldY, time, options.mode, viewportBounds, labels);
                     intensity = rawValue;
                 } else {
                     rawValue = calculatePattern(worldX, worldY, time, options.mode);
@@ -1064,7 +1159,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                 
                 // Skip very low intensity cells for performance (adjusted for trail effects)
                 const minThreshold = trailEffect > 0 ? 0.05 :
-                    ((options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading') ? 0.15 : 0.1);
+                    ((options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road') ? 0.15 : 0.1);
                 if (intensity < minThreshold) continue;
                 
                 const char = getCharForIntensity(intensity, options.mode);
@@ -1079,7 +1174,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                     const g = parseInt(hex.substring(2, 4), 16);
                     const b = parseInt(hex.substring(4, 6), 16);
                     color = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-                } else if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'clear' || options.mode === 'macintosh' || options.mode === 'loading') {
+                } else if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'clear' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road') {
                     // Use text color for all monochromatic modes
                     color = accentColor;
                 } else {
@@ -1087,8 +1182,8 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                     color = getColorFromPalette(colorValue, options.mode, accentColor);
                 }
                 
-                // For NARA, Macintosh, Loading, and geometry3d modes, only set the exact position to avoid grid artifacts
-                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading') {
+                // For NARA, Macintosh, Loading, Road, and geometry3d modes, only set the exact position to avoid grid artifacts
+                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road') {
                     const key = `${worldX},${worldY}`;
                     pattern[key] = {
                         char,
@@ -1116,7 +1211,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
 
     // Cycle to next mode (including off state)
     const cycleMode = useCallback(() => {
-        const modes: MonogramMode[] = ['clear', 'perlin'];
+        const modes: MonogramMode[] = ['clear', 'perlin', 'road'];
         setOptions(prev => {
             // If currently disabled, enable with first mode
             if (!prev.enabled) {
