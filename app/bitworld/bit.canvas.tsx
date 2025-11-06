@@ -726,6 +726,10 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             // Set to road mode (paths connecting labels)
             monogramSystem.updateOption('mode', 'road');
             monogramSystem.updateOption('enabled', true);
+        } else if (args[0] === 'map') {
+            // Set to terrain mode (topographic map visualization)
+            monogramSystem.updateOption('mode', 'terrain');
+            monogramSystem.updateOption('enabled', true);
         }
     }, [monogramSystem]);
 

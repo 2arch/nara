@@ -10,7 +10,7 @@ interface MonogramTrailPosition {
 }
 
 // --- Monogram Pattern Types ---
-export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'geometry3d' | 'macintosh' | 'loading' | 'road';
+export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'geometry3d' | 'macintosh' | 'loading' | 'road' | 'terrain';
 
 // Label position interface for road mode
 export interface LabelPosition {
@@ -189,6 +189,7 @@ const useMonogramSystem = (
             macintosh: [' ', '░', '▒', '▓', '█'], // Standard block progression for Mac face
             loading: [' ', '░', '▒', '▓', '█'], // Standard block progression for loading text
             road: [' ', '░', '▒', '▓', '█'], // Standard block progression for roads between labels
+            terrain: [' ', '░', '▒', '▓', '█'], // Contour lines for topographic visualization
         };
 
         const charSet = chars[mode] || chars.perlin;
@@ -198,8 +199,8 @@ const useMonogramSystem = (
 
     // Get color from palette based on value
     const getColorFromPalette = useCallback((value: number, mode: MonogramMode, accentColor: string): string => {
-        if (mode === 'nara' || mode === 'macintosh' || mode === 'loading' || mode === 'road') {
-            // Use accent color for NARA, Macintosh, Loading, and Road modes
+        if (mode === 'nara' || mode === 'macintosh' || mode === 'loading' || mode === 'road' || mode === 'terrain') {
+            // Use accent color for NARA, Macintosh, Loading, Road, and Terrain modes
             return accentColor;
         }
 
@@ -964,6 +965,69 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
         return Math.min(1, maxIntensity);
     }, [options.complexity, options.speed, perlinNoise]);
 
+    // Terrain mode - Topographic visualization creating distance field contours around labels
+    const calculateTerrain = useCallback((x: number, y: number, time: number, labels: LabelPosition[]): number => {
+        if (!labels || labels.length === 0) return 0;
+
+        const complexity = options.complexity;
+
+        // Calculate distance field from all labels
+        let minDistance = Infinity;
+        let nearestLabelColor = '#FFFFFF';
+
+        for (const label of labels) {
+            const dx = x - label.x;
+            const dy = y - label.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (distance < minDistance) {
+                minDistance = distance;
+                nearestLabelColor = label.color;
+            }
+        }
+
+        // Add organic variation using Perlin noise for realistic terrain feel
+        const noiseScale = 0.02 * complexity;
+        const terrainNoise = perlinNoise(
+            x * noiseScale + time * 0.1,
+            y * noiseScale - time * 0.08
+        );
+
+        // Add noise to distance to create varied terrain (±20% variation)
+        const noisyDistance = minDistance + (terrainNoise * minDistance * 0.2);
+
+        // Create contour lines at regular intervals
+        const contourInterval = 15 / complexity; // Denser contours with higher complexity
+        const contourPosition = (noisyDistance % contourInterval) / contourInterval;
+
+        // Create sharp contour lines (higher intensity near contour boundaries)
+        const contourThickness = 0.15; // Width of the contour line
+        let intensity = 0;
+
+        if (contourPosition < contourThickness || contourPosition > (1 - contourThickness)) {
+            // We're on a contour line
+            const distanceToContour = Math.min(contourPosition, 1 - contourPosition);
+            intensity = 1 - (distanceToContour / contourThickness);
+
+            // Add elevation-based intensity variation (higher = dimmer, lower = brighter)
+            const elevationFactor = Math.max(0.3, 1 - (noisyDistance / 200));
+            intensity *= elevationFactor;
+
+            // Add animated pulse along contours
+            const pulse = Math.sin(time * options.speed + noisyDistance * 0.1) * 0.15 + 0.85;
+            intensity *= pulse;
+        }
+
+        // Add subtle gradient fill between contours for depth
+        if (intensity < 0.2) {
+            const gradientIntensity = 0.1 * (1 - contourPosition);
+            const elevationFactor = Math.max(0.1, 1 - (noisyDistance / 300));
+            intensity = Math.max(intensity, gradientIntensity * elevationFactor);
+        }
+
+        return Math.max(0, Math.min(1, intensity));
+    }, [options.complexity, options.speed, perlinNoise]);
+
     // NARA text stretch distortion effect
     const calculateNara = useCallback((x: number, y: number, time: number, viewportBounds?: {
         startX: number,
@@ -1133,9 +1197,10 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
             case 'macintosh': return calculateMacintosh(x, y, time, viewportBounds);
             case 'loading': return calculateLoading(x, y, time, viewportBounds);
             case 'road': return calculateRoad(x, y, time, labels || []);
+            case 'terrain': return calculateTerrain(x, y, time, labels || []);
             default: return calculatePerlin(x, y, time);
         }
-    }, [calculatePerlin, calculateNara, calculate3DGeometry, calculateMacintosh, calculateLoading, calculateRoad]);
+    }, [calculatePerlin, calculateNara, calculate3DGeometry, calculateMacintosh, calculateLoading, calculateRoad, calculateTerrain]);
 
     // Calculate comet trail effect at a specific position
     const calculateTrailEffect = useCallback((x: number, y: number): number => {
@@ -1205,8 +1270,8 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
         const time = timeRef.current;
         const accentColor = textColor || '#000000'; // Default to black if not provided
 
-        // For NARA, Macintosh, Loading, Road, and 3D geometry modes, use finer sampling for better quality
-        const step = (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road') ? 1 : Math.max(1, Math.floor(3 - options.complexity * 2));
+        // For NARA, Macintosh, Loading, Road, Terrain, and 3D geometry modes, use finer sampling for better quality
+        const step = (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') ? 1 : Math.max(1, Math.floor(3 - options.complexity * 2));
         
         for (let worldY = Math.floor(startWorldY); worldY <= Math.ceil(endWorldY); worldY += step) {
             for (let worldX = Math.floor(startWorldX); worldX <= Math.ceil(endWorldX); worldX += step) {
@@ -1214,8 +1279,8 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                 let rawValue: number;
                 let intensity: number;
 
-                // Special handling for nara, macintosh, loading, road, and geometry3d modes that need viewport bounds or labels
-                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road') {
+                // Special handling for nara, macintosh, loading, road, terrain, and geometry3d modes that need viewport bounds or labels
+                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') {
                     const viewportBounds = {
                         startX: startWorldX,
                         startY: startWorldY,
@@ -1235,7 +1300,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                 
                 // Skip very low intensity cells for performance (adjusted for trail effects)
                 const minThreshold = trailEffect > 0 ? 0.05 :
-                    ((options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road') ? 0.15 : 0.1);
+                    ((options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') ? 0.15 : 0.1);
                 if (intensity < minThreshold) continue;
                 
                 const char = getCharForIntensity(intensity, options.mode);
@@ -1250,7 +1315,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                     const g = parseInt(hex.substring(2, 4), 16);
                     const b = parseInt(hex.substring(4, 6), 16);
                     color = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-                } else if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'clear' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road') {
+                } else if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'clear' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') {
                     // Use text color for all monochromatic modes
                     color = accentColor;
                 } else {
@@ -1258,8 +1323,8 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                     color = getColorFromPalette(colorValue, options.mode, accentColor);
                 }
                 
-                // For NARA, Macintosh, Loading, Road, and geometry3d modes, only set the exact position to avoid grid artifacts
-                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road') {
+                // For NARA, Macintosh, Loading, Road, Terrain, and geometry3d modes, only set the exact position to avoid grid artifacts
+                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') {
                     const key = `${worldX},${worldY}`;
                     pattern[key] = {
                         char,
@@ -1287,7 +1352,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
 
     // Cycle to next mode (including off state)
     const cycleMode = useCallback(() => {
-        const modes: MonogramMode[] = ['clear', 'perlin', 'road'];
+        const modes: MonogramMode[] = ['clear', 'perlin', 'road', 'terrain'];
         setOptions(prev => {
             // If currently disabled, enable with first mode
             if (!prev.enabled) {
