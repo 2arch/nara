@@ -1988,17 +1988,20 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     const worldX = parseInt(xStr, 10);
                     const worldY = parseInt(yStr, 10);
 
-                    const charString = engine.getCharacter(engine.worldData[key]);
-                    try {
-                        const labelData = JSON.parse(charString);
-                        labels.push({
-                            x: worldX,
-                            y: worldY,
-                            text: labelData.text || '',
-                            color: labelData.color || engine.textColor
-                        });
-                    } catch (e) {
-                        // Skip invalid label data
+                    const charData = engine.worldData[key];
+                    if (!engine.isImageData(charData)) {
+                        const charString = engine.getCharacter(charData);
+                        try {
+                            const labelData = JSON.parse(charString);
+                            labels.push({
+                                x: worldX,
+                                y: worldY,
+                                text: labelData.text || '',
+                                color: labelData.color || engine.textColor
+                            });
+                        } catch (e) {
+                            // Skip invalid label data
+                        }
                     }
                 }
             }
