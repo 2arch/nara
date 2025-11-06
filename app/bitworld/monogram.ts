@@ -1352,7 +1352,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
 
     // Cycle to next mode (including off state)
     const cycleMode = useCallback(() => {
-        const modes: MonogramMode[] = ['clear', 'perlin', 'road', 'terrain'];
+        const modes: MonogramMode[] = ['clear', 'perlin', 'road'];
         setOptions(prev => {
             // If currently disabled, enable with first mode
             if (!prev.enabled) {

@@ -108,7 +108,7 @@ const READ_ONLY_COMMANDS = ['signin', 'share'];
 // Commands organized by category for logical ordering
 const AVAILABLE_COMMANDS = [
     // Navigation & View
-    'nav', 'search', 'cam', 'indent', 'zoom',
+    'nav', 'search', 'cam', 'indent', 'zoom', 'map',
     // Content Creation
     'label', 'task', 'link', 'clip', 'upload',
     // Special
@@ -127,7 +127,7 @@ const AVAILABLE_COMMANDS = [
 
 // Category mapping for visual organization
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
-    'nav': ['nav', 'search', 'cam', 'indent', 'zoom'],
+    'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map'],
     'create': ['label', 'task', 'link', 'clip', 'upload'],
     'special': ['mode', 'note', 'mail', 'chat', 'tutorial', 'help'],
     'style': ['bg', 'text', 'font'],
@@ -147,6 +147,7 @@ const CAMERA_COMMANDS = ['default', 'focus'];
 export const COMMAND_HELP: { [command: string]: string } = {
     'nav': 'Navigate to saved labels. Type /nav to see all your labels, then select one to jump to that location. Labels act as spatial bookmarks in your canvas.',
     'search': 'Search through all text on your canvas. Type /search followed by your query to find and navigate to specific content. Useful for finding ideas in large canvases.',
+    'map': 'Generate a procedural map of ephemeral labels around your viewport. Creates a tasteful exploration terrain with temporary waypoints that disappear when you press Escape.',
     'cam': 'Control camera behavior. Use /cam focus to enable focus mode, which smoothly follows your cursor. Use /cam default to return to normal panning.',
     'indent': 'Toggle text indentation. This affects how new lines are indented when you press Enter, helping you organize thoughts hierarchically.',
     'label': 'Create a spatial label at your current selection. Type /label \'text\' [color]. Defaults to current text color (accent). Custom colors: /label \'text\' crimson. Labels show as colored cells with cutout text.',
