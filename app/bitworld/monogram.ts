@@ -804,11 +804,12 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
         return 0;
     }, [textToBitmap]);
 
-    // Road mode - Creates trails connecting all labels
+    // Road mode - Single line with NARA-style noise distortion for wavy/loopy effect
     const calculateRoad = useCallback((x: number, y: number, time: number, labels: LabelPosition[]): number => {
         if (!labels || labels.length < 2) return 0;
 
         const complexity = options.complexity;
+        const morphSpeed = 0.5; // Same as NARA
         let maxIntensity = 0;
 
         // Create paths between consecutive labels
@@ -827,8 +828,47 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                 const projX = startLabel.x + t * dx;
                 const projY = startLabel.y + t * dy;
 
-                // Distance from current position to line segment
-                const distance = Math.sqrt((x - projX) ** 2 + (y - projY) ** 2);
+                // Apply NARA-style noise distortion to make the line wavy
+                // Multi-layered noise for smooth morphing (same as NARA)
+                const noiseScale1 = 0.01 * complexity;
+                const noiseScale2 = 0.005 * complexity;
+
+                const noiseX1 = perlinNoise(
+                    projX * noiseScale1 + Math.cos(time * morphSpeed) * 5,
+                    projY * noiseScale1 + Math.sin(time * morphSpeed) * 5
+                );
+                const noiseY1 = perlinNoise(
+                    projX * noiseScale1 + Math.sin(time * morphSpeed * 1.3) * 5,
+                    projY * noiseScale1 + Math.cos(time * morphSpeed * 1.3) * 5
+                );
+
+                const noiseX2 = perlinNoise(
+                    projX * noiseScale2 + time * morphSpeed * 0.5,
+                    projY * noiseScale2 - time * morphSpeed * 0.3
+                );
+                const noiseY2 = perlinNoise(
+                    projX * noiseScale2 - time * morphSpeed * 0.3,
+                    projY * noiseScale2 + time * morphSpeed * 0.5
+                );
+
+                // Combine noise layers for smooth morphing
+                const morphAmount = 15 * complexity; // Adjusted for road scale
+                const distortX = (noiseX1 * 0.7 + noiseX2 * 0.3) * morphAmount;
+                const distortY = (noiseY1 * 0.7 + noiseY2 * 0.3) * morphAmount;
+
+                // Wave distortion that flows continuously (same as NARA)
+                const waveFreq = 0.02;
+                const waveAmp = 5 * complexity; // Adjusted for road scale
+                const wavePhase = time * 0.8;
+                const waveX = Math.sin(projY * waveFreq + wavePhase) * waveAmp;
+                const waveY = Math.cos(projX * waveFreq * 0.7 + wavePhase * 1.3) * waveAmp * 0.5;
+
+                // Apply all transformations to create the wavy line position
+                const wavyLineX = projX - distortX - waveX;
+                const wavyLineY = projY - distortY - waveY;
+
+                // Distance from current position to the wavy line
+                const distance = Math.sqrt((x - wavyLineX) ** 2 + (y - wavyLineY) ** 2);
 
                 // Road width based on complexity
                 const roadWidth = 2 + complexity * 2;
@@ -838,20 +878,14 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                     const distanceFade = 1 - (distance / roadWidth);
 
                     // Add animated pulse along the road
-                    const progressAlongPath = t; // 0 to 1 along this segment
-                    const globalProgress = (i + progressAlongPath) / (labels.length - 1); // 0 to 1 across all segments
+                    const progressAlongPath = t;
+                    const globalProgress = (i + progressAlongPath) / (labels.length - 1);
 
                     // Create traveling wave effect
-                    const wavePhase = (globalProgress * Math.PI * 4) - (time * options.speed);
-                    const wavePulse = (Math.sin(wavePhase) * 0.5 + 0.5) * 0.3 + 0.7; // 0.7 to 1.0
+                    const wavePhase2 = (globalProgress * Math.PI * 4) - (time * options.speed);
+                    const wavePulse = (Math.sin(wavePhase2) * 0.5 + 0.5) * 0.3 + 0.7;
 
-                    // Add distance-based variation for organic feel
-                    const noiseVariation = perlinNoise(
-                        projX * 0.1,
-                        projY * 0.1
-                    ) * 0.2 + 0.9; // 0.9 to 1.1
-
-                    const intensity = distanceFade * wavePulse * noiseVariation;
+                    const intensity = distanceFade * wavePulse;
                     maxIntensity = Math.max(maxIntensity, intensity);
                 }
             }
@@ -870,16 +904,51 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                 const t = Math.max(0, Math.min(1, ((x - startLabel.x) * dx + (y - startLabel.y) * dy) / (segmentLength * segmentLength)));
                 const projX = startLabel.x + t * dx;
                 const projY = startLabel.y + t * dy;
-                const distance = Math.sqrt((x - projX) ** 2 + (y - projY) ** 2);
+
+                // Apply NARA-style distortion
+                const noiseScale1 = 0.01 * complexity;
+                const noiseScale2 = 0.005 * complexity;
+
+                const noiseX1 = perlinNoise(
+                    projX * noiseScale1 + Math.cos(time * morphSpeed) * 5,
+                    projY * noiseScale1 + Math.sin(time * morphSpeed) * 5
+                );
+                const noiseY1 = perlinNoise(
+                    projX * noiseScale1 + Math.sin(time * morphSpeed * 1.3) * 5,
+                    projY * noiseScale1 + Math.cos(time * morphSpeed * 1.3) * 5
+                );
+
+                const noiseX2 = perlinNoise(
+                    projX * noiseScale2 + time * morphSpeed * 0.5,
+                    projY * noiseScale2 - time * morphSpeed * 0.3
+                );
+                const noiseY2 = perlinNoise(
+                    projX * noiseScale2 - time * morphSpeed * 0.3,
+                    projY * noiseScale2 + time * morphSpeed * 0.5
+                );
+
+                const morphAmount = 15 * complexity;
+                const distortX = (noiseX1 * 0.7 + noiseX2 * 0.3) * morphAmount;
+                const distortY = (noiseY1 * 0.7 + noiseY2 * 0.3) * morphAmount;
+
+                const waveFreq = 0.02;
+                const waveAmp = 5 * complexity;
+                const wavePhase = time * 0.8;
+                const waveX = Math.sin(projY * waveFreq + wavePhase) * waveAmp;
+                const waveY = Math.cos(projX * waveFreq * 0.7 + wavePhase * 1.3) * waveAmp * 0.5;
+
+                const wavyLineX = projX - distortX - waveX;
+                const wavyLineY = projY - distortY - waveY;
+
+                const distance = Math.sqrt((x - wavyLineX) ** 2 + (y - wavyLineY) ** 2);
                 const roadWidth = 2 + complexity * 2;
 
                 if (distance <= roadWidth) {
                     const distanceFade = 1 - (distance / roadWidth);
                     const globalProgress = t;
-                    const wavePhase = (globalProgress * Math.PI * 4) - (time * options.speed);
-                    const wavePulse = (Math.sin(wavePhase) * 0.5 + 0.5) * 0.3 + 0.7;
-                    const noiseVariation = perlinNoise(projX * 0.1, projY * 0.1) * 0.2 + 0.9;
-                    const intensity = distanceFade * wavePulse * noiseVariation;
+                    const wavePhase2 = (globalProgress * Math.PI * 4) - (time * options.speed);
+                    const wavePulse = (Math.sin(wavePhase2) * 0.5 + 0.5) * 0.3 + 0.7;
+                    const intensity = distanceFade * wavePulse;
                     maxIntensity = Math.max(maxIntensity, intensity);
                 }
             }
