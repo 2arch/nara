@@ -4300,16 +4300,12 @@ export function useWorldEngine({
                             const wordIndex = Math.floor((simpleNoise(labelX * 0.1, labelY * 0.1, seed) + 1) * 0.5 * labelWords.length) % labelWords.length;
                             const word = labelWords[wordIndex];
 
-                            // Create styled character for each letter
-                            for (let i = 0; i < word.length; i++) {
-                                const key = `${labelX + i},${labelY}`;
-                                newLightData[key] = {
-                                    char: word[i],
-                                    style: {
-                                        color: textColor, // Use current text color
-                                    }
-                                };
-                            }
+                            // Create proper label entry (same format as permanent labels)
+                            const labelKey = `label_${labelX},${labelY}`;
+                            newLightData[labelKey] = JSON.stringify({
+                                text: word,
+                                color: textColor
+                            });
                         }
                     }
 

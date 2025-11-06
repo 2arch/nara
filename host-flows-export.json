@@ -1,0 +1,320 @@
+{
+  "tutorialFlow": {
+    "flowId": "tutorial",
+    "startMessageId": "tutorial_welcome",
+    "messages": {
+      "tutorial_welcome": {
+        "id": "tutorial_welcome",
+        "text": "Welcome to the Nara tutorial! \n \n I'll teach you the basics of spatial writing.",
+        "expectsInput": false,
+        "requiresChatMode": false,
+        "nextMessageId": "learn_background"
+      },
+      "learn_background": {
+        "id": "learn_background",
+        "text": "Let's start by changing the background color. \n \n Type: /bg chalk",
+        "expectsInput": true,
+        "requiresChatMode": false,
+        "expectedCommand": "bg",
+        "commandValidator": "Validates: cmd === 'bg' && args[0].toLowerCase() === 'chalk'",
+        "nextMessageId": "background_success",
+        "previousMessageId": "tutorial_welcome"
+      },
+      "background_success": {
+        "id": "background_success",
+        "text": "Perfect! You changed the background to red. \n \n Next, let's learn about text colors.",
+        "expectsInput": false,
+        "requiresChatMode": false,
+        "nextMessageId": "learn_color",
+        "previousMessageId": "learn_background"
+      },
+      "learn_color": {
+        "id": "learn_color",
+        "text": "Now change your text color. \n \n Type: /text garden",
+        "expectsInput": true,
+        "requiresChatMode": false,
+        "expectedCommand": "text",
+        "commandValidator": "Validates: cmd === 'text' && args[0].toLowerCase() === 'garden'",
+        "nextMessageId": "color_success",
+        "previousMessageId": "background_success"
+      },
+      "color_success": {
+        "id": "color_success",
+        "text": "Great! Your text is now garden green. \n \n Let's create a label to organize your thoughts.",
+        "expectsInput": false,
+        "requiresChatMode": false,
+        "nextMessageId": "learn_label",
+        "previousMessageId": "learn_color"
+      },
+      "learn_label": {
+        "id": "learn_label",
+        "text": "Labels help you mark important points in space. \n \n First, select a location by clicking and dragging on the canvas. \n \n Then, type: /label ",
+        "expectsInput": true,
+        "requiresChatMode": false,
+        "expectedCommand": "label",
+        "commandValidator": "Validates: cmd === 'label' && args.length > 0",
+        "nextMessageId": "label_success",
+        "previousMessageId": "color_success"
+      },
+      "label_success": {
+        "id": "label_success",
+        "text": "Excellent! You created a label. \n \n Labels appear as arrows pointing to that location.",
+        "expectsInput": false,
+        "requiresChatMode": false,
+        "nextMessageId": "tutorial_complete",
+        "previousMessageId": "learn_label"
+      },
+      "tutorial_complete": {
+        "id": "tutorial_complete",
+        "text": "You've completed the basics! \n \n Type /help anytime to see all commands. Happy writing!",
+        "expectsInput": false,
+        "requiresChatMode": false,
+        "previousMessageId": "label_success"
+      }
+    }
+  },
+  "welcomeFlow": {
+    "flowId": "welcome",
+    "startMessageId": "welcome_message",
+    "messages": {
+      "welcome_message": {
+        "id": "welcome_message",
+        "text": "Hey! Welcome to Nara.",
+        "expectsInput": false,
+        "nextMessageId": "explain_nara"
+      },
+      "explain_nara": {
+        "id": "explain_nara",
+        "text": "Nara is a new medium for spatial writing. \n \n ",
+        "expectsInput": false,
+        "nextMessageId": "explain_function",
+        "previousMessageId": "welcome_message"
+      },
+      "explain_function": {
+        "id": "explain_function",
+        "text": "It's meant to provide a unique, and intuitve writing experience.",
+        "expectsInput": false,
+        "nextMessageId": "explain_user",
+        "previousMessageId": "explain_nara"
+      },
+      "explain_user": {
+        "id": "explain_user",
+        "text": "I've added some markers to get you started. Take a look around! \n \n (use two fingers to pan)",
+        "expectsInput": false,
+        "nextMessageId": "validate_user",
+        "previousMessageId": "explain_function",
+        "spawnContent": "Spawns 3 labels offscreen: 'non-linear thinking', 'spatial canvas', 'connect ideas'"
+      },
+      "validate_user": {
+        "id": "validate_user",
+        "text": "As you spend more time here, you'll find that the real limit is your ability to harness the space to connect the dots. \n \n We created a medium that helps you think better.",
+        "expectsInput": false,
+        "nextMessageId": "welcome",
+        "previousMessageId": "explain_user"
+      },
+      "welcome": {
+        "id": "welcome",
+        "text": "Type your email and hit enter to begin your journey.",
+        "expectsInput": true,
+        "inputType": "email",
+        "inputValidator": "Email regex validation",
+        "nextMessageId": "collect_password",
+        "previousMessageId": "validate_user",
+        "despawnLabels": true
+      },
+      "collect_password": {
+        "id": "collect_password",
+        "text": "choose a password (at least 6 characters)",
+        "expectsInput": true,
+        "inputType": "password",
+        "inputValidator": "Min 6 characters",
+        "onResponse": "Returns 'checking_user' - attempts sign in first",
+        "previousMessageId": "welcome"
+      },
+      "checking_user": {
+        "id": "checking_user",
+        "text": "checking credentials...",
+        "expectsInput": false,
+        "note": "Attempts to sign in with email/password. If successful, redirects to user's world. If fails, proceeds to username collection for new user."
+      },
+      "collect_username_welcome": {
+        "id": "collect_username_welcome",
+        "text": "choose a username",
+        "expectsInput": true,
+        "inputType": "username",
+        "inputValidator": "3-20 chars, alphanumeric + underscore, checks availability",
+        "onResponse": "Returns 'creating_account'",
+        "previousMessageId": "collect_password"
+      },
+      "creating_account": {
+        "id": "creating_account",
+        "text": "creating your account...",
+        "expectsInput": false,
+        "note": "Creates Firebase account, sets up profile, stores world settings"
+      },
+      "account_created": {
+        "id": "account_created",
+        "text": "welcome to nara!",
+        "expectsInput": false
+      },
+      "ask_navigation": {
+        "id": "ask_navigation",
+        "text": "would you like to navigate to your home world? \n \n (yes / no)",
+        "expectsInput": true,
+        "inputType": "choice",
+        "choices": ["yes", "no"],
+        "branchLogic": "yes -> navigate_home, no -> stay_in_public",
+        "previousMessageId": "account_created",
+        "note": "Only shown when signing up in public world (e.g., /base)"
+      },
+      "navigate_home": {
+        "id": "navigate_home",
+        "text": "taking you to your world...",
+        "expectsInput": false,
+        "note": "Redirects to /{username}"
+      },
+      "stay_in_public": {
+        "id": "stay_in_public",
+        "text": "sounds good! you can always navigate to your home world using the /state command. \n \n enjoy! (press enter to continue)",
+        "expectsInput": true,
+        "inputType": "text",
+        "inputValidator": "Accepts any input",
+        "nextMessageId": "dismiss_flow"
+      },
+      "dismiss_flow": {
+        "id": "dismiss_flow",
+        "text": "",
+        "expectsInput": false,
+        "note": "Cleans up and exits flow"
+      }
+    }
+  },
+  "upgradeFlow": {
+    "flowId": "upgrade",
+    "startMessageId": "limit_reached",
+    "messages": {
+      "limit_reached": {
+        "id": "limit_reached",
+        "text": "You've hit your daily AI limit.",
+        "expectsInput": false,
+        "nextMessageId": "explain_limit"
+      },
+      "explain_limit": {
+        "id": "explain_limit",
+        "text": "On the fresh tier, you get 5 AI interactions per day. \n \n This helps us keep Nara sustainable while you explore.",
+        "expectsInput": false,
+        "nextMessageId": "introduce_pro",
+        "previousMessageId": "limit_reached"
+      },
+      "introduce_pro": {
+        "id": "introduce_pro",
+        "text": "But if you're ready to go deeper, Nara Pro gives you unlimited AI.",
+        "expectsInput": false,
+        "nextMessageId": "show_benefits",
+        "previousMessageId": "explain_limit"
+      },
+      "show_benefits": {
+        "id": "show_benefits",
+        "text": "With Pro, you can: \n \n → Generate unlimited images \n → Transform text without limits \n → Chat with AI as much as you need \n → Push your thinking further",
+        "expectsInput": false,
+        "nextMessageId": "show_pricing",
+        "previousMessageId": "introduce_pro"
+      },
+      "show_pricing": {
+        "id": "show_pricing",
+        "text": "Nara Pro is $10/month. \n \n Think of it as the cost of two coffees for unlimited creative space.",
+        "expectsInput": false,
+        "nextMessageId": "upgrade_prompt",
+        "previousMessageId": "show_benefits"
+      },
+      "upgrade_prompt": {
+        "id": "upgrade_prompt",
+        "text": "Ready to upgrade? \n \n Type \"yes\" to continue, or \"no\" if you'd like to stay on the fresh tier.",
+        "expectsInput": true,
+        "inputType": "choice",
+        "choices": ["yes", "no"],
+        "inputValidator": "Must be 'yes' or 'no'",
+        "onResponse": "yes -> redirecting_to_checkout, no -> upgrade_declined",
+        "previousMessageId": "show_pricing"
+      },
+      "redirecting_to_checkout": {
+        "id": "redirecting_to_checkout",
+        "text": "taking you to checkout...",
+        "expectsInput": false,
+        "note": "Creates Stripe checkout session and redirects"
+      },
+      "upgrade_declined": {
+        "id": "upgrade_declined",
+        "text": "No worries! Your quota resets tomorrow. \n \n You can always upgrade later by typing /pro.",
+        "expectsInput": false
+      }
+    }
+  },
+  "verificationFlow": {
+    "flowId": "verification",
+    "startMessageId": "collect_username",
+    "note": "Used after email verification to collect username",
+    "messages": {
+      "collect_username": {
+        "id": "collect_username",
+        "text": "choose a username",
+        "expectsInput": true,
+        "inputType": "username",
+        "inputValidator": "3-20 chars, alphanumeric + underscore, checks availability",
+        "onResponse": "Returns 'creating_profile'"
+      },
+      "creating_profile": {
+        "id": "creating_profile",
+        "text": "creating your profile...",
+        "expectsInput": false,
+        "note": "Creates/updates user profile in Firebase"
+      },
+      "profile_created": {
+        "id": "profile_created",
+        "text": "welcome to nara!",
+        "expectsInput": false
+      }
+    }
+  },
+  "passwordResetFlow": {
+    "flowId": "password_reset",
+    "startMessageId": "reset_welcome",
+    "messages": {
+      "reset_welcome": {
+        "id": "reset_welcome",
+        "text": "Welcome back! Let's reset your password.",
+        "expectsInput": false,
+        "nextMessageId": "collect_email"
+      },
+      "collect_email": {
+        "id": "collect_email",
+        "text": "Enter your email address:",
+        "expectsInput": true,
+        "inputType": "email",
+        "inputValidator": "Email regex validation",
+        "nextMessageId": "collect_new_password",
+        "previousMessageId": "reset_welcome"
+      },
+      "collect_new_password": {
+        "id": "collect_new_password",
+        "text": "Choose a new password (at least 6 characters):",
+        "expectsInput": true,
+        "inputType": "password",
+        "inputValidator": "Min 6 characters",
+        "onResponse": "Returns 'resetting_password'",
+        "previousMessageId": "collect_email"
+      },
+      "resetting_password": {
+        "id": "resetting_password",
+        "text": "resetting your password...",
+        "expectsInput": false,
+        "note": "Updates password via Firebase, then signs user in"
+      },
+      "reset_complete": {
+        "id": "reset_complete",
+        "text": "Password reset! Signing you in...",
+        "expectsInput": false
+      }
+    }
+  }
+}

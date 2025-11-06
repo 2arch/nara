@@ -1979,8 +1979,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         // === Render Monogram Patterns ===
         if (monogramEnabled) {
-            // Extract label positions for road mode
+            // Extract label positions for road mode (from both worldData and lightModeData)
             const labels: Array<{x: number, y: number, text: string, color: string}> = [];
+
+            // Check worldData for permanent labels
             for (const key in engine.worldData) {
                 if (key.startsWith('label_')) {
                     const coordsStr = key.substring('label_'.length);
@@ -1993,6 +1995,31 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const charString = engine.getCharacter(charData);
                         try {
                             const labelData = JSON.parse(charString);
+                            labels.push({
+                                x: worldX,
+                                y: worldY,
+                                text: labelData.text || '',
+                                color: labelData.color || engine.textColor
+                            });
+                        } catch (e) {
+                            // Skip invalid label data
+                        }
+                    }
+                }
+            }
+
+            // Also check lightModeData for ephemeral labels (from /map command)
+            for (const key in engine.lightModeData) {
+                if (key.startsWith('label_')) {
+                    const coordsStr = key.substring('label_'.length);
+                    const [xStr, yStr] = coordsStr.split(',');
+                    const worldX = parseInt(xStr, 10);
+                    const worldY = parseInt(yStr, 10);
+
+                    const charData = engine.lightModeData[key];
+                    if (typeof charData === 'string') {
+                        try {
+                            const labelData = JSON.parse(charData);
                             labels.push({
                                 x: worldX,
                                 y: worldY,
