@@ -4444,14 +4444,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             const margin = 2;
                             if (node.width < margin * 2 + 3 || node.height < margin * 2 + 3) return;
 
-                            // Rooms should be large enough for 100-200 word notes
-                            // Average word ~5 chars + space = 6 chars per word
-                            // 100 words = ~600 chars, 200 words = ~1200 chars
-                            // Assuming ~60-80 chars per line (30-40 cells wide)
-                            // Need ~15-20 lines for 100-200 words
-                            // Rooms: 30-60 cells wide, 15-25 cells tall
-                            const roomWidth = Math.floor(rng(rngOffset) * (node.width - margin * 2 - 30)) + 30;
-                            const roomHeight = Math.floor(rng(rngOffset + 1) * (node.height - margin * 2 - 15)) + 15;
+                            // Average room should fit ~100-200 words
+                            // ~30-40 cells wide × 10-15 cells tall
+                            const roomWidth = Math.floor(rng(rngOffset) * 12) + 28; // 28-40 cells wide
+                            const roomHeight = Math.floor(rng(rngOffset + 1) * 6) + 10; // 10-16 cells tall
                             const roomX = node.x + margin + Math.floor(rng(rngOffset + 2) * Math.max(0, node.width - roomWidth - margin * 2));
                             const roomY = node.y + margin + Math.floor(rng(rngOffset + 3) * Math.max(0, node.height - roomHeight - margin * 2));
 
@@ -4465,21 +4461,21 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const visualHeight = node.height * 2; // 2 units tall per cell
                         const splitHorizontal = visualHeight > visualWidth ? true : (visualWidth > visualHeight ? false : rng(rngOffset + depth) > 0.5);
 
-                        if (splitHorizontal && node.height >= 30) {
-                            const splitY = node.y + Math.floor(node.height / 2) + Math.floor(rng(rngOffset + depth + 1) * 8) - 4;
+                        if (splitHorizontal && node.height >= 20) {
+                            const splitY = node.y + Math.floor(node.height / 2) + Math.floor(rng(rngOffset + depth + 1) * 6) - 3;
                             node.leftChild = { x: node.x, y: node.y, width: node.width, height: splitY - node.y };
                             node.rightChild = { x: node.x, y: splitY, width: node.width, height: node.y + node.height - splitY };
-                        } else if (!splitHorizontal && node.width >= 60) {
-                            const splitX = node.x + Math.floor(node.width / 2) + Math.floor(rng(rngOffset + depth + 2) * 10) - 5;
+                        } else if (!splitHorizontal && node.width >= 40) {
+                            const splitX = node.x + Math.floor(node.width / 2) + Math.floor(rng(rngOffset + depth + 2) * 8) - 4;
                             node.leftChild = { x: node.x, y: node.y, width: splitX - node.x, height: node.height };
                             node.rightChild = { x: splitX, y: node.y, width: node.x + node.width - splitX, height: node.height };
                         } else {
                             // Can't split further, make it a room
                             const margin = 2;
-                            // Large rooms for text: 30-60 cells wide, 15-25 cells tall
-                            const roomWidth = Math.max(30, Math.min(node.width - margin * 2, 60));
-                            const roomHeight = Math.max(15, Math.min(node.height - margin * 2, 25));
-                            if (roomWidth >= 30 && roomHeight >= 15) {
+                            // Average room: 28-40 cells wide, 10-16 cells tall
+                            const roomWidth = Math.max(28, Math.min(node.width - margin * 2, 40));
+                            const roomHeight = Math.max(10, Math.min(node.height - margin * 2, 16));
+                            if (roomWidth >= 28 && roomHeight >= 10) {
                                 node.room = { x: node.x + margin, y: node.y + margin, width: roomWidth, height: roomHeight };
                             }
                             return;
@@ -4499,8 +4495,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         return result;
                     };
 
-                    // Create large dungeon area for substantial text content
-                    // ~120 cells wide × 60 cells tall = space for multiple large text blocks
+                    // Create dungeon with multiple medium-sized rooms
+                    // Each room ~30-40 × 10-15 cells for 100-200 word notes
                     const dungeonWidth = 120;
                     const dungeonHeight = 60;
                     const rootNode: BSPNode = {
@@ -4510,7 +4506,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         height: dungeonHeight
                     };
 
-                    const maxDepth = 2; // Creates 4 larger rooms instead of 8 small ones
+                    const maxDepth = 3; // Creates 6-8 medium-sized rooms
                     bspSplit(rootNode, 0, maxDepth, random, 100);
 
                     const rooms = collectRooms(rootNode);
