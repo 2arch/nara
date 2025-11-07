@@ -4697,182 +4697,21 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         if (selectedPatternKey) {
             try {
                 const patternData = JSON.parse(engine.worldData[selectedPatternKey] as string);
-                const { centerX, centerY, width = 120, height = 60, timestamp } = patternData;
+                const { centerX, centerY, width = 120, height = 60 } = patternData;
 
-                // Generate the pattern to calculate actual bounds
-                const seed = timestamp;
-                const random = (n: number) => {
-                    const x = Math.sin(seed + n) * 10000;
-                    return x - Math.floor(x);
-                };
+                // Convert center/dimensions to bounds (same as image format)
+                const startX = Math.floor(centerX - width / 2);
+                const startY = Math.floor(centerY - height / 2);
+                const endX = startX + width;
+                const endY = startY + height;
 
-                // Use same BSP generation logic to get actual cells
-                type BSPNode = {
-                    x: number; y: number; width: number; height: number;
-                    leftChild?: BSPNode; rightChild?: BSPNode;
-                    room?: { x: number; y: number; width: number; height: number };
-                };
-
-                const bspSplit = (node: BSPNode, depth: number, maxDepth: number, rng: (n: number) => number, rngOffset: number): void => {
-                    if (depth >= maxDepth) {
-                        const margin = 2;
-                        if (node.width < margin * 2 + 3 || node.height < margin * 2 + 3) return;
-                        const roomWidth = Math.floor(rng(rngOffset) * 12) + 28;
-                        const roomHeight = Math.floor(rng(rngOffset + 1) * 6) + 10;
-                        const roomX = node.x + margin + Math.floor(rng(rngOffset + 2) * Math.max(0, node.width - roomWidth - margin * 2));
-                        const roomY = node.y + margin + Math.floor(rng(rngOffset + 3) * Math.max(0, node.height - roomHeight - margin * 2));
-                        node.room = { x: roomX, y: roomY, width: roomWidth, height: roomHeight };
-                        return;
-                    }
-                    const visualWidth = node.width * 1;
-                    const visualHeight = node.height * 2;
-                    const splitHorizontal = visualHeight > visualWidth ? true : (visualWidth > visualHeight ? false : rng(rngOffset + depth) > 0.5);
-                    if (splitHorizontal && node.height >= 20) {
-                        const splitY = node.y + Math.floor(node.height / 2) + Math.floor(rng(rngOffset + depth + 1) * 6) - 3;
-                        node.leftChild = { x: node.x, y: node.y, width: node.width, height: splitY - node.y };
-                        node.rightChild = { x: node.x, y: splitY, width: node.width, height: node.y + node.height - splitY };
-                    } else if (!splitHorizontal && node.width >= 40) {
-                        const splitX = node.x + Math.floor(node.width / 2) + Math.floor(rng(rngOffset + depth + 2) * 8) - 4;
-                        node.leftChild = { x: node.x, y: node.y, width: splitX - node.x, height: node.height };
-                        node.rightChild = { x: splitX, y: node.y, width: node.x + node.width - splitX, height: node.height };
-                    } else {
-                        const margin = 2;
-                        const roomWidth = Math.max(28, Math.min(node.width - margin * 2, 40));
-                        const roomHeight = Math.max(10, Math.min(node.height - margin * 2, 16));
-                        if (roomWidth >= 28 && roomHeight >= 10) {
-                            node.room = { x: node.x + margin, y: node.y + margin, width: roomWidth, height: roomHeight };
-                        }
-                        return;
-                    }
-                    if (node.leftChild) bspSplit(node.leftChild, depth + 1, maxDepth, rng, rngOffset + depth * 10);
-                    if (node.rightChild) bspSplit(node.rightChild, depth + 1, maxDepth, rng, rngOffset + depth * 10 + 5);
-                };
-
-                const collectRooms = (node: BSPNode): Array<{ x: number; y: number; width: number; height: number }> => {
-                    const result: Array<{ x: number; y: number; width: number; height: number }> = [];
-                    if (node.room) result.push(node.room);
-                    if (node.leftChild) result.push(...collectRooms(node.leftChild));
-                    if (node.rightChild) result.push(...collectRooms(node.rightChild));
-                    return result;
-                };
-
-                const rootNode: BSPNode = {
-                    x: Math.floor(centerX - width / 2),
-                    y: Math.floor(centerY - height / 2),
-                    width: width,
-                    height: height
-                };
-
-                bspSplit(rootNode, 0, 3, random, 100);
-                const rooms = collectRooms(rootNode);
-                const gridCells = new Set<string>();
-
-                // Add room cells
-                for (const room of rooms) {
-                    for (let x = room.x; x < room.x + room.width; x++) {
-                        for (let y = room.y; y < room.y + room.height; y++) {
-                            gridCells.add(`${x},${y}`);
-                        }
-                    }
-                }
-
-                // Add corridors
-                const drawCorridor = (room1: typeof rooms[0], room2: typeof rooms[0], rngSeed: number) => {
-                    const startX = room1.x + Math.floor(room1.width / 2);
-                    const startY = room1.y + Math.floor(room1.height / 2);
-                    const endX = room2.x + Math.floor(room2.width / 2);
-                    const endY = room2.y + Math.floor(room2.height / 2);
-                    const corridorWidth = 3;
-                    const corridorHeight = 2;
-
-                    if (random(rngSeed) > 0.5) {
-                        const minX = Math.min(startX, endX);
-                        const maxX = Math.max(startX, endX);
-                        for (let x = minX; x <= maxX; x++) {
-                            for (let w = 0; w < corridorWidth; w++) {
-                                gridCells.add(`${x},${startY + w - Math.floor(corridorWidth / 2)}`);
-                            }
-                        }
-                        const minY = Math.min(startY, endY);
-                        const maxY = Math.max(startY, endY);
-                        for (let y = minY; y <= maxY; y++) {
-                            for (let h = 0; h < corridorHeight; h++) {
-                                gridCells.add(`${endX + h - Math.floor(corridorHeight / 2)},${y}`);
-                            }
-                        }
-                    } else {
-                        const minY = Math.min(startY, endY);
-                        const maxY = Math.max(startY, endY);
-                        for (let y = minY; y <= maxY; y++) {
-                            for (let h = 0; h < corridorHeight; h++) {
-                                gridCells.add(`${startX + h - Math.floor(corridorHeight / 2)},${y}`);
-                            }
-                        }
-                        const minX = Math.min(startX, endX);
-                        const maxX = Math.max(startX, endX);
-                        for (let x = minX; x <= maxX; x++) {
-                            for (let w = 0; w < corridorWidth; w++) {
-                                gridCells.add(`${x},${endY + w - Math.floor(corridorWidth / 2)}`);
-                            }
-                        }
-                    }
-                };
-
-                if (rooms.length > 0) {
-                    const connected = new Set<number>([0]);
-                    while (connected.size < rooms.length) {
-                        let bestEdge: { from: number; to: number; dist: number } | null = null;
-                        for (const i of connected) {
-                            for (let j = 0; j < rooms.length; j++) {
-                                if (!connected.has(j)) {
-                                    const dx = Math.abs(rooms[j].x - rooms[i].x);
-                                    const dy = Math.abs(rooms[j].y - rooms[i].y);
-                                    const dist = dx + dy;
-                                    if (!bestEdge || dist < bestEdge.dist) {
-                                        bestEdge = { from: i, to: j, dist };
-                                    }
-                                }
-                            }
-                        }
-                        if (bestEdge) {
-                            connected.add(bestEdge.to);
-                            drawCorridor(rooms[bestEdge.from], rooms[bestEdge.to], bestEdge.from * 7 + bestEdge.to);
-                        } else {
-                            break;
-                        }
-                    }
-                    const extraCorridors = Math.floor(random(200) * 2) + 1;
-                    for (let e = 0; e < extraCorridors && rooms.length > 2; e++) {
-                        const i = Math.floor(random(300 + e) * rooms.length);
-                        const j = Math.floor(random(400 + e) * rooms.length);
-                        if (i !== j) {
-                            drawCorridor(rooms[i], rooms[j], i * 13 + j);
-                        }
-                    }
-                }
-
-                // Calculate actual bounds from generated cells
-                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-                for (const cellKey of gridCells) {
-                    const [x, y] = cellKey.split(',').map(Number);
-                    minX = Math.min(minX, x);
-                    maxX = Math.max(maxX, x);
-                    minY = Math.min(minY, y);
-                    maxY = Math.max(maxY, y);
-                }
-
-                // Use actual bounds for selection box
-                const startX = minX;
-                const startY = minY;
-                const endX = maxX + 1; // +1 because we want to include the cell
-                const endY = maxY + 1;
-
+                // Draw selection border around the selected pattern
                 const topLeftScreen = engine.worldToScreen(startX, startY, currentZoom, currentOffset);
                 const bottomRightScreen = engine.worldToScreen(endX, endY, currentZoom, currentOffset);
 
-                // Draw selection border
+                // Use text accent color for selection border
                 ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
-                const lineWidth = 3;
+                const lineWidth = 3; // Slightly thicker to indicate selection
                 ctx.lineWidth = lineWidth;
                 const halfWidth = lineWidth / 2;
                 ctx.strokeRect(
@@ -4882,18 +4721,21 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     bottomRightScreen.y - topLeftScreen.y - lineWidth
                 );
 
-                // Draw resize handles at corners
+                // Draw resize thumbs (handles) at corners only
                 const thumbSize = 8;
-                ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.9)`;
+                const thumbColor = `rgba(${hexToRgb(engine.textColor)}, 1)`;
+                ctx.fillStyle = thumbColor;
 
-                // Top-left
-                ctx.fillRect(topLeftScreen.x - thumbSize / 2, topLeftScreen.y - thumbSize / 2, thumbSize, thumbSize);
-                // Top-right
-                ctx.fillRect(bottomRightScreen.x - thumbSize / 2, topLeftScreen.y - thumbSize / 2, thumbSize, thumbSize);
-                // Bottom-right
-                ctx.fillRect(bottomRightScreen.x - thumbSize / 2, bottomRightScreen.y - thumbSize / 2, thumbSize, thumbSize);
-                // Bottom-left
-                ctx.fillRect(topLeftScreen.x - thumbSize / 2, bottomRightScreen.y - thumbSize / 2, thumbSize, thumbSize);
+                const left = topLeftScreen.x;
+                const right = bottomRightScreen.x;
+                const top = topLeftScreen.y;
+                const bottom = bottomRightScreen.y;
+
+                // Corner thumbs
+                ctx.fillRect(left - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-left
+                ctx.fillRect(right - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-right
+                ctx.fillRect(left - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-left
+                ctx.fillRect(right - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-right
             } catch (e) {
                 // Skip invalid pattern data
             }
@@ -6281,8 +6123,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     const patternData = JSON.parse(engine.worldData[selectedPatternKey] as string);
                     const { centerX, centerY, width = 120, height = 60 } = patternData;
 
-                    // Use the original intended bounds for hit detection
-                    // (The visual handles match this, as selection box now shows actual extent)
+                    // Convert center/dimensions to bounds (same as image format)
                     const startX = Math.floor(centerX - width / 2);
                     const startY = Math.floor(centerY - height / 2);
                     const endX = startX + width;
@@ -7229,8 +7070,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     const patternData = JSON.parse(engine.worldData[selectedPatternKey] as string);
                     const { centerX, centerY, width = 120, height = 60 } = patternData;
 
-                    // Use the original intended bounds for hit detection
-                    // (matches the mousedown handler)
+                    // Convert center/dimensions to bounds (same as image format)
                     const startX = Math.floor(centerX - width / 2);
                     const startY = Math.floor(centerY - height / 2);
                     const endX = startX + width;
