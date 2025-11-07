@@ -156,7 +156,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'link': 'Create a clickable link from selected text. Select text, then type /link [url]. Click the underlined link to open the URL in a new tab. URLs are auto-detected when pasted.',
     'clip': 'Save selected text to your clipboard. Select text, then type /clip to capture it. Access your clips later to paste them anywhere on the canvas.',
     'upload': 'Upload an image to your canvas. Type /upload, then select an image file. The image will be placed at your current cursor position and saved to your canvas.',
-    'paint': 'Enter paint mode to create filled polygon regions on the canvas. Click/tap to place vertices, double-click/double-tap to complete the polygon. Press ESC to exit. Regions define zones for monogram patterns.',
+    'paint': 'Enter paint mode to draw filled regions on the canvas. Drag to draw a continuous stroke, double-click/double-tap to fill the enclosed area. Press ESC to exit. Regions define zones for monogram patterns.',
     'mode': 'Switch canvas modes. /mode default for standard writing, /mode air for ephemeral text that doesn\'t save, /mode chat to talk with AI, /mode note for focused note-taking.',
     'note': 'Quick shortcut to enter note mode. This creates a focused writing space perfect for drafting ideas before placing them on your main canvas.',
     'mail': '[SUPER ONLY] Create an email region. Select a rectangular area, type /mail. Row 1 = recipient email, Row 2 = subject line, Row 3+ = message body. Click the send button to deliver the email.',
@@ -2640,7 +2640,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             setModeState(prev => ({ ...prev, isPaintMode: newPaintMode }));
 
             if (newPaintMode) {
-                setDialogueWithRevert("Paint mode enabled - click to place vertices, double-click to finish polygon, ESC to exit.", setDialogueText);
+                setDialogueWithRevert("Paint mode enabled - drag to draw, double-click/double-tap to fill, ESC to exit.", setDialogueText);
             } else {
                 setDialogueWithRevert("Paint mode disabled", setDialogueText);
             }
@@ -3078,7 +3078,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             setModeState(prev => ({ ...prev, isPaintMode: newPaintMode }));
 
             if (newPaintMode) {
-                setDialogueWithRevert("Paint mode enabled - click to place vertices, double-click to finish polygon, ESC to exit.", setDialogueText);
+                setDialogueWithRevert("Paint mode enabled - drag to draw, double-click/double-tap to fill, ESC to exit.", setDialogueText);
             } else {
                 setDialogueWithRevert("Paint mode disabled", setDialogueText);
             }

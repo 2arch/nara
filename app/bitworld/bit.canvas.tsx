@@ -4391,39 +4391,28 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
-        // Render current in-progress polygon (lasso tool)
-        if (currentPaintStrokeRef.current.length >= 1) {
+        // Render current in-progress paint stroke
+        if (currentPaintStrokeRef.current.length >= 2) {
             const points = currentPaintStrokeRef.current;
 
-            // Draw vertices as small circles
-            ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
-            for (const point of points) {
+            // Draw the stroke as a smooth continuous line
+            ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+
+            const firstPoint = points[0];
+            const firstScreen = engine.worldToScreen(firstPoint.x, firstPoint.y, currentZoom, currentOffset);
+            ctx.moveTo(firstScreen.x, firstScreen.y);
+
+            for (let i = 1; i < points.length; i++) {
+                const point = points[i];
                 const screenPos = engine.worldToScreen(point.x, point.y, currentZoom, currentOffset);
-                ctx.beginPath();
-                ctx.arc(screenPos.x, screenPos.y, 5, 0, Math.PI * 2);
-                ctx.fill();
+                ctx.lineTo(screenPos.x, screenPos.y);
             }
 
-            // Draw lines connecting vertices
-            if (points.length >= 2) {
-                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.6)`;
-                ctx.lineWidth = 2;
-                ctx.setLineDash([5, 5]); // Dashed line for in-progress
-                ctx.beginPath();
-
-                const firstPoint = points[0];
-                const firstScreen = engine.worldToScreen(firstPoint.x, firstPoint.y, currentZoom, currentOffset);
-                ctx.moveTo(firstScreen.x, firstScreen.y);
-
-                for (let i = 1; i < points.length; i++) {
-                    const point = points[i];
-                    const screenPos = engine.worldToScreen(point.x, point.y, currentZoom, currentOffset);
-                    ctx.lineTo(screenPos.x, screenPos.y);
-                }
-
-                ctx.stroke();
-                ctx.setLineDash([]); // Reset dash
-            }
+            ctx.stroke();
         }
 
 
@@ -5484,7 +5473,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             // Clear the current polygon
             currentPaintStrokeRef.current = [];
 
-            setDialogueWithRevert("Region saved - click to start new polygon, double-click to finish, ESC to exit paint mode", engine.setDialogueText);
+            setDialogueWithRevert("Region saved - drag to draw, double-click to fill, ESC to exit paint mode", engine.setDialogueText);
 
             return;
         }
@@ -5620,14 +5609,15 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
-            // Check if paint mode is active first (lasso/polygon tool)
+            // Check if paint mode is active first (continuous stroke tool)
             if (engine.isPaintMode) {
                 e.preventDefault();
 
                 const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
 
-                // Add vertex to polygon
-                currentPaintStrokeRef.current.push(worldPos);
+                // Start new stroke
+                isPaintingRef.current = true;
+                currentPaintStrokeRef.current = [worldPos];
 
                 canvasRef.current?.focus();
                 return;
@@ -5872,7 +5862,22 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
-        // Paint mode doesn't need mouse move tracking (click-to-place vertices only)
+        // Handle paint mode continuous stroke
+        if (engine.isPaintMode && isPaintingRef.current) {
+            const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
+
+            // Add point to stroke if it's far enough from the last point (reduces redundant points)
+            const lastPoint = currentPaintStrokeRef.current[currentPaintStrokeRef.current.length - 1];
+            const dx = worldPos.x - lastPoint.x;
+            const dy = worldPos.y - lastPoint.y;
+            const distSq = dx * dx + dy * dy;
+
+            // Add point if distance is greater than ~0.5 world units
+            if (distSq > 0.25) {
+                currentPaintStrokeRef.current.push(worldPos);
+            }
+            return;
+        }
 
         // Always track mouse position for preview (when not actively dragging)
         if (!isMiddleMouseDownRef.current && !isSelectingMouseDownRef.current) {
@@ -6099,7 +6104,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         if (e.button === 0) { // Left mouse button
-            // Paint mode uses click-to-place, not drag - no action needed on mouse up
+            // Handle paint mode stroke end
+            if (engine.isPaintMode && isPaintingRef.current) {
+                isPaintingRef.current = false;
+                return;
+            }
 
             // Reset resize state if active
             if (resizeState.active) {
@@ -6452,7 +6461,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const dy = touches[1].y - touches[0].y;
             lastPinchDistanceRef.current = Math.sqrt(dx * dx + dy * dy);
         } else if (touches.length === 1) {
-            // Check if paint mode is active first (lasso/polygon tool)
+            // Check if paint mode is active first (continuous stroke tool)
             if (engine.isPaintMode) {
                 e.preventDefault();
 
@@ -6463,8 +6472,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     engine.viewOffset
                 );
 
-                // Add vertex to polygon
-                currentPaintStrokeRef.current.push({ x: worldPos.x, y: worldPos.y });
+                // Start new stroke
+                isPaintingRef.current = true;
+                currentPaintStrokeRef.current = [{ x: worldPos.x, y: worldPos.y }];
 
                 return; // Don't process other gestures
             }
@@ -6503,7 +6513,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     // Clear the current polygon
                     currentPaintStrokeRef.current = [];
 
-                    setDialogueWithRevert("Region saved - tap to start new polygon, double-tap to finish, ESC to exit paint mode", engine.setDialogueText);
+                    setDialogueWithRevert("Region saved - drag to draw, double-tap to fill, ESC to exit paint mode", engine.setDialogueText);
 
                     return;
                 }
@@ -6732,7 +6742,27 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             longPressTimerRef.current = null;
         }
 
-        // Paint mode doesn't need touch move tracking (tap-to-place vertices only)
+        // Handle paint mode continuous stroke
+        if (engine.isPaintMode && isPaintingRef.current && touches.length === 1) {
+            const worldPos = engine.screenToWorld(
+                touches[0].x,
+                touches[0].y,
+                engine.zoomLevel,
+                engine.viewOffset
+            );
+
+            // Add point to stroke if it's far enough from the last point (reduces redundant points)
+            const lastPoint = currentPaintStrokeRef.current[currentPaintStrokeRef.current.length - 1];
+            const dx = worldPos.x - lastPoint.x;
+            const dy = worldPos.y - lastPoint.y;
+            const distSq = dx * dx + dy * dy;
+
+            // Add point if distance is greater than ~0.5 world units
+            if (distSq > 0.25) {
+                currentPaintStrokeRef.current.push({ x: worldPos.x, y: worldPos.y });
+            }
+            return;
+        }
 
         // Handle resize drag (highest priority)
         if (resizeState.active && resizeState.handle && resizeState.originalBounds && touches.length === 1) {
@@ -6907,7 +6937,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             longPressTimerRef.current = null;
         }
 
-        // Paint mode uses tap-to-place, not drag - no action needed on touch end
+        // Handle paint mode stroke end
+        if (engine.isPaintMode && isPaintingRef.current) {
+            isPaintingRef.current = false;
+            return;
+        }
 
         // Reset resize state if active
         if (resizeState.active) {
