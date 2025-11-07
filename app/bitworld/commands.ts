@@ -2633,6 +2633,33 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             return { command: 'upload', args, commandStartPos: commandState.commandStartPos };
         }
 
+        // Handle paint command - toggles paint mode for drawing monogram zones
+        if (commandToExecute.startsWith('paint')) {
+            // Toggle paint mode for drawing monogram zones
+            const newPaintMode = !modeState.isPaintMode;
+            setModeState(prev => ({ ...prev, isPaintMode: newPaintMode }));
+
+            if (newPaintMode) {
+                setDialogueWithRevert("Paint mode enabled - draw with 1 finger/mouse, pan with 2 fingers/middle mouse. Press ESC to exit.", setDialogueText);
+            } else {
+                setDialogueWithRevert("Paint mode disabled", setDialogueText);
+            }
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            return null; // Paint mode toggle doesn't need further processing
+        }
+
         // Check if this is an unrecognized command - treat as AI prompt
         if (!AVAILABLE_COMMANDS.includes(commandName.toLowerCase())) {
             // This is an AI prompt, not a recognized command
@@ -3051,7 +3078,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             setModeState(prev => ({ ...prev, isPaintMode: newPaintMode }));
 
             if (newPaintMode) {
-                setDialogueWithRevert("Paint mode enabled - click and drag to draw. Press ESC to exit.", setDialogueText);
+                setDialogueWithRevert("Paint mode enabled - draw with 1 finger/mouse, pan with 2 fingers/middle mouse. Press ESC to exit.", setDialogueText);
             } else {
                 setDialogueWithRevert("Paint mode disabled", setDialogueText);
             }
