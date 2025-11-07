@@ -4427,49 +4427,81 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         return x - Math.floor(x);
                     };
 
-                    // Generate 5-8 room positions
-                    const numRooms = Math.floor(random(0) * 4) + 5;
-                    const rooms: Array<{ x: number; y: number; width: number; height: number }> = [];
+                    // BSP-based room generation for better spatial partitioning
+                    type BSPNode = {
+                        x: number;
+                        y: number;
+                        width: number;
+                        height: number;
+                        leftChild?: BSPNode;
+                        rightChild?: BSPNode;
+                        room?: { x: number; y: number; width: number; height: number };
+                    };
 
-                    // Generate non-overlapping rooms on grid
-                    for (let i = 0; i < numRooms; i++) {
-                        let attempts = 0;
-                        let validRoom = false;
-                        let newRoom: { x: number; y: number; width: number; height: number } = { x: 0, y: 0, width: 0, height: 0 };
+                    const bspSplit = (node: BSPNode, depth: number, maxDepth: number, rng: (n: number) => number, rngOffset: number): void => {
+                        if (depth >= maxDepth) {
+                            // Create room in this leaf node with margin for corridors
+                            const margin = 2;
+                            if (node.width < margin * 2 + 3 || node.height < margin * 2 + 3) return;
 
-                        while (!validRoom && attempts < 50) {
-                            const angle = random(i * 2 + attempts) * Math.PI * 2;
-                            const dist = random(i * 2 + 1 + attempts) * 12 + 5;
-                            const cx = Math.floor(centerX + Math.cos(angle) * dist);
-                            const cy = Math.floor(centerY + Math.sin(angle) * dist);
+                            const roomWidth = Math.floor(rng(rngOffset) * (node.width - margin * 2 - 3)) + 3;
+                            const roomHeight = Math.floor(rng(rngOffset + 1) * (node.height - margin * 2 - 3)) + 3;
+                            const roomX = node.x + margin + Math.floor(rng(rngOffset + 2) * (node.width - roomWidth - margin * 2));
+                            const roomY = node.y + margin + Math.floor(rng(rngOffset + 3) * (node.height - roomHeight - margin * 2));
 
-                            // Room size (3-6 cells wide/tall)
-                            const w = Math.floor(random(i * 3 + attempts) * 4) + 3;
-                            const h = Math.floor(random(i * 3 + 1 + attempts) * 4) + 3;
+                            node.room = { x: roomX, y: roomY, width: roomWidth, height: roomHeight };
+                            return;
+                        }
 
-                            newRoom = { x: cx, y: cy, width: w, height: h };
+                        // Split horizontally or vertically based on node proportions
+                        const splitHorizontal = node.height > node.width ? true : (node.width > node.height ? false : rng(rngOffset + depth) > 0.5);
 
-                            // Check if overlaps with existing rooms
-                            validRoom = true;
-                            for (const room of rooms) {
-                                const overlap = !(
-                                    newRoom.x + newRoom.width < room.x ||
-                                    newRoom.x > room.x + room.width ||
-                                    newRoom.y + newRoom.height < room.y ||
-                                    newRoom.y > room.y + room.height
-                                );
-                                if (overlap) {
-                                    validRoom = false;
-                                    break;
-                                }
+                        if (splitHorizontal && node.height >= 10) {
+                            const splitY = node.y + Math.floor(node.height / 2) + Math.floor(rng(rngOffset + depth + 1) * 4) - 2;
+                            node.leftChild = { x: node.x, y: node.y, width: node.width, height: splitY - node.y };
+                            node.rightChild = { x: node.x, y: splitY, width: node.width, height: node.y + node.height - splitY };
+                        } else if (!splitHorizontal && node.width >= 10) {
+                            const splitX = node.x + Math.floor(node.width / 2) + Math.floor(rng(rngOffset + depth + 2) * 4) - 2;
+                            node.leftChild = { x: node.x, y: node.y, width: splitX - node.x, height: node.height };
+                            node.rightChild = { x: splitX, y: node.y, width: node.x + node.width - splitX, height: node.height };
+                        } else {
+                            // Can't split further, make it a room
+                            const margin = 1;
+                            const roomWidth = Math.max(3, Math.min(node.width - margin * 2, 6));
+                            const roomHeight = Math.max(3, Math.min(node.height - margin * 2, 6));
+                            if (roomWidth >= 3 && roomHeight >= 3) {
+                                node.room = { x: node.x + margin, y: node.y + margin, width: roomWidth, height: roomHeight };
                             }
-                            attempts++;
+                            return;
                         }
 
-                        if (validRoom) {
-                            rooms.push(newRoom);
+                        if (node.leftChild) bspSplit(node.leftChild, depth + 1, maxDepth, rng, rngOffset + depth * 10);
+                        if (node.rightChild) bspSplit(node.rightChild, depth + 1, maxDepth, rng, rngOffset + depth * 10 + 5);
+                    };
+
+                    const collectRooms = (node: BSPNode): Array<{ x: number; y: number; width: number; height: number }> => {
+                        const result: Array<{ x: number; y: number; width: number; height: number }> = [];
+                        if (node.room) {
+                            result.push(node.room);
                         }
-                    }
+                        if (node.leftChild) result.push(...collectRooms(node.leftChild));
+                        if (node.rightChild) result.push(...collectRooms(node.rightChild));
+                        return result;
+                    };
+
+                    // Create initial BSP tree within a bounded area
+                    const dungeonSize = 30;
+                    const rootNode: BSPNode = {
+                        x: Math.floor(centerX - dungeonSize / 2),
+                        y: Math.floor(centerY - dungeonSize / 2),
+                        width: dungeonSize,
+                        height: dungeonSize
+                    };
+
+                    const maxDepth = 3; // Creates up to 8 rooms
+                    bspSplit(rootNode, 0, maxDepth, random, 100);
+
+                    const rooms = collectRooms(rootNode);
 
                     // Create a grid to mark filled cells
                     const gridCells = new Set<string>();
@@ -4483,58 +4515,81 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         }
                     }
 
-                    // Connect rooms with corridors (1-cell wide paths using Manhattan distance)
-                    for (let i = 0; i < rooms.length; i++) {
-                        // Find nearest unconnected room
-                        let nearest = -1;
-                        let minDist = Infinity;
+                    // Minimum Spanning Tree for guaranteed connectivity, then add extra corridors
+                    const drawCorridor = (room1: typeof rooms[0], room2: typeof rooms[0], rngSeed: number) => {
+                        const startX = room1.x + Math.floor(room1.width / 2);
+                        const startY = room1.y + Math.floor(room1.height / 2);
+                        const endX = room2.x + Math.floor(room2.width / 2);
+                        const endY = room2.y + Math.floor(room2.height / 2);
 
-                        for (let j = 0; j < rooms.length; j++) {
-                            if (i !== j) {
-                                const dx = Math.abs(rooms[j].x - rooms[i].x);
-                                const dy = Math.abs(rooms[j].y - rooms[i].y);
-                                const dist = dx + dy;
-                                if (dist < minDist) {
-                                    minDist = dist;
-                                    nearest = j;
+                        // L-shaped corridor - randomly choose horizontal-first or vertical-first
+                        if (random(rngSeed) > 0.5) {
+                            // Horizontal then vertical
+                            const minX = Math.min(startX, endX);
+                            const maxX = Math.max(startX, endX);
+                            for (let x = minX; x <= maxX; x++) {
+                                gridCells.add(`${x},${startY}`);
+                            }
+                            const minY = Math.min(startY, endY);
+                            const maxY = Math.max(startY, endY);
+                            for (let y = minY; y <= maxY; y++) {
+                                gridCells.add(`${endX},${y}`);
+                            }
+                        } else {
+                            // Vertical then horizontal
+                            const minY = Math.min(startY, endY);
+                            const maxY = Math.max(startY, endY);
+                            for (let y = minY; y <= maxY; y++) {
+                                gridCells.add(`${startX},${y}`);
+                            }
+                            const minX = Math.min(startX, endX);
+                            const maxX = Math.max(startX, endX);
+                            for (let x = minX; x <= maxX; x++) {
+                                gridCells.add(`${x},${endY}`);
+                            }
+                        }
+                    };
+
+                    // Simple MST using Prim's algorithm
+                    if (rooms.length > 0) {
+                        const connected = new Set<number>([0]); // Start with first room
+                        const edges: Array<{ from: number; to: number; dist: number }> = [];
+
+                        // Build MST
+                        while (connected.size < rooms.length) {
+                            let bestEdge: { from: number; to: number; dist: number } | null = null;
+
+                            // Find shortest edge from connected to unconnected room
+                            for (const i of connected) {
+                                for (let j = 0; j < rooms.length; j++) {
+                                    if (!connected.has(j)) {
+                                        const dx = Math.abs(rooms[j].x - rooms[i].x);
+                                        const dy = Math.abs(rooms[j].y - rooms[i].y);
+                                        const dist = dx + dy;
+
+                                        if (!bestEdge || dist < bestEdge.dist) {
+                                            bestEdge = { from: i, to: j, dist };
+                                        }
+                                    }
                                 }
+                            }
+
+                            if (bestEdge) {
+                                edges.push(bestEdge);
+                                connected.add(bestEdge.to);
+                                drawCorridor(rooms[bestEdge.from], rooms[bestEdge.to], bestEdge.from * 7 + bestEdge.to);
+                            } else {
+                                break; // No more rooms to connect
                             }
                         }
 
-                        if (nearest !== -1) {
-                            // Draw L-shaped corridor from room i to nearest
-                            const startX = rooms[i].x + Math.floor(rooms[i].width / 2);
-                            const startY = rooms[i].y + Math.floor(rooms[i].height / 2);
-                            const endX = rooms[nearest].x + Math.floor(rooms[nearest].width / 2);
-                            const endY = rooms[nearest].y + Math.floor(rooms[nearest].height / 2);
-
-                            // Horizontal then vertical
-                            if (random(i * 7) > 0.5) {
-                                // Go horizontal first
-                                const minX = Math.min(startX, endX);
-                                const maxX = Math.max(startX, endX);
-                                for (let x = minX; x <= maxX; x++) {
-                                    gridCells.add(`${x},${startY}`);
-                                }
-                                // Then vertical
-                                const minY = Math.min(startY, endY);
-                                const maxY = Math.max(startY, endY);
-                                for (let y = minY; y <= maxY; y++) {
-                                    gridCells.add(`${endX},${y}`);
-                                }
-                            } else {
-                                // Go vertical first
-                                const minY = Math.min(startY, endY);
-                                const maxY = Math.max(startY, endY);
-                                for (let y = minY; y <= maxY; y++) {
-                                    gridCells.add(`${startX},${y}`);
-                                }
-                                // Then horizontal
-                                const minX = Math.min(startX, endX);
-                                const maxX = Math.max(startX, endX);
-                                for (let x = minX; x <= maxX; x++) {
-                                    gridCells.add(`${x},${endY}`);
-                                }
+                        // Add 1-2 extra corridors for loops/cycles (makes exploration more interesting)
+                        const extraCorridors = Math.floor(random(200) * 2) + 1;
+                        for (let e = 0; e < extraCorridors && rooms.length > 2; e++) {
+                            const i = Math.floor(random(300 + e) * rooms.length);
+                            const j = Math.floor(random(400 + e) * rooms.length);
+                            if (i !== j) {
+                                drawCorridor(rooms[i], rooms[j], i * 13 + j);
                             }
                         }
                     }
