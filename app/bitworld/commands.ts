@@ -2665,14 +2665,88 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             if (setWorldData && worldData) {
                 const cursorPos = commandState.commandStartPos;
 
-                // Generate pattern data
+                // Generate rooms using BSP
+                const width = 120;
+                const height = 60;
+                const timestamp = Date.now();
+                const seed = timestamp;
+                const random = (n: number) => {
+                    const x = Math.sin(seed + n) * 10000;
+                    return x - Math.floor(x);
+                };
+
+                type BSPNode = {
+                    x: number;
+                    y: number;
+                    width: number;
+                    height: number;
+                    leftChild?: BSPNode;
+                    rightChild?: BSPNode;
+                    room?: { x: number; y: number; width: number; height: number };
+                };
+
+                const bspSplit = (node: BSPNode, depth: number, maxDepth: number, rng: (n: number) => number, rngOffset: number): void => {
+                    if (depth >= maxDepth) {
+                        const margin = 2;
+                        if (node.width < margin * 2 + 3 || node.height < margin * 2 + 3) return;
+                        const roomWidth = Math.floor(rng(rngOffset) * 12) + 28;
+                        const roomHeight = Math.floor(rng(rngOffset + 1) * 6) + 10;
+                        const roomX = node.x + margin + Math.floor(rng(rngOffset + 2) * Math.max(0, node.width - roomWidth - margin * 2));
+                        const roomY = node.y + margin + Math.floor(rng(rngOffset + 3) * Math.max(0, node.height - roomHeight - margin * 2));
+                        node.room = { x: roomX, y: roomY, width: roomWidth, height: roomHeight };
+                        return;
+                    }
+                    const visualWidth = node.width * 1;
+                    const visualHeight = node.height * 2;
+                    const splitHorizontal = visualHeight > visualWidth ? true : (visualWidth > visualHeight ? false : rng(rngOffset + depth) > 0.5);
+                    if (splitHorizontal && node.height >= 20) {
+                        const splitY = node.y + Math.floor(node.height / 2) + Math.floor(rng(rngOffset + depth + 1) * 6) - 3;
+                        node.leftChild = { x: node.x, y: node.y, width: node.width, height: splitY - node.y };
+                        node.rightChild = { x: node.x, y: splitY, width: node.width, height: node.y + node.height - splitY };
+                    } else if (!splitHorizontal && node.width >= 40) {
+                        const splitX = node.x + Math.floor(node.width / 2) + Math.floor(rng(rngOffset + depth + 2) * 8) - 4;
+                        node.leftChild = { x: node.x, y: node.y, width: splitX - node.x, height: node.height };
+                        node.rightChild = { x: splitX, y: node.y, width: node.x + node.width - splitX, height: node.height };
+                    } else {
+                        const margin = 2;
+                        const roomWidth = Math.max(28, Math.min(node.width - margin * 2, 40));
+                        const roomHeight = Math.max(10, Math.min(node.height - margin * 2, 16));
+                        if (roomWidth >= 28 && roomHeight >= 10) {
+                            node.room = { x: node.x + margin, y: node.y + margin, width: roomWidth, height: roomHeight };
+                        }
+                        return;
+                    }
+                    if (node.leftChild) bspSplit(node.leftChild, depth + 1, maxDepth, rng, rngOffset + depth * 10);
+                    if (node.rightChild) bspSplit(node.rightChild, depth + 1, maxDepth, rng, rngOffset + depth * 10 + 5);
+                };
+
+                const collectRooms = (node: BSPNode): Array<{ x: number; y: number; width: number; height: number }> => {
+                    const result: Array<{ x: number; y: number; width: number; height: number }> = [];
+                    if (node.room) result.push(node.room);
+                    if (node.leftChild) result.push(...collectRooms(node.leftChild));
+                    if (node.rightChild) result.push(...collectRooms(node.rightChild));
+                    return result;
+                };
+
+                const rootNode: BSPNode = {
+                    x: Math.floor(cursorPos.x - width / 2),
+                    y: Math.floor(cursorPos.y - height / 2),
+                    width: width,
+                    height: height
+                };
+
+                bspSplit(rootNode, 0, 3, random, 100);
+                const rooms = collectRooms(rootNode);
+
+                // Generate pattern data with stored rooms
                 const patternKey = `pattern_${Date.now()}`;
                 const patternData = {
                     centerX: cursorPos.x,
                     centerY: cursorPos.y,
-                    width: 120, // Default dungeon width
-                    height: 60, // Default dungeon height
-                    timestamp: Date.now()
+                    width: width,
+                    height: height,
+                    timestamp: timestamp,
+                    rooms: rooms // Store generated rooms
                 };
 
                 setWorldData((prev: WorldData) => ({

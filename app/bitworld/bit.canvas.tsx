@@ -4442,97 +4442,14 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             if (key.startsWith('pattern_')) {
                 try {
                     const patternData = JSON.parse(engine.worldData[key] as string);
-                    const { centerX, centerY, timestamp, width = 120, height = 60 } = patternData;
+                    const { centerX, centerY, timestamp, width = 120, height = 60, rooms = [] } = patternData;
 
-                    // Generate deterministic pattern from timestamp seed
+                    // Random function for corridor generation (still uses timestamp seed for consistency)
                     const seed = timestamp;
                     const random = (n: number) => {
                         const x = Math.sin(seed + n) * 10000;
                         return x - Math.floor(x);
                     };
-
-                    // BSP-based room generation for better spatial partitioning
-                    type BSPNode = {
-                        x: number;
-                        y: number;
-                        width: number;
-                        height: number;
-                        leftChild?: BSPNode;
-                        rightChild?: BSPNode;
-                        room?: { x: number; y: number; width: number; height: number };
-                    };
-
-                    const bspSplit = (node: BSPNode, depth: number, maxDepth: number, rng: (n: number) => number, rngOffset: number): void => {
-                        if (depth >= maxDepth) {
-                            // Create room in this leaf node with margin for corridors
-                            const margin = 2;
-                            if (node.width < margin * 2 + 3 || node.height < margin * 2 + 3) return;
-
-                            // Average room should fit ~100-200 words
-                            // ~30-40 cells wide × 10-15 cells tall
-                            const roomWidth = Math.floor(rng(rngOffset) * 12) + 28; // 28-40 cells wide
-                            const roomHeight = Math.floor(rng(rngOffset + 1) * 6) + 10; // 10-16 cells tall
-                            const roomX = node.x + margin + Math.floor(rng(rngOffset + 2) * Math.max(0, node.width - roomWidth - margin * 2));
-                            const roomY = node.y + margin + Math.floor(rng(rngOffset + 3) * Math.max(0, node.height - roomHeight - margin * 2));
-
-                            node.room = { x: roomX, y: roomY, width: roomWidth, height: roomHeight };
-                            return;
-                        }
-
-                        // Split horizontally or vertically based on node proportions
-                        // Account for 1:2 cell aspect ratio - compare visual proportions
-                        const visualWidth = node.width * 1; // 1 cell wide
-                        const visualHeight = node.height * 2; // 2 units tall per cell
-                        const splitHorizontal = visualHeight > visualWidth ? true : (visualWidth > visualHeight ? false : rng(rngOffset + depth) > 0.5);
-
-                        if (splitHorizontal && node.height >= 20) {
-                            const splitY = node.y + Math.floor(node.height / 2) + Math.floor(rng(rngOffset + depth + 1) * 6) - 3;
-                            node.leftChild = { x: node.x, y: node.y, width: node.width, height: splitY - node.y };
-                            node.rightChild = { x: node.x, y: splitY, width: node.width, height: node.y + node.height - splitY };
-                        } else if (!splitHorizontal && node.width >= 40) {
-                            const splitX = node.x + Math.floor(node.width / 2) + Math.floor(rng(rngOffset + depth + 2) * 8) - 4;
-                            node.leftChild = { x: node.x, y: node.y, width: splitX - node.x, height: node.height };
-                            node.rightChild = { x: splitX, y: node.y, width: node.x + node.width - splitX, height: node.height };
-                        } else {
-                            // Can't split further, make it a room
-                            const margin = 2;
-                            // Average room: 28-40 cells wide, 10-16 cells tall
-                            const roomWidth = Math.max(28, Math.min(node.width - margin * 2, 40));
-                            const roomHeight = Math.max(10, Math.min(node.height - margin * 2, 16));
-                            if (roomWidth >= 28 && roomHeight >= 10) {
-                                node.room = { x: node.x + margin, y: node.y + margin, width: roomWidth, height: roomHeight };
-                            }
-                            return;
-                        }
-
-                        if (node.leftChild) bspSplit(node.leftChild, depth + 1, maxDepth, rng, rngOffset + depth * 10);
-                        if (node.rightChild) bspSplit(node.rightChild, depth + 1, maxDepth, rng, rngOffset + depth * 10 + 5);
-                    };
-
-                    const collectRooms = (node: BSPNode): Array<{ x: number; y: number; width: number; height: number }> => {
-                        const result: Array<{ x: number; y: number; width: number; height: number }> = [];
-                        if (node.room) {
-                            result.push(node.room);
-                        }
-                        if (node.leftChild) result.push(...collectRooms(node.leftChild));
-                        if (node.rightChild) result.push(...collectRooms(node.rightChild));
-                        return result;
-                    };
-
-                    // Create dungeon with size from pattern data (allows resizing)
-                    const dungeonWidth = width;
-                    const dungeonHeight = height;
-                    const rootNode: BSPNode = {
-                        x: Math.floor(centerX - dungeonWidth / 2),
-                        y: Math.floor(centerY - dungeonHeight / 2),
-                        width: dungeonWidth,
-                        height: dungeonHeight
-                    };
-
-                    const maxDepth = 3; // Creates 6-8 medium-sized rooms
-                    bspSplit(rootNode, 0, maxDepth, random, 100);
-
-                    const rooms = collectRooms(rootNode);
 
                     // Create a grid to mark filled cells
                     const gridCells = new Set<string>();
@@ -4697,7 +4614,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         if (selectedPatternKey) {
             try {
                 const patternData = JSON.parse(engine.worldData[selectedPatternKey] as string);
-                const { centerX, centerY, width = 120, height = 60 } = patternData;
+                const { centerX, centerY, width = 120, height = 60, rooms = [] } = patternData;
 
                 // Convert center/dimensions to bounds (same as image format)
                 const startX = Math.floor(centerX - width / 2);
@@ -4731,11 +4648,30 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const top = topLeftScreen.y;
                 const bottom = bottomRightScreen.y;
 
-                // Corner thumbs
+                // Pattern border corner thumbs
                 ctx.fillRect(left - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-left
                 ctx.fillRect(right - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-right
                 ctx.fillRect(left - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-left
                 ctx.fillRect(right - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-right
+
+                // Draw corner thumbs for each individual room
+                for (const room of rooms) {
+                    const roomTopLeft = engine.worldToScreen(room.x, room.y, currentZoom, currentOffset);
+                    const roomBottomRight = engine.worldToScreen(room.x + room.width, room.y + room.height, currentZoom, currentOffset);
+
+                    const roomLeft = roomTopLeft.x;
+                    const roomRight = roomBottomRight.x;
+                    const roomTop = roomTopLeft.y;
+                    const roomBottom = roomBottomRight.y;
+
+                    // Room corner thumbs (smaller and slightly transparent to distinguish from pattern border)
+                    const roomThumbSize = 6;
+                    ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.7)`;
+                    ctx.fillRect(roomLeft - roomThumbSize / 2, roomTop - roomThumbSize / 2, roomThumbSize, roomThumbSize);
+                    ctx.fillRect(roomRight - roomThumbSize / 2, roomTop - roomThumbSize / 2, roomThumbSize, roomThumbSize);
+                    ctx.fillRect(roomLeft - roomThumbSize / 2, roomBottom - roomThumbSize / 2, roomThumbSize, roomThumbSize);
+                    ctx.fillRect(roomRight - roomThumbSize / 2, roomBottom - roomThumbSize / 2, roomThumbSize, roomThumbSize);
+                }
             } catch (e) {
                 // Skip invalid pattern data
             }
