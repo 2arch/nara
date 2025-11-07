@@ -111,7 +111,7 @@ const AVAILABLE_COMMANDS = [
     // Navigation & View
     'nav', 'search', 'cam', 'indent', 'zoom', 'map',
     // Content Creation
-    'label', 'task', 'link', 'clip', 'upload',
+    'label', 'task', 'link', 'clip', 'upload', 'paint',
     // Special
     'mode', 'note', 'mail', 'chat', 'tutorial', 'help',
     // Styling & Display
