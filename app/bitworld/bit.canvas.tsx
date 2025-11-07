@@ -4444,12 +4444,16 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             const margin = 2;
                             if (node.width < margin * 2 + 3 || node.height < margin * 2 + 3) return;
 
-                            // Rooms should be roughly square in visual space (accounting for 1:2 cell aspect ratio)
-                            // So if we want a visually square room, width should be ~2x height in cells
-                            const roomWidth = Math.floor(rng(rngOffset) * (node.width - margin * 2 - 4)) + 4;
-                            const roomHeight = Math.floor(rng(rngOffset + 1) * (node.height - margin * 2 - 2)) + 2;
-                            const roomX = node.x + margin + Math.floor(rng(rngOffset + 2) * (node.width - roomWidth - margin * 2));
-                            const roomY = node.y + margin + Math.floor(rng(rngOffset + 3) * (node.height - roomHeight - margin * 2));
+                            // Rooms should be large enough for 100-200 word notes
+                            // Average word ~5 chars + space = 6 chars per word
+                            // 100 words = ~600 chars, 200 words = ~1200 chars
+                            // Assuming ~60-80 chars per line (30-40 cells wide)
+                            // Need ~15-20 lines for 100-200 words
+                            // Rooms: 30-60 cells wide, 15-25 cells tall
+                            const roomWidth = Math.floor(rng(rngOffset) * (node.width - margin * 2 - 30)) + 30;
+                            const roomHeight = Math.floor(rng(rngOffset + 1) * (node.height - margin * 2 - 15)) + 15;
+                            const roomX = node.x + margin + Math.floor(rng(rngOffset + 2) * Math.max(0, node.width - roomWidth - margin * 2));
+                            const roomY = node.y + margin + Math.floor(rng(rngOffset + 3) * Math.max(0, node.height - roomHeight - margin * 2));
 
                             node.room = { x: roomX, y: roomY, width: roomWidth, height: roomHeight };
                             return;
@@ -4461,21 +4465,21 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const visualHeight = node.height * 2; // 2 units tall per cell
                         const splitHorizontal = visualHeight > visualWidth ? true : (visualWidth > visualHeight ? false : rng(rngOffset + depth) > 0.5);
 
-                        if (splitHorizontal && node.height >= 10) {
-                            const splitY = node.y + Math.floor(node.height / 2) + Math.floor(rng(rngOffset + depth + 1) * 4) - 2;
+                        if (splitHorizontal && node.height >= 30) {
+                            const splitY = node.y + Math.floor(node.height / 2) + Math.floor(rng(rngOffset + depth + 1) * 8) - 4;
                             node.leftChild = { x: node.x, y: node.y, width: node.width, height: splitY - node.y };
                             node.rightChild = { x: node.x, y: splitY, width: node.width, height: node.y + node.height - splitY };
-                        } else if (!splitHorizontal && node.width >= 10) {
-                            const splitX = node.x + Math.floor(node.width / 2) + Math.floor(rng(rngOffset + depth + 2) * 4) - 2;
+                        } else if (!splitHorizontal && node.width >= 60) {
+                            const splitX = node.x + Math.floor(node.width / 2) + Math.floor(rng(rngOffset + depth + 2) * 10) - 5;
                             node.leftChild = { x: node.x, y: node.y, width: splitX - node.x, height: node.height };
                             node.rightChild = { x: splitX, y: node.y, width: node.x + node.width - splitX, height: node.height };
                         } else {
                             // Can't split further, make it a room
-                            const margin = 1;
-                            // Make rooms that look visually square-ish (width ~2x height in cells)
-                            const roomWidth = Math.max(4, Math.min(node.width - margin * 2, 8));
-                            const roomHeight = Math.max(2, Math.min(node.height - margin * 2, 4));
-                            if (roomWidth >= 4 && roomHeight >= 2) {
+                            const margin = 2;
+                            // Large rooms for text: 30-60 cells wide, 15-25 cells tall
+                            const roomWidth = Math.max(30, Math.min(node.width - margin * 2, 60));
+                            const roomHeight = Math.max(15, Math.min(node.height - margin * 2, 25));
+                            if (roomWidth >= 30 && roomHeight >= 15) {
                                 node.room = { x: node.x + margin, y: node.y + margin, width: roomWidth, height: roomHeight };
                             }
                             return;
@@ -4495,10 +4499,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         return result;
                     };
 
-                    // Create initial BSP tree within a bounded area
-                    // Make dungeon wider to compensate for 1:2 cell aspect ratio
-                    const dungeonWidth = 40;
-                    const dungeonHeight = 20;
+                    // Create large dungeon area for substantial text content
+                    // ~120 cells wide × 60 cells tall = space for multiple large text blocks
+                    const dungeonWidth = 120;
+                    const dungeonHeight = 60;
                     const rootNode: BSPNode = {
                         x: Math.floor(centerX - dungeonWidth / 2),
                         y: Math.floor(centerY - dungeonHeight / 2),
@@ -4506,7 +4510,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         height: dungeonHeight
                     };
 
-                    const maxDepth = 3; // Creates up to 8 rooms
+                    const maxDepth = 2; // Creates 4 larger rooms instead of 8 small ones
                     bspSplit(rootNode, 0, maxDepth, random, 100);
 
                     const rooms = collectRooms(rootNode);
