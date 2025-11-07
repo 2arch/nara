@@ -4444,8 +4444,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             const margin = 2;
                             if (node.width < margin * 2 + 3 || node.height < margin * 2 + 3) return;
 
-                            const roomWidth = Math.floor(rng(rngOffset) * (node.width - margin * 2 - 3)) + 3;
-                            const roomHeight = Math.floor(rng(rngOffset + 1) * (node.height - margin * 2 - 3)) + 3;
+                            // Rooms should be roughly square in visual space (accounting for 1:2 cell aspect ratio)
+                            // So if we want a visually square room, width should be ~2x height in cells
+                            const roomWidth = Math.floor(rng(rngOffset) * (node.width - margin * 2 - 4)) + 4;
+                            const roomHeight = Math.floor(rng(rngOffset + 1) * (node.height - margin * 2 - 2)) + 2;
                             const roomX = node.x + margin + Math.floor(rng(rngOffset + 2) * (node.width - roomWidth - margin * 2));
                             const roomY = node.y + margin + Math.floor(rng(rngOffset + 3) * (node.height - roomHeight - margin * 2));
 
@@ -4454,7 +4456,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         }
 
                         // Split horizontally or vertically based on node proportions
-                        const splitHorizontal = node.height > node.width ? true : (node.width > node.height ? false : rng(rngOffset + depth) > 0.5);
+                        // Account for 1:2 cell aspect ratio - compare visual proportions
+                        const visualWidth = node.width * 1; // 1 cell wide
+                        const visualHeight = node.height * 2; // 2 units tall per cell
+                        const splitHorizontal = visualHeight > visualWidth ? true : (visualWidth > visualHeight ? false : rng(rngOffset + depth) > 0.5);
 
                         if (splitHorizontal && node.height >= 10) {
                             const splitY = node.y + Math.floor(node.height / 2) + Math.floor(rng(rngOffset + depth + 1) * 4) - 2;
@@ -4467,9 +4472,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         } else {
                             // Can't split further, make it a room
                             const margin = 1;
-                            const roomWidth = Math.max(3, Math.min(node.width - margin * 2, 6));
-                            const roomHeight = Math.max(3, Math.min(node.height - margin * 2, 6));
-                            if (roomWidth >= 3 && roomHeight >= 3) {
+                            // Make rooms that look visually square-ish (width ~2x height in cells)
+                            const roomWidth = Math.max(4, Math.min(node.width - margin * 2, 8));
+                            const roomHeight = Math.max(2, Math.min(node.height - margin * 2, 4));
+                            if (roomWidth >= 4 && roomHeight >= 2) {
                                 node.room = { x: node.x + margin, y: node.y + margin, width: roomWidth, height: roomHeight };
                             }
                             return;
@@ -4490,12 +4496,14 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     };
 
                     // Create initial BSP tree within a bounded area
-                    const dungeonSize = 30;
+                    // Make dungeon wider to compensate for 1:2 cell aspect ratio
+                    const dungeonWidth = 40;
+                    const dungeonHeight = 20;
                     const rootNode: BSPNode = {
-                        x: Math.floor(centerX - dungeonSize / 2),
-                        y: Math.floor(centerY - dungeonSize / 2),
-                        width: dungeonSize,
-                        height: dungeonSize
+                        x: Math.floor(centerX - dungeonWidth / 2),
+                        y: Math.floor(centerY - dungeonHeight / 2),
+                        width: dungeonWidth,
+                        height: dungeonHeight
                     };
 
                     const maxDepth = 3; // Creates up to 8 rooms
