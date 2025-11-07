@@ -74,7 +74,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     type ResizeHandle = 'top-left' | 'top-right' | 'bottom-right' | 'bottom-left';
     const [resizeState, setResizeState] = useState<{
         active: boolean;
-        type: 'image' | 'note' | 'iframe' | 'mail' | null;
+        type: 'image' | 'note' | 'iframe' | 'mail' | 'pattern' | null;
         key: string | null;
         handle: ResizeHandle | null;
         originalBounds: { startX: number; startY: number; endX: number; endY: number } | null;
@@ -4697,13 +4697,175 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         if (selectedPatternKey) {
             try {
                 const patternData = JSON.parse(engine.worldData[selectedPatternKey] as string);
-                const { centerX, centerY, width = 120, height = 60 } = patternData;
+                const { centerX, centerY, width = 120, height = 60, timestamp } = patternData;
 
-                // Calculate bounding box
-                const startX = Math.floor(centerX - width / 2);
-                const startY = Math.floor(centerY - height / 2);
-                const endX = startX + width;
-                const endY = startY + height;
+                // Generate the pattern to calculate actual bounds
+                const seed = timestamp;
+                const random = (n: number) => {
+                    const x = Math.sin(seed + n) * 10000;
+                    return x - Math.floor(x);
+                };
+
+                // Use same BSP generation logic to get actual cells
+                type BSPNode = {
+                    x: number; y: number; width: number; height: number;
+                    leftChild?: BSPNode; rightChild?: BSPNode;
+                    room?: { x: number; y: number; width: number; height: number };
+                };
+
+                const bspSplit = (node: BSPNode, depth: number, maxDepth: number, rng: (n: number) => number, rngOffset: number): void => {
+                    if (depth >= maxDepth) {
+                        const margin = 2;
+                        if (node.width < margin * 2 + 3 || node.height < margin * 2 + 3) return;
+                        const roomWidth = Math.floor(rng(rngOffset) * 12) + 28;
+                        const roomHeight = Math.floor(rng(rngOffset + 1) * 6) + 10;
+                        const roomX = node.x + margin + Math.floor(rng(rngOffset + 2) * Math.max(0, node.width - roomWidth - margin * 2));
+                        const roomY = node.y + margin + Math.floor(rng(rngOffset + 3) * Math.max(0, node.height - roomHeight - margin * 2));
+                        node.room = { x: roomX, y: roomY, width: roomWidth, height: roomHeight };
+                        return;
+                    }
+                    const visualWidth = node.width * 1;
+                    const visualHeight = node.height * 2;
+                    const splitHorizontal = visualHeight > visualWidth ? true : (visualWidth > visualHeight ? false : rng(rngOffset + depth) > 0.5);
+                    if (splitHorizontal && node.height >= 20) {
+                        const splitY = node.y + Math.floor(node.height / 2) + Math.floor(rng(rngOffset + depth + 1) * 6) - 3;
+                        node.leftChild = { x: node.x, y: node.y, width: node.width, height: splitY - node.y };
+                        node.rightChild = { x: node.x, y: splitY, width: node.width, height: node.y + node.height - splitY };
+                    } else if (!splitHorizontal && node.width >= 40) {
+                        const splitX = node.x + Math.floor(node.width / 2) + Math.floor(rng(rngOffset + depth + 2) * 8) - 4;
+                        node.leftChild = { x: node.x, y: node.y, width: splitX - node.x, height: node.height };
+                        node.rightChild = { x: splitX, y: node.y, width: node.x + node.width - splitX, height: node.height };
+                    } else {
+                        const margin = 2;
+                        const roomWidth = Math.max(28, Math.min(node.width - margin * 2, 40));
+                        const roomHeight = Math.max(10, Math.min(node.height - margin * 2, 16));
+                        if (roomWidth >= 28 && roomHeight >= 10) {
+                            node.room = { x: node.x + margin, y: node.y + margin, width: roomWidth, height: roomHeight };
+                        }
+                        return;
+                    }
+                    if (node.leftChild) bspSplit(node.leftChild, depth + 1, maxDepth, rng, rngOffset + depth * 10);
+                    if (node.rightChild) bspSplit(node.rightChild, depth + 1, maxDepth, rng, rngOffset + depth * 10 + 5);
+                };
+
+                const collectRooms = (node: BSPNode): Array<{ x: number; y: number; width: number; height: number }> => {
+                    const result: Array<{ x: number; y: number; width: number; height: number }> = [];
+                    if (node.room) result.push(node.room);
+                    if (node.leftChild) result.push(...collectRooms(node.leftChild));
+                    if (node.rightChild) result.push(...collectRooms(node.rightChild));
+                    return result;
+                };
+
+                const rootNode: BSPNode = {
+                    x: Math.floor(centerX - width / 2),
+                    y: Math.floor(centerY - height / 2),
+                    width: width,
+                    height: height
+                };
+
+                bspSplit(rootNode, 0, 3, random, 100);
+                const rooms = collectRooms(rootNode);
+                const gridCells = new Set<string>();
+
+                // Add room cells
+                for (const room of rooms) {
+                    for (let x = room.x; x < room.x + room.width; x++) {
+                        for (let y = room.y; y < room.y + room.height; y++) {
+                            gridCells.add(`${x},${y}`);
+                        }
+                    }
+                }
+
+                // Add corridors
+                const drawCorridor = (room1: typeof rooms[0], room2: typeof rooms[0], rngSeed: number) => {
+                    const startX = room1.x + Math.floor(room1.width / 2);
+                    const startY = room1.y + Math.floor(room1.height / 2);
+                    const endX = room2.x + Math.floor(room2.width / 2);
+                    const endY = room2.y + Math.floor(room2.height / 2);
+                    const corridorWidth = 3;
+                    const corridorHeight = 2;
+
+                    if (random(rngSeed) > 0.5) {
+                        const minX = Math.min(startX, endX);
+                        const maxX = Math.max(startX, endX);
+                        for (let x = minX; x <= maxX; x++) {
+                            for (let w = 0; w < corridorWidth; w++) {
+                                gridCells.add(`${x},${startY + w - Math.floor(corridorWidth / 2)}`);
+                            }
+                        }
+                        const minY = Math.min(startY, endY);
+                        const maxY = Math.max(startY, endY);
+                        for (let y = minY; y <= maxY; y++) {
+                            for (let h = 0; h < corridorHeight; h++) {
+                                gridCells.add(`${endX + h - Math.floor(corridorHeight / 2)},${y}`);
+                            }
+                        }
+                    } else {
+                        const minY = Math.min(startY, endY);
+                        const maxY = Math.max(startY, endY);
+                        for (let y = minY; y <= maxY; y++) {
+                            for (let h = 0; h < corridorHeight; h++) {
+                                gridCells.add(`${startX + h - Math.floor(corridorHeight / 2)},${y}`);
+                            }
+                        }
+                        const minX = Math.min(startX, endX);
+                        const maxX = Math.max(startX, endX);
+                        for (let x = minX; x <= maxX; x++) {
+                            for (let w = 0; w < corridorWidth; w++) {
+                                gridCells.add(`${x},${endY + w - Math.floor(corridorWidth / 2)}`);
+                            }
+                        }
+                    }
+                };
+
+                if (rooms.length > 0) {
+                    const connected = new Set<number>([0]);
+                    while (connected.size < rooms.length) {
+                        let bestEdge: { from: number; to: number; dist: number } | null = null;
+                        for (const i of connected) {
+                            for (let j = 0; j < rooms.length; j++) {
+                                if (!connected.has(j)) {
+                                    const dx = Math.abs(rooms[j].x - rooms[i].x);
+                                    const dy = Math.abs(rooms[j].y - rooms[i].y);
+                                    const dist = dx + dy;
+                                    if (!bestEdge || dist < bestEdge.dist) {
+                                        bestEdge = { from: i, to: j, dist };
+                                    }
+                                }
+                            }
+                        }
+                        if (bestEdge) {
+                            connected.add(bestEdge.to);
+                            drawCorridor(rooms[bestEdge.from], rooms[bestEdge.to], bestEdge.from * 7 + bestEdge.to);
+                        } else {
+                            break;
+                        }
+                    }
+                    const extraCorridors = Math.floor(random(200) * 2) + 1;
+                    for (let e = 0; e < extraCorridors && rooms.length > 2; e++) {
+                        const i = Math.floor(random(300 + e) * rooms.length);
+                        const j = Math.floor(random(400 + e) * rooms.length);
+                        if (i !== j) {
+                            drawCorridor(rooms[i], rooms[j], i * 13 + j);
+                        }
+                    }
+                }
+
+                // Calculate actual bounds from generated cells
+                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                for (const cellKey of gridCells) {
+                    const [x, y] = cellKey.split(',').map(Number);
+                    minX = Math.min(minX, x);
+                    maxX = Math.max(maxX, x);
+                    minY = Math.min(minY, y);
+                    maxY = Math.max(maxY, y);
+                }
+
+                // Use actual bounds for selection box
+                const startX = minX;
+                const startY = minY;
+                const endX = maxX + 1; // +1 because we want to include the cell
+                const endY = maxY + 1;
 
                 const topLeftScreen = engine.worldToScreen(startX, startY, currentZoom, currentOffset);
                 const bottomRightScreen = engine.worldToScreen(endX, endY, currentZoom, currentOffset);
@@ -6113,6 +6275,54 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
             }
 
+            // Check pattern resize handles
+            if (selectedPatternKey) {
+                try {
+                    const patternData = JSON.parse(engine.worldData[selectedPatternKey] as string);
+                    const { centerX, centerY, width = 120, height = 60 } = patternData;
+
+                    // Use the original intended bounds for hit detection
+                    // (The visual handles match this, as selection box now shows actual extent)
+                    const startX = Math.floor(centerX - width / 2);
+                    const startY = Math.floor(centerY - height / 2);
+                    const endX = startX + width;
+                    const endY = startY + height;
+
+                    const topLeftScreen = engine.worldToScreen(startX, startY, engine.zoomLevel, engine.viewOffset);
+                    const bottomRightScreen = engine.worldToScreen(endX, endY, engine.zoomLevel, engine.viewOffset);
+
+                    const left = topLeftScreen.x;
+                    const right = bottomRightScreen.x;
+                    const top = topLeftScreen.y;
+                    const bottom = bottomRightScreen.y;
+
+                    // Check each corner handle
+                    let handle: ResizeHandle | null = null;
+                    if (isWithinThumb(x, y, left, top)) handle = 'top-left';
+                    else if (isWithinThumb(x, y, right, top)) handle = 'top-right';
+                    else if (isWithinThumb(x, y, right, bottom)) handle = 'bottom-right';
+                    else if (isWithinThumb(x, y, left, bottom)) handle = 'bottom-left';
+
+                    if (handle) {
+                        setResizeState({
+                            active: true,
+                            type: 'pattern',
+                            key: selectedPatternKey,
+                            handle,
+                            originalBounds: {
+                                startX,
+                                startY,
+                                endX,
+                                endY
+                            }
+                        });
+                        return; // Early return, don't process other mouse events
+                    }
+                } catch (e) {
+                    // Skip invalid pattern data
+                }
+            }
+
             if (e.shiftKey) {
                 // Shift+drag: prioritize selection, fallback to text block
                 isSelectingMouseDownRef.current = false;
@@ -6408,6 +6618,31 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     });
                 } catch (e) {
                     // Invalid mail data
+                }
+            } else if (resizeState.type === 'pattern' && resizeState.key) {
+                try {
+                    const patternData = JSON.parse(engine.worldData[resizeState.key] as string);
+
+                    // Calculate new width and height from bounds
+                    const newWidth = newBounds.endX - newBounds.startX;
+                    const newHeight = newBounds.endY - newBounds.startY;
+
+                    // Calculate new center from bounds
+                    const newCenterX = newBounds.startX + newWidth / 2;
+                    const newCenterY = newBounds.startY + newHeight / 2;
+
+                    engine.setWorldData(prev => ({
+                        ...prev,
+                        [resizeState.key!]: JSON.stringify({
+                            ...patternData,
+                            centerX: newCenterX,
+                            centerY: newCenterY,
+                            width: newWidth,
+                            height: newHeight
+                        })
+                    }));
+                } catch (e) {
+                    // Invalid pattern data
                 }
             }
 
@@ -7002,6 +7237,53 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
             }
 
+            // Check pattern resize handles
+            if (selectedPatternKey) {
+                try {
+                    const patternData = JSON.parse(engine.worldData[selectedPatternKey] as string);
+                    const { centerX, centerY, width = 120, height = 60 } = patternData;
+
+                    // Use the original intended bounds for hit detection
+                    // (matches the mousedown handler)
+                    const startX = Math.floor(centerX - width / 2);
+                    const startY = Math.floor(centerY - height / 2);
+                    const endX = startX + width;
+                    const endY = startY + height;
+
+                    const topLeftScreen = engine.worldToScreen(startX, startY, engine.zoomLevel, engine.viewOffset);
+                    const bottomRightScreen = engine.worldToScreen(endX, endY, engine.zoomLevel, engine.viewOffset);
+
+                    const left = topLeftScreen.x;
+                    const right = bottomRightScreen.x;
+                    const top = topLeftScreen.y;
+                    const bottom = bottomRightScreen.y;
+
+                    let handle: ResizeHandle | null = null;
+                    if (isWithinThumb(x, y, left, top)) handle = 'top-left';
+                    else if (isWithinThumb(x, y, right, top)) handle = 'top-right';
+                    else if (isWithinThumb(x, y, right, bottom)) handle = 'bottom-right';
+                    else if (isWithinThumb(x, y, left, bottom)) handle = 'bottom-left';
+
+                    if (handle) {
+                        setResizeState({
+                            active: true,
+                            type: 'pattern',
+                            key: selectedPatternKey,
+                            handle,
+                            originalBounds: {
+                                startX,
+                                startY,
+                                endX,
+                                endY
+                            }
+                        });
+                        return; // Early return - don't process other touch events
+                    }
+                } catch (e) {
+                    // Skip invalid pattern data
+                }
+            }
+
             // Long press detection for move operations and command menu
             // Clear any existing timer
             if (longPressTimerRef.current) {
@@ -7198,6 +7480,79 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     }));
                 } catch (e) {
                     // Invalid note data
+                }
+            } else if (resizeState.type === 'iframe' && resizeState.key) {
+                try {
+                    const iframeData = JSON.parse(engine.worldData[resizeState.key] as string);
+                    engine.setWorldData(prev => ({
+                        ...prev,
+                        [resizeState.key!]: JSON.stringify({
+                            ...iframeData,
+                            startX: newBounds.startX,
+                            startY: newBounds.startY,
+                            endX: newBounds.endX,
+                            endY: newBounds.endY
+                        })
+                    }));
+                } catch (e) {
+                    // Invalid iframe data
+                }
+            } else if (resizeState.type === 'mail' && resizeState.key) {
+                try {
+                    const mailData = JSON.parse(engine.worldData[resizeState.key] as string);
+                    const buttonKey = `mailbutton_${resizeState.key}`;
+                    const buttonData = engine.worldData[buttonKey] ? JSON.parse(engine.worldData[buttonKey] as string) : null;
+
+                    engine.setWorldData(prev => {
+                        const updated = {
+                            ...prev,
+                            [resizeState.key!]: JSON.stringify({
+                                ...mailData,
+                                startX: newBounds.startX,
+                                startY: newBounds.startY,
+                                endX: newBounds.endX,
+                                endY: newBounds.endY
+                            })
+                        };
+
+                        // Update button position to stay at bottom-right corner
+                        if (buttonData) {
+                            updated[buttonKey] = JSON.stringify({
+                                ...buttonData,
+                                x: newBounds.endX,
+                                y: newBounds.endY
+                            });
+                        }
+
+                        return updated;
+                    });
+                } catch (e) {
+                    // Invalid mail data
+                }
+            } else if (resizeState.type === 'pattern' && resizeState.key) {
+                try {
+                    const patternData = JSON.parse(engine.worldData[resizeState.key] as string);
+
+                    // Calculate new width and height from bounds
+                    const newWidth = newBounds.endX - newBounds.startX;
+                    const newHeight = newBounds.endY - newBounds.startY;
+
+                    // Calculate new center from bounds
+                    const newCenterX = newBounds.startX + newWidth / 2;
+                    const newCenterY = newBounds.startY + newHeight / 2;
+
+                    engine.setWorldData(prev => ({
+                        ...prev,
+                        [resizeState.key!]: JSON.stringify({
+                            ...patternData,
+                            centerX: newCenterX,
+                            centerY: newCenterY,
+                            width: newWidth,
+                            height: newHeight
+                        })
+                    }));
+                } catch (e) {
+                    // Invalid pattern data
                 }
             }
 
