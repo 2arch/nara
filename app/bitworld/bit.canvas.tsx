@@ -5881,7 +5881,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
             // Check if clicking on a resize handle first
             const thumbSize = 8;
-            const thumbHitArea = thumbSize + 4; // Add padding for easier clicking
+            const thumbHitArea = thumbSize + 6; // Add padding for easier clicking (14px total)
 
             // Helper function to check if point is within a thumb
             const isWithinThumb = (px: number, py: number, tx: number, ty: number): boolean => {
@@ -6982,7 +6982,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const x = touches[0].x;
             const y = touches[0].y;
             const thumbSize = 8;
-            const thumbHitArea = thumbSize + 8; // Larger hit area for touch (was +4 for mouse)
+            const thumbHitArea = thumbSize + 10; // Larger hit area for touch (18px total)
 
             const isWithinThumb = (px: number, py: number, tx: number, ty: number): boolean => {
                 return Math.abs(px - tx) <= thumbHitArea / 2 && Math.abs(py - ty) <= thumbHitArea / 2;
