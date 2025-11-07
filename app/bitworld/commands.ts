@@ -111,7 +111,7 @@ const AVAILABLE_COMMANDS = [
     // Navigation & View
     'nav', 'search', 'cam', 'indent', 'zoom', 'map',
     // Content Creation
-    'label', 'task', 'link', 'clip', 'upload', 'paint',
+    'label', 'task', 'link', 'clip', 'upload', 'paint', 'pattern',
     // Special
     'mode', 'note', 'mail', 'chat', 'tutorial', 'help',
     // Styling & Display
@@ -3081,6 +3081,26 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 setDialogueWithRevert("Paint mode enabled - drag to draw, double-click/double-tap to fill, ESC to exit.", setDialogueText);
             } else {
                 setDialogueWithRevert("Paint mode disabled", setDialogueText);
+            }
+        } else if (commandName === 'pattern') {
+            // Generate a townscape pattern at cursor position
+            if (setWorldData && worldData) {
+                const cursorPos = getCursorPosition?.() || { x: 0, y: 0 };
+
+                // Generate pattern data
+                const patternKey = `pattern_${Date.now()}`;
+                const patternData = {
+                    centerX: cursorPos.x,
+                    centerY: cursorPos.y,
+                    timestamp: Date.now()
+                };
+
+                setWorldData(prev => ({
+                    ...prev,
+                    [patternKey]: JSON.stringify(patternData)
+                }));
+
+                setDialogueWithRevert("Pattern generated", setDialogueText);
             }
         } else if (commandName === 'label') {
             // Check if there's a selection to create label from
