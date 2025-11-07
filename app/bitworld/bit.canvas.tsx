@@ -7054,7 +7054,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 startY: selectedNoteData.startY,
                                 endX: selectedNoteData.endX,
                                 endY: selectedNoteData.endY
-                            }
+                            },
+                            roomIndex: null
                         });
                         return; // Early return - don't process other touch events
                     }
@@ -7588,7 +7589,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 type: null,
                 key: null,
                 handle: null,
-                originalBounds: null
+                originalBounds: null,
+                roomIndex: null
             });
             return; // Early return after resize complete
         }
