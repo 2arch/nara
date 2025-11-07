@@ -375,6 +375,7 @@ export interface WorldEngine {
     updateClusterLabels: () => Promise<void>;
     focusedBoundKey: string | null;
     isMoveMode: boolean;
+    isPaintMode: boolean;
     gridMode: import('./commands').GridMode;
     cycleGridMode: () => void;
     artefactsEnabled: boolean;
@@ -1139,6 +1140,8 @@ export function useWorldEngine({
         isIndentEnabled,
         isMoveMode,
         exitMoveMode,
+        isPaintMode,
+        exitPaintMode,
         gridMode,
         cycleGridMode,
         artefactsEnabled,
@@ -3214,6 +3217,13 @@ export function useWorldEngine({
         if (key === 'Escape' && isMoveMode) {
             exitMoveMode();
             setDialogueWithRevert("Move mode disabled", setDialogueText);
+            return true;
+        }
+
+        // === Paint Mode Exit ===
+        if (key === 'Escape' && isPaintMode) {
+            exitPaintMode();
+            setDialogueWithRevert("Paint mode disabled", setDialogueText);
             return true;
         }
 
@@ -10701,6 +10711,7 @@ export function useWorldEngine({
         updateClusterLabels,
         focusedBoundKey, // Expose focused bound for rendering
         isMoveMode,
+        isPaintMode,
         gridMode,
         cycleGridMode,
         artefactsEnabled,

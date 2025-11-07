@@ -4348,6 +4348,64 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Paint Strokes ===
+        for (const key in engine.worldData) {
+            if (key.startsWith('stroke_')) {
+                try {
+                    const strokeData = JSON.parse(engine.worldData[key] as string);
+                    const { points } = strokeData;
+
+                    if (!points || points.length < 2) continue;
+
+                    // Draw stroke as connected line segments
+                    ctx.strokeStyle = engine.textColor;
+                    ctx.lineWidth = 3;
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+                    ctx.beginPath();
+
+                    // Move to first point
+                    const firstPoint = points[0];
+                    const firstScreen = engine.worldToScreen(firstPoint.x, firstPoint.y, currentZoom, currentOffset);
+                    ctx.moveTo(firstScreen.x, firstScreen.y);
+
+                    // Draw lines to subsequent points
+                    for (let i = 1; i < points.length; i++) {
+                        const point = points[i];
+                        const screenPos = engine.worldToScreen(point.x, point.y, currentZoom, currentOffset);
+                        ctx.lineTo(screenPos.x, screenPos.y);
+                    }
+
+                    ctx.stroke();
+                } catch (e) {
+                    // Skip invalid stroke data
+                }
+            }
+        }
+
+        // Also render the current in-progress paint stroke
+        if (isPaintingRef.current && currentPaintStrokeRef.current.length >= 2) {
+            const points = currentPaintStrokeRef.current;
+
+            ctx.strokeStyle = engine.textColor;
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+
+            const firstPoint = points[0];
+            const firstScreen = engine.worldToScreen(firstPoint.x, firstPoint.y, currentZoom, currentOffset);
+            ctx.moveTo(firstScreen.x, firstScreen.y);
+
+            for (let i = 1; i < points.length; i++) {
+                const point = points[i];
+                const screenPos = engine.worldToScreen(point.x, point.y, currentZoom, currentOffset);
+                ctx.lineTo(screenPos.x, screenPos.y);
+            }
+
+            ctx.stroke();
+        }
+
 
         // === Render AI Processing Region ===
         if (engine.aiProcessingRegion) {
@@ -6275,6 +6333,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     const lastPinchDistanceRef = useRef<number | null>(null);
     const isTouchPanningRef = useRef<boolean>(false);
     const isTouchSelectingRef = useRef<boolean>(false);
+    const isPaintingRef = useRef<boolean>(false);
+    const currentPaintStrokeRef = useRef<Array<{x: number, y: number}>>([]);
     const touchHasMovedRef = useRef<boolean>(false);
 
     // Double-tap detection state
@@ -6331,6 +6391,22 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const dy = touches[1].y - touches[0].y;
             lastPinchDistanceRef.current = Math.sqrt(dx * dx + dy * dy);
         } else if (touches.length === 1) {
+            // Check if paint mode is active first
+            if (engine.isPaintMode) {
+                e.preventDefault();
+                isPaintingRef.current = true;
+
+                // Start paint stroke with initial world position
+                const worldPos = engine.screenToWorld(
+                    touches[0].x,
+                    touches[0].y,
+                    engine.zoomLevel,
+                    engine.viewOffset
+                );
+                currentPaintStrokeRef.current = [{ x: worldPos.x, y: worldPos.y }];
+                return; // Don't process other gestures
+            }
+
             // Single touch - detect double-tap or prepare for pan
             const now = Date.now();
             const currentPos = { x: touches[0].x, y: touches[0].y };
@@ -6572,6 +6648,31 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             longPressTimerRef.current = null;
         }
 
+        // Handle paint stroke (highest priority after long press cancellation)
+        if (isPaintingRef.current && touches.length === 1) {
+            e.preventDefault();
+
+            const worldPos = engine.screenToWorld(
+                touches[0].x,
+                touches[0].y,
+                engine.zoomLevel,
+                engine.viewOffset
+            );
+
+            // Add point to stroke if moved significantly
+            const lastPoint = currentPaintStrokeRef.current[currentPaintStrokeRef.current.length - 1];
+            const distance = Math.sqrt(
+                Math.pow(worldPos.x - lastPoint.x, 2) +
+                Math.pow(worldPos.y - lastPoint.y, 2)
+            );
+
+            if (distance > 0.3) { // Only add point if moved > 0.3 cells
+                currentPaintStrokeRef.current.push({ x: worldPos.x, y: worldPos.y });
+            }
+
+            return; // Don't process other gestures
+        }
+
         // Handle resize drag (highest priority)
         if (resizeState.active && resizeState.handle && resizeState.originalBounds && touches.length === 1) {
             const x = touches[0].x;
@@ -6743,6 +6844,29 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         if (longPressTimerRef.current) {
             clearTimeout(longPressTimerRef.current);
             longPressTimerRef.current = null;
+        }
+
+        // Handle paint stroke end - save to worldData
+        if (isPaintingRef.current) {
+            isPaintingRef.current = false;
+
+            // Only save if we have at least 2 points
+            if (currentPaintStrokeRef.current.length >= 2) {
+                const strokeKey = `stroke_${Date.now()}`;
+                const strokeData = {
+                    points: currentPaintStrokeRef.current,
+                    timestamp: Date.now()
+                };
+
+                engine.setWorldData(prev => ({
+                    ...prev,
+                    [strokeKey]: JSON.stringify(strokeData)
+                }));
+            }
+
+            // Clear the current stroke
+            currentPaintStrokeRef.current = [];
+            return; // Don't process other gestures
         }
 
         // Reset resize state if active
