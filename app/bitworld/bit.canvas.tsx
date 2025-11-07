@@ -68,6 +68,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const [shiftDragStartPos, setShiftDragStartPos] = useState<Point | null>(null);
     const [selectedImageKey, setSelectedImageKey] = useState<string | null>(null);
     const [selectedNoteKey, setSelectedNoteKey] = useState<string | null>(null);
+    const [selectedPatternKey, setSelectedPatternKey] = useState<string | null>(null);
 
     // Resize state
     type ResizeHandle = 'top-left' | 'top-right' | 'bottom-right' | 'bottom-left';
@@ -1330,6 +1331,29 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         pos.y >= imageData.startY && pos.y <= imageData.endY) {
                         return imageData;
                     }
+                }
+            }
+        }
+        return null;
+    }, [engine]);
+
+    const findPatternAtPosition = useCallback((pos: Point): { key: string; data: any } | null => {
+        for (const key in engine.worldData) {
+            if (key.startsWith('pattern_')) {
+                try {
+                    const patternData = JSON.parse(engine.worldData[key] as string);
+                    const { centerX, centerY, width = 120, height = 60 } = patternData;
+
+                    const startX = Math.floor(centerX - width / 2);
+                    const startY = Math.floor(centerY - height / 2);
+                    const endX = startX + width;
+                    const endY = startY + height;
+
+                    if (pos.x >= startX && pos.x <= endX && pos.y >= startY && pos.y <= endY) {
+                        return { key, data: patternData };
+                    }
+                } catch (e) {
+                    continue;
                 }
             }
         }
@@ -4418,7 +4442,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             if (key.startsWith('pattern_')) {
                 try {
                     const patternData = JSON.parse(engine.worldData[key] as string);
-                    const { centerX, centerY, timestamp } = patternData;
+                    const { centerX, centerY, timestamp, width = 120, height = 60 } = patternData;
 
                     // Generate deterministic pattern from timestamp seed
                     const seed = timestamp;
@@ -4495,10 +4519,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         return result;
                     };
 
-                    // Create dungeon with multiple medium-sized rooms
-                    // Each room ~30-40 × 10-15 cells for 100-200 word notes
-                    const dungeonWidth = 120;
-                    const dungeonHeight = 60;
+                    // Create dungeon with size from pattern data (allows resizing)
+                    const dungeonWidth = width;
+                    const dungeonHeight = height;
                     const rootNode: BSPNode = {
                         x: Math.floor(centerX - dungeonWidth / 2),
                         y: Math.floor(centerY - dungeonHeight / 2),
@@ -4670,6 +4693,49 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
+        // === Render Selected Pattern Border ===
+        if (selectedPatternKey) {
+            try {
+                const patternData = JSON.parse(engine.worldData[selectedPatternKey] as string);
+                const { centerX, centerY, width = 120, height = 60 } = patternData;
+
+                // Calculate bounding box
+                const startX = Math.floor(centerX - width / 2);
+                const startY = Math.floor(centerY - height / 2);
+                const endX = startX + width;
+                const endY = startY + height;
+
+                const topLeftScreen = engine.worldToScreen(startX, startY, currentZoom, currentOffset);
+                const bottomRightScreen = engine.worldToScreen(endX, endY, currentZoom, currentOffset);
+
+                // Draw selection border
+                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
+                const lineWidth = 3;
+                ctx.lineWidth = lineWidth;
+                const halfWidth = lineWidth / 2;
+                ctx.strokeRect(
+                    topLeftScreen.x + halfWidth,
+                    topLeftScreen.y + halfWidth,
+                    bottomRightScreen.x - topLeftScreen.x - lineWidth,
+                    bottomRightScreen.y - topLeftScreen.y - lineWidth
+                );
+
+                // Draw resize handles at corners
+                const thumbSize = 8;
+                ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.9)`;
+
+                // Top-left
+                ctx.fillRect(topLeftScreen.x - thumbSize / 2, topLeftScreen.y - thumbSize / 2, thumbSize, thumbSize);
+                // Top-right
+                ctx.fillRect(bottomRightScreen.x - thumbSize / 2, topLeftScreen.y - thumbSize / 2, thumbSize, thumbSize);
+                // Bottom-right
+                ctx.fillRect(bottomRightScreen.x - thumbSize / 2, bottomRightScreen.y - thumbSize / 2, thumbSize, thumbSize);
+                // Bottom-left
+                ctx.fillRect(topLeftScreen.x - thumbSize / 2, bottomRightScreen.y - thumbSize / 2, thumbSize, thumbSize);
+            } catch (e) {
+                // Skip invalid pattern data
+            }
+        }
 
         // === Render AI Processing Region ===
         if (engine.aiProcessingRegion) {
@@ -6086,21 +6152,38 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 };
                 const iframeAtPosition = findIframeAtPosition(snappedWorldPos);
 
-                if (iframeAtPosition) {
+                // Check for pattern first
+                const patternAtPosition = findPatternAtPosition(snappedWorldPos);
+
+                if (patternAtPosition) {
+                    // Single click on pattern selects it (shows resize handles)
+                    setSelectedPatternKey(patternAtPosition.key);
+                    setSelectedIframeKey(null);
+                    setSelectedImageKey(null);
+                    setSelectedNoteKey(null);
+                    setSelectedMailKey(null);
+                    if (activeIframeKey) {
+                        setActiveIframeKey(null);
+                    }
+                    isSelectingMouseDownRef.current = false;
+                } else if (iframeAtPosition) {
                     // Single click on iframe selects it (shows resize handles)
                     setSelectedIframeKey(iframeAtPosition.key);
                     setSelectedImageKey(null);
                     setSelectedNoteKey(null);
+                    setSelectedPatternKey(null);
                     // Deactivate if clicking outside the currently active iframe
                     if (activeIframeKey && activeIframeKey !== iframeAtPosition.key) {
                         setActiveIframeKey(null);
                     }
                     isSelectingMouseDownRef.current = false;
                 } else {
-                    // Clear image, note, and iframe selections when starting regular selection
+                    // Clear all selections when starting regular selection
                     setSelectedImageKey(null);
                     setSelectedNoteKey(null);
                     setSelectedIframeKey(null);
+                    setSelectedPatternKey(null);
+                    setSelectedMailKey(null);
                     // Deactivate any active iframe when clicking outside
                     if (activeIframeKey) {
                         setActiveIframeKey(null);
