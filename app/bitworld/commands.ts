@@ -2670,6 +2670,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 const patternData = {
                     centerX: cursorPos.x,
                     centerY: cursorPos.y,
+                    width: 120, // Default dungeon width
+                    height: 60, // Default dungeon height
                     timestamp: Date.now()
                 };
 
