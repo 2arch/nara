@@ -4530,30 +4530,45 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const endX = room2.x + Math.floor(room2.width / 2);
                         const endY = room2.y + Math.floor(room2.height / 2);
 
+                        // Wider corridors to match larger room scale
+                        // 3 cells wide for horizontal, 2 cells tall for vertical (respects 1:2 aspect ratio)
+                        const corridorWidth = 3; // horizontal thickness
+                        const corridorHeight = 2; // vertical thickness
+
                         // L-shaped corridor - randomly choose horizontal-first or vertical-first
                         if (random(rngSeed) > 0.5) {
-                            // Horizontal then vertical
+                            // Horizontal segment first (3 cells wide)
                             const minX = Math.min(startX, endX);
                             const maxX = Math.max(startX, endX);
                             for (let x = minX; x <= maxX; x++) {
-                                gridCells.add(`${x},${startY}`);
+                                for (let w = 0; w < corridorWidth; w++) {
+                                    gridCells.add(`${x},${startY + w - Math.floor(corridorWidth / 2)}`);
+                                }
                             }
+                            // Vertical segment (2 cells tall visually matches horizontal 3-wide)
                             const minY = Math.min(startY, endY);
                             const maxY = Math.max(startY, endY);
                             for (let y = minY; y <= maxY; y++) {
-                                gridCells.add(`${endX},${y}`);
+                                for (let h = 0; h < corridorHeight; h++) {
+                                    gridCells.add(`${endX + h - Math.floor(corridorHeight / 2)},${y}`);
+                                }
                             }
                         } else {
-                            // Vertical then horizontal
+                            // Vertical segment first (2 cells tall)
                             const minY = Math.min(startY, endY);
                             const maxY = Math.max(startY, endY);
                             for (let y = minY; y <= maxY; y++) {
-                                gridCells.add(`${startX},${y}`);
+                                for (let h = 0; h < corridorHeight; h++) {
+                                    gridCells.add(`${startX + h - Math.floor(corridorHeight / 2)},${y}`);
+                                }
                             }
+                            // Horizontal segment (3 cells wide)
                             const minX = Math.min(startX, endX);
                             const maxX = Math.max(startX, endX);
                             for (let x = minX; x <= maxX; x++) {
-                                gridCells.add(`${x},${endY}`);
+                                for (let w = 0; w < corridorWidth; w++) {
+                                    gridCells.add(`${x},${endY + w - Math.floor(corridorWidth / 2)}`);
+                                }
                             }
                         }
                     };
