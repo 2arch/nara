@@ -3085,7 +3085,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         } else if (commandName === 'pattern') {
             // Generate a townscape pattern at cursor position
             if (setWorldData && worldData) {
-                const cursorPos = getCursorPosition?.() || { x: 0, y: 0 };
+                const cursorPos = commandState.commandStartPos;
 
                 // Generate pattern data
                 const patternKey = `pattern_${Date.now()}`;
@@ -3095,13 +3095,27 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     timestamp: Date.now()
                 };
 
-                setWorldData(prev => ({
+                setWorldData((prev: WorldData) => ({
                     ...prev,
                     [patternKey]: JSON.stringify(patternData)
                 }));
 
                 setDialogueWithRevert("Pattern generated", setDialogueText);
             }
+
+            // Clear command state
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            return null; // Pattern doesn't need further processing
         } else if (commandName === 'label') {
             // Check if there's a selection to create label from
             const existingSelection = getNormalizedSelection?.();

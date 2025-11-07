@@ -6507,10 +6507,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     const currentPaintStrokeRef = useRef<Array<{x: number, y: number}>>([]);
     const touchHasMovedRef = useRef<boolean>(false);
 
-    // Double-tap detection state
+    // Double-tap and triple-tap detection state
     const lastTapTimeRef = useRef<number>(0);
     const lastTapPosRef = useRef<{ x: number; y: number } | null>(null);
+    const tapCountRef = useRef<number>(0);
     const DOUBLE_TAP_THRESHOLD = 300; // ms - time window for double-tap
+    const TRIPLE_TAP_THRESHOLD = 400; // ms - time window for triple-tap
     const DOUBLE_TAP_DISTANCE = 30; // px - max distance between taps
     const isDoubleTapModeRef = useRef<boolean>(false);
 
@@ -6585,20 +6587,41 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 return; // Don't process other gestures
             }
 
-            // Single touch - detect double-tap or prepare for pan
+            // Single touch - detect double-tap/triple-tap or prepare for pan
             const now = Date.now();
             const currentPos = { x: touches[0].x, y: touches[0].y };
 
-            // Check if this is a double-tap (within time and distance threshold)
+            // Check if this is a sequential tap (within time and distance threshold)
             const timeSinceLastTap = now - lastTapTimeRef.current;
-            const isDoubleTap = lastTapPosRef.current &&
-                timeSinceLastTap < DOUBLE_TAP_THRESHOLD &&
+            const isSequentialTap = lastTapPosRef.current &&
+                timeSinceLastTap < TRIPLE_TAP_THRESHOLD &&
                 Math.sqrt(
                     Math.pow(currentPos.x - lastTapPosRef.current.x, 2) +
                     Math.pow(currentPos.y - lastTapPosRef.current.y, 2)
                 ) < DOUBLE_TAP_DISTANCE;
 
-            if (isDoubleTap) {
+            // Update tap count
+            if (isSequentialTap) {
+                tapCountRef.current += 1;
+            } else {
+                tapCountRef.current = 1;
+            }
+
+            const isDoubleTap = tapCountRef.current === 2 && timeSinceLastTap < DOUBLE_TAP_THRESHOLD;
+            const isTripleTap = tapCountRef.current === 3;
+
+            if (isTripleTap) {
+                // Triple-tap detected - acts as ESC key
+                e.preventDefault();
+
+                // Reset tap count
+                tapCountRef.current = 0;
+
+                // Simulate ESC key press
+                engine.handleKeyDown('Escape', false, false, false, false);
+
+                return;
+            } else if (isDoubleTap) {
                 // Double-tap detected
                 e.preventDefault(); // Prevent iOS Safari double-tap-to-zoom
 
@@ -6619,7 +6642,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     // Clear the current polygon
                     currentPaintStrokeRef.current = [];
 
-                    setDialogueWithRevert("Region saved - drag to draw, double-tap to fill, ESC to exit paint mode", engine.setDialogueText);
+                    setDialogueWithRevert("Region saved - drag to draw, double-tap to fill, triple-tap for ESC", engine.setDialogueText);
 
                     return;
                 }
