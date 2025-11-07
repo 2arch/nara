@@ -78,12 +78,14 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         key: string | null;
         handle: ResizeHandle | null;
         originalBounds: { startX: number; startY: number; endX: number; endY: number } | null;
+        roomIndex: number | null; // For pattern type: which room in the rooms array (null = pattern boundary)
     }>({
         active: false,
         type: null,
         key: null,
         handle: null,
-        originalBounds: null
+        originalBounds: null,
+        roomIndex: null
     });
 
     const [selectedIframeKey, setSelectedIframeKey] = useState<string | null>(null);
@@ -5916,7 +5918,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 startY: selectedImageData.startY,
                                 endX: selectedImageData.endX,
                                 endY: selectedImageData.endY
-                            }
+                            },
+                            roomIndex: null
                         });
                         return; // Early return, don't process other mouse events
                     }
@@ -5953,7 +5956,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 startY: selectedNoteData.startY,
                                 endX: selectedNoteData.endX,
                                 endY: selectedNoteData.endY
-                            }
+                            },
+                            roomIndex: null
                         });
                         return; // Early return, don't process other mouse events
                     }
@@ -5992,7 +5996,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 startY: selectedIframeData.startY,
                                 endX: selectedIframeData.endX,
                                 endY: selectedIframeData.endY
-                            }
+                            },
+                            roomIndex: null
                         });
                         return; // Early return, don't process other mouse events
                     }
@@ -6031,7 +6036,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 startY: selectedMailData.startY,
                                 endX: selectedMailData.endX,
                                 endY: selectedMailData.endY
-                            }
+                            },
+                            roomIndex: null
                         });
                         return; // Early return, don't process other mouse events
                     }
@@ -6040,12 +6046,50 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
             }
 
-            // Check pattern resize handles
+            // Check pattern room resize handles (check rooms first, they're inside the pattern)
             if (selectedPatternKey) {
                 try {
                     const patternData = JSON.parse(engine.worldData[selectedPatternKey] as string);
-                    const { centerX, centerY, width = 120, height = 60 } = patternData;
+                    const { centerX, centerY, width = 120, height = 60, rooms = [] } = patternData;
 
+                    // Check individual room corners first (smaller hit area for precision)
+                    const roomThumbHitArea = 10; // 6px thumb + 4px padding
+                    for (let roomIndex = 0; roomIndex < rooms.length; roomIndex++) {
+                        const room = rooms[roomIndex];
+                        const roomTopLeft = engine.worldToScreen(room.x, room.y, engine.zoomLevel, engine.viewOffset);
+                        const roomBottomRight = engine.worldToScreen(room.x + room.width, room.y + room.height, engine.zoomLevel, engine.viewOffset);
+
+                        const roomLeft = roomTopLeft.x;
+                        const roomRight = roomBottomRight.x;
+                        const roomTop = roomTopLeft.y;
+                        const roomBottom = roomBottomRight.y;
+
+                        // Check if clicking on any room corner thumb
+                        let handle: ResizeHandle | null = null;
+                        if (Math.abs(x - roomLeft) <= roomThumbHitArea / 2 && Math.abs(y - roomTop) <= roomThumbHitArea / 2) handle = 'top-left';
+                        else if (Math.abs(x - roomRight) <= roomThumbHitArea / 2 && Math.abs(y - roomTop) <= roomThumbHitArea / 2) handle = 'top-right';
+                        else if (Math.abs(x - roomRight) <= roomThumbHitArea / 2 && Math.abs(y - roomBottom) <= roomThumbHitArea / 2) handle = 'bottom-right';
+                        else if (Math.abs(x - roomLeft) <= roomThumbHitArea / 2 && Math.abs(y - roomBottom) <= roomThumbHitArea / 2) handle = 'bottom-left';
+
+                        if (handle) {
+                            setResizeState({
+                                active: true,
+                                type: 'pattern',
+                                key: selectedPatternKey,
+                                handle,
+                                originalBounds: {
+                                    startX: room.x,
+                                    startY: room.y,
+                                    endX: room.x + room.width,
+                                    endY: room.y + room.height
+                                },
+                                roomIndex: roomIndex
+                            });
+                            return; // Early return, don't process other mouse events
+                        }
+                    }
+
+                    // If no room thumb hit, check pattern boundary
                     // Convert center/dimensions to bounds (same as image format)
                     const startX = Math.floor(centerX - width / 2);
                     const startY = Math.floor(centerY - height / 2);
@@ -6078,7 +6122,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 startY,
                                 endX,
                                 endY
-                            }
+                            },
+                            roomIndex: null // null means resizing pattern boundary
                         });
                         return; // Early return, don't process other mouse events
                     }
@@ -6387,24 +6432,53 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 try {
                     const patternData = JSON.parse(engine.worldData[resizeState.key] as string);
 
-                    // Calculate new width and height from bounds
-                    const newWidth = newBounds.endX - newBounds.startX;
-                    const newHeight = newBounds.endY - newBounds.startY;
+                    if (resizeState.roomIndex !== null && resizeState.roomIndex !== undefined) {
+                        // Resizing a specific room
+                        const rooms = patternData.rooms || [];
 
-                    // Calculate new center from bounds
-                    const newCenterX = newBounds.startX + newWidth / 2;
-                    const newCenterY = newBounds.startY + newHeight / 2;
+                        // Bounds check for safety
+                        if (resizeState.roomIndex < 0 || resizeState.roomIndex >= rooms.length) {
+                            return;
+                        }
 
-                    engine.setWorldData(prev => ({
-                        ...prev,
-                        [resizeState.key!]: JSON.stringify({
-                            ...patternData,
-                            centerX: newCenterX,
-                            centerY: newCenterY,
-                            width: newWidth,
-                            height: newHeight
-                        })
-                    }));
+                        const updatedRooms = [...rooms];
+
+                        // Update the specific room
+                        updatedRooms[resizeState.roomIndex] = {
+                            x: newBounds.startX,
+                            y: newBounds.startY,
+                            width: newBounds.endX - newBounds.startX,
+                            height: newBounds.endY - newBounds.startY
+                        };
+
+                        engine.setWorldData(prev => ({
+                            ...prev,
+                            [resizeState.key!]: JSON.stringify({
+                                ...patternData,
+                                rooms: updatedRooms
+                            })
+                        }));
+                    } else {
+                        // Resizing pattern boundary
+                        // Calculate new width and height from bounds
+                        const newWidth = newBounds.endX - newBounds.startX;
+                        const newHeight = newBounds.endY - newBounds.startY;
+
+                        // Calculate new center from bounds
+                        const newCenterX = newBounds.startX + newWidth / 2;
+                        const newCenterY = newBounds.startY + newHeight / 2;
+
+                        engine.setWorldData(prev => ({
+                            ...prev,
+                            [resizeState.key!]: JSON.stringify({
+                                ...patternData,
+                                centerX: newCenterX,
+                                centerY: newCenterY,
+                                width: newWidth,
+                                height: newHeight
+                            })
+                        }));
+                    }
                 } catch (e) {
                     // Invalid pattern data
                 }
@@ -6460,7 +6534,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     type: null,
                     key: null,
                     handle: null,
-                    originalBounds: null
+                    originalBounds: null,
+                    roomIndex: null
                 });
                 return; // Early return after resize complete
             }
@@ -6942,7 +7017,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 startY: selectedImageData.startY,
                                 endX: selectedImageData.endX,
                                 endY: selectedImageData.endY
-                            }
+                            },
+                            roomIndex: null
                         });
                         return; // Early return - don't process other touch events
                     }
@@ -6987,12 +7063,50 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
             }
 
-            // Check pattern resize handles
+            // Check pattern room resize handles (check rooms first, they're inside the pattern)
             if (selectedPatternKey) {
                 try {
                     const patternData = JSON.parse(engine.worldData[selectedPatternKey] as string);
-                    const { centerX, centerY, width = 120, height = 60 } = patternData;
+                    const { centerX, centerY, width = 120, height = 60, rooms = [] } = patternData;
 
+                    // Check individual room corners first (larger hit area for touch)
+                    const roomThumbHitArea = 14; // 6px thumb + 8px padding for touch
+                    for (let roomIndex = 0; roomIndex < rooms.length; roomIndex++) {
+                        const room = rooms[roomIndex];
+                        const roomTopLeft = engine.worldToScreen(room.x, room.y, engine.zoomLevel, engine.viewOffset);
+                        const roomBottomRight = engine.worldToScreen(room.x + room.width, room.y + room.height, engine.zoomLevel, engine.viewOffset);
+
+                        const roomLeft = roomTopLeft.x;
+                        const roomRight = roomBottomRight.x;
+                        const roomTop = roomTopLeft.y;
+                        const roomBottom = roomBottomRight.y;
+
+                        // Check if tapping on any room corner thumb
+                        let handle: ResizeHandle | null = null;
+                        if (Math.abs(x - roomLeft) <= roomThumbHitArea / 2 && Math.abs(y - roomTop) <= roomThumbHitArea / 2) handle = 'top-left';
+                        else if (Math.abs(x - roomRight) <= roomThumbHitArea / 2 && Math.abs(y - roomTop) <= roomThumbHitArea / 2) handle = 'top-right';
+                        else if (Math.abs(x - roomRight) <= roomThumbHitArea / 2 && Math.abs(y - roomBottom) <= roomThumbHitArea / 2) handle = 'bottom-right';
+                        else if (Math.abs(x - roomLeft) <= roomThumbHitArea / 2 && Math.abs(y - roomBottom) <= roomThumbHitArea / 2) handle = 'bottom-left';
+
+                        if (handle) {
+                            setResizeState({
+                                active: true,
+                                type: 'pattern',
+                                key: selectedPatternKey,
+                                handle,
+                                originalBounds: {
+                                    startX: room.x,
+                                    startY: room.y,
+                                    endX: room.x + room.width,
+                                    endY: room.y + room.height
+                                },
+                                roomIndex: roomIndex
+                            });
+                            return; // Early return - don't process other touch events
+                        }
+                    }
+
+                    // If no room thumb hit, check pattern boundary
                     // Convert center/dimensions to bounds (same as image format)
                     const startX = Math.floor(centerX - width / 2);
                     const startY = Math.floor(centerY - height / 2);
@@ -7024,7 +7138,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 startY,
                                 endX,
                                 endY
-                            }
+                            },
+                            roomIndex: null // null means resizing pattern boundary
                         });
                         return; // Early return - don't process other touch events
                     }
@@ -7299,24 +7414,53 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 try {
                     const patternData = JSON.parse(engine.worldData[resizeState.key] as string);
 
-                    // Calculate new width and height from bounds
-                    const newWidth = newBounds.endX - newBounds.startX;
-                    const newHeight = newBounds.endY - newBounds.startY;
+                    if (resizeState.roomIndex !== null && resizeState.roomIndex !== undefined) {
+                        // Resizing a specific room
+                        const rooms = patternData.rooms || [];
 
-                    // Calculate new center from bounds
-                    const newCenterX = newBounds.startX + newWidth / 2;
-                    const newCenterY = newBounds.startY + newHeight / 2;
+                        // Bounds check for safety
+                        if (resizeState.roomIndex < 0 || resizeState.roomIndex >= rooms.length) {
+                            return;
+                        }
 
-                    engine.setWorldData(prev => ({
-                        ...prev,
-                        [resizeState.key!]: JSON.stringify({
-                            ...patternData,
-                            centerX: newCenterX,
-                            centerY: newCenterY,
-                            width: newWidth,
-                            height: newHeight
-                        })
-                    }));
+                        const updatedRooms = [...rooms];
+
+                        // Update the specific room
+                        updatedRooms[resizeState.roomIndex] = {
+                            x: newBounds.startX,
+                            y: newBounds.startY,
+                            width: newBounds.endX - newBounds.startX,
+                            height: newBounds.endY - newBounds.startY
+                        };
+
+                        engine.setWorldData(prev => ({
+                            ...prev,
+                            [resizeState.key!]: JSON.stringify({
+                                ...patternData,
+                                rooms: updatedRooms
+                            })
+                        }));
+                    } else {
+                        // Resizing pattern boundary
+                        // Calculate new width and height from bounds
+                        const newWidth = newBounds.endX - newBounds.startX;
+                        const newHeight = newBounds.endY - newBounds.startY;
+
+                        // Calculate new center from bounds
+                        const newCenterX = newBounds.startX + newWidth / 2;
+                        const newCenterY = newBounds.startY + newHeight / 2;
+
+                        engine.setWorldData(prev => ({
+                            ...prev,
+                            [resizeState.key!]: JSON.stringify({
+                                ...patternData,
+                                centerX: newCenterX,
+                                centerY: newCenterY,
+                                width: newWidth,
+                                height: newHeight
+                            })
+                        }));
+                    }
                 } catch (e) {
                     // Invalid pattern data
                 }
