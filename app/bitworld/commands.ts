@@ -58,6 +58,7 @@ export interface ModeState {
     cameraMode: CameraMode; // Camera tracking mode
     isIndentEnabled: boolean; // Whether smart indentation is enabled for Enter key
     isMoveMode: boolean; // Whether move mode is active for dragging text blocks
+    isPaintMode: boolean; // Whether paint mode is active for drawing monogram zones
     gridMode: GridMode; // 3D grid rendering mode
     artefactsEnabled: boolean; // Whether 3D artifacts are enabled in space mode
     artifactType: ArtifactType; // Type of artifacts to show (images or questions)
@@ -239,6 +240,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         cameraMode: 'default', // Default camera mode for all devices
         isIndentEnabled: true, // Smart indentation enabled by default
         isMoveMode: false, // Move mode not active initially
+        isPaintMode: false, // Paint mode not active initially
         gridMode: 'dots', // Default grid mode
         artefactsEnabled: false, // Artifacts enabled by default in space mode
         artifactType: 'images', // Default to image artifacts
@@ -3042,6 +3044,16 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             } else {
                 setDialogueWithRevert("Make a selection first", setDialogueText);
             }
+        } else if (commandName === 'paint') {
+            // Toggle paint mode for drawing monogram zones
+            const newPaintMode = !modeState.isPaintMode;
+            setModeState(prev => ({ ...prev, isPaintMode: newPaintMode }));
+
+            if (newPaintMode) {
+                setDialogueWithRevert("Paint mode enabled - click and drag to draw. Press ESC to exit.", setDialogueText);
+            } else {
+                setDialogueWithRevert("Paint mode disabled", setDialogueText);
+            }
         } else if (commandName === 'label') {
             // Check if there's a selection to create label from
             const existingSelection = getNormalizedSelection?.();
@@ -3284,6 +3296,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         isIndentEnabled: modeState.isIndentEnabled,
         isMoveMode: modeState.isMoveMode,
         exitMoveMode: () => setModeState(prev => ({ ...prev, isMoveMode: false })),
+        isPaintMode: modeState.isPaintMode,
+        exitPaintMode: () => setModeState(prev => ({ ...prev, isPaintMode: false })),
         gridMode: modeState.gridMode,
         cycleGridMode: () => setModeState(prev => ({ 
             ...prev, 
