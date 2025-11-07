@@ -2660,6 +2660,42 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             return null; // Paint mode toggle doesn't need further processing
         }
 
+        // Handle pattern command - generates townscape pattern at cursor position
+        if (commandToExecute.startsWith('pattern')) {
+            if (setWorldData && worldData) {
+                const cursorPos = commandState.commandStartPos;
+
+                // Generate pattern data
+                const patternKey = `pattern_${Date.now()}`;
+                const patternData = {
+                    centerX: cursorPos.x,
+                    centerY: cursorPos.y,
+                    timestamp: Date.now()
+                };
+
+                setWorldData((prev: WorldData) => ({
+                    ...prev,
+                    [patternKey]: JSON.stringify(patternData)
+                }));
+
+                setDialogueWithRevert("Pattern generated", setDialogueText);
+            }
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            return null; // Pattern doesn't need further processing
+        }
+
         // Check if this is an unrecognized command - treat as AI prompt
         if (!AVAILABLE_COMMANDS.includes(commandName.toLowerCase())) {
             // This is an AI prompt, not a recognized command
@@ -3082,40 +3118,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             } else {
                 setDialogueWithRevert("Paint mode disabled", setDialogueText);
             }
-        } else if (commandName === 'pattern') {
-            // Generate a townscape pattern at cursor position
-            if (setWorldData && worldData) {
-                const cursorPos = commandState.commandStartPos;
-
-                // Generate pattern data
-                const patternKey = `pattern_${Date.now()}`;
-                const patternData = {
-                    centerX: cursorPos.x,
-                    centerY: cursorPos.y,
-                    timestamp: Date.now()
-                };
-
-                setWorldData((prev: WorldData) => ({
-                    ...prev,
-                    [patternKey]: JSON.stringify(patternData)
-                }));
-
-                setDialogueWithRevert("Pattern generated", setDialogueText);
-            }
-
-            // Clear command state
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
-
-            return null; // Pattern doesn't need further processing
         } else if (commandName === 'label') {
             // Check if there's a selection to create label from
             const existingSelection = getNormalizedSelection?.();
