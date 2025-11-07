@@ -4427,81 +4427,164 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         return x - Math.floor(x);
                     };
 
-                    // Generate 6-10 building positions using Voronoi-like distribution
-                    const numBuildings = Math.floor(random(0) * 5) + 6;
-                    const radius = 20; // Pattern radius in world units
+                    // Generate 5-8 room positions
+                    const numRooms = Math.floor(random(0) * 4) + 5;
+                    const rooms: Array<{ x: number; y: number; width: number; height: number }> = [];
 
-                    const buildings: Array<{ x: number; y: number; width: number; height: number }> = [];
+                    // Generate non-overlapping rooms on grid
+                    for (let i = 0; i < numRooms; i++) {
+                        let attempts = 0;
+                        let validRoom = false;
+                        let newRoom: { x: number; y: number; width: number; height: number } = { x: 0, y: 0, width: 0, height: 0 };
 
-                    // Generate building positions with some spacing
-                    for (let i = 0; i < numBuildings; i++) {
-                        const angle = random(i * 2) * Math.PI * 2;
-                        const dist = random(i * 2 + 1) * radius * 0.7 + radius * 0.3;
-                        const x = centerX + Math.cos(angle) * dist;
-                        const y = centerY + Math.sin(angle) * dist;
+                        while (!validRoom && attempts < 50) {
+                            const angle = random(i * 2 + attempts) * Math.PI * 2;
+                            const dist = random(i * 2 + 1 + attempts) * 12 + 5;
+                            const cx = Math.floor(centerX + Math.cos(angle) * dist);
+                            const cy = Math.floor(centerY + Math.sin(angle) * dist);
 
-                        // Random building size
-                        const width = random(i * 3) * 4 + 3;
-                        const height = random(i * 3 + 1) * 4 + 3;
+                            // Room size (3-6 cells wide/tall)
+                            const w = Math.floor(random(i * 3 + attempts) * 4) + 3;
+                            const h = Math.floor(random(i * 3 + 1 + attempts) * 4) + 3;
 
-                        buildings.push({ x, y, width, height });
+                            newRoom = { x: cx, y: cy, width: w, height: h };
+
+                            // Check if overlaps with existing rooms
+                            validRoom = true;
+                            for (const room of rooms) {
+                                const overlap = !(
+                                    newRoom.x + newRoom.width < room.x ||
+                                    newRoom.x > room.x + room.width ||
+                                    newRoom.y + newRoom.height < room.y ||
+                                    newRoom.y > room.y + room.height
+                                );
+                                if (overlap) {
+                                    validRoom = false;
+                                    break;
+                                }
+                            }
+                            attempts++;
+                        }
+
+                        if (validRoom) {
+                            rooms.push(newRoom);
+                        }
                     }
 
-                    // Draw connecting paths between nearby buildings
-                    ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
-                    ctx.lineWidth = 1;
+                    // Create a grid to mark filled cells
+                    const gridCells = new Set<string>();
 
-                    for (let i = 0; i < buildings.length; i++) {
-                        // Connect each building to 2-3 nearest neighbors
-                        const distances: Array<{ idx: number; dist: number }> = [];
-                        for (let j = 0; j < buildings.length; j++) {
+                    // Add all room cells to grid
+                    for (const room of rooms) {
+                        for (let x = room.x; x < room.x + room.width; x++) {
+                            for (let y = room.y; y < room.y + room.height; y++) {
+                                gridCells.add(`${x},${y}`);
+                            }
+                        }
+                    }
+
+                    // Connect rooms with corridors (1-cell wide paths using Manhattan distance)
+                    for (let i = 0; i < rooms.length; i++) {
+                        // Find nearest unconnected room
+                        let nearest = -1;
+                        let minDist = Infinity;
+
+                        for (let j = 0; j < rooms.length; j++) {
                             if (i !== j) {
-                                const dx = buildings[j].x - buildings[i].x;
-                                const dy = buildings[j].y - buildings[i].y;
-                                const dist = Math.sqrt(dx * dx + dy * dy);
-                                distances.push({ idx: j, dist });
+                                const dx = Math.abs(rooms[j].x - rooms[i].x);
+                                const dy = Math.abs(rooms[j].y - rooms[i].y);
+                                const dist = dx + dy;
+                                if (dist < minDist) {
+                                    minDist = dist;
+                                    nearest = j;
+                                }
                             }
                         }
 
-                        distances.sort((a, b) => a.dist - b.dist);
-                        const numConnections = Math.min(2, distances.length);
+                        if (nearest !== -1) {
+                            // Draw L-shaped corridor from room i to nearest
+                            const startX = rooms[i].x + Math.floor(rooms[i].width / 2);
+                            const startY = rooms[i].y + Math.floor(rooms[i].height / 2);
+                            const endX = rooms[nearest].x + Math.floor(rooms[nearest].width / 2);
+                            const endY = rooms[nearest].y + Math.floor(rooms[nearest].height / 2);
 
-                        for (let k = 0; k < numConnections; k++) {
-                            const neighbor = buildings[distances[k].idx];
-                            const start = engine.worldToScreen(buildings[i].x, buildings[i].y, currentZoom, currentOffset);
-                            const end = engine.worldToScreen(neighbor.x, neighbor.y, currentZoom, currentOffset);
-
-                            ctx.beginPath();
-                            ctx.moveTo(start.x, start.y);
-                            ctx.lineTo(end.x, end.y);
-                            ctx.stroke();
+                            // Horizontal then vertical
+                            if (random(i * 7) > 0.5) {
+                                // Go horizontal first
+                                const minX = Math.min(startX, endX);
+                                const maxX = Math.max(startX, endX);
+                                for (let x = minX; x <= maxX; x++) {
+                                    gridCells.add(`${x},${startY}`);
+                                }
+                                // Then vertical
+                                const minY = Math.min(startY, endY);
+                                const maxY = Math.max(startY, endY);
+                                for (let y = minY; y <= maxY; y++) {
+                                    gridCells.add(`${endX},${y}`);
+                                }
+                            } else {
+                                // Go vertical first
+                                const minY = Math.min(startY, endY);
+                                const maxY = Math.max(startY, endY);
+                                for (let y = minY; y <= maxY; y++) {
+                                    gridCells.add(`${startX},${y}`);
+                                }
+                                // Then horizontal
+                                const minX = Math.min(startX, endX);
+                                const maxX = Math.max(startX, endX);
+                                for (let x = minX; x <= maxX; x++) {
+                                    gridCells.add(`${x},${endY}`);
+                                }
+                            }
                         }
                     }
 
-                    // Draw buildings as rectangles
-                    ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.2)`;
+                    // Draw the unified shape with a single outer border
+                    // Fill all cells
+                    ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.15)`;
+                    for (const cellKey of gridCells) {
+                        const [x, y] = cellKey.split(',').map(Number);
+                        const topLeft = engine.worldToScreen(x, y, currentZoom, currentOffset);
+                        const bottomRight = engine.worldToScreen(x + 1, y + 1, currentZoom, currentOffset);
+                        const w = bottomRight.x - topLeft.x;
+                        const h = bottomRight.y - topLeft.y;
+                        ctx.fillRect(topLeft.x, topLeft.y, w, h);
+                    }
+
+                    // Draw outer border only (cells that have an empty neighbor)
                     ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.6)`;
                     ctx.lineWidth = 2;
 
-                    for (const building of buildings) {
-                        const topLeft = engine.worldToScreen(
-                            building.x - building.width / 2,
-                            building.y - building.height / 2,
-                            currentZoom,
-                            currentOffset
-                        );
-                        const bottomRight = engine.worldToScreen(
-                            building.x + building.width / 2,
-                            building.y + building.height / 2,
-                            currentZoom,
-                            currentOffset
-                        );
+                    for (const cellKey of gridCells) {
+                        const [x, y] = cellKey.split(',').map(Number);
+                        const topLeft = engine.worldToScreen(x, y, currentZoom, currentOffset);
+                        const bottomRight = engine.worldToScreen(x + 1, y + 1, currentZoom, currentOffset);
 
-                        const w = bottomRight.x - topLeft.x;
-                        const h = bottomRight.y - topLeft.y;
+                        // Check each edge and draw if it's a border
+                        ctx.beginPath();
 
-                        ctx.fillRect(topLeft.x, topLeft.y, w, h);
-                        ctx.strokeRect(topLeft.x, topLeft.y, w, h);
+                        // Top edge
+                        if (!gridCells.has(`${x},${y - 1}`)) {
+                            ctx.moveTo(topLeft.x, topLeft.y);
+                            ctx.lineTo(bottomRight.x, topLeft.y);
+                        }
+                        // Right edge
+                        if (!gridCells.has(`${x + 1},${y}`)) {
+                            ctx.moveTo(bottomRight.x, topLeft.y);
+                            ctx.lineTo(bottomRight.x, bottomRight.y);
+                        }
+                        // Bottom edge
+                        if (!gridCells.has(`${x},${y + 1}`)) {
+                            ctx.moveTo(topLeft.x, bottomRight.y);
+                            ctx.lineTo(bottomRight.x, bottomRight.y);
+                        }
+                        // Left edge
+                        if (!gridCells.has(`${x - 1},${y}`)) {
+                            ctx.moveTo(topLeft.x, topLeft.y);
+                            ctx.lineTo(topLeft.x, bottomRight.y);
+                        }
+
+                        ctx.stroke();
                     }
                 } catch (e) {
                     // Skip invalid pattern data
