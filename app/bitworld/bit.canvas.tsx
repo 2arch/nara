@@ -6459,14 +6459,43 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             })
                         }));
                     } else {
-                        // Resizing pattern boundary
-                        // Calculate new width and height from bounds
+                        // Resizing pattern boundary - scale entire pattern including rooms
+                        const oldWidth = patternData.width || 120;
+                        const oldHeight = patternData.height || 60;
+                        const oldCenterX = patternData.centerX;
+                        const oldCenterY = patternData.centerY;
+
+                        // Calculate new dimensions
                         const newWidth = newBounds.endX - newBounds.startX;
                         const newHeight = newBounds.endY - newBounds.startY;
-
-                        // Calculate new center from bounds
                         const newCenterX = newBounds.startX + newWidth / 2;
                         const newCenterY = newBounds.startY + newHeight / 2;
+
+                        // Calculate scale factors
+                        const scaleX = newWidth / oldWidth;
+                        const scaleY = newHeight / oldHeight;
+
+                        // Scale and reposition all rooms relative to pattern center
+                        const rooms = patternData.rooms || [];
+                        const scaledRooms = rooms.map((room: any) => {
+                            // Get room position relative to old pattern center
+                            const relX = room.x - oldCenterX;
+                            const relY = room.y - oldCenterY;
+
+                            // Scale relative position and size
+                            const newRelX = relX * scaleX;
+                            const newRelY = relY * scaleY;
+                            const newWidth = room.width * scaleX;
+                            const newHeight = room.height * scaleY;
+
+                            // Convert back to absolute position
+                            return {
+                                x: newCenterX + newRelX,
+                                y: newCenterY + newRelY,
+                                width: newWidth,
+                                height: newHeight
+                            };
+                        });
 
                         engine.setWorldData(prev => ({
                             ...prev,
@@ -6475,7 +6504,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 centerX: newCenterX,
                                 centerY: newCenterY,
                                 width: newWidth,
-                                height: newHeight
+                                height: newHeight,
+                                rooms: scaledRooms
                             })
                         }));
                     }
@@ -7442,14 +7472,43 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             })
                         }));
                     } else {
-                        // Resizing pattern boundary
-                        // Calculate new width and height from bounds
+                        // Resizing pattern boundary - scale entire pattern including rooms
+                        const oldWidth = patternData.width || 120;
+                        const oldHeight = patternData.height || 60;
+                        const oldCenterX = patternData.centerX;
+                        const oldCenterY = patternData.centerY;
+
+                        // Calculate new dimensions
                         const newWidth = newBounds.endX - newBounds.startX;
                         const newHeight = newBounds.endY - newBounds.startY;
-
-                        // Calculate new center from bounds
                         const newCenterX = newBounds.startX + newWidth / 2;
                         const newCenterY = newBounds.startY + newHeight / 2;
+
+                        // Calculate scale factors
+                        const scaleX = newWidth / oldWidth;
+                        const scaleY = newHeight / oldHeight;
+
+                        // Scale and reposition all rooms relative to pattern center
+                        const rooms = patternData.rooms || [];
+                        const scaledRooms = rooms.map((room: any) => {
+                            // Get room position relative to old pattern center
+                            const relX = room.x - oldCenterX;
+                            const relY = room.y - oldCenterY;
+
+                            // Scale relative position and size
+                            const newRelX = relX * scaleX;
+                            const newRelY = relY * scaleY;
+                            const newWidth = room.width * scaleX;
+                            const newHeight = room.height * scaleY;
+
+                            // Convert back to absolute position
+                            return {
+                                x: newCenterX + newRelX,
+                                y: newCenterY + newRelY,
+                                width: newWidth,
+                                height: newHeight
+                            };
+                        });
 
                         engine.setWorldData(prev => ({
                             ...prev,
@@ -7458,7 +7517,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 centerX: newCenterX,
                                 centerY: newCenterY,
                                 width: newWidth,
-                                height: newHeight
+                                height: newHeight,
+                                rooms: scaledRooms
                             })
                         }));
                     }
