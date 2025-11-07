@@ -7136,24 +7136,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     isDoubleTapModeRef.current = true;
                     isTouchSelectingRef.current = true;
                 }
-            } else {
-                // Single tap - prepare for pan (primary gesture)
-                isDoubleTapModeRef.current = false;
-                isTouchPanningRef.current = true;
-                const info = engine.handlePanStart(touches[0].clientX, touches[0].clientY);
-                panStartInfoRef.current = info;
-                intermediatePanOffsetRef.current = { ...engine.viewOffset };
-                panStartPosRef.current = { ...engine.viewOffset };
-                setIsPanning(true);
-                setPanDistance(0);
-                lastPanMilestoneRef.current = 0;
             }
 
-            // Update last tap tracking
-            lastTapTimeRef.current = now;
-            lastTapPosRef.current = currentPos;
-
-            // Check for resize thumb touches (highest priority - before long press or move)
+            // Check for resize thumb touches (highest priority - before pan setup)
+            // This must happen before pan is initialized to prevent pan interference
             const x = touches[0].x;
             const y = touches[0].y;
             const thumbSize = 8;
@@ -7283,6 +7269,23 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     // Skip invalid pattern data
                 }
             }
+
+            // If no double-tap and no resize handle, prepare for pan (single tap primary gesture)
+            if (!isDoubleTap) {
+                isDoubleTapModeRef.current = false;
+                isTouchPanningRef.current = true;
+                const info = engine.handlePanStart(touches[0].clientX, touches[0].clientY);
+                panStartInfoRef.current = info;
+                intermediatePanOffsetRef.current = { ...engine.viewOffset };
+                panStartPosRef.current = { ...engine.viewOffset };
+                setIsPanning(true);
+                setPanDistance(0);
+                lastPanMilestoneRef.current = 0;
+            }
+
+            // Update last tap tracking
+            lastTapTimeRef.current = now;
+            lastTapPosRef.current = currentPos;
 
             // Long press detection for move operations and command menu
             // Clear any existing timer
