@@ -4395,11 +4395,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         if (currentPaintStrokeRef.current.length >= 2) {
             const points = currentPaintStrokeRef.current;
 
-            // Draw the stroke as a smooth continuous line
+            // Draw the stroke as a continuous line
             ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
             ctx.lineWidth = 3;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
             ctx.beginPath();
 
             const firstPoint = points[0];
@@ -5615,9 +5613,15 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                 const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
 
-                // Start new stroke
-                isPaintingRef.current = true;
-                currentPaintStrokeRef.current = [worldPos];
+                // Only start new stroke if there isn't one already (to allow double-click to work)
+                if (currentPaintStrokeRef.current.length === 0) {
+                    isPaintingRef.current = true;
+                    currentPaintStrokeRef.current = [worldPos];
+                } else {
+                    // If there's already a stroke, this might be part of a double-click
+                    // Just set painting to true and append to existing stroke
+                    isPaintingRef.current = true;
+                }
 
                 canvasRef.current?.focus();
                 return;
@@ -6472,9 +6476,15 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     engine.viewOffset
                 );
 
-                // Start new stroke
-                isPaintingRef.current = true;
-                currentPaintStrokeRef.current = [{ x: worldPos.x, y: worldPos.y }];
+                // Only start new stroke if there isn't one already (to allow double-tap to work)
+                if (currentPaintStrokeRef.current.length === 0) {
+                    isPaintingRef.current = true;
+                    currentPaintStrokeRef.current = [{ x: worldPos.x, y: worldPos.y }];
+                } else {
+                    // If there's already a stroke, this might be part of a double-tap
+                    // Just set painting to true and append to existing stroke
+                    isPaintingRef.current = true;
+                }
 
                 return; // Don't process other gestures
             }
