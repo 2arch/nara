@@ -4946,23 +4946,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         if (selectedNoteKey) {
             try {
                 const selectedPlanData = JSON.parse(engine.worldData[selectedNoteKey] as string);
-                // Draw selection border around the selected note region
                 const topLeftScreen = engine.worldToScreen(selectedPlanData.startX, selectedPlanData.startY, currentZoom, currentOffset);
                 const bottomRightScreen = engine.worldToScreen(selectedPlanData.endX + 1, selectedPlanData.endY + 1, currentZoom, currentOffset);
 
-                // Use text accent color for selection border
-                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
-                const lineWidth = 3; // Slightly thicker to indicate selection
-                ctx.lineWidth = lineWidth;
-                const halfWidth = lineWidth / 2;
-                ctx.strokeRect(
-                    topLeftScreen.x + halfWidth,
-                    topLeftScreen.y + halfWidth,
-                    bottomRightScreen.x - topLeftScreen.x - lineWidth,
-                    bottomRightScreen.y - topLeftScreen.y - lineWidth
-                );
-
-                // Draw resize thumbs (handles) at corners only
+                // Draw resize thumbs (handles) at corners only (no border)
                 const thumbSize = 8;
                 const thumbColor = `rgba(${hexToRgb(engine.textColor)}, 1)`;
                 ctx.fillStyle = thumbColor;
