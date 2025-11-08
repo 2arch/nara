@@ -6451,10 +6451,37 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             height: newBounds.endY - newBounds.startY
                         };
 
+                        // Recalculate pattern boundary to enclose all rooms + corridors
+                        const corridorPadding = 3;
+                        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+                        for (const room of updatedRooms) {
+                            const roomMinX = room.x;
+                            const roomMinY = room.y;
+                            const roomMaxX = room.x + room.width;
+                            const roomMaxY = room.y + room.height;
+                            const centerX = room.x + Math.floor(room.width / 2);
+                            const centerY = room.y + Math.floor(room.height / 2);
+
+                            minX = Math.min(minX, roomMinX, centerX - corridorPadding);
+                            minY = Math.min(minY, roomMinY, centerY - corridorPadding);
+                            maxX = Math.max(maxX, roomMaxX, centerX + corridorPadding);
+                            maxY = Math.max(maxY, roomMaxY, centerY + corridorPadding);
+                        }
+
+                        const actualWidth = maxX - minX;
+                        const actualHeight = maxY - minY;
+                        const actualCenterX = minX + actualWidth / 2;
+                        const actualCenterY = minY + actualHeight / 2;
+
                         engine.setWorldData(prev => ({
                             ...prev,
                             [resizeState.key!]: JSON.stringify({
                                 ...patternData,
+                                centerX: actualCenterX,
+                                centerY: actualCenterY,
+                                width: actualWidth,
+                                height: actualHeight,
                                 rooms: updatedRooms
                             })
                         }));
@@ -7465,10 +7492,37 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             height: newBounds.endY - newBounds.startY
                         };
 
+                        // Recalculate pattern boundary to enclose all rooms + corridors
+                        const corridorPadding = 3;
+                        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+                        for (const room of updatedRooms) {
+                            const roomMinX = room.x;
+                            const roomMinY = room.y;
+                            const roomMaxX = room.x + room.width;
+                            const roomMaxY = room.y + room.height;
+                            const centerX = room.x + Math.floor(room.width / 2);
+                            const centerY = room.y + Math.floor(room.height / 2);
+
+                            minX = Math.min(minX, roomMinX, centerX - corridorPadding);
+                            minY = Math.min(minY, roomMinY, centerY - corridorPadding);
+                            maxX = Math.max(maxX, roomMaxX, centerX + corridorPadding);
+                            maxY = Math.max(maxY, roomMaxY, centerY + corridorPadding);
+                        }
+
+                        const actualWidth = maxX - minX;
+                        const actualHeight = maxY - minY;
+                        const actualCenterX = minX + actualWidth / 2;
+                        const actualCenterY = minY + actualHeight / 2;
+
                         engine.setWorldData(prev => ({
                             ...prev,
                             [resizeState.key!]: JSON.stringify({
                                 ...patternData,
+                                centerX: actualCenterX,
+                                centerY: actualCenterY,
+                                width: actualWidth,
+                                height: actualHeight,
                                 rooms: updatedRooms
                             })
                         }));
