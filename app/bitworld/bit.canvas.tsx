@@ -692,7 +692,12 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 enabled: engine.settings.monogramEnabled || false
             };
         }
-        
+
+        // In host mode - check if we're starting with intro flow (NARA banner)
+        if (initialHostFlow === 'intro') {
+            return { mode: 'nara' as const, enabled: true };
+        }
+
         // In host mode - check hostMonogramMode prop
         if (hostMonogramMode === 'perlin') {
             return { mode: 'perlin' as const, enabled: true };
