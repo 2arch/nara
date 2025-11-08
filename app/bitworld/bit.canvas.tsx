@@ -6488,12 +6488,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             const newWidth = room.width * scaleX;
                             const newHeight = room.height * scaleY;
 
-                            // Convert back to absolute position
+                            // Convert back to absolute position and round to integers
+                            // (grid rendering requires integer coordinates)
                             return {
-                                x: newCenterX + newRelX,
-                                y: newCenterY + newRelY,
-                                width: newWidth,
-                                height: newHeight
+                                x: Math.round(newCenterX + newRelX),
+                                y: Math.round(newCenterY + newRelY),
+                                width: Math.round(newWidth),
+                                height: Math.round(newHeight)
                             };
                         });
 
@@ -7501,12 +7502,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             const newWidth = room.width * scaleX;
                             const newHeight = room.height * scaleY;
 
-                            // Convert back to absolute position
+                            // Convert back to absolute position and round to integers
+                            // (grid rendering requires integer coordinates)
                             return {
-                                x: newCenterX + newRelX,
-                                y: newCenterY + newRelY,
-                                width: newWidth,
-                                height: newHeight
+                                x: Math.round(newCenterX + newRelX),
+                                y: Math.round(newCenterY + newRelY),
+                                width: Math.round(newWidth),
+                                height: Math.round(newHeight)
                             };
                         });
 
