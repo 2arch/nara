@@ -377,22 +377,24 @@ export const upgradeFlow: HostFlow = {
   }
 };
 
-// Tutorial flow - interactive command learning
+// Tutorial flow - interactive command learning with AI showcase
 export const tutorialFlow: HostFlow = {
   flowId: 'tutorial',
   startMessageId: 'tutorial_welcome',
   messages: {
+    // === INTRO ===
     'tutorial_welcome': {
       id: 'tutorial_welcome',
-      text: 'Welcome to the Nara tutorial! \n \n I\'ll teach you the basics of spatial writing.',
+      text: 'Welcome to Nara! \n \n The infinite canvas for spatial thinking.',
       expectsInput: false,
       requiresChatMode: false,
       nextMessageId: 'learn_background'
     },
 
+    // === BASIC STYLING ===
     'learn_background': {
       id: 'learn_background',
-      text: 'Let\'s start by changing the background color. \n \n Type: /bg chalk',
+      text: 'Let\'s personalize your space. \n \n Type: /bg chalk',
       expectsInput: true,
       requiresChatMode: false,
       expectedCommand: 'bg',
@@ -405,7 +407,7 @@ export const tutorialFlow: HostFlow = {
 
     'background_success': {
       id: 'background_success',
-      text: 'Perfect! You changed the background to red. \n \n Next, let\'s learn about text colors.',
+      text: 'Perfect! You changed the background to chalk blue. \n \n Next, let\'s style your text.',
       expectsInput: false,
       requiresChatMode: false,
       nextMessageId: 'learn_color',
@@ -414,7 +416,7 @@ export const tutorialFlow: HostFlow = {
 
     'learn_color': {
       id: 'learn_color',
-      text: 'Now change your text color. \n \n Type: /text garden',
+      text: 'Change your text color. \n \n Type: /text garden',
       expectsInput: true,
       requiresChatMode: false,
       expectedCommand: 'text',
@@ -427,16 +429,17 @@ export const tutorialFlow: HostFlow = {
 
     'color_success': {
       id: 'color_success',
-      text: 'Great! Your text is now garden green. \n \n Let\'s create a label to organize your thoughts.',
+      text: 'Great! Your text is now garden green.',
       expectsInput: false,
       requiresChatMode: false,
       nextMessageId: 'learn_label',
       previousMessageId: 'learn_color'
     },
 
+    // === SPATIAL ORGANIZATION ===
     'learn_label': {
       id: 'learn_label',
-      text: 'Labels help you mark important points in space. \n \n First, select a location by clicking and dragging on the canvas. \n \n Then, type: /label ',
+      text: 'Labels help you mark important points. \n \n Type: /label my first idea',
       expectsInput: true,
       requiresChatMode: false,
       expectedCommand: 'label',
@@ -449,19 +452,154 @@ export const tutorialFlow: HostFlow = {
 
     'label_success': {
       id: 'label_success',
-      text: 'Excellent! You created a label. \n \n Labels appear as arrows pointing to that location.',
+      text: 'Excellent! Labels appear as arrows in space. \n \n Now for the fun part...',
+      expectsInput: false,
+      requiresChatMode: false,
+      nextMessageId: 'introduce_ai',
+      previousMessageId: 'learn_label'
+    },
+
+    // === AI INTRODUCTION ===
+    'introduce_ai': {
+      id: 'introduce_ai',
+      text: 'Nara has AI built in. \n \n You can generate text, transform ideas, and even create images.',
+      expectsInput: false,
+      requiresChatMode: false,
+      nextMessageId: 'learn_chat',
+      previousMessageId: 'label_success'
+    },
+
+    'learn_chat': {
+      id: 'learn_chat',
+      text: 'Let\'s enter chat mode to talk with AI. \n \n Type: /chat',
+      expectsInput: true,
+      requiresChatMode: false,
+      expectedCommand: 'chat',
+      commandValidator: (cmd) => cmd === 'chat',
+      nextMessageId: 'chat_activated',
+      previousMessageId: 'introduce_ai'
+    },
+
+    'chat_activated': {
+      id: 'chat_activated',
+      text: 'You\'re in chat mode! The blue cursor shows you\'re talking to AI.',
+      expectsInput: false,
+      requiresChatMode: true,
+      nextMessageId: 'explain_image_generation',
+      previousMessageId: 'learn_chat'
+    },
+
+    'explain_image_generation': {
+      id: 'explain_image_generation',
+      text: 'Here\'s something cool: AI can generate images. \n \n Just describe what you want to see.',
+      expectsInput: false,
+      requiresChatMode: true,
+      nextMessageId: 'prompt_for_image',
+      previousMessageId: 'chat_activated'
+    },
+
+    'prompt_for_image': {
+      id: 'prompt_for_image',
+      text: 'Try it! Type something like: \n \n "draw a sunset over mountains"',
+      expectsInput: false,
+      requiresChatMode: true,
+      nextMessageId: 'image_wait',
+      previousMessageId: 'explain_image_generation'
+    },
+
+    'image_wait': {
+      id: 'image_wait',
+      text: 'Watch as AI creates your image! \n \n (Press ESC to exit chat mode when you see the image)',
+      expectsInput: false,
+      requiresChatMode: false,
+      nextMessageId: 'image_complete',
+      previousMessageId: 'prompt_for_image'
+    },
+
+    'image_complete': {
+      id: 'image_complete',
+      text: 'Pretty cool, right? Images, text, ideas - all in one infinite space.',
+      expectsInput: false,
+      requiresChatMode: false,
+      nextMessageId: 'learn_state',
+      previousMessageId: 'image_wait'
+    },
+
+    // === STATE MANAGEMENT ===
+    'learn_state': {
+      id: 'learn_state',
+      text: 'Save your work with states. \n \n Type: /state save tutorial',
+      expectsInput: true,
+      requiresChatMode: false,
+      expectedCommand: 'state',
+      commandValidator: (cmd, args) => {
+        return cmd === 'state' && args.length >= 2 && args[0] === 'save';
+      },
+      nextMessageId: 'state_saved',
+      previousMessageId: 'image_complete'
+    },
+
+    'state_saved': {
+      id: 'state_saved',
+      text: 'Saved! You can load it anytime with /state load tutorial',
+      expectsInput: false,
+      requiresChatMode: false,
+      nextMessageId: 'tutorial_almost_done',
+      previousMessageId: 'learn_state'
+    },
+
+    // === CALL TO ACTION ===
+    'tutorial_almost_done': {
+      id: 'tutorial_almost_done',
+      text: 'You\'ve learned the basics! \n \n But there\'s so much more...',
+      expectsInput: false,
+      requiresChatMode: false,
+      nextMessageId: 'showcase_features',
+      previousMessageId: 'state_saved'
+    },
+
+    'showcase_features': {
+      id: 'showcase_features',
+      text: 'With Nara, you can: \n \n → Transform text with AI \n → Upload and edit images \n → Create spatial links \n → Generate patterns and structures',
+      expectsInput: false,
+      requiresChatMode: false,
+      nextMessageId: 'mention_limits',
+      previousMessageId: 'tutorial_almost_done'
+    },
+
+    'mention_limits': {
+      id: 'mention_limits',
+      text: 'On the free tier, you get 5 AI interactions per day. \n \n Perfect for exploring what\'s possible.',
+      expectsInput: false,
+      requiresChatMode: false,
+      nextMessageId: 'introduce_pro',
+      previousMessageId: 'showcase_features'
+    },
+
+    'introduce_pro': {
+      id: 'introduce_pro',
+      text: 'Want unlimited AI? Nara Pro gives you: \n \n → Unlimited image generation \n → Unlimited text transformation \n → Priority support',
+      expectsInput: false,
+      requiresChatMode: false,
+      nextMessageId: 'cta_upgrade',
+      previousMessageId: 'mention_limits'
+    },
+
+    'cta_upgrade': {
+      id: 'cta_upgrade',
+      text: 'Ready to unlock unlimited creativity? \n \n Type /upgrade now to see Pro pricing!',
       expectsInput: false,
       requiresChatMode: false,
       nextMessageId: 'tutorial_complete',
-      previousMessageId: 'learn_label'
+      previousMessageId: 'introduce_pro'
     },
 
     'tutorial_complete': {
       id: 'tutorial_complete',
-      text: 'You\'ve completed the basics! \n \n Type /help anytime to see all commands. Happy writing!',
+      text: 'Happy creating! Type /help anytime to see all commands. \n \n Your infinite canvas awaits.',
       expectsInput: false,
       requiresChatMode: false,
-      previousMessageId: 'label_success'
+      previousMessageId: 'cta_upgrade'
     }
   }
 };

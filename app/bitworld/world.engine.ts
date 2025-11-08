@@ -3442,6 +3442,11 @@ export function useWorldEngine({
                         inputPositions: [],
                         isProcessing: false
                     });
+
+                    // Notify tutorial flow that chat command was executed
+                    if (commandValidationHandlerRef.current) {
+                        commandValidationHandlerRef.current('chat', exec.args, worldData);
+                    }
                 } else if (exec.command === 'ai-chat') {
                     // One-shot AI prompt
                     const aiPrompt = exec.args[0];
