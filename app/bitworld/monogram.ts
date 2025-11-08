@@ -96,6 +96,12 @@ const useMonogramSystem = (
     // NARA anchor point (ephemeral - set when entering NARA mode, cleared when leaving)
     const naraAnchorRef = useRef<{x: number, y: number} | null>(null);
 
+    // Mode transition state for smooth crossfades
+    const previousModeRef = useRef<MonogramMode>(options.mode);
+    const transitionFromModeRef = useRef<MonogramMode>(options.mode); // Mode we're transitioning FROM
+    const transitionStartTimeRef = useRef<number | null>(null);
+    const transitionDuration = 800; // ms for crossfade
+
     const timeRef = useRef<number>(0);
     const animationFrameRef = useRef<number>(0);
     
@@ -186,6 +192,16 @@ const useMonogramSystem = (
     useEffect(() => {
         if (options.mode !== 'nara') {
             naraAnchorRef.current = null;
+        }
+    }, [options.mode]);
+
+    // Detect mode changes and start transition
+    useEffect(() => {
+        if (options.mode !== previousModeRef.current) {
+            // Mode changed - start transition
+            transitionFromModeRef.current = previousModeRef.current; // Store the mode we're transitioning FROM
+            transitionStartTimeRef.current = Date.now();
+            previousModeRef.current = options.mode;
         }
     }, [options.mode]);
 
@@ -1289,28 +1305,63 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
         const time = timeRef.current;
         const accentColor = textColor || '#000000'; // Default to black if not provided
 
+        // Calculate transition progress (0 = old mode, 1 = new mode)
+        let transitionProgress = 1.0;
+        let isTransitioning = false;
+        if (transitionStartTimeRef.current !== null) {
+            const elapsed = Date.now() - transitionStartTimeRef.current;
+            if (elapsed < transitionDuration) {
+                transitionProgress = elapsed / transitionDuration;
+                // Smooth easing (ease-in-out)
+                transitionProgress = transitionProgress * transitionProgress * (3 - 2 * transitionProgress);
+                isTransitioning = true;
+            } else {
+                // Transition complete
+                transitionStartTimeRef.current = null;
+            }
+        }
+
         // For NARA, Macintosh, Loading, Road, Terrain, and 3D geometry modes, use finer sampling for better quality
         const step = (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') ? 1 : Math.max(1, Math.floor(3 - options.complexity * 2));
         
         for (let worldY = Math.floor(startWorldY); worldY <= Math.ceil(endWorldY); worldY += step) {
             for (let worldX = Math.floor(startWorldX); worldX <= Math.ceil(endWorldX); worldX += step) {
-                
+
                 let rawValue: number;
                 let intensity: number;
 
-                // Special handling for nara, macintosh, loading, road, terrain, and geometry3d modes that need viewport bounds or labels
+                const viewportBounds = {
+                    startX: startWorldX,
+                    startY: startWorldY,
+                    endX: endWorldX,
+                    endY: endWorldY
+                };
+
+                // Calculate new mode intensity
+                let newIntensity: number;
                 if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') {
-                    const viewportBounds = {
-                        startX: startWorldX,
-                        startY: startWorldY,
-                        endX: endWorldX,
-                        endY: endWorldY
-                    };
-                    rawValue = calculatePattern(worldX, worldY, time, options.mode, viewportBounds, labels);
-                    intensity = rawValue;
+                    newIntensity = calculatePattern(worldX, worldY, time, options.mode, viewportBounds, labels);
                 } else {
-                    rawValue = calculatePattern(worldX, worldY, time, options.mode);
-                    intensity = Math.abs(rawValue);
+                    newIntensity = Math.abs(calculatePattern(worldX, worldY, time, options.mode));
+                }
+
+                // If transitioning, blend with old mode
+                if (isTransitioning) {
+                    let oldIntensity: number;
+                    const oldMode = transitionFromModeRef.current;
+
+                    if (oldMode === 'nara' || oldMode === 'geometry3d' || oldMode === 'macintosh' || oldMode === 'loading' || oldMode === 'road' || oldMode === 'terrain') {
+                        oldIntensity = calculatePattern(worldX, worldY, time, oldMode, viewportBounds, labels);
+                    } else {
+                        oldIntensity = Math.abs(calculatePattern(worldX, worldY, time, oldMode));
+                    }
+
+                    // Blend between old and new based on transition progress
+                    intensity = oldIntensity * (1 - transitionProgress) + newIntensity * transitionProgress;
+                    rawValue = intensity; // Use blended value
+                } else {
+                    intensity = newIntensity;
+                    rawValue = intensity;
                 }
                 
                 // Calculate and blend trail effect
