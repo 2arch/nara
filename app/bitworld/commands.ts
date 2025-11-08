@@ -2738,13 +2738,41 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 bspSplit(rootNode, 0, 3, random, 100);
                 const rooms = collectRooms(rootNode);
 
+                // Calculate actual bounding box from rooms (accounting for corridors)
+                // Corridors are 3 cells wide horizontally, 2 cells tall vertically
+                const corridorPadding = 3; // Max corridor extension from room centers
+
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                for (const room of rooms) {
+                    // Room bounds
+                    const roomMinX = room.x;
+                    const roomMinY = room.y;
+                    const roomMaxX = room.x + room.width;
+                    const roomMaxY = room.y + room.height;
+
+                    // Account for corridors extending from room centers
+                    const centerX = room.x + Math.floor(room.width / 2);
+                    const centerY = room.y + Math.floor(room.height / 2);
+
+                    minX = Math.min(minX, roomMinX, centerX - corridorPadding);
+                    minY = Math.min(minY, roomMinY, centerY - corridorPadding);
+                    maxX = Math.max(maxX, roomMaxX, centerX + corridorPadding);
+                    maxY = Math.max(maxY, roomMaxY, centerY + corridorPadding);
+                }
+
+                // Calculate center and dimensions from actual extent
+                const actualWidth = maxX - minX;
+                const actualHeight = maxY - minY;
+                const actualCenterX = minX + actualWidth / 2;
+                const actualCenterY = minY + actualHeight / 2;
+
                 // Generate pattern data with stored rooms
                 const patternKey = `pattern_${Date.now()}`;
                 const patternData = {
-                    centerX: cursorPos.x,
-                    centerY: cursorPos.y,
-                    width: width,
-                    height: height,
+                    centerX: actualCenterX,
+                    centerY: actualCenterY,
+                    width: actualWidth,
+                    height: actualHeight,
                     timestamp: timestamp,
                     rooms: rooms // Store generated rooms
                 };
