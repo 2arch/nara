@@ -12,8 +12,6 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isVerifyingEmail, setIsVerifyingEmail] = useState(false);
-  const [showBanner, setShowBanner] = useState(true);
-  const [bannerFadedOut, setBannerFadedOut] = useState(false);
   const router = useRouter();
 
   // Check for email link sign-in on mount
@@ -41,18 +39,6 @@ export default function Home() {
     handleEmailLink();
   }, []);
 
-  // Banner intro animation
-  useEffect(() => {
-    // Show banner for 1.5 seconds, then fade out
-    const bannerTimer = setTimeout(() => {
-      setBannerFadedOut(true);
-      // After fade animation completes (0.5s), hide banner
-      setTimeout(() => setShowBanner(false), 500);
-    }, 1500);
-
-    return () => clearTimeout(bannerTimer);
-  }, []);
-
   // Listen for authentication state changes
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -60,7 +46,7 @@ export default function Home() {
       setAuthLoading(false);
 
       // If user is already authenticated, redirect to their homepage
-      if (user && !showBanner) {
+      if (user) {
         const username = await getUsernameByUid(user.uid);
         if (username) {
           router.push(`/@${username}`);
@@ -69,7 +55,7 @@ export default function Home() {
     });
 
     return () => unsubscribe();
-  }, [router, showBanner]);
+  }, [router]);
 
   // Dynamic colors based on time of day
   const [hostColors, setHostColors] = useState(() => {
@@ -82,20 +68,10 @@ export default function Home() {
 
   const engine = useWorldEngine({
     worldId: null, // Always null for home page (anonymous users)
-    initialBackgroundColor: showBanner ? '#000000' : hostColors.background,
+    initialBackgroundColor: hostColors.background,
     userUid: null, // Always null for home page
     initialZoomLevel: 1.6 // Zoomed in for host mode onboarding
   });
-
-  // Set monogram mode to 'nara' for banner
-  useEffect(() => {
-    if (showBanner) {
-      engine.updateSettings({
-        monogramMode: 'nara',
-        monogramEnabled: true
-      });
-    }
-  }, [showBanner, engine]);
 
   const handleAuthSuccess = useCallback((username: string) => {
     // Navigate to user's homepage (background color already saved to Firebase)
@@ -110,29 +86,18 @@ export default function Home() {
     return () => clearInterval(interval);
   }, []);
 
-  // Determine what to show based on state
-  const shouldShowWelcomeFlow = !showBanner && !user && !isVerifyingEmail;
-  const initialFlow = isVerifyingEmail ? undefined : (shouldShowWelcomeFlow ? "welcome" : undefined);
+  // If coming from email verification, don't start normal flow
+  const initialFlow = isVerifyingEmail ? undefined : "intro";
 
   return (
-    <div
-      className="w-screen relative"
-      style={{
-        backgroundColor: showBanner ? '#000000' : '#F8F8F0',
-        height: '100dvh',
-        transition: 'background-color 0.5s ease',
-        opacity: showBanner && bannerFadedOut ? 0 : 1,
-        transitionProperty: 'background-color, opacity'
-      }}
-    >
+    <div className="w-screen relative" style={{backgroundColor: '#F8F8F0', height: '100dvh'}}>
       <BitCanvas
         engine={engine}
         cursorColorAlternate={cursorAlternate}
         className="w-full h-full"
-        monogramEnabled={showBanner}
+        monogramEnabled={true}
         dialogueEnabled={false}
-        hostModeEnabled={!showBanner}
-        hostMonogramMode={showBanner ? 'user-settings' : 'off'}
+        hostModeEnabled={true}
         initialHostFlow={initialFlow}
         onAuthSuccess={handleAuthSuccess}
         fontFamily={engine.fontFamily}
