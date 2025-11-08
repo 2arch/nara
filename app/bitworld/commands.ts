@@ -58,7 +58,6 @@ export interface ModeState {
     cameraMode: CameraMode; // Camera tracking mode
     isIndentEnabled: boolean; // Whether smart indentation is enabled for Enter key
     isMoveMode: boolean; // Whether move mode is active for dragging text blocks
-    isPaintMode: boolean; // Whether paint mode is active for drawing monogram zones
     gridMode: GridMode; // 3D grid rendering mode
     artefactsEnabled: boolean; // Whether 3D artifacts are enabled in space mode
     artifactType: ArtifactType; // Type of artifacts to show (images or questions)
@@ -111,7 +110,7 @@ const AVAILABLE_COMMANDS = [
     // Navigation & View
     'nav', 'search', 'cam', 'indent', 'zoom', 'map',
     // Content Creation
-    'label', 'task', 'link', 'clip', 'upload', 'paint', 'pattern',
+    'label', 'task', 'link', 'clip', 'upload', 'pattern',
     // Special
     'mode', 'note', 'mail', 'chat', 'tutorial', 'help',
     // Styling & Display
@@ -129,7 +128,7 @@ const AVAILABLE_COMMANDS = [
 // Category mapping for visual organization
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map'],
-    'create': ['label', 'task', 'link', 'clip', 'upload', 'paint'],
+    'create': ['label', 'task', 'link', 'clip', 'upload'],
     'special': ['mode', 'note', 'mail', 'chat', 'tutorial', 'help'],
     'style': ['bg', 'text', 'font'],
     'state': ['state', 'random', 'clear', 'replay'],
@@ -242,7 +241,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         cameraMode: 'default', // Default camera mode for all devices
         isIndentEnabled: true, // Smart indentation enabled by default
         isMoveMode: false, // Move mode not active initially
-        isPaintMode: false, // Paint mode not active initially
         gridMode: 'dots', // Default grid mode
         artefactsEnabled: false, // Artifacts enabled by default in space mode
         artifactType: 'images', // Default to image artifacts
@@ -2653,33 +2651,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             return { command: 'upload', args, commandStartPos: commandState.commandStartPos };
         }
 
-        // Handle paint command - toggles paint mode for drawing monogram zones
-        if (commandToExecute.startsWith('paint')) {
-            // Toggle paint mode for drawing monogram zones
-            const newPaintMode = !modeState.isPaintMode;
-            setModeState(prev => ({ ...prev, isPaintMode: newPaintMode }));
-
-            if (newPaintMode) {
-                setDialogueWithRevert("Paint mode enabled - drag to draw, double-click/double-tap to fill, ESC to exit.", setDialogueText);
-            } else {
-                setDialogueWithRevert("Paint mode disabled", setDialogueText);
-            }
-
-            // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
-
-            return null; // Paint mode toggle doesn't need further processing
-        }
-
         // Handle pattern command - generates townscape pattern at cursor position
         if (commandToExecute.startsWith('pattern')) {
             if (setWorldData && worldData) {
@@ -3238,16 +3209,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             } else {
                 setDialogueWithRevert("Make a selection first", setDialogueText);
             }
-        } else if (commandName === 'paint') {
-            // Toggle paint mode for drawing monogram zones
-            const newPaintMode = !modeState.isPaintMode;
-            setModeState(prev => ({ ...prev, isPaintMode: newPaintMode }));
-
-            if (newPaintMode) {
-                setDialogueWithRevert("Paint mode enabled - drag to draw, double-click/double-tap to fill, ESC to exit.", setDialogueText);
-            } else {
-                setDialogueWithRevert("Paint mode disabled", setDialogueText);
-            }
         } else if (commandName === 'label') {
             // Check if there's a selection to create label from
             const existingSelection = getNormalizedSelection?.();
@@ -3490,8 +3451,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         isIndentEnabled: modeState.isIndentEnabled,
         isMoveMode: modeState.isMoveMode,
         exitMoveMode: () => setModeState(prev => ({ ...prev, isMoveMode: false })),
-        isPaintMode: modeState.isPaintMode,
-        exitPaintMode: () => setModeState(prev => ({ ...prev, isPaintMode: false })),
         gridMode: modeState.gridMode,
         cycleGridMode: () => setModeState(prev => ({ 
             ...prev, 

@@ -443,6 +443,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
     // Track if initial host flow has been started (prevent restart after authentication)
     const hasStartedInitialFlowRef = useRef(false);
+    const previousCameraModeRef = useRef<'default' | 'focus' | null>(null); // Store camera mode before host flow
 
     // Start host flow when enabled (only once)
     useEffect(() => {
@@ -457,6 +458,12 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 engine.updateSettings({
                     textColor: hostTextColor
                 });
+            }
+
+            // Save current camera mode and switch to focus mode (prevents virtual keyboard obscuring input)
+            previousCameraModeRef.current = engine.modeState.cameraMode;
+            if (engine.modeState.cameraMode !== 'focus') {
+                engine.setModeState(prev => ({ ...prev, cameraMode: 'focus' }));
             }
 
             // Activate host mode in engine
@@ -477,6 +484,20 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             }
         }
     }, [hostModeEnabled, initialHostFlow, hostDialogue.isHostActive, hostTextColor]);
+
+    // Restore camera mode when host flow exits
+    const wasHostActiveRef = useRef(false);
+    useEffect(() => {
+        // Track when host mode transitions from active to inactive
+        if (wasHostActiveRef.current && !hostDialogue.isHostActive) {
+            // Host flow just exited - restore previous camera mode
+            if (previousCameraModeRef.current !== null) {
+                engine.setModeState(prev => ({ ...prev, cameraMode: previousCameraModeRef.current! }));
+                previousCameraModeRef.current = null;
+            }
+        }
+        wasHostActiveRef.current = hostDialogue.isHostActive;
+    }, [hostDialogue.isHostActive]);
 
     // Sync host input type with engine for password masking
     useEffect(() => {
@@ -837,12 +858,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         prevClipboardLengthRef.current = currentLength;
     }, [engine.clipboardItems]);
 
-    // Update cursor style when paint mode changes
-    useEffect(() => {
-        if (canvasRef.current) {
-            canvasRef.current.style.cursor = engine.isPaintMode ? 'crosshair' : 'text';
-        }
-    }, [engine.isPaintMode]);
 
     // Controller system for handling keyboard inputs
     const { registerGroup, handleKeyDown: handleKeyDownFromController, getHelpText } = useControllerSystem();
@@ -4380,64 +4395,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
-        // === Render Paint Regions (Filled Polygons) ===
-        for (const key in engine.worldData) {
-            if (key.startsWith('region_')) {
-                try {
-                    const regionData = JSON.parse(engine.worldData[key] as string);
-                    const { points } = regionData;
-
-                    if (!points || points.length < 3) continue; // Need at least 3 points for a polygon
-
-                    // Draw filled polygon
-                    ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.15)`;
-                    ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.6)`;
-                    ctx.lineWidth = 2;
-                    ctx.beginPath();
-
-                    // Move to first point
-                    const firstPoint = points[0];
-                    const firstScreen = engine.worldToScreen(firstPoint.x, firstPoint.y, currentZoom, currentOffset);
-                    ctx.moveTo(firstScreen.x, firstScreen.y);
-
-                    // Draw lines to subsequent points
-                    for (let i = 1; i < points.length; i++) {
-                        const point = points[i];
-                        const screenPos = engine.worldToScreen(point.x, point.y, currentZoom, currentOffset);
-                        ctx.lineTo(screenPos.x, screenPos.y);
-                    }
-
-                    // Close the path and fill
-                    ctx.closePath();
-                    ctx.fill();
-                    ctx.stroke();
-                } catch (e) {
-                    // Skip invalid region data
-                }
-            }
-        }
-
-        // Render current in-progress paint stroke
-        if (currentPaintStrokeRef.current.length >= 2) {
-            const points = currentPaintStrokeRef.current;
-
-            // Draw the stroke as a continuous line
-            ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-
-            const firstPoint = points[0];
-            const firstScreen = engine.worldToScreen(firstPoint.x, firstPoint.y, currentZoom, currentOffset);
-            ctx.moveTo(firstScreen.x, firstScreen.y);
-
-            for (let i = 1; i < points.length; i++) {
-                const point = points[i];
-                const screenPos = engine.worldToScreen(point.x, point.y, currentZoom, currentOffset);
-                ctx.lineTo(screenPos.x, screenPos.y);
-            }
-
-            ctx.stroke();
-        }
 
         // === Render Pattern Townscapes ===
         for (const key in engine.worldData) {
@@ -5704,30 +5661,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             y: Math.floor(worldPos.y)
         };
 
-        // Handle paint mode - double-click finalizes the polygon
-        if (engine.isPaintMode && currentPaintStrokeRef.current.length >= 3) {
-            e.preventDefault();
-
-            // Save the polygon as a filled region
-            const regionKey = `region_${Date.now()}`;
-            const regionData = {
-                points: currentPaintStrokeRef.current,
-                timestamp: Date.now()
-            };
-
-            engine.setWorldData(prev => ({
-                ...prev,
-                [regionKey]: JSON.stringify(regionData)
-            }));
-
-            // Clear the current polygon
-            currentPaintStrokeRef.current = [];
-
-            setDialogueWithRevert("Region saved - drag to draw, double-click to fill, ESC to exit paint mode", engine.setDialogueText);
-
-            return;
-        }
-        
         // Find the text block at this position (prioritize text)
         const textBlock = findTextBlock(snappedWorldPos, engine.worldData, engine);
         
@@ -5858,26 +5791,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         } else if (e.button === 0) { // Left mouse button
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
-
-            // Check if paint mode is active first (continuous stroke tool)
-            if (engine.isPaintMode) {
-                e.preventDefault();
-
-                const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
-
-                // Only start new stroke if there isn't one already (to allow double-click to work)
-                if (currentPaintStrokeRef.current.length === 0) {
-                    isPaintingRef.current = true;
-                    currentPaintStrokeRef.current = [worldPos];
-                } else {
-                    // If there's already a stroke, this might be part of a double-click
-                    // Just set painting to true and append to existing stroke
-                    isPaintingRef.current = true;
-                }
-
-                canvasRef.current?.focus();
-                return;
-            }
 
             // Check if clicking on a resize handle first
             const thumbSize = 8;
@@ -6225,23 +6138,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
-        // Handle paint mode continuous stroke
-        if (engine.isPaintMode && isPaintingRef.current) {
-            const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
-
-            // Add point to stroke if it's far enough from the last point (reduces redundant points)
-            const lastPoint = currentPaintStrokeRef.current[currentPaintStrokeRef.current.length - 1];
-            const dx = worldPos.x - lastPoint.x;
-            const dy = worldPos.y - lastPoint.y;
-            const distSq = dx * dx + dy * dy;
-
-            // Add point if distance is greater than ~0.5 world units
-            if (distSq > 0.25) {
-                currentPaintStrokeRef.current.push(worldPos);
-            }
-            return;
-        }
-
         // Always track mouse position for preview (when not actively dragging)
         if (!isMiddleMouseDownRef.current && !isSelectingMouseDownRef.current) {
             const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
@@ -6579,12 +6475,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         if (e.button === 0) { // Left mouse button
-            // Handle paint mode stroke end
-            if (engine.isPaintMode && isPaintingRef.current) {
-                isPaintingRef.current = false;
-                return;
-            }
-
             // Reset resize state if active
             if (resizeState.active) {
                 setResizeState({
@@ -6879,8 +6769,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     const lastPinchDistanceRef = useRef<number | null>(null);
     const isTouchPanningRef = useRef<boolean>(false);
     const isTouchSelectingRef = useRef<boolean>(false);
-    const isPaintingRef = useRef<boolean>(false);
-    const currentPaintStrokeRef = useRef<Array<{x: number, y: number}>>([]);
     const touchHasMovedRef = useRef<boolean>(false);
 
     // Double-tap and triple-tap detection state
@@ -6939,30 +6827,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const dy = touches[1].y - touches[0].y;
             lastPinchDistanceRef.current = Math.sqrt(dx * dx + dy * dy);
         } else if (touches.length === 1) {
-            // Check if paint mode is active first (continuous stroke tool)
-            if (engine.isPaintMode) {
-                e.preventDefault();
-
-                const worldPos = engine.screenToWorld(
-                    touches[0].x,
-                    touches[0].y,
-                    engine.zoomLevel,
-                    engine.viewOffset
-                );
-
-                // Only start new stroke if there isn't one already (to allow double-tap to work)
-                if (currentPaintStrokeRef.current.length === 0) {
-                    isPaintingRef.current = true;
-                    currentPaintStrokeRef.current = [{ x: worldPos.x, y: worldPos.y }];
-                } else {
-                    // If there's already a stroke, this might be part of a double-tap
-                    // Just set painting to true and append to existing stroke
-                    isPaintingRef.current = true;
-                }
-
-                return; // Don't process other gestures
-            }
-
             // Single touch - detect double-tap/triple-tap or prepare for pan
             const now = Date.now();
             const currentPos = { x: touches[0].x, y: touches[0].y };
@@ -7000,28 +6864,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             } else if (isDoubleTap) {
                 // Double-tap detected
                 e.preventDefault(); // Prevent iOS Safari double-tap-to-zoom
-
-                // Handle paint mode - double-tap finalizes the polygon
-                if (engine.isPaintMode && currentPaintStrokeRef.current.length >= 3) {
-                    // Save the polygon as a filled region
-                    const regionKey = `region_${Date.now()}`;
-                    const regionData = {
-                        points: currentPaintStrokeRef.current,
-                        timestamp: Date.now()
-                    };
-
-                    engine.setWorldData(prev => ({
-                        ...prev,
-                        [regionKey]: JSON.stringify(regionData)
-                    }));
-
-                    // Clear the current polygon
-                    currentPaintStrokeRef.current = [];
-
-                    setDialogueWithRevert("Region saved - drag to draw, double-tap to fill, triple-tap for ESC", engine.setDialogueText);
-
-                    return;
-                }
 
                 // If command menu is active, dismiss it (mobile alternative to ESC key)
                 if (engine.commandState.isActive) {
@@ -7335,28 +7177,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         if (longPressTimerRef.current) {
             clearTimeout(longPressTimerRef.current);
             longPressTimerRef.current = null;
-        }
-
-        // Handle paint mode continuous stroke
-        if (engine.isPaintMode && isPaintingRef.current && touches.length === 1) {
-            const worldPos = engine.screenToWorld(
-                touches[0].x,
-                touches[0].y,
-                engine.zoomLevel,
-                engine.viewOffset
-            );
-
-            // Add point to stroke if it's far enough from the last point (reduces redundant points)
-            const lastPoint = currentPaintStrokeRef.current[currentPaintStrokeRef.current.length - 1];
-            const dx = worldPos.x - lastPoint.x;
-            const dy = worldPos.y - lastPoint.y;
-            const distSq = dx * dx + dy * dy;
-
-            // Add point if distance is greater than ~0.5 world units
-            if (distSq > 0.25) {
-                currentPaintStrokeRef.current.push({ x: worldPos.x, y: worldPos.y });
-            }
-            return;
         }
 
         // Handle resize drag (highest priority)
@@ -7690,12 +7510,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         if (longPressTimerRef.current) {
             clearTimeout(longPressTimerRef.current);
             longPressTimerRef.current = null;
-        }
-
-        // Handle paint mode stroke end
-        if (engine.isPaintMode && isPaintingRef.current) {
-            isPaintingRef.current = false;
-            return;
         }
 
         // Reset resize state if active
