@@ -3448,6 +3448,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         clearLightModeData: () => setModeState(prev => ({ ...prev, lightModeData: {} })),
         setLightModeData: (data: WorldData) => setModeState(prev => ({ ...prev, lightModeData: data })),
         cameraMode: modeState.cameraMode,
+        setCameraMode: (mode: CameraMode) => setModeState(prev => ({ ...prev, cameraMode: mode })),
         isIndentEnabled: modeState.isIndentEnabled,
         isMoveMode: modeState.isMoveMode,
         exitMoveMode: () => setModeState(prev => ({ ...prev, isMoveMode: false })),

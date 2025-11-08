@@ -375,6 +375,8 @@ export interface WorldEngine {
     updateClusterLabels: () => Promise<void>;
     focusedBoundKey: string | null;
     isMoveMode: boolean;
+    cameraMode: import('./commands').CameraMode;
+    setCameraMode: (mode: import('./commands').CameraMode) => void;
     gridMode: import('./commands').GridMode;
     cycleGridMode: () => void;
     artefactsEnabled: boolean;
@@ -1136,6 +1138,7 @@ export function useWorldEngine({
         clearLightModeData,
         setLightModeData,
         cameraMode,
+        setCameraMode,
         isIndentEnabled,
         isMoveMode,
         exitMoveMode,
@@ -10701,6 +10704,8 @@ export function useWorldEngine({
         updateClusterLabels,
         focusedBoundKey, // Expose focused bound for rendering
         isMoveMode,
+        cameraMode,
+        setCameraMode,
         gridMode,
         cycleGridMode,
         artefactsEnabled,
