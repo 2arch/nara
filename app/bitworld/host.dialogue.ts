@@ -53,15 +53,87 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
     isProcessing: false
   });
 
-  // Auto-advance the NARA banner after 1.5 seconds
-  useEffect(() => {
-    if (state.currentMessageId === 'nara_banner' && state.isActive) {
-      const timer = setTimeout(() => {
-        advanceToNextMessage();
-      }, 1500);
-      return () => clearTimeout(timer);
+  // Start a flow
+  const startFlow = useCallback((flowId: string, cursorPos?: Point) => {
+    const flow = HOST_FLOWS[flowId];
+    if (!flow) {
+      console.error(`Flow ${flowId} not found`);
+      return;
     }
-  }, [state.currentMessageId, state.isActive]);
+
+    const startMessage = flow.messages[flow.startMessageId];
+    if (!startMessage) {
+      console.error(`Start message ${flow.startMessageId} not found in flow ${flowId}`);
+      return;
+    }
+
+    // Display the first message (centered at current viewport)
+    const centerPos = getViewportCenter();
+
+    setHostData({
+      text: startMessage.text,
+      color: undefined, // Will use engine.textColor
+      centerPos: centerPos,
+      timestamp: Date.now()
+    });
+
+    // Handle monogram mode from message
+    if (startMessage.monogramMode && setMonogramMode) {
+      setMonogramMode(startMessage.monogramMode);
+    }
+
+    // Handle background color from message
+    if (startMessage.backgroundColor && setBackgroundColor) {
+      setBackgroundColor(startMessage.backgroundColor);
+    }
+
+    // Spawn staged content if defined (only if not already spawned)
+    if (startMessage.spawnContent && setWorldData) {
+      const content = startMessage.spawnContent(centerPos);
+
+      // Check if labels already exist (don't duplicate)
+      const labelKeys = Object.keys(content).filter(k => k.startsWith('label_'));
+
+      setWorldData(prev => {
+        const labelsExist = labelKeys.some(key => key in prev);
+        if (labelsExist) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          ...content
+        };
+      });
+    }
+
+    // Activate host mode
+    if (setHostMode) {
+      setHostMode({
+        isActive: true,
+        currentInputType: startMessage.inputType || null
+      });
+    }
+
+    // Only activate chat mode if required (default to true for backward compatibility)
+    const requiresChatMode = startMessage.requiresChatMode !== false;
+    if (setChatMode && requiresChatMode) {
+      setChatMode({
+        isActive: true,
+        currentInput: '',
+        inputPositions: [],
+        isProcessing: false
+      });
+    }
+
+    setState({
+      isActive: true,
+      currentFlowId: flowId,
+      currentMessageId: flow.startMessageId,
+      collectedData: {},
+      isProcessing: false
+    });
+  }, [setHostData, getViewportCenter, setWorldData, setHostMode, setChatMode, setMonogramMode, setBackgroundColor]);
 
   // Manual advance through non-input messages (removed auto-advance)
   const advanceToNextMessage = useCallback(() => {
@@ -176,87 +248,15 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
     }
   }, [state, setHostData, getViewportCenter]);
 
-  // Start a flow
-  const startFlow = useCallback((flowId: string, cursorPos?: Point) => {
-    const flow = HOST_FLOWS[flowId];
-    if (!flow) {
-      console.error(`Flow ${flowId} not found`);
-      return;
+  // Auto-advance the NARA banner after 1.5 seconds
+  useEffect(() => {
+    if (state.currentMessageId === 'nara_banner' && state.isActive) {
+      const timer = setTimeout(() => {
+        advanceToNextMessage();
+      }, 1500);
+      return () => clearTimeout(timer);
     }
-
-    const startMessage = flow.messages[flow.startMessageId];
-    if (!startMessage) {
-      console.error(`Start message ${flow.startMessageId} not found in flow ${flowId}`);
-      return;
-    }
-
-    // Display the first message (centered at current viewport)
-    const centerPos = getViewportCenter();
-
-    setHostData({
-      text: startMessage.text,
-      color: undefined, // Will use engine.textColor
-      centerPos: centerPos,
-      timestamp: Date.now()
-    });
-
-    // Handle monogram mode from message
-    if (startMessage.monogramMode && setMonogramMode) {
-      setMonogramMode(startMessage.monogramMode);
-    }
-
-    // Handle background color from message
-    if (startMessage.backgroundColor && setBackgroundColor) {
-      setBackgroundColor(startMessage.backgroundColor);
-    }
-
-    // Spawn staged content if defined (only if not already spawned)
-    if (startMessage.spawnContent && setWorldData) {
-      const content = startMessage.spawnContent(centerPos);
-
-      // Check if labels already exist (don't duplicate)
-      const labelKeys = Object.keys(content).filter(k => k.startsWith('label_'));
-
-      setWorldData(prev => {
-        const labelsExist = labelKeys.some(key => key in prev);
-        if (labelsExist) {
-          return prev;
-        }
-
-        return {
-          ...prev,
-          ...content
-        };
-      });
-    }
-
-    // Activate host mode
-    if (setHostMode) {
-      setHostMode({
-        isActive: true,
-        currentInputType: startMessage.inputType || null
-      });
-    }
-
-    // Only activate chat mode if required (default to true for backward compatibility)
-    const requiresChatMode = startMessage.requiresChatMode !== false;
-    if (setChatMode && requiresChatMode) {
-      setChatMode({
-        isActive: true,
-        currentInput: '',
-        inputPositions: [],
-        isProcessing: false
-      });
-    }
-
-    setState({
-      isActive: true,
-      currentFlowId: flowId,
-      currentMessageId: flow.startMessageId,
-      collectedData: {},
-      isProcessing: false
-    });
-  }, [setHostData, getViewportCenter, setWorldData, setHostMode, setChatMode, setMonogramMode, setBackgroundColor]);
+  }, [state.currentMessageId, state.isActive, advanceToNextMessage]);
 
   // Get current message
   const getCurrentMessage = useCallback((): HostMessage | null => {
