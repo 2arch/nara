@@ -340,11 +340,17 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         hostBackgroundColor: hostBackgroundColor,
         isPublicWorld: isPublicWorld,
         setMonogramMode: (mode: string) => {
+            console.log('[BitCanvas] setMonogramMode called with:', mode);
+            console.log('[BitCanvas] Current monogram options before update:', monogramSystem.options);
             monogramSystem.updateOption('mode', mode as any);
             monogramSystem.updateOption('enabled', true);
+            console.log('[BitCanvas] Monogram options after update:', monogramSystem.options);
         },
         setBackgroundColor: (color: string) => {
+            console.log('[BitCanvas] setBackgroundColor called with:', color);
+            console.log('[BitCanvas] Current engine backgroundColor:', engine.settings.backgroundColor);
             engine.updateSettings({ backgroundColor: color });
+            console.log('[BitCanvas] Engine backgroundColor after update:', engine.settings.backgroundColor);
         }
     });
 

@@ -44,14 +44,7 @@ export default function Home() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       setAuthLoading(false);
-
-      // If user is already authenticated, redirect to their homepage
-      if (user) {
-        const username = await getUsernameByUid(user.uid);
-        if (username) {
-          router.push(`/@${username}`);
-        }
-      }
+      // Don't auto-redirect here - let intro flow check auth after banner
     });
 
     return () => unsubscribe();
@@ -87,6 +80,7 @@ export default function Home() {
   }, []);
 
   // If coming from email verification, don't start normal flow
+  // Otherwise, start with intro flow (which will check auth after banner)
   const initialFlow = isVerifyingEmail ? undefined : "intro";
 
   return (

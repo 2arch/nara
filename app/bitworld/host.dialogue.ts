@@ -79,11 +79,13 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
 
     // Handle monogram mode from message
     if (startMessage.monogramMode && setMonogramMode) {
+      console.log('[HostDialogue] startFlow - Setting monogram mode to:', startMessage.monogramMode);
       setMonogramMode(startMessage.monogramMode);
     }
 
     // Handle background color from message
     if (startMessage.backgroundColor && setBackgroundColor) {
+      console.log('[HostDialogue] startFlow - Setting background color to:', startMessage.backgroundColor);
       setBackgroundColor(startMessage.backgroundColor);
     }
 
