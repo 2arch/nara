@@ -93,6 +93,9 @@ const useMonogramSystem = (
     const [mouseTrail, setMouseTrail] = useState<MonogramTrailPosition[]>([]);
     const lastMousePosRef = useRef<Point | null>(null);
 
+    // NARA anchor point (ephemeral - set when entering NARA mode, cleared when leaving)
+    const naraAnchorRef = useRef<{x: number, y: number} | null>(null);
+
     const timeRef = useRef<number>(0);
     const animationFrameRef = useRef<number>(0);
     
@@ -178,6 +181,13 @@ const useMonogramSystem = (
 
         return () => clearInterval(cleanup);
     }, [options.interactiveTrails, options.trailFadeMs]);
+
+    // Clear NARA anchor when switching away from NARA mode
+    useEffect(() => {
+        if (options.mode !== 'nara') {
+            naraAnchorRef.current = null;
+        }
+    }, [options.mode]);
 
     // Character sets for different intensities
     const getCharForIntensity = useCallback((intensity: number, mode: MonogramMode): string => {
@@ -1036,20 +1046,29 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
         endY: number
     }): number => {
         if (!viewportBounds) return 0;
-        
+
         const complexity = options.complexity;
-        
+
         // Use multi-font bitmap for dynamic font swapping
         const textBitmapData = textToBitmapMultiFont("NARA", 120, time);
         if (!textBitmapData) return 0;
-        
+
         const textBitmap = textBitmapData.imageData;
-        
-        // Calculate viewport dimensions and center
+
+        // Calculate viewport dimensions
         const viewportWidth = viewportBounds.endX - viewportBounds.startX;
         const viewportHeight = viewportBounds.endY - viewportBounds.startY;
-        const centerX = (viewportBounds.startX + viewportBounds.endX) / 2;
-        const centerY = (viewportBounds.startY + viewportBounds.endY) / 2;
+
+        // Use anchored position if available, otherwise set anchor to current viewport center
+        if (!naraAnchorRef.current) {
+            naraAnchorRef.current = {
+                x: (viewportBounds.startX + viewportBounds.endX) / 2,
+                y: (viewportBounds.startY + viewportBounds.endY) / 2
+            };
+        }
+
+        const centerX = naraAnchorRef.current.x;
+        const centerY = naraAnchorRef.current.y;
         
         // Scale text to fit viewport nicely (adjusted for larger font and movement bounds)
         // Using 0.6 to ensure text + movement stays within comfortable bounds
