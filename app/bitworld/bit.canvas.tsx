@@ -461,9 +461,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             }
 
             // Save current camera mode and switch to focus mode (prevents virtual keyboard obscuring input)
-            previousCameraModeRef.current = engine.modeState.cameraMode;
-            if (engine.modeState.cameraMode !== 'focus') {
-                engine.setModeState(prev => ({ ...prev, cameraMode: 'focus' }));
+            previousCameraModeRef.current = engine.cameraMode;
+            if (engine.cameraMode !== 'focus') {
+                engine.setCameraMode('focus');
             }
 
             // Activate host mode in engine
@@ -492,7 +492,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         if (wasHostActiveRef.current && !hostDialogue.isHostActive) {
             // Host flow just exited - restore previous camera mode
             if (previousCameraModeRef.current !== null) {
-                engine.setModeState(prev => ({ ...prev, cameraMode: previousCameraModeRef.current! }));
+                engine.setCameraMode(previousCameraModeRef.current);
                 previousCameraModeRef.current = null;
             }
         }
