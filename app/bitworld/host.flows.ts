@@ -57,6 +57,7 @@ export const introFlow: HostFlow = {
       id: 'transition_to_welcome',
       text: '', // Silent transition
       expectsInput: false,
+      monogramMode: 'perlin',
       // This will be handled by host.dialogue.ts to switch to welcome flow
     }
   }
