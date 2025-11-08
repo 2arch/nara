@@ -47,6 +47,7 @@ interface BitCanvasProps {
     hostModeEnabled?: boolean; // Enable host dialogue mode for onboarding
     initialHostFlow?: string; // Initial flow to start (e.g., 'welcome')
     onAuthSuccess?: (username: string) => void; // Callback after successful auth
+    onTutorialComplete?: () => void; // Callback when tutorial is completed
     isVerifyingEmail?: boolean; // Flag to indicate email verification in progress
     hostTextColor?: string; // Text color for host mode
     hostBackgroundColor?: string; // Host background color to save as initial world setting
@@ -56,7 +57,7 @@ interface BitCanvasProps {
     hostMonogramMode?: 'perlin' | 'user-settings' | 'off'; // Monogram mode during host flow
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true, isPublicWorld = false, hostMonogramMode = 'perlin' }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, onTutorialComplete, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true, isPublicWorld = false, hostMonogramMode = 'perlin' }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -843,6 +844,19 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             return hostDialogue.validateCommand(command, args, worldState);
         });
     }, [engine, hostDialogue]);
+
+    // Monitor tutorial completion
+    const prevTutorialActiveRef = useRef(false);
+    useEffect(() => {
+        const isTutorialActive = hostDialogue.hostState.isActive && hostDialogue.hostState.currentFlowId === 'tutorial';
+
+        // If tutorial was active and now is not, it completed
+        if (prevTutorialActiveRef.current && !isTutorialActive && onTutorialComplete) {
+            onTutorialComplete();
+        }
+
+        prevTutorialActiveRef.current = isTutorialActive;
+    }, [hostDialogue.hostState.isActive, hostDialogue.hostState.currentFlowId, onTutorialComplete]);
 
     // Track clipboard additions for visual feedback
     const prevClipboardLengthRef = useRef(0);
