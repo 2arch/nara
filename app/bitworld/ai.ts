@@ -37,7 +37,7 @@ export async function transformText(text: string, instructions: string, userId?:
         if (userId) {
             const quota = await checkUserQuota(userId);
             if (!quota.canUseAI) {
-                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /pro`;
+                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`;
             }
         }
 
@@ -95,7 +95,7 @@ export async function explainText(text: string, analysisType: string = 'analysis
         if (userId) {
             const quota = await checkUserQuota(userId);
             if (!quota.canUseAI) {
-                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /pro`;
+                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`;
             }
         }
 
@@ -157,7 +157,7 @@ export async function summarizeText(text: string, focus?: string, userId?: strin
         if (userId) {
             const quota = await checkUserQuota(userId);
             if (!quota.canUseAI) {
-                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /pro`;
+                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`;
             }
         }
 
@@ -230,7 +230,7 @@ export async function generateImage(
             if (!quota.canUseAI) {
                 return {
                     imageData: null,
-                    text: `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /pro`
+                    text: `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`
                 };
             }
         }
@@ -358,7 +358,7 @@ export async function chatWithAI(
         if (userId) {
             const quota = await checkUserQuota(userId);
             if (!quota.canUseAI) {
-                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /pro`;
+                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`;
             }
         }
 

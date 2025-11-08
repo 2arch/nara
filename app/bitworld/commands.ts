@@ -2358,57 +2358,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             return null;
         }
 
-        if (commandToExecute.startsWith('pro')) {
-            // Direct redirect to Stripe checkout
-            setDialogueWithRevert("Redirecting to checkout...", setDialogueText);
-
-            // Get current user and create checkout session
-            import('firebase/auth').then(({ onAuthStateChanged }) => {
-                import('../firebase').then(({ auth }) => {
-                    onAuthStateChanged(auth, (user) => {
-                        if (user) {
-                            fetch('/api/stripe/checkout', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    plan: 'pro',
-                                    interval: 'monthly',
-                                    userId: user.uid,
-                                }),
-                            })
-                            .then(r => r.json())
-                            .then(data => {
-                                if (data.url) {
-                                    window.location.href = data.url;
-                                } else {
-                                    setDialogueWithRevert('Checkout failed. Please try again.', setDialogueText);
-                                }
-                            })
-                            .catch(() => {
-                                setDialogueWithRevert('Checkout failed. Please try again.', setDialogueText);
-                            });
-                        } else {
-                            setDialogueWithRevert('Please sign in first.', setDialogueText);
-                        }
-                    });
-                });
-            });
-
-            // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
-
-            return null;
-        }
-
         if (commandToExecute.startsWith('upgrade')) {
             // Trigger the upgrade flow
             if (triggerUpgradeFlow) {
