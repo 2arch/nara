@@ -1316,7 +1316,14 @@ export function useWorldEngine({
         }
     }, onCommandExecuted: (command: string, args: string[]) => {
         if (commandValidationHandlerRef.current) {
-            commandValidationHandlerRef.current(command, args, worldData);
+            // Pass worldData plus selection state for validation
+            const worldState = {
+                worldData,
+                selectionStart,
+                selectionEnd,
+                hasSelection: selectionStart !== null && selectionEnd !== null
+            };
+            commandValidationHandlerRef.current(command, args, worldState);
         }
     } });
 
@@ -3445,7 +3452,13 @@ export function useWorldEngine({
 
                     // Notify tutorial flow that chat command was executed
                     if (commandValidationHandlerRef.current) {
-                        commandValidationHandlerRef.current('chat', exec.args, worldData);
+                        const worldState = {
+                            worldData,
+                            selectionStart,
+                            selectionEnd,
+                            hasSelection: selectionStart !== null && selectionEnd !== null
+                        };
+                        commandValidationHandlerRef.current('chat', exec.args, worldState);
                     }
                 } else if (exec.command === 'ai-chat') {
                     // One-shot AI prompt
@@ -4318,7 +4331,13 @@ export function useWorldEngine({
 
                                 // Notify tutorial flow
                                 if (commandValidationHandlerRef.current) {
-                                    commandValidationHandlerRef.current('label', [selectedText], worldData);
+                                    const worldState = {
+                                        worldData,
+                                        selectionStart,
+                                        selectionEnd,
+                                        hasSelection: selectionStart !== null && selectionEnd !== null
+                                    };
+                                    commandValidationHandlerRef.current('label', [selectedText], worldState);
                                 }
                             } else {
                                 setDialogueWithRevert("Selection is empty", setDialogueText);
