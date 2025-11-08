@@ -26,6 +26,8 @@ export interface UseHostDialogueProps {
   setWorldData?: (updater: (prev: Record<string, any>) => Record<string, any>) => void;
   hostBackgroundColor?: string; // Host greeting background color to set as initial world bg
   isPublicWorld?: boolean; // Whether user is signing up in a public world (e.g., /base)
+  setMonogramMode?: (mode: string) => void; // Control monogram display
+  setBackgroundColor?: (color: string) => void; // Control background color
 }
 
 // Helper to map message IDs to field names
@@ -42,7 +44,7 @@ function getFieldNameFromMessageId(messageId: string): string {
   return fieldMap[messageId] || 'username'; // Default to username for verification flow
 }
 
-export function useHostDialogue({ setHostData, getViewportCenter, setDialogueText, onAuthSuccess, onTriggerZoom, setHostMode, setChatMode, addEphemeralText, setWorldData, hostBackgroundColor, isPublicWorld }: UseHostDialogueProps) {
+export function useHostDialogue({ setHostData, getViewportCenter, setDialogueText, onAuthSuccess, onTriggerZoom, setHostMode, setChatMode, addEphemeralText, setWorldData, hostBackgroundColor, isPublicWorld, setMonogramMode, setBackgroundColor }: UseHostDialogueProps) {
   const [state, setState] = useState<HostDialogueState>({
     isActive: false,
     currentFlowId: null,
@@ -50,6 +52,16 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
     collectedData: {},
     isProcessing: false
   });
+
+  // Auto-advance the NARA banner after 1.5 seconds
+  useEffect(() => {
+    if (state.currentMessageId === 'nara_banner' && state.isActive) {
+      const timer = setTimeout(() => {
+        advanceToNextMessage();
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [state.currentMessageId, state.isActive]);
 
   // Manual advance through non-input messages (removed auto-advance)
   const advanceToNextMessage = useCallback(() => {
@@ -65,6 +77,12 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
 
     // If message doesn't expect input and has a nextMessageId, advance manually
     if (!currentMessage.expectsInput && currentMessage.nextMessageId) {
+      // Special handling for transition_to_welcome - switch to welcome flow
+      if (currentMessage.nextMessageId === 'transition_to_welcome') {
+        startFlow('welcome');
+        return;
+      }
+
       const nextMessage = flow.messages[currentMessage.nextMessageId!];
       if (nextMessage) {
         const centerPos = getViewportCenter();
@@ -75,6 +93,16 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           centerPos: centerPos,
           timestamp: Date.now()
         });
+
+        // Handle monogram mode from message
+        if (nextMessage.monogramMode && setMonogramMode) {
+          setMonogramMode(nextMessage.monogramMode);
+        }
+
+        // Handle background color from message
+        if (nextMessage.backgroundColor && setBackgroundColor) {
+          setBackgroundColor(nextMessage.backgroundColor);
+        }
 
         // Despawn labels if requested
         if (nextMessage.despawnLabels && setWorldData) {
@@ -116,7 +144,7 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
         }));
       }
     }
-  }, [state, setHostData, getViewportCenter, setWorldData]);
+  }, [state, setHostData, getViewportCenter, setWorldData, setMonogramMode, setBackgroundColor, startFlow]);
 
   // Go back to previous message
   const goBackToPreviousMessage = useCallback(() => {
@@ -172,6 +200,16 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       timestamp: Date.now()
     });
 
+    // Handle monogram mode from message
+    if (startMessage.monogramMode && setMonogramMode) {
+      setMonogramMode(startMessage.monogramMode);
+    }
+
+    // Handle background color from message
+    if (startMessage.backgroundColor && setBackgroundColor) {
+      setBackgroundColor(startMessage.backgroundColor);
+    }
+
     // Spawn staged content if defined (only if not already spawned)
     if (startMessage.spawnContent && setWorldData) {
       const content = startMessage.spawnContent(centerPos);
@@ -218,7 +256,7 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       collectedData: {},
       isProcessing: false
     });
-  }, [setHostData, getViewportCenter, setWorldData, setHostMode, setChatMode]);
+  }, [setHostData, getViewportCenter, setWorldData, setHostMode, setChatMode, setMonogramMode, setBackgroundColor]);
 
   // Get current message
   const getCurrentMessage = useCallback((): HostMessage | null => {

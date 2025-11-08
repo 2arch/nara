@@ -338,7 +338,14 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             } : undefined,
         setWorldData: engine.setWorldData,
         hostBackgroundColor: hostBackgroundColor,
-        isPublicWorld: isPublicWorld
+        isPublicWorld: isPublicWorld,
+        setMonogramMode: (mode: string) => {
+            monogramSystem.updateOption('mode', mode as any);
+            monogramSystem.updateOption('enabled', true);
+        },
+        setBackgroundColor: (color: string) => {
+            engine.updateSettings({ backgroundColor: color });
+        }
     });
 
     // Handle email verification flow

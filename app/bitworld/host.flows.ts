@@ -26,6 +26,10 @@ export interface HostMessage {
   requiresChatMode?: boolean; // If false, user executes commands directly on canvas
   expectedCommand?: string; // The command the user should execute (e.g., "bg")
   commandValidator?: (executedCommand: string, args: string[], worldState?: any) => boolean; // Validate command was executed correctly
+
+  // Monogram control
+  monogramMode?: 'nara' | 'perlin' | 'clear' | 'geometry3d' | 'macintosh' | 'loading' | 'road' | 'terrain'; // Control monogram display
+  backgroundColor?: string; // Override background color for this message
 }
 
 export interface HostFlow {
@@ -35,6 +39,28 @@ export interface HostFlow {
 }
 
 import { checkUsernameAvailability } from '../firebase';
+
+// Intro flow - shows NARA banner before welcome flow
+export const introFlow: HostFlow = {
+  flowId: 'intro',
+  startMessageId: 'nara_banner',
+  messages: {
+    'nara_banner': {
+      id: 'nara_banner',
+      text: '', // Empty text - just show the monogram
+      expectsInput: false,
+      monogramMode: 'nara',
+      backgroundColor: '#000000',
+      nextMessageId: 'transition_to_welcome'
+    },
+    'transition_to_welcome': {
+      id: 'transition_to_welcome',
+      text: '', // Silent transition
+      expectsInput: false,
+      // This will be handled by host.dialogue.ts to switch to welcome flow
+    }
+  }
+};
 
 // Simplified welcome flow - greet then collect email for magic link
 export const welcomeFlow: HostFlow = {
@@ -496,6 +522,7 @@ export const passwordResetFlow: HostFlow = {
 
 // Export all flows
 export const HOST_FLOWS: Record<string, HostFlow> = {
+  'intro': introFlow,
   'welcome': welcomeFlow,
   'verification': verificationFlow,
   'upgrade': upgradeFlow,
