@@ -332,7 +332,7 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           return true;
         } else {
           setHostData({
-            text: 'checkout failed. please try /pro command instead.',
+            text: 'checkout failed. please try /upgrade command instead.',
             centerPos: getViewportCenter(),
             timestamp: Date.now()
           });
@@ -341,7 +341,7 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
         }
       } catch (error) {
         setHostData({
-          text: 'something went wrong. please try /pro command instead.',
+          text: 'something went wrong. please try /upgrade command instead.',
           centerPos: getViewportCenter(),
           timestamp: Date.now()
         });

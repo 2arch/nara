@@ -344,7 +344,7 @@ export const upgradeFlow: HostFlow = {
 
     'upgrade_declined': {
       id: 'upgrade_declined',
-      text: 'No worries! Your quota resets tomorrow. \n \n You can always upgrade later by typing /pro.',
+      text: 'No worries! Your quota resets tomorrow. \n \n You can always upgrade later by typing /upgrade.',
       expectsInput: false
     }
   }

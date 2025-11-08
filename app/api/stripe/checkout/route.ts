@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
       ],
       mode: 'subscription',
       success_url: `${process.env.NEXT_PUBLIC_BASE_URL || 'https://nara.ws'}/?success=true`,
-      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL || 'https://nara.ws'}/pro`,
+      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL || 'https://nara.ws'}`,
       metadata: {
         userId,
         plan: planName,
