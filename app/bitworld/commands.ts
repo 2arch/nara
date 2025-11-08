@@ -1809,6 +1809,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 }
             }
             
+            // Notify tutorial flow that state command was executed
+            if (onCommandExecuted) {
+                onCommandExecuted('state', args);
+            }
+
             // Fallback: Return command execution for world engine to handle (old behavior)
             return {
                 command: 'state',
