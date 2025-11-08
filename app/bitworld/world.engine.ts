@@ -404,6 +404,7 @@ interface UseWorldEngineProps {
     username?: string; // Add username for routing
     enableCommands?: boolean; // Enable/disable command system (default: true)
     initialStateName?: string | null; // Initial state name from URL
+    initialPatternId?: string; // Pattern ID from URL for deterministic pattern generation
     onMonogramCommand?: (args: string[]) => void; // Callback for monogram commands
     isReadOnly?: boolean; // Read-only mode (observer/viewer)
 }
@@ -438,6 +439,131 @@ function getNearbySmartIndentation(worldData: WorldData, cursorPos: {x: number, 
     return null; // No nearby text blocks found
 }
 
+/**
+ * Generate deterministic pattern from pattern ID
+ * @param patternId Base36 pattern identifier from URL
+ * @param centerPos Center position for pattern placement
+ * @returns Pattern data object ready for worldData storage
+ */
+function generatePatternFromId(patternId: string, centerPos: Point = { x: 0, y: 0 }): {
+    patternData: any;
+    patternKey: string;
+} {
+    // Convert pattern ID to numeric seed (base36 decode)
+    const seed = parseInt(patternId, 36);
+
+    // If invalid, use hash of the string
+    const numericSeed = isNaN(seed) ? patternId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) : seed;
+
+    // Deterministic RNG based on seed
+    const random = (n: number) => {
+        const x = Math.sin(numericSeed + n) * 10000;
+        return x - Math.floor(x);
+    };
+
+    // BSP generation (same as pattern command)
+    const width = 120;
+    const height = 60;
+
+    type BSPNode = {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+        leftChild?: BSPNode;
+        rightChild?: BSPNode;
+        room?: { x: number; y: number; width: number; height: number };
+    };
+
+    const bspSplit = (node: BSPNode, depth: number, maxDepth: number, rng: (n: number) => number, rngOffset: number): void => {
+        if (depth >= maxDepth) {
+            const margin = 2;
+            if (node.width < margin * 2 + 3 || node.height < margin * 2 + 3) return;
+            const roomWidth = Math.floor(rng(rngOffset) * 12) + 28;
+            const roomHeight = Math.floor(rng(rngOffset + 1) * 6) + 10;
+            const roomX = node.x + margin + Math.floor(rng(rngOffset + 2) * Math.max(0, node.width - roomWidth - margin * 2));
+            const roomY = node.y + margin + Math.floor(rng(rngOffset + 3) * Math.max(0, node.height - roomHeight - margin * 2));
+            node.room = { x: roomX, y: roomY, width: roomWidth, height: roomHeight };
+            return;
+        }
+        const visualWidth = node.width * 1;
+        const visualHeight = node.height * 2;
+        const splitHorizontal = visualHeight > visualWidth ? true : (visualWidth > visualHeight ? false : rng(rngOffset + depth) > 0.5);
+        if (splitHorizontal && node.height >= 20) {
+            const splitY = node.y + Math.floor(node.height / 2) + Math.floor(rng(rngOffset + depth + 1) * 6) - 3;
+            node.leftChild = { x: node.x, y: node.y, width: node.width, height: splitY - node.y };
+            node.rightChild = { x: node.x, y: splitY, width: node.width, height: node.y + node.height - splitY };
+        } else if (!splitHorizontal && node.width >= 40) {
+            const splitX = node.x + Math.floor(node.width / 2) + Math.floor(rng(rngOffset + depth + 2) * 8) - 4;
+            node.leftChild = { x: node.x, y: node.y, width: splitX - node.x, height: node.height };
+            node.rightChild = { x: splitX, y: node.y, width: node.x + node.width - splitX, height: node.height };
+        } else {
+            const margin = 2;
+            const roomWidth = Math.max(28, Math.min(node.width - margin * 2, 40));
+            const roomHeight = Math.max(10, Math.min(node.height - margin * 2, 16));
+            if (roomWidth >= 28 && roomHeight >= 10) {
+                node.room = { x: node.x + margin, y: node.y + margin, width: roomWidth, height: roomHeight };
+            }
+            return;
+        }
+        if (node.leftChild) bspSplit(node.leftChild, depth + 1, maxDepth, rng, rngOffset + depth * 10);
+        if (node.rightChild) bspSplit(node.rightChild, depth + 1, maxDepth, rng, rngOffset + depth * 10 + 5);
+    };
+
+    const collectRooms = (node: BSPNode): Array<{ x: number; y: number; width: number; height: number }> => {
+        const result: Array<{ x: number; y: number; width: number; height: number }> = [];
+        if (node.room) result.push(node.room);
+        if (node.leftChild) result.push(...collectRooms(node.leftChild));
+        if (node.rightChild) result.push(...collectRooms(node.rightChild));
+        return result;
+    };
+
+    const rootNode: BSPNode = {
+        x: Math.floor(centerPos.x - width / 2),
+        y: Math.floor(centerPos.y - height / 2),
+        width: width,
+        height: height
+    };
+
+    bspSplit(rootNode, 0, 3, random, 100);
+    const rooms = collectRooms(rootNode);
+
+    // Calculate actual bounding box from rooms
+    const corridorPadding = 3;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    for (const room of rooms) {
+        const roomMinX = room.x;
+        const roomMinY = room.y;
+        const roomMaxX = room.x + room.width;
+        const roomMaxY = room.y + room.height;
+        const centerX = room.x + Math.floor(room.width / 2);
+        const centerY = room.y + Math.floor(room.height / 2);
+
+        minX = Math.min(minX, roomMinX, centerX - corridorPadding);
+        minY = Math.min(minY, roomMinY, centerY - corridorPadding);
+        maxX = Math.max(maxX, roomMaxX, centerX + corridorPadding);
+        maxY = Math.max(maxY, roomMaxY, centerY + corridorPadding);
+    }
+
+    const actualWidth = maxX - minX;
+    const actualHeight = maxY - minY;
+    const actualCenterX = minX + actualWidth / 2;
+    const actualCenterY = minY + actualHeight / 2;
+
+    const patternKey = `pattern_${patternId}`;
+    const patternData = {
+        centerX: actualCenterX,
+        centerY: actualCenterY,
+        width: actualWidth,
+        height: actualHeight,
+        timestamp: numericSeed,
+        rooms: rooms
+    };
+
+    return { patternData, patternKey };
+}
+
 // --- The Hook ---
 export function useWorldEngine({
     initialWorldData = {},
@@ -451,6 +577,7 @@ export function useWorldEngine({
     enableCommands = true, // Default to enabled
     username,            // Username for routing
     initialStateName = null, // Initial state name from URL
+    initialPatternId,    // Pattern ID from URL for deterministic generation
     onMonogramCommand,   // Callback for monogram commands
     isReadOnly = false,  // Read-only mode (default to writeable)
 }: UseWorldEngineProps): WorldEngine {
@@ -556,6 +683,28 @@ export function useWorldEngine({
 
         fetchMembership();
     }, [userUid]);
+
+    // Auto-generate pattern from URL parameter if provided
+    useEffect(() => {
+        if (initialPatternId && worldData) {
+            // Check if pattern already exists in world data
+            const patternKey = `pattern_${initialPatternId}`;
+            const patternExists = patternKey in worldData;
+
+            if (!patternExists) {
+                // Generate pattern at origin (0, 0)
+                const { patternData, patternKey: generatedKey } = generatePatternFromId(initialPatternId, { x: 0, y: 0 });
+
+                // Add pattern to world data
+                setWorldData((prev: WorldData) => ({
+                    ...prev,
+                    [generatedKey]: JSON.stringify(patternData)
+                }));
+
+                console.log(`Pattern ${initialPatternId} generated from URL`);
+            }
+        }
+    }, [initialPatternId]); // Only run once on mount when initialPatternId exists
 
     // Effect to detect when cursor is on a bounded region
     useEffect(() => {
