@@ -26,6 +26,7 @@ function BasePageContent() {
 
   // Parse URL coordinate parameters (supports both new and legacy formats)
   const viewParam = searchParams.get('v'); // New format: v=x.y.zoom
+  const patternParam = searchParams.get('p'); // Pattern ID: p=1a2b3c
   const urlX = searchParams.get('x'); // Legacy format
   const urlY = searchParams.get('y'); // Legacy format
   const urlZoom = searchParams.get('zoom'); // Legacy format
@@ -33,6 +34,7 @@ function BasePageContent() {
   // Parse view parameter (dot-separated: x.y.zoom)
   let initialViewOffset: { x: number; y: number } | undefined;
   let initialZoomLevel: number | undefined;
+  let initialPatternId: string | undefined;
   let isSharedLink = false;
 
   if (viewParam) {
@@ -65,6 +67,11 @@ function BasePageContent() {
         initialZoomLevel = zoom;
       }
     }
+  }
+
+  // Parse pattern parameter
+  if (patternParam) {
+    initialPatternId = patternParam;
   }
 
   // Log all visits to Firebase for analysis (non-blocking, after canvas loads)
@@ -133,6 +140,7 @@ function BasePageContent() {
     initialStateName: null, // No state name for base
     initialViewOffset,
     initialZoomLevel,
+    initialPatternId,
     isReadOnly: !user // Read-only if not authenticated
   });
 

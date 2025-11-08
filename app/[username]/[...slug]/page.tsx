@@ -39,6 +39,7 @@ function UserStateContent() {
 
   // Parse URL coordinate parameters (supports both new and legacy formats)
   const viewParam = searchParams.get('v'); // New format: v=x.y.zoom
+  const patternParam = searchParams.get('p'); // Pattern ID: p=1a2b3c
   const urlX = searchParams.get('x'); // Legacy format
   const urlY = searchParams.get('y'); // Legacy format
   const urlZoom = searchParams.get('zoom'); // Legacy format
@@ -46,6 +47,7 @@ function UserStateContent() {
   // Parse view parameter (dot-separated: x.y.zoom)
   let initialViewOffset: { x: number; y: number } | undefined;
   let initialZoomLevel: number | undefined;
+  let initialPatternId: string | undefined;
 
   if (viewParam) {
     const parts = viewParam.split('.');
@@ -69,6 +71,11 @@ function UserStateContent() {
       y: parseInt(urlY)
     };
     initialZoomLevel = urlZoom ? parseFloat(urlZoom) : undefined;
+  }
+
+  // Parse pattern parameter
+  if (patternParam) {
+    initialPatternId = patternParam;
   }
 
   // Listen for authentication state changes
@@ -112,6 +119,7 @@ function UserStateContent() {
     initialStateName: stateName,
     initialViewOffset: initialViewOffset,
     initialZoomLevel: initialZoomLevel,
+    initialPatternId: initialPatternId,
     isReadOnly: !isOwner // Pass read-only flag
   });
 
