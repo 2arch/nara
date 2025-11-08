@@ -99,6 +99,7 @@ export default function Home() {
         hostTextColor={hostColors.text}
         hostBackgroundColor={hostColors.background}
         hostDimBackground={false}
+        hostMonogramMode="off"
       />
     </div>
   );
