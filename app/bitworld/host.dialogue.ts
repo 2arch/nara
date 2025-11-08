@@ -151,14 +151,21 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
 
     // If message doesn't expect input and has a nextMessageId, advance manually
     if (!currentMessage.expectsInput && currentMessage.nextMessageId) {
-      // Special handling for transition_to_welcome - switch to welcome flow
-      if (currentMessage.nextMessageId === 'transition_to_welcome') {
-        startFlow('welcome');
-        return;
-      }
-
       const nextMessage = flow.messages[currentMessage.nextMessageId!];
       if (nextMessage) {
+        // Special handling for transition_to_welcome - process monogram change then switch to welcome flow
+        if (currentMessage.nextMessageId === 'transition_to_welcome') {
+          // Apply monogram mode from transition message before switching flows
+          if (nextMessage.monogramMode && setMonogramMode) {
+            setMonogramMode(nextMessage.monogramMode);
+          }
+          // Restore background color to host color (from black NARA banner)
+          if (hostBackgroundColor && setBackgroundColor) {
+            setBackgroundColor(hostBackgroundColor);
+          }
+          startFlow('welcome');
+          return;
+        }
         const centerPos = getViewportCenter();
 
         setHostData({
