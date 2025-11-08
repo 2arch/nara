@@ -120,7 +120,7 @@ const AVAILABLE_COMMANDS = [
     // Sharing & Publishing
     'publish', 'unpublish', 'share', 'spawn', 'monogram',
     // Account
-    'signin', 'signout', 'account',
+    'signin', 'signout', 'account', 'upgrade',
     // Debug
     'debug'
 ];
@@ -133,7 +133,7 @@ export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'style': ['bg', 'text', 'font'],
     'state': ['state', 'random', 'clear', 'replay'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
-    'account': ['signin', 'signout', 'account'],
+    'account': ['signin', 'signout', 'account', 'upgrade'],
     'debug': ['debug']
 };
 
@@ -177,6 +177,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'signin': 'Sign in to your Nara account. Required for saving work, publishing canvases, and accessing AI features.',
     'signout': 'Sign out of your Nara account. You\'ll return to read-only mode.',
     'account': 'Manage your account settings. Use /account reset to reset your password.',
+    'upgrade': 'Upgrade to Nara Pro for unlimited AI operations. Starts a guided conversation to learn about Pro benefits and pricing before upgrading.',
     'debug': 'Toggle debug mode. Shows technical information about canvas state, performance, and rendering. Useful for troubleshooting or understanding the system.'
 };
 
@@ -2392,6 +2393,27 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     });
                 });
             });
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            return null;
+        }
+
+        if (commandToExecute.startsWith('upgrade')) {
+            // Trigger the upgrade flow
+            if (triggerUpgradeFlow) {
+                triggerUpgradeFlow();
+            }
 
             // Clear command mode
             setCommandState({

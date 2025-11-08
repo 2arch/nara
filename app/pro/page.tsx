@@ -107,7 +107,7 @@ export default function ProPage() {
         ) : (
           <div className="border border-white p-6 mb-8">
             <div className="text-center mb-6">
-              <div className="text-6xl mb-4">$7.99</div>
+              <div className="text-6xl mb-4">$10</div>
               <div className="text-lg text-gray-300">per month</div>
             </div>
             
