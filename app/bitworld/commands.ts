@@ -207,6 +207,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         textColor: string;
         textBackground?: string;
     } | null>(null);
+    const previousCameraModeRef = useRef<CameraMode | null>(null); // Store camera mode before command mode
     const [commandState, setCommandState] = useState<CommandState>({
         isActive: false,
         input: '',
@@ -1060,8 +1061,27 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         return { width: maxLineWidth, height: totalHeight };
     }, [addEphemeralText, calculateResponseWidth]);
 
+    // Helper to restore camera mode when exiting command mode (mobile only)
+    const restoreCameraModeIfNeeded = useCallback(() => {
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        if (isMobile && previousCameraModeRef.current !== null) {
+            setModeState(prev => ({ ...prev, cameraMode: previousCameraModeRef.current! }));
+            previousCameraModeRef.current = null;
+        }
+    }, []);
+
     // Start command mode when '/' is pressed
     const startCommand = useCallback((cursorPos: Point) => {
+        // On mobile: Save current camera mode and switch to focus
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        if (isMobile) {
+            previousCameraModeRef.current = modeState.cameraMode;
+            // Only switch to focus if not already in focus mode
+            if (modeState.cameraMode !== 'focus') {
+                setModeState(prev => ({ ...prev, cameraMode: 'focus' }));
+            }
+        }
+
         // Initialize command display
         const newCommandData: WorldData = {};
         const commandText = '/';
@@ -1121,7 +1141,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             originalCursorPos: { x: cursorPos.x, y: cursorPos.y }, // Store original position
             hasNavigated: false
         });
-    }, [isReadOnly, matchCommands, userUid, membershipLevel]);
+    }, [isReadOnly, matchCommands, userUid, membershipLevel, modeState.cameraMode]);
 
     // Handle character input in command mode
     const addCharacter = useCallback((char: string) => {
@@ -2966,6 +2986,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const originalPos = commandState.originalCursorPos;
             const result = executeCommand(isPermanent);
 
+            // Restore camera mode if needed (mobile only)
+            restoreCameraModeIfNeeded();
+
             // Check if command returned a flag to restore cursor
             if (result && typeof result === 'object' && 'restoreCursor' in result && result.restoreCursor) {
                 setCursorPos(originalPos);
@@ -2977,6 +3000,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             if (cancelComposition) {
                 cancelComposition();
             }
+
+            // Restore camera mode if needed (mobile only)
+            restoreCameraModeIfNeeded();
 
             // Exit command mode without executing and restore cursor to original position
             const originalPos = commandState.originalCursorPos;
@@ -3130,7 +3156,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         return false;
-    }, [commandState, startCommand, executeCommand, navigateUp, navigateDown, handleBackspace, addCharacter, pasteIntoCommand]);
+    }, [commandState, startCommand, executeCommand, navigateUp, navigateDown, handleBackspace, addCharacter, pasteIntoCommand, restoreCameraModeIfNeeded]);
 
     // Select a command from dropdown (for click handling)
     const selectCommand = useCallback((selectedCommand: string) => {
