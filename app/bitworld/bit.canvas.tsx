@@ -356,20 +356,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             console.log('[BitCanvas] Current engine backgroundColor:', engine.settings.backgroundColor);
             engine.updateSettings({ backgroundColor: color });
             console.log('[BitCanvas] Engine backgroundColor after update:', engine.settings.backgroundColor);
-        },
-        setBackgroundMode: (mode: 'color' | 'image' | 'video' | 'transparent') => {
-            console.log('[BitCanvas] setBackgroundMode called with:', mode);
-            console.log('[BitCanvas] Current engine backgroundMode:', engine.backgroundMode);
-            // Background mode is controlled by command system, call switchBackgroundMode
-            engine.switchBackgroundMode(mode as any, engine.backgroundImage || '', engine.textColor);
-            console.log('[BitCanvas] Engine backgroundMode after update:', engine.backgroundMode);
-        },
-        setBackgroundImage: (imageUrl: string) => {
-            console.log('[BitCanvas] setBackgroundImage called with:', imageUrl);
-            console.log('[BitCanvas] Current engine backgroundImage:', engine.backgroundImage);
-            // Switch to image mode with the provided URL
-            engine.switchBackgroundMode('image' as any, imageUrl, engine.textColor);
-            console.log('[BitCanvas] Engine backgroundImage after update:', engine.backgroundImage);
         }
     });
 

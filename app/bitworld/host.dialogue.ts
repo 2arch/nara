@@ -28,8 +28,6 @@ export interface UseHostDialogueProps {
   isPublicWorld?: boolean; // Whether user is signing up in a public world (e.g., /base)
   setMonogramMode?: (mode: string) => void; // Control monogram display
   setBackgroundColor?: (color: string) => void; // Control background color
-  setBackgroundMode?: (mode: 'color' | 'image' | 'video' | 'transparent') => void; // Control background mode
-  setBackgroundImage?: (imageUrl: string) => void; // Control background image
 }
 
 // Helper to map message IDs to field names
@@ -46,7 +44,7 @@ function getFieldNameFromMessageId(messageId: string): string {
   return fieldMap[messageId] || 'username'; // Default to username for verification flow
 }
 
-export function useHostDialogue({ setHostData, getViewportCenter, setDialogueText, onAuthSuccess, onTriggerZoom, setHostMode, setChatMode, addEphemeralText, setWorldData, hostBackgroundColor, isPublicWorld, setMonogramMode, setBackgroundColor, setBackgroundMode, setBackgroundImage }: UseHostDialogueProps) {
+export function useHostDialogue({ setHostData, getViewportCenter, setDialogueText, onAuthSuccess, onTriggerZoom, setHostMode, setChatMode, addEphemeralText, setWorldData, hostBackgroundColor, isPublicWorld, setMonogramMode, setBackgroundColor }: UseHostDialogueProps) {
   const [state, setState] = useState<HostDialogueState>({
     isActive: false,
     currentFlowId: null,
@@ -89,18 +87,6 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
     if (startMessage.backgroundColor && setBackgroundColor) {
       console.log('[HostDialogue] startFlow - Setting background color to:', startMessage.backgroundColor);
       setBackgroundColor(startMessage.backgroundColor);
-    }
-
-    // Handle background mode from message
-    if (startMessage.backgroundMode && setBackgroundMode) {
-      console.log('[HostDialogue] startFlow - Setting background mode to:', startMessage.backgroundMode);
-      setBackgroundMode(startMessage.backgroundMode);
-    }
-
-    // Handle background image from message
-    if (startMessage.backgroundImage && setBackgroundImage) {
-      console.log('[HostDialogue] startFlow - Setting background image to:', startMessage.backgroundImage);
-      setBackgroundImage(startMessage.backgroundImage);
     }
 
     // Spawn staged content if defined (only if not already spawned)
@@ -149,7 +135,7 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       collectedData: {},
       isProcessing: false
     });
-  }, [setHostData, getViewportCenter, setWorldData, setHostMode, setChatMode, setMonogramMode, setBackgroundColor, setBackgroundMode, setBackgroundImage]);
+  }, [setHostData, getViewportCenter, setWorldData, setHostMode, setChatMode, setMonogramMode, setBackgroundColor]);
 
   // Manual advance through non-input messages (removed auto-advance)
   const advanceToNextMessage = useCallback(() => {
@@ -173,16 +159,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           if (nextMessage.monogramMode && setMonogramMode) {
             setMonogramMode(nextMessage.monogramMode);
           }
-          // Apply background mode if specified
-          if (nextMessage.backgroundMode && setBackgroundMode) {
-            setBackgroundMode(nextMessage.backgroundMode);
-          }
-          // Apply background image if specified
-          if (nextMessage.backgroundImage && setBackgroundImage) {
-            setBackgroundImage(nextMessage.backgroundImage);
-          }
-          // Otherwise restore background color to host color (from black NARA banner)
-          else if (hostBackgroundColor && setBackgroundColor) {
+          // Restore background color to host color (from black NARA banner)
+          if (hostBackgroundColor && setBackgroundColor) {
             setBackgroundColor(hostBackgroundColor);
           }
           startFlow('welcome');
@@ -205,16 +183,6 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
         // Handle background color from message
         if (nextMessage.backgroundColor && setBackgroundColor) {
           setBackgroundColor(nextMessage.backgroundColor);
-        }
-
-        // Handle background mode from message
-        if (nextMessage.backgroundMode && setBackgroundMode) {
-          setBackgroundMode(nextMessage.backgroundMode);
-        }
-
-        // Handle background image from message
-        if (nextMessage.backgroundImage && setBackgroundImage) {
-          setBackgroundImage(nextMessage.backgroundImage);
         }
 
         // Despawn labels if requested
@@ -257,7 +225,7 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
         }));
       }
     }
-  }, [state, setHostData, getViewportCenter, setWorldData, setMonogramMode, setBackgroundColor, setBackgroundMode, setBackgroundImage, startFlow, hostBackgroundColor]);
+  }, [state, setHostData, getViewportCenter, setWorldData, setMonogramMode, setBackgroundColor, startFlow]);
 
   // Go back to previous message
   const goBackToPreviousMessage = useCallback(() => {
