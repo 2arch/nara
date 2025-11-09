@@ -2853,9 +2853,16 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         // === Render Host Data (Centered at Initial Position) ===
         if (engine.hostData) {
+            // Calculate fade-in progress (same as monogram crossfade: 800ms with ease-in-out)
+            const fadeDuration = 800; // ms
+            const elapsed = engine.hostData.timestamp ? Date.now() - engine.hostData.timestamp : fadeDuration;
+            let fadeProgress = Math.min(1, elapsed / fadeDuration);
+            // Smooth easing (ease-in-out) - same as monogram
+            fadeProgress = fadeProgress * fadeProgress * (3 - 2 * fadeProgress);
+
             // Dim surrounding content when host dialogue is active (only if enabled)
             if (hostDimBackground) {
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                ctx.fillStyle = `rgba(0, 0, 0, ${0.4 * fadeProgress})`;
                 ctx.fillRect(0, 0, cssWidth, cssHeight);
             }
 
@@ -2942,7 +2949,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             const flickerPerturbation = (flicker1 * 0.08 + flicker2 * 0.05 + randomNoise * 0.07);
             const pulseIntensity = basePulse + flickerPerturbation;
 
-            const glowAlphas = [0.6 * pulseIntensity, 0.3 * pulseIntensity]; // Alpha values for distance 1, 2
+            // Apply fade-in to glow intensity
+            const glowAlphas = [0.6 * pulseIntensity * fadeProgress, 0.3 * pulseIntensity * fadeProgress]; // Alpha values for distance 1, 2
 
             // Parse background color for alpha manipulation
             const bgHex = (engine.backgroundColor || '#FFFFFF').replace('#', '');
@@ -3032,8 +3040,25 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 ctx.fillStyle = engine.backgroundColor;
                                 ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
 
-                                // Render the character with host color
-                                ctx.fillStyle = hostColor;
+                                // Render the character with host color and fade-in
+                                // Parse host color and apply fade alpha
+                                const hostColorWithAlpha = (() => {
+                                    if (hostColor.startsWith('#')) {
+                                        const hex = hostColor.replace('#', '');
+                                        const r = parseInt(hex.substring(0, 2), 16);
+                                        const g = parseInt(hex.substring(2, 4), 16);
+                                        const b = parseInt(hex.substring(4, 6), 16);
+                                        return `rgba(${r}, ${g}, ${b}, ${fadeProgress})`;
+                                    } else if (hostColor.startsWith('rgb')) {
+                                        // Already has alpha or is rgb - add/modify alpha
+                                        return hostColor.replace(/rgba?\(([^)]+)\)/, (match, values) => {
+                                            const parts = values.split(',').map((v: string) => v.trim());
+                                            return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${fadeProgress})`;
+                                        });
+                                    }
+                                    return hostColor;
+                                })();
+                                ctx.fillStyle = hostColorWithAlpha;
                                 renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
                             }
                         }
@@ -3075,8 +3100,19 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
 
                             if (char && char.trim() !== '') {
-                                // Render the hint character in backgroundColor (no background, no glow)
-                                ctx.fillStyle = engine.backgroundColor;
+                                // Render the hint character in backgroundColor with fade-in
+                                const hintColorWithAlpha = (() => {
+                                    const color = engine.backgroundColor;
+                                    if (color.startsWith('#')) {
+                                        const hex = color.replace('#', '');
+                                        const r = parseInt(hex.substring(0, 2), 16);
+                                        const g = parseInt(hex.substring(2, 4), 16);
+                                        const b = parseInt(hex.substring(4, 6), 16);
+                                        return `rgba(${r}, ${g}, ${b}, ${fadeProgress})`;
+                                    }
+                                    return color;
+                                })();
+                                ctx.fillStyle = hintColorWithAlpha;
                                 renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
                             }
                         }
