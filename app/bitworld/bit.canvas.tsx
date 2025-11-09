@@ -98,6 +98,10 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const lastEnterPressRef = useRef<number>(0);
     const [isPasswordVisible, setIsPasswordVisible] = useState<boolean>(false);
 
+    // Track host mode dim fade-in (should only happen once when host mode activates)
+    const hostDimFadeStartRef = useRef<number | null>(null);
+    const hasHostDimFadedInRef = useRef<boolean>(false);
+
     // Pan distance monitoring
     const [panDistance, setPanDistance] = useState<number>(0);
     const [isPanning, setIsPanning] = useState<boolean>(false);
@@ -2853,18 +2857,37 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         // === Render Host Data (Centered at Initial Position) ===
         if (engine.hostData) {
-            // Calculate fade-in progress (same as monogram crossfade: 800ms with ease-in-out)
             const fadeDuration = 800; // ms
-            const elapsed = engine.hostData.timestamp ? Date.now() - engine.hostData.timestamp : fadeDuration;
-            let fadeProgress = Math.min(1, elapsed / fadeDuration);
-            // Smooth easing (ease-in-out) - same as monogram
-            fadeProgress = fadeProgress * fadeProgress * (3 - 2 * fadeProgress);
 
-            // Dim surrounding content when host dialogue is active (only if enabled)
+            // Background dim fade-in (only once when host mode first activates)
             if (hostDimBackground) {
-                ctx.fillStyle = `rgba(0, 0, 0, ${0.4 * fadeProgress})`;
+                // Initialize dim fade timer on first appearance
+                if (!hasHostDimFadedInRef.current && hostDimFadeStartRef.current === null) {
+                    hostDimFadeStartRef.current = Date.now();
+                }
+
+                let dimProgress = 1.0; // Default to fully dimmed
+                if (hostDimFadeStartRef.current !== null && !hasHostDimFadedInRef.current) {
+                    const dimElapsed = Date.now() - hostDimFadeStartRef.current;
+                    dimProgress = Math.min(1, dimElapsed / fadeDuration);
+                    // Smooth easing (ease-in-out)
+                    dimProgress = dimProgress * dimProgress * (3 - 2 * dimProgress);
+
+                    // Mark as faded in once complete
+                    if (dimProgress >= 1.0) {
+                        hasHostDimFadedInRef.current = true;
+                    }
+                }
+
+                ctx.fillStyle = `rgba(0, 0, 0, ${0.4 * dimProgress})`;
                 ctx.fillRect(0, 0, cssWidth, cssHeight);
             }
+
+            // Text fade-in (happens on each new message)
+            const textElapsed = engine.hostData.timestamp ? Date.now() - engine.hostData.timestamp : fadeDuration;
+            let fadeProgress = Math.min(1, textElapsed / fadeDuration);
+            // Smooth easing (ease-in-out) - same as monogram
+            fadeProgress = fadeProgress * fadeProgress * (3 - 2 * fadeProgress);
 
             const hostText = engine.hostData.text;
             const hostColor = engine.hostData.color || engine.textColor;
@@ -3170,6 +3193,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     // Draw main arrow in solid backgroundColor (no pulsing)
                     drawArrow(ctx, adjustedX, adjustedY, intersection.angle, engine.backgroundColor);
                 }
+            }
+        } else {
+            // Reset dim fade tracking when host mode exits
+            if (hasHostDimFadedInRef.current || hostDimFadeStartRef.current !== null) {
+                hostDimFadeStartRef.current = null;
+                hasHostDimFadedInRef.current = false;
             }
         }
 
