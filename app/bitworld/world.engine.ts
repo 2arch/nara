@@ -180,6 +180,7 @@ export interface WorldEngine {
     backgroundImage?: string;
     backgroundVideo?: string;
     backgroundStream?: MediaStream;
+    switchBackgroundMode: (newMode: BackgroundMode, bgColor?: string, textColor?: string, textBg?: string, aiPrompt?: string) => boolean;
     textColor: string;
     fontFamily: string;
     currentTextStyle: {
@@ -10736,6 +10737,7 @@ export function useWorldEngine({
         backgroundImage,
         backgroundVideo,
         backgroundStream,
+        switchBackgroundMode,
         textColor,
         fontFamily,
         currentTextStyle,

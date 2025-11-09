@@ -30,6 +30,8 @@ export interface HostMessage {
   // Monogram control
   monogramMode?: 'nara' | 'perlin' | 'clear' | 'geometry3d' | 'macintosh' | 'loading' | 'road' | 'terrain'; // Control monogram display
   backgroundColor?: string; // Override background color for this message
+  backgroundMode?: 'color' | 'image' | 'video' | 'transparent'; // Background mode
+  backgroundImage?: string; // Background image URL
 }
 
 export interface HostFlow {
@@ -57,7 +59,9 @@ export const introFlow: HostFlow = {
       id: 'transition_to_welcome',
       text: '', // Silent transition
       expectsInput: false,
-      monogramMode: 'perlin',
+      monogramMode: 'clear', // Clear monogram to show image
+      backgroundMode: 'image',
+      backgroundImage: 'https://d2w9rnfcy7mm78.cloudfront.net/40525619/original_8f6196d0fda2a540ef8e380980921d25.jpg?1761186290?bc=0',
       // This will be handled by host.dialogue.ts to switch to welcome flow
     }
   }
