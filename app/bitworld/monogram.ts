@@ -83,6 +83,7 @@ export interface MonogramOptions {
         rightEyeSquint?: number; // Right eye squint (0=normal, 1=squinted)
         smile?: number; // Smile intensity (0=neutral, 1=full smile)
         frown?: number; // Frown intensity (0=neutral, 1=full frown)
+        isTracked?: boolean; // True if actively tracked by MediaPipe, false if autonomous
     };
 }
 
@@ -597,9 +598,12 @@ const useMonogramSystem = (
         // Scale for face features (in world units) - simple approach
         const faceScale = viewportWidth * 0.015 * complexity;
 
-        // Rotation angles - use external rotation with clamping
+        // Rotation angles - use external rotation with clamping or autonomous animation
         let rotX: number, rotY: number, rotZ: number;
-        if (options.externalRotation) {
+        const isTracked = options.externalRotation?.isTracked ?? false;
+
+        if (options.externalRotation && isTracked) {
+            // Face is actively tracked - use MediaPipe data
             // X-axis (pitch/nodding): Clamp to ±45 degrees to prevent extreme up/down views
             const maxPitch = Math.PI / 4; // 45 degrees
             rotX = Math.max(-maxPitch, Math.min(maxPitch, options.externalRotation.rotX));
@@ -610,8 +614,24 @@ const useMonogramSystem = (
 
             // Z-axis (roll/tilting): Reduce to 30% to keep face more upright
             rotZ = options.externalRotation.rotZ * 0.3;
+        } else if (options.externalRotation && !isTracked) {
+            // Autonomous mode - use last known position with gentle oscillations
+            const baseRotX = options.externalRotation.rotX;
+            const baseRotY = options.externalRotation.rotY;
+            const baseRotZ = options.externalRotation.rotZ;
+
+            // Add gentle autonomous animations
+            const slowTime = time * 0.15; // Very slow oscillation
+            const breathingX = Math.sin(slowTime * 0.8) * 0.08; // Gentle up/down breathing
+            const driftY = Math.sin(slowTime * 0.5) * 0.05; // Slight left/right drift
+            const driftZ = Math.cos(slowTime * 0.6) * 0.03; // Minimal roll
+
+            // Blend from last known position with gentle autonomous drift
+            rotX = baseRotX + breathingX;
+            rotY = baseRotY + driftY;
+            rotZ = baseRotZ * 0.3 + driftZ;
         } else {
-            // Neutral pose if no face data yet
+            // No face data - neutral pose
             rotX = 0;
             rotY = 0;
             rotZ = 0;
@@ -687,12 +707,13 @@ const useMonogramSystem = (
         let rightEyeBlink = 0;
 
         if (options.externalRotation?.leftEyeBlink !== undefined &&
-            options.externalRotation?.rightEyeBlink !== undefined) {
-            // Use tracked eye blinks
+            options.externalRotation?.rightEyeBlink !== undefined &&
+            isTracked) {
+            // Use tracked eye blinks (when face is actively being tracked)
             leftEyeBlink = options.externalRotation.leftEyeBlink;
             rightEyeBlink = options.externalRotation.rightEyeBlink;
         } else {
-            // Fallback to automatic blink animation
+            // Autonomous blink animation (used when not tracked or no face data)
             const blinkCycle = time * 0.5;
             const blinkPhase = blinkCycle % 5;
             let autoBlink = 0;
@@ -705,11 +726,22 @@ const useMonogramSystem = (
             rightEyeBlink = autoBlink;
         }
 
-        const mouthOpen = options.externalRotation?.mouthOpen ?? 0;
-        const leftEyeSquint = options.externalRotation?.leftEyeSquint ?? 0;
-        const rightEyeSquint = options.externalRotation?.rightEyeSquint ?? 0;
-        const smile = options.externalRotation?.smile ?? 0;
-        const frown = options.externalRotation?.frown ?? 0;
+        // Mouth dynamics - use tracked or add subtle autonomous breathing
+        let mouthOpen = 0;
+        if (isTracked && options.externalRotation?.mouthOpen !== undefined) {
+            // Use tracked mouth opening
+            mouthOpen = options.externalRotation.mouthOpen;
+        } else if (!isTracked && options.externalRotation) {
+            // Autonomous mode - add very subtle breathing
+            const breathCycle = time * 0.2;
+            mouthOpen = Math.max(0, Math.sin(breathCycle) * 0.05); // Very subtle
+        }
+
+        // These features are not used in the classic Macintosh mask but kept for compatibility
+        const leftEyeSquint = 0;
+        const rightEyeSquint = 0;
+        const smile = 0;
+        const frown = 0;
 
         // Get face features with current dynamics applied
         const dynamics: FaceDynamics = {
