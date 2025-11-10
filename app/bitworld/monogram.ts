@@ -583,8 +583,65 @@ const useMonogramSystem = (
         const centerX = (viewportBounds.startX + viewportBounds.endX) / 2;
         const centerY = (viewportBounds.startY + viewportBounds.endY) / 2;
 
-        // Scale for face features (in world units)
-        const faceScale = viewportWidth * 0.015 * complexity;
+        // Define face features as a reusable data structure (in face coordinate space)
+        // Note: Eye height will be modulated by eye openness, mouth by mouth opening
+        interface FaceFeature {
+            cx: number;      // center x
+            cy: number;      // center y (base position)
+            width: number;
+            height: number;  // base height
+            type: 'leftEye' | 'rightEye' | 'noseVert' | 'noseHoriz' | 'mouth' | 'leftCorner' | 'rightCorner';
+        }
+
+        const baseFaceFeatures: FaceFeature[] = [
+            { cx: -14.3, cy: -9.1, width: 5.8, height: 14.6, type: 'leftEye' },
+            { cx: 14.3, cy: -9.1, width: 5.8, height: 14.6, type: 'rightEye' },
+            { cx: 0, cy: 3.9, width: 4.4, height: 10.4, type: 'noseVert' },
+            { cx: 5.2, cy: 9.1, width: 10.4, height: 4.4, type: 'noseHoriz' },
+            { cx: 2.6, cy: 18.2, width: 23.4, height: 4.4, type: 'mouth' },
+            { cx: -11, cy: 16.2, width: 4.4, height: 4.4, type: 'leftCorner' },
+            { cx: 16.2, cy: 16.2, width: 4.4, height: 4.4, type: 'rightCorner' },
+        ];
+
+        // Calculate bounding box accounting for maximum possible mouth opening
+        const maxMouthOpen = 1.0; // Maximum mouth openness value
+        const maxMouthScale = 1 + maxMouthOpen * 3; // Up to 4x height when fully open
+
+        const faceBounds = baseFaceFeatures.reduce((acc, feature) => {
+            let cy = feature.cy;
+            let height = feature.height;
+
+            // Account for dynamic mouth movement in bounding box
+            if (feature.type === 'mouth') {
+                cy = cy + maxMouthOpen * 4; // Maximum Y shift
+                height = height * maxMouthScale; // Maximum height scale
+            } else if (feature.type === 'leftCorner' || feature.type === 'rightCorner') {
+                cy = cy + maxMouthOpen * 3; // Maximum corner Y shift
+            }
+
+            const minX = feature.cx - feature.width / 2;
+            const maxX = feature.cx + feature.width / 2;
+            const minY = cy - height / 2;
+            const maxY = cy + height / 2;
+
+            return {
+                minX: Math.min(acc.minX, minX),
+                maxX: Math.max(acc.maxX, maxX),
+                minY: Math.min(acc.minY, minY),
+                maxY: Math.max(acc.maxY, maxY),
+            };
+        }, { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
+
+        const faceWidth = faceBounds.maxX - faceBounds.minX;
+        const faceHeight = faceBounds.maxY - faceBounds.minY;
+
+        // Cat-in-container scaling: fill viewport while maintaining aspect ratio
+        const fillPercentage = 0.7; // Use 70% of viewport for safety margin
+        const scaleX = (viewportWidth * fillPercentage) / faceWidth;
+        const scaleY = (viewportHeight * fillPercentage) / faceHeight;
+
+        // Scale to fit the smaller dimension (guarantees fit in both dimensions)
+        const faceScale = Math.min(scaleX, scaleY) * complexity;
 
         // Rotation angles - use external rotation with clamping
         let rotX: number, rotY: number, rotZ: number;
