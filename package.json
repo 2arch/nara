@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.13.0",
+    "@mediapipe/tasks-vision": "^0.10.22-rc.20250304",
     "@sanity/diff-match-patch": "^3.2.0",
     "@types/katex": "^0.16.7",
     "@types/three": "^0.175.0",
