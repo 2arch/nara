@@ -816,11 +816,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 updateSettings(newSettings);
             }
         } else if (newMode === 'stream') {
-            // Stream mode for screen sharing
+            // Stream mode for screen sharing or webcam
             const finalTextColor = textColor || '#FFFFFF'; // Default to white text on stream
             setModeState(prev => ({
                 ...prev,
                 backgroundMode: 'stream',
+                backgroundColor: undefined, // Clear backgroundColor so stream shows through
                 backgroundImage: undefined,
                 backgroundVideo: undefined,
                 textColor: finalTextColor,
@@ -1413,8 +1414,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     backgroundStream: stream
                 }));
 
-                // Show webcam feed as background
-                switchBackgroundMode('stream', undefined, '#FFFFFF');
+                // Show webcam feed as background (clears backgroundColor so stream shows through)
+                switchBackgroundMode('stream');
 
                 setDialogueWithRevert(`Face-piloted geometry active (${cameraLabel} camera). Turn your head to pilot! Use /monogram geometry3d to enable the geometry.`, setDialogueText);
             } catch (error) {
