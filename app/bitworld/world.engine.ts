@@ -396,6 +396,7 @@ export interface WorldEngine {
         rotX: number;
         rotY: number;
         rotZ: number;
+        mouthOpen?: number; // Mouth openness (0-1)
     };
     setFaceDetectionEnabled: (enabled: boolean) => void;
 }

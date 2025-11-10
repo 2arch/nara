@@ -68,11 +68,12 @@ export interface MonogramOptions {
     interactiveTrails: boolean; // Enable mouse interaction trails
     trailIntensity: number; // Trail effect intensity (0.1 - 2.0)
     trailFadeMs: number; // Trail fade duration in milliseconds
-    // Face-controlled rotation (overrides time-based rotation)
+    // Face-controlled rotation and expression (overrides time-based rotation)
     externalRotation?: {
         rotX: number;
         rotY: number;
         rotZ: number;
+        mouthOpen?: number; // Mouth openness (0-1), from face blendshapes
     };
 }
 
@@ -646,6 +647,11 @@ const useMonogramSystem = (
             eyeOpenness = Math.sin((blinkPhase - 4.5) / 0.2 * Math.PI);
         }
 
+        // Mouth openness from face tracking (0-1)
+        const mouthOpen = options.externalRotation?.mouthOpen ?? 0;
+        // Scale mouth: closed is normal size, open expands vertically
+        const mouthScale = 1 + mouthOpen * 3; // Up to 4x height when fully open
+
         // Check if point is inside any face feature
         // Left eye
         if (Math.abs(nx + 14.3) < 2.9 && Math.abs(ny + 9.1) < 7.3 * eyeOpenness) {
@@ -672,20 +678,23 @@ const useMonogramSystem = (
             return 1.0 * depthFactor;
         }
 
-        // Mouth (horizontal bar)
-        if (Math.abs(ny - 18.2) < 2.2 && nx > -9.1 && nx < 14.3) {
+        // Mouth (horizontal bar) - scales vertically when mouth opens
+        const mouthCenterY = 18.2 + (mouthOpen * 4); // Move down slightly when open
+        const mouthHeight = 2.2 * mouthScale;
+        if (Math.abs(ny - mouthCenterY) < mouthHeight && nx > -9.1 && nx < 14.3) {
             const depthFactor = Math.max(0.5, 1 - Math.abs(unproj3dZ) / 100);
             return 1.0 * depthFactor;
         }
 
-        // Left mouth corner
-        if (Math.abs(nx + 11) < 2.2 && Math.abs(ny - 16.2) < 2.2) {
+        // Left mouth corner - moves with mouth opening
+        const cornerY = 16.2 + (mouthOpen * 3);
+        if (Math.abs(nx + 11) < 2.2 && Math.abs(ny - cornerY) < 2.2) {
             const depthFactor = Math.max(0.5, 1 - Math.abs(unproj3dZ) / 100);
             return 1.0 * depthFactor;
         }
 
-        // Right mouth corner
-        if (Math.abs(nx - 16.2) < 2.2 && Math.abs(ny - 16.2) < 2.2) {
+        // Right mouth corner - moves with mouth opening
+        if (Math.abs(nx - 16.2) < 2.2 && Math.abs(ny - cornerY) < 2.2) {
             const depthFactor = Math.max(0.5, 1 - Math.abs(unproj3dZ) / 100);
             return 1.0 * depthFactor;
         }
