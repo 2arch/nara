@@ -25,6 +25,7 @@ export interface DialogueRenderContext {
     textColor: string;
     backgroundColor: string;
     timestamp?: number; // Optional timestamp for animations
+    position?: 'center' | 'bottom'; // Vertical positioning (default varies by display)
 }
 
 /**
@@ -173,7 +174,8 @@ export const HostDisplay: DialogueDisplay = {
             fontFamily,
             textColor,
             backgroundColor,
-            timestamp
+            timestamp,
+            position = 'bottom' // Default to bottom positioning
         } = context;
 
         // Constants
@@ -197,9 +199,18 @@ export const HostDisplay: DialogueDisplay = {
         const maxLineWidth = Math.max(...wrappedLines.map(line => line.length));
         const totalHeight = wrappedLines.length;
 
-        // Center the text
+        // Calculate positioning based on position parameter
         const startCol = Math.floor((availableWidthChars - maxLineWidth) / 2);
-        const startRow = Math.floor((availableHeightChars - totalHeight) / 2);
+        let startRow: number;
+
+        if (position === 'bottom') {
+            // Bottom positioning (like subtitles)
+            const bottomMargin = 3;
+            startRow = Math.max(MARGIN_CHARS, availableHeightChars - bottomMargin - totalHeight);
+        } else {
+            // Center positioning
+            startRow = Math.floor((availableHeightChars - totalHeight) / 2);
+        }
 
         const verticalTextOffset = (charHeight - fontSize) / 2 + (fontSize * 0.1);
 

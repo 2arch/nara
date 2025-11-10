@@ -165,7 +165,8 @@ export function useDialogue() {
         displayName?: string,
         textColor?: string,
         backgroundColor?: string,
-        timestamp?: number
+        timestamp?: number,
+        position?: 'center' | 'bottom'
     }) => {
         const {
             canvasWidth,
@@ -175,7 +176,8 @@ export function useDialogue() {
             displayName = 'subtitle',
             textColor = DIALOGUE_TEXT_COLOR,
             backgroundColor = '#FFFFFF',
-            timestamp
+            timestamp,
+            position
         } = props;
 
         // Use fixed dimensions for dialogue, independent of world zoom
@@ -197,7 +199,8 @@ export function useDialogue() {
             fontFamily: FONT_FAMILY,
             textColor,
             backgroundColor,
-            timestamp
+            timestamp,
+            position
         };
 
         // Render using the selected display
