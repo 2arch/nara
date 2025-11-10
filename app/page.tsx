@@ -6,6 +6,7 @@ import { BitCanvas } from './bitworld/bit.canvas';
 import { auth } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { getUsernameByUid, completeSignInWithEmailLink } from './firebase';
+import { selectIntro, resolveIntroConfig } from './bitworld/intro';
 
 export default function Home() {
   const [cursorAlternate, setCursorAlternate] = useState(false);
@@ -50,18 +51,13 @@ export default function Home() {
     return () => unsubscribe();
   }, [router]);
 
-  // Dynamic colors based on time of day
-  const [hostColors, setHostColors] = useState(() => {
-    const hour = new Date().getHours();
-    const isDaytime = hour >= 6 && hour < 18;
-    return isDaytime
-      ? { background: '#F0FF6A', text: '#FFA500' } // sulfur bg, orange text
-      : { background: '#69AED6', text: '#000000' }; // chalk bg, black text
-  });
+  // Select and resolve intro configuration
+  const introConfig = selectIntro();
+  const resolvedIntro = resolveIntroConfig(introConfig);
 
   const engine = useWorldEngine({
     worldId: null, // Always null for home page (anonymous users)
-    initialBackgroundColor: hostColors.background,
+    initialBackgroundColor: resolvedIntro.backgroundColor,
     userUid: null, // Always null for home page
     initialZoomLevel: 1.6, // Zoomed in for host mode onboarding
     skipInitialBackground: !isVerifyingEmail // Skip initial bg when intro flow is active
@@ -81,8 +77,8 @@ export default function Home() {
   }, []);
 
   // If coming from email verification, don't start normal flow
-  // Otherwise, start with intro flow (which will check auth after banner)
-  const initialFlow = isVerifyingEmail ? undefined : "intro";
+  // Otherwise, start with configured intro flow
+  const initialFlow = isVerifyingEmail ? undefined : resolvedIntro.hostFlow;
 
   return (
     <div className="w-screen relative" style={{backgroundColor: '#F8F8F0', height: '100dvh'}}>
@@ -97,8 +93,8 @@ export default function Home() {
         onAuthSuccess={handleAuthSuccess}
         fontFamily={engine.fontFamily}
         isVerifyingEmail={isVerifyingEmail}
-        hostTextColor={hostColors.text}
-        hostBackgroundColor={hostColors.background}
+        hostTextColor={resolvedIntro.hostTextColor}
+        hostBackgroundColor={resolvedIntro.backgroundColor}
         hostDimBackground={false}
         hostMonogramMode="off"
       />
