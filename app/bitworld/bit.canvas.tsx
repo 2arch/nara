@@ -772,9 +772,11 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Sync face orientation to monogram rotation
     useEffect(() => {
         if (engine.isFaceDetectionEnabled && engine.faceOrientation) {
+            console.log('[Monogram] Setting external rotation:', engine.faceOrientation);
             monogramSystem.setExternalRotation(engine.faceOrientation);
         } else {
             // Clear external rotation when face detection is disabled
+            console.log('[Monogram] Clearing external rotation');
             monogramSystem.setExternalRotation(undefined);
         }
     }, [engine.isFaceDetectionEnabled, engine.faceOrientation]);
