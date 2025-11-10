@@ -79,6 +79,7 @@ export interface ModeState {
         mouthOpen?: number; // Mouth openness (0-1)
         leftEyeBlink?: number; // Left eye blink (0=open, 1=closed)
         rightEyeBlink?: number; // Right eye blink (0=open, 1=closed)
+        isTracked?: boolean; // True if from MediaPipe tracking, false if autonomous
     };
 }
 
@@ -223,6 +224,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         textBackground?: string;
     } | null>(null);
     const previousCameraModeRef = useRef<CameraMode | null>(null); // Store camera mode before command mode
+    const lastKnownOrientationRef = useRef<{
+        rotX: number;
+        rotY: number;
+        rotZ: number;
+        mouthOpen?: number;
+        leftEyeBlink?: number;
+        rightEyeBlink?: number;
+    } | null>(null); // Store last known face orientation for smooth autonomous transitions
     const [commandState, setCommandState] = useState<CommandState>({
         isActive: false,
         input: '',
@@ -277,6 +286,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
     // Update face orientation in state when detected
     useEffect(() => {
         if (modeState.isFaceDetectionEnabled && hasDetection && faceData) {
+            // Face is actively tracked - use MediaPipe data
             const rotation = faceOrientationToRotation(smoothOrientation, true, false, false);
 
             // Extract expressions from blendshapes
@@ -295,21 +305,54 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 rightEyeBlink = faceData.blendshapes.get('eyeBlinkRight') ?? 0;
             }
 
+            const trackedOrientation = {
+                ...rotation,
+                mouthOpen,
+                leftEyeBlink,
+                rightEyeBlink,
+                isTracked: true // Mark as tracked by MediaPipe
+            };
+
+            // Store this as last known orientation
+            lastKnownOrientationRef.current = {
+                rotX: rotation.rotX,
+                rotY: rotation.rotY,
+                rotZ: rotation.rotZ,
+                mouthOpen,
+                leftEyeBlink,
+                rightEyeBlink
+            };
+
             setModeState(prev => ({
                 ...prev,
-                faceOrientation: {
-                    ...rotation,
-                    mouthOpen,
-                    leftEyeBlink,
-                    rightEyeBlink
-                }
+                faceOrientation: trackedOrientation
             }));
         } else if (modeState.isFaceDetectionEnabled && !hasDetection) {
-            // Clear orientation when no face detected
-            setModeState(prev => ({
-                ...prev,
-                faceOrientation: undefined
-            }));
+            // Face lost - transition to autonomous mode using last known position
+            if (lastKnownOrientationRef.current) {
+                // Keep the last orientation but mark as autonomous
+                setModeState(prev => ({
+                    ...prev,
+                    faceOrientation: {
+                        ...lastKnownOrientationRef.current!,
+                        isTracked: false // Mark as autonomous
+                    }
+                }));
+            } else {
+                // No previous orientation - use neutral pose
+                setModeState(prev => ({
+                    ...prev,
+                    faceOrientation: {
+                        rotX: 0,
+                        rotY: 0,
+                        rotZ: 0,
+                        mouthOpen: 0,
+                        leftEyeBlink: 0,
+                        rightEyeBlink: 0,
+                        isTracked: false
+                    }
+                }));
+            }
         }
     }, [modeState.isFaceDetectionEnabled, hasDetection, faceData, smoothOrientation]);
 
