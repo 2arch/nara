@@ -79,6 +79,10 @@ export interface MonogramOptions {
         mouthOpen?: number; // Mouth openness (0-1), from face blendshapes
         leftEyeBlink?: number; // Left eye blink (0=open, 1=closed)
         rightEyeBlink?: number; // Right eye blink (0=open, 1=closed)
+        leftEyeSquint?: number; // Left eye squint (0=normal, 1=squinted)
+        rightEyeSquint?: number; // Right eye squint (0=normal, 1=squinted)
+        smile?: number; // Smile intensity (0=neutral, 1=full smile)
+        frown?: number; // Frown intensity (0=neutral, 1=full frown)
     };
 }
 
@@ -708,12 +712,20 @@ const useMonogramSystem = (
         }
 
         const mouthOpen = options.externalRotation?.mouthOpen ?? 0;
+        const leftEyeSquint = options.externalRotation?.leftEyeSquint ?? 0;
+        const rightEyeSquint = options.externalRotation?.rightEyeSquint ?? 0;
+        const smile = options.externalRotation?.smile ?? 0;
+        const frown = options.externalRotation?.frown ?? 0;
 
         // Get face features with current dynamics applied
         const dynamics: FaceDynamics = {
             leftEyeBlink,
             rightEyeBlink,
+            leftEyeSquint,
+            rightEyeSquint,
             mouthOpen,
+            smile,
+            frown,
         };
 
         const features = mask.getFeaturesWithDynamics(dynamics);

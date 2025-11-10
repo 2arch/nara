@@ -26,10 +26,14 @@ export interface FaceFeature {
  * Dynamic properties that can affect feature rendering
  */
 export interface FaceDynamics {
-    leftEyeBlink?: number;   // 0=open, 1=closed
-    rightEyeBlink?: number;  // 0=open, 1=closed
-    mouthOpen?: number;      // 0=closed, 1=fully open
-    eyebrowRaise?: number;   // 0=neutral, 1=raised
+    leftEyeBlink?: number;    // 0=open, 1=closed (vertical collapse)
+    rightEyeBlink?: number;   // 0=open, 1=closed (vertical collapse)
+    leftEyeSquint?: number;   // 0=normal, 1=squinted (becomes '>')
+    rightEyeSquint?: number;  // 0=normal, 1=squinted (becomes '<')
+    mouthOpen?: number;       // 0=closed, 1=fully open
+    smile?: number;           // 0=neutral, 1=full smile
+    frown?: number;           // 0=neutral, 1=full frown
+    eyebrowRaise?: number;    // 0=neutral, 1=raised
 }
 
 /**
@@ -113,59 +117,180 @@ export function calculateFaceScale(
 // ============================================================================
 
 /**
- * The classic Macintosh-style face (default)
+ * Chibi-style Macintosh face with expressive features (default)
  */
 export const MacintoshMask: Mask = {
     name: 'macintosh',
-    description: 'Classic Macintosh-style minimalist face with rectangular features',
+    description: 'Chibi-style Macintosh face with cute proportions and expressive features',
 
     baseFeatures: [
-        { cx: -14.3, cy: -9.1, cz: 0, width: 5.8, height: 14.6, type: 'leftEye' },
-        { cx: 14.3, cy: -9.1, cz: 0, width: 5.8, height: 14.6, type: 'rightEye' },
-        { cx: 0, cy: 3.9, cz: 0, width: 4.4, height: 10.4, type: 'noseVert' },
-        { cx: 5.2, cy: 9.1, cz: 0, width: 10.4, height: 4.4, type: 'noseHoriz' },
-        { cx: 2.6, cy: 18.2, cz: 0, width: 23.4, height: 4.4, type: 'mouth' },
-        { cx: -11, cy: 16.2, cz: 0, width: 4.4, height: 4.4, type: 'leftCorner' },
-        { cx: 16.2, cy: 16.2, cz: 0, width: 4.4, height: 4.4, type: 'rightCorner' },
+        // Bigger, more chibi-like eyes (taller and slightly wider)
+        { cx: -12, cy: -8, cz: 0, width: 7, height: 18, type: 'leftEye' },
+        { cx: 12, cy: -8, cz: 0, width: 7, height: 18, type: 'rightEye' },
+
+        // Squint chevrons (left eye becomes '>')
+        { cx: -12, cy: -8, cz: 0, width: 8, height: 4, type: 'leftEyeSquintTop' },
+        { cx: -12, cy: -8, cz: 0, width: 8, height: 4, type: 'leftEyeSquintBottom' },
+
+        // Squint chevrons (right eye becomes '<')
+        { cx: 12, cy: -8, cz: 0, width: 8, height: 4, type: 'rightEyeSquintTop' },
+        { cx: 12, cy: -8, cz: 0, width: 8, height: 4, type: 'rightEyeSquintBottom' },
+
+        // Simple dot nose (chibi style)
+        { cx: 0, cy: 6, cz: 0, width: 4, height: 4, type: 'nose' },
+
+        // Mouth bar (will curve for smile/frown)
+        { cx: 0, cy: 16, cz: 0, width: 20, height: 4, type: 'mouth' },
+
+        // Smile curves (appear when smiling)
+        { cx: -10, cy: 14, cz: 0, width: 4, height: 4, type: 'smileLeft' },
+        { cx: 10, cy: 14, cz: 0, width: 4, height: 4, type: 'smileRight' },
+
+        // Frown curves (appear when frowning)
+        { cx: -10, cy: 18, cz: 0, width: 4, height: 4, type: 'frownLeft' },
+        { cx: 10, cy: 18, cz: 0, width: 4, height: 4, type: 'frownRight' },
     ],
 
     getFeaturesWithDynamics(dynamics: FaceDynamics): FaceFeature[] {
-        const { leftEyeBlink = 0, rightEyeBlink = 0, mouthOpen = 0 } = dynamics;
+        const {
+            leftEyeBlink = 0,
+            rightEyeBlink = 0,
+            leftEyeSquint = 0,
+            rightEyeSquint = 0,
+            mouthOpen = 0,
+            smile = 0,
+            frown = 0
+        } = dynamics;
 
-        return this.baseFeatures.map(feature => {
+        // Threshold for switching to squint chevrons
+        const squintThreshold = 0.3;
+
+        const features: FaceFeature[] = [];
+
+        for (const feature of this.baseFeatures) {
             const modulated = { ...feature };
 
-            // Modulate eye height based on blink
+            // === LEFT EYE ===
             if (feature.type === 'leftEye') {
-                const eyeOpenness = 1 - leftEyeBlink;
-                modulated.height = feature.height * eyeOpenness;
-            } else if (feature.type === 'rightEye') {
-                const eyeOpenness = 1 - rightEyeBlink;
-                modulated.height = feature.height * eyeOpenness;
+                if (leftEyeSquint > squintThreshold) {
+                    // Hide normal eye when squinting (chevrons will show instead)
+                    continue;
+                } else {
+                    // Normal eye - apply blink
+                    const eyeOpenness = 1 - leftEyeBlink;
+                    modulated.height = feature.height * eyeOpenness;
+                    features.push(modulated);
+                }
             }
 
-            // Modulate mouth position and height based on opening
+            // === RIGHT EYE ===
+            else if (feature.type === 'rightEye') {
+                if (rightEyeSquint > squintThreshold) {
+                    // Hide normal eye when squinting (chevrons will show instead)
+                    continue;
+                } else {
+                    // Normal eye - apply blink
+                    const eyeOpenness = 1 - rightEyeBlink;
+                    modulated.height = feature.height * eyeOpenness;
+                    features.push(modulated);
+                }
+            }
+
+            // === LEFT EYE SQUINT CHEVRONS '>' ===
+            else if (feature.type === 'leftEyeSquintTop') {
+                if (leftEyeSquint > squintThreshold) {
+                    // Top part of '>' chevron - shifts up and angles
+                    modulated.cy = feature.cy - 4;
+                    modulated.cx = feature.cx - 2;
+                    modulated.width = 6;
+                    modulated.height = 3;
+                    features.push(modulated);
+                }
+            }
+            else if (feature.type === 'leftEyeSquintBottom') {
+                if (leftEyeSquint > squintThreshold) {
+                    // Bottom part of '>' chevron - shifts down and angles
+                    modulated.cy = feature.cy + 4;
+                    modulated.cx = feature.cx - 2;
+                    modulated.width = 6;
+                    modulated.height = 3;
+                    features.push(modulated);
+                }
+            }
+
+            // === RIGHT EYE SQUINT CHEVRONS '<' ===
+            else if (feature.type === 'rightEyeSquintTop') {
+                if (rightEyeSquint > squintThreshold) {
+                    // Top part of '<' chevron - shifts up and angles
+                    modulated.cy = feature.cy - 4;
+                    modulated.cx = feature.cx + 2;
+                    modulated.width = 6;
+                    modulated.height = 3;
+                    features.push(modulated);
+                }
+            }
+            else if (feature.type === 'rightEyeSquintBottom') {
+                if (rightEyeSquint > squintThreshold) {
+                    // Bottom part of '<' chevron - shifts down and angles
+                    modulated.cy = feature.cy + 4;
+                    modulated.cx = feature.cx + 2;
+                    modulated.width = 6;
+                    modulated.height = 3;
+                    features.push(modulated);
+                }
+            }
+
+            // === NOSE ===
+            else if (feature.type === 'nose') {
+                features.push(modulated);
+            }
+
+            // === MOUTH ===
             else if (feature.type === 'mouth') {
-                const mouthScale = 1 + mouthOpen * 3; // Up to 4x height
-                modulated.cy = feature.cy + mouthOpen * 4; // Shift down
+                // Mouth moves up when smiling, down when frowning
+                const expressionShift = (smile * -3) + (frown * 3);
+                modulated.cy = feature.cy + expressionShift;
+
+                // Mouth opens vertically
+                const mouthScale = 1 + mouthOpen * 2;
                 modulated.height = feature.height * mouthScale;
+                modulated.cy += mouthOpen * 3; // Shift down when opening
+
+                features.push(modulated);
             }
 
-            // Modulate mouth corner positions
-            else if (feature.type === 'leftCorner' || feature.type === 'rightCorner') {
-                modulated.cy = feature.cy + mouthOpen * 3; // Shift down
+            // === SMILE CURVES ===
+            else if (feature.type === 'smileLeft' || feature.type === 'smileRight') {
+                if (smile > 0.3) {
+                    // Show smile curves when smiling
+                    modulated.height = feature.height * smile;
+                    features.push(modulated);
+                }
             }
 
-            return modulated;
-        });
+            // === FROWN CURVES ===
+            else if (feature.type === 'frownLeft' || feature.type === 'frownRight') {
+                if (frown > 0.3) {
+                    // Show frown curves when frowning
+                    modulated.height = feature.height * frown;
+                    features.push(modulated);
+                }
+            }
+        }
+
+        return features;
     },
 
     getBounds(dynamics?: FaceDynamics): FaceBounds {
         // Calculate bounds with maximum dynamic range
         const maxDynamics: FaceDynamics = {
-            leftEyeBlink: 0,  // Fully open (doesn't increase bounds)
+            leftEyeBlink: 0,      // Fully open (doesn't increase bounds)
             rightEyeBlink: 0,
-            mouthOpen: 1.0,   // Fully open (maximum bounds)
+            leftEyeSquint: 1.0,   // Fully squinted (chevrons)
+            rightEyeSquint: 1.0,
+            mouthOpen: 1.0,       // Fully open (maximum vertical)
+            smile: 1.0,           // Full smile (moves up)
+            frown: 1.0,           // Full frown (moves down)
         };
 
         const featuresWithMax = this.getFeaturesWithDynamics(
