@@ -797,6 +797,10 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             // Set to road mode (paths connecting labels)
             monogramSystem.updateOption('mode', 'road');
             monogramSystem.updateOption('enabled', true);
+        } else if (args[0] === 'geometry3d' || args[0] === '3d') {
+            // Set to geometry3d mode (3D wireframe shapes)
+            monogramSystem.updateOption('mode', 'geometry3d');
+            monogramSystem.updateOption('enabled', true);
         }
     }, [monogramSystem]);
 
