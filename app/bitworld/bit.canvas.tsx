@@ -10,7 +10,6 @@ import { COLOR_MAP, COMMAND_CATEGORIES, COMMAND_HELP } from './commands';
 import { useHostDialogue } from './host.dialogue';
 import { setDialogueWithRevert } from './ai';
 import { CanvasRecorder } from './tape';
-import { FaceDebugOverlay } from './face.debug';
 
 // --- Constants --- (Copied and relevant ones kept)
 const GRID_COLOR = '#F2F2F233';
@@ -773,19 +772,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Sync face orientation to monogram rotation
     useEffect(() => {
         if (engine.isFaceDetectionEnabled && engine.faceOrientation) {
-            console.log('[Monogram] Setting external rotation:', engine.faceOrientation);
-            import('./face.debug').then(({ addFaceDebugLog }) => {
-                addFaceDebugLog('success', `Monogram rotation applied: rotX=${engine.faceOrientation!.rotX.toFixed(2)}, rotY=${engine.faceOrientation!.rotY.toFixed(2)}, rotZ=${engine.faceOrientation!.rotZ.toFixed(2)}`);
-            });
             monogramSystem.setExternalRotation(engine.faceOrientation);
         } else {
             // Clear external rotation when face detection is disabled
-            console.log('[Monogram] Clearing external rotation');
-            if (engine.isFaceDetectionEnabled) {
-                import('./face.debug').then(({ addFaceDebugLog }) => {
-                    addFaceDebugLog('info', 'Monogram rotation cleared');
-                });
-            }
             monogramSystem.setExternalRotation(undefined);
         }
     }, [engine.isFaceDetectionEnabled, engine.faceOrientation]);
@@ -8473,9 +8462,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     }}
                 />
             )}
-
-            {/* Face Detection Debug Overlay */}
-            <FaceDebugOverlay enabled={engine.isFaceDetectionEnabled} />
         </>
     );
 }
