@@ -4,6 +4,7 @@ import type { Point, WorldData } from './world.engine';
 import { generateImage, generateVideo, setDialogueWithRevert } from './ai';
 import { detectImageIntent } from './ai.utils';
 import type { WorldSettings } from './settings';
+import { useFaceDetection, useSmoothFaceOrientation, faceOrientationToRotation } from './face';
 
 // --- Command System Types ---
 export interface CommandState {
@@ -70,6 +71,12 @@ export interface ModeState {
         startY: number;
         endY?: number; // For lists/finite bounds
     };
+    isFaceDetectionEnabled: boolean; // Whether face-piloted geometry is active
+    faceOrientation?: { // Face rotation data from MediaPipe
+        rotX: number;
+        rotY: number;
+        rotZ: number;
+    };
 }
 
 interface UseCommandSystemProps {
@@ -113,7 +120,7 @@ const AVAILABLE_COMMANDS = [
     // Content Creation
     'label', 'task', 'link', 'clip', 'upload', 'pattern',
     // Special
-    'mode', 'note', 'mail', 'chat', 'tutorial', 'help',
+    'mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help',
     // Styling & Display
     'bg', 'text', 'font',
     // State Management
@@ -130,7 +137,7 @@ const AVAILABLE_COMMANDS = [
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map'],
     'create': ['label', 'task', 'link', 'clip', 'upload'],
-    'special': ['mode', 'note', 'mail', 'chat', 'tutorial', 'help'],
+    'special': ['mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help'],
     'style': ['bg', 'text', 'font'],
     'state': ['state', 'random', 'clear', 'replay'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
@@ -161,6 +168,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'note': 'Quick shortcut to enter note mode. This creates a focused writing space perfect for drafting ideas before placing them on your main canvas.',
     'mail': '[SUPER ONLY] Create an email region. Select a rectangular area, type /mail. Row 1 = recipient email, Row 2 = subject line, Row 3+ = message body. Click the send button to deliver the email.',
     'chat': 'Quick shortcut to enter chat mode. Talk with AI to transform, expand, or generate text. The AI can help you develop ideas or create content based on your prompts.',
+    'talk': 'Enable face-piloted geometry. Activates your webcam and tracks your face to control 3D monogram rotation. Turn your head to pilot the geometry in real-time. Type /talk front or /talk back to choose camera.',
     'tutorial': 'Start the interactive tutorial. Learn the basics of spatial writing through hands-on exercises that teach you core commands and concepts.',
     'help': 'Show this detailed help menu. The command list stays open with descriptions for every available command, so you can explore what\'s possible.',
     'tab': 'Toggle AI-powered autocomplete suggestions. When enabled, type and see AI suggestions appear as gray text. Press Tab to accept suggestions.',
@@ -248,7 +256,34 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         artifactType: 'images', // Default to image artifacts
         isFullscreenMode: false, // Fullscreen mode not active initially
         fullscreenRegion: undefined, // No fullscreen region initially
+        isFaceDetectionEnabled: false, // Face detection not active initially
+        faceOrientation: undefined, // No face orientation initially
     });
+
+    // Face detection system
+    const { faceData, isReady: faceReady, hasDetection } = useFaceDetection({
+        enabled: modeState.isFaceDetectionEnabled,
+        videoStream: backgroundStreamRef.current,
+    });
+
+    const smoothOrientation = useSmoothFaceOrientation(faceData, 0.3);
+
+    // Update face orientation in state when detected
+    useEffect(() => {
+        if (modeState.isFaceDetectionEnabled && hasDetection && faceData) {
+            const rotation = faceOrientationToRotation(smoothOrientation, true, false, false);
+            setModeState(prev => ({
+                ...prev,
+                faceOrientation: rotation
+            }));
+        } else if (modeState.isFaceDetectionEnabled && !hasDetection) {
+            // Clear orientation when no face detected
+            setModeState(prev => ({
+                ...prev,
+                faceOrientation: undefined
+            }));
+        }
+    }, [modeState.isFaceDetectionEnabled, hasDetection, faceData, smoothOrientation]);
 
     // Function to load saved color preferences
     const loadColorPreferences = useCallback((settings: WorldSettings) => {
@@ -1331,6 +1366,69 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             setCommandData({});
 
             return null; // Autocomplete toggle doesn't need further processing
+        }
+
+        // Handle /talk command for face-piloted geometry
+        if (commandToExecute.startsWith('talk')) {
+            const inputParts = commandState.input.trim().split(/\s+/);
+            const cameraArg = inputParts.length > 1 ? inputParts[1] : undefined;
+
+            try {
+                // Determine which camera to use
+                let facingMode: 'user' | 'environment' = 'user'; // Default to front camera for face detection
+                let cameraLabel = 'front';
+
+                if (cameraArg) {
+                    const camera = cameraArg.toLowerCase();
+                    if (camera === 'back') {
+                        facingMode = 'environment';
+                        cameraLabel = 'back';
+                    }
+                }
+
+                // Request webcam access
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 },
+                        facingMode: facingMode
+                    },
+                    audio: false
+                });
+
+                // Stop any existing stream
+                if (backgroundStreamRef.current) {
+                    backgroundStreamRef.current.getTracks().forEach(track => track.stop());
+                }
+
+                // Store stream reference
+                backgroundStreamRef.current = stream;
+
+                // Enable face detection
+                setModeState(prev => ({
+                    ...prev,
+                    isFaceDetectionEnabled: true
+                }));
+
+                setDialogueWithRevert(`Face-piloted geometry active (${cameraLabel} camera). Turn your head to pilot! Use /monogram geometry3d to enable the geometry.`, setDialogueText);
+            } catch (error) {
+                console.error('Failed to start face detection:', error);
+                setDialogueWithRevert("Failed to access camera. Please grant permission.", setDialogueText);
+            }
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            return null;
         }
 
         if (commandToExecute.startsWith('bg')) {
@@ -3443,5 +3541,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             setModeState(prev => ({ ...prev, isFullscreenMode: enabled, fullscreenRegion: region })),
         exitFullscreenMode: () =>
             setModeState(prev => ({ ...prev, isFullscreenMode: false, fullscreenRegion: undefined })),
+        isFaceDetectionEnabled: modeState.isFaceDetectionEnabled,
+        faceOrientation: modeState.faceOrientation,
+        setFaceDetectionEnabled: (enabled: boolean) =>
+            setModeState(prev => ({ ...prev, isFaceDetectionEnabled: enabled })),
     };
 }
