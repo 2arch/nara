@@ -72,10 +72,11 @@ export interface ModeState {
         endY?: number; // For lists/finite bounds
     };
     isFaceDetectionEnabled: boolean; // Whether face-piloted geometry is active
-    faceOrientation?: { // Face rotation data from MediaPipe
+    faceOrientation?: { // Face rotation and expression data from MediaPipe
         rotX: number;
         rotY: number;
         rotZ: number;
+        mouthOpen?: number; // Mouth openness (0-1)
     };
 }
 
@@ -272,9 +273,23 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
     useEffect(() => {
         if (modeState.isFaceDetectionEnabled && hasDetection && faceData) {
             const rotation = faceOrientationToRotation(smoothOrientation, false, false, false);
+
+            // Extract mouth openness from blendshapes
+            let mouthOpen = 0;
+            if (faceData.blendshapes) {
+                // MediaPipe provides jawOpen blendshape (0-1)
+                const jawOpen = faceData.blendshapes.get('jawOpen') ?? 0;
+                const mouthOpen1 = faceData.blendshapes.get('mouthOpen') ?? 0;
+                // Use the maximum of available mouth-related blendshapes
+                mouthOpen = Math.max(jawOpen, mouthOpen1);
+            }
+
             setModeState(prev => ({
                 ...prev,
-                faceOrientation: rotation
+                faceOrientation: {
+                    ...rotation,
+                    mouthOpen
+                }
             }));
         } else if (modeState.isFaceDetectionEnabled && !hasDetection) {
             // Clear orientation when no face detected
