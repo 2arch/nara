@@ -476,6 +476,7 @@ const useMonogramSystem = (
             rotX = options.externalRotation.rotX;
             rotY = options.externalRotation.rotY;
             rotZ = options.externalRotation.rotZ;
+            console.log('[Monogram 3D] Using face rotation:', { rotX, rotY, rotZ });
         } else {
             // Default time-based rotation
             rotX = time * options.speed;
