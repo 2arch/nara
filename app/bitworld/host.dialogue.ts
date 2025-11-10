@@ -91,16 +91,15 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       setBackgroundColor(startMessage.backgroundColor);
     }
 
-    // Handle background mode from message
-    if (startMessage.backgroundMode && setBackgroundMode) {
-      console.log('[HostDialogue] startFlow - Setting background mode to:', startMessage.backgroundMode);
-      setBackgroundMode(startMessage.backgroundMode);
-    }
-
-    // Handle background image from message
+    // Handle background image from message (this switches to image mode internally)
     if (startMessage.backgroundImage && setBackgroundImage) {
       console.log('[HostDialogue] startFlow - Setting background image to:', startMessage.backgroundImage);
       setBackgroundImage(startMessage.backgroundImage);
+    }
+    // Only set background mode separately if no image is specified
+    else if (startMessage.backgroundMode && setBackgroundMode) {
+      console.log('[HostDialogue] startFlow - Setting background mode to:', startMessage.backgroundMode);
+      setBackgroundMode(startMessage.backgroundMode);
     }
 
     // Spawn staged content if defined (only if not already spawned)
@@ -173,19 +172,17 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           if (nextMessage.monogramMode && setMonogramMode) {
             setMonogramMode(nextMessage.monogramMode);
           }
-          // Apply background mode if specified
-          if (nextMessage.backgroundMode && setBackgroundMode) {
-            setBackgroundMode(nextMessage.backgroundMode);
-          }
-          // Apply background image if specified
+          // Apply background image if specified (this switches to image mode internally)
           if (nextMessage.backgroundImage && setBackgroundImage) {
             setBackgroundImage(nextMessage.backgroundImage);
           }
+          // Only set background mode separately if no image is specified
+          else if (nextMessage.backgroundMode && setBackgroundMode) {
+            setBackgroundMode(nextMessage.backgroundMode);
+          }
           // Only restore background color to host color if message doesn't override it
-          if (!nextMessage.backgroundMode && !nextMessage.backgroundImage) {
-            if (hostBackgroundColor && setBackgroundColor) {
-              setBackgroundColor(hostBackgroundColor);
-            }
+          else if (hostBackgroundColor && setBackgroundColor) {
+            setBackgroundColor(hostBackgroundColor);
           }
           startFlow('welcome');
           return;
@@ -209,14 +206,13 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           setBackgroundColor(nextMessage.backgroundColor);
         }
 
-        // Handle background mode from message
-        if (nextMessage.backgroundMode && setBackgroundMode) {
-          setBackgroundMode(nextMessage.backgroundMode);
-        }
-
-        // Handle background image from message
+        // Handle background image from message (this switches to image mode internally)
         if (nextMessage.backgroundImage && setBackgroundImage) {
           setBackgroundImage(nextMessage.backgroundImage);
+        }
+        // Only set background mode separately if no image is specified
+        else if (nextMessage.backgroundMode && setBackgroundMode) {
+          setBackgroundMode(nextMessage.backgroundMode);
         }
 
         // Despawn labels if requested
