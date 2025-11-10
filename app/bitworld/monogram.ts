@@ -594,15 +594,8 @@ const useMonogramSystem = (
         // Get the selected face mask
         const mask = getMask(options.maskName);
 
-        // Calculate bounding box and scale from mask
-        const faceBounds = mask.getBounds();
-        const faceScale = calculateFaceScale(
-            faceBounds,
-            viewportWidth,
-            viewportHeight,
-            1.2, // Fill viewport generously (was 0.7)
-            complexity
-        );
+        // Scale for face features (in world units) - simple approach
+        const faceScale = viewportWidth * 0.015 * complexity;
 
         // Rotation angles - use external rotation with clamping
         let rotX: number, rotY: number, rotZ: number;
