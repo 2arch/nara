@@ -79,6 +79,10 @@ export interface ModeState {
         mouthOpen?: number; // Mouth openness (0-1)
         leftEyeBlink?: number; // Left eye blink (0=open, 1=closed)
         rightEyeBlink?: number; // Right eye blink (0=open, 1=closed)
+        leftEyeSquint?: number; // Left eye squint (0=normal, 1=squinted)
+        rightEyeSquint?: number; // Right eye squint (0=normal, 1=squinted)
+        smile?: number; // Smile intensity (0=neutral, 1=full smile)
+        frown?: number; // Frown intensity (0=neutral, 1=full frown)
     };
 }
 
@@ -283,6 +287,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             let mouthOpen = 0;
             let leftEyeBlink = 0;
             let rightEyeBlink = 0;
+            let leftEyeSquint = 0;
+            let rightEyeSquint = 0;
+            let smile = 0;
+            let frown = 0;
 
             if (faceData.blendshapes) {
                 // Mouth openness
@@ -293,6 +301,20 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 // Eye blinks (MediaPipe provides separate left/right eye blinks)
                 leftEyeBlink = faceData.blendshapes.get('eyeBlinkLeft') ?? 0;
                 rightEyeBlink = faceData.blendshapes.get('eyeBlinkRight') ?? 0;
+
+                // Eye squints (independent from blinks)
+                leftEyeSquint = faceData.blendshapes.get('eyeSquintLeft') ?? 0;
+                rightEyeSquint = faceData.blendshapes.get('eyeSquintRight') ?? 0;
+
+                // Smile (combine left and right smile)
+                const smileLeft = faceData.blendshapes.get('mouthSmileLeft') ?? 0;
+                const smileRight = faceData.blendshapes.get('mouthSmileRight') ?? 0;
+                smile = Math.max(smileLeft, smileRight);
+
+                // Frown (combine left and right frown)
+                const frownLeft = faceData.blendshapes.get('mouthFrownLeft') ?? 0;
+                const frownRight = faceData.blendshapes.get('mouthFrownRight') ?? 0;
+                frown = Math.max(frownLeft, frownRight);
             }
 
             setModeState(prev => ({
@@ -301,7 +323,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     ...rotation,
                     mouthOpen,
                     leftEyeBlink,
-                    rightEyeBlink
+                    rightEyeBlink,
+                    leftEyeSquint,
+                    rightEyeSquint,
+                    smile,
+                    frown
                 }
             }));
         } else if (modeState.isFaceDetectionEnabled && !hasDetection) {
