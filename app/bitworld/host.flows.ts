@@ -52,7 +52,8 @@ export const introFlow: HostFlow = {
       text: '', // Empty text - just show the monogram
       expectsInput: false,
       monogramMode: 'nara',
-      backgroundColor: '#000000',
+      backgroundMode: 'image', // Show image from the start (not solid black)
+      backgroundImage: 'https://d2w9rnfcy7mm78.cloudfront.net/40525619/original_8f6196d0fda2a540ef8e380980921d25.jpg?1761186290?bc=0',
       nextMessageId: 'transition_to_welcome'
     },
     'transition_to_welcome': {
