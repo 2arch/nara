@@ -74,6 +74,8 @@ export interface MonogramOptions {
         rotY: number;
         rotZ: number;
         mouthOpen?: number; // Mouth openness (0-1), from face blendshapes
+        leftEyeBlink?: number; // Left eye blink (0=open, 1=closed)
+        rightEyeBlink?: number; // Right eye blink (0=open, 1=closed)
     };
 }
 
@@ -581,13 +583,12 @@ const useMonogramSystem = (
         const centerX = (viewportBounds.startX + viewportBounds.endX) / 2;
         const centerY = (viewportBounds.startY + viewportBounds.endY) / 2;
 
-        // Scale for face features
+        // Scale for face features (in world units)
         const faceScale = viewportWidth * 0.015 * complexity;
 
-        // Rotation angles - ALWAYS use external rotation
+        // Rotation angles - use external rotation
         let rotX: number, rotY: number, rotZ: number;
         if (options.externalRotation) {
-            // Face-controlled rotation (dynamic based on head movement)
             rotX = options.externalRotation.rotX;
             rotY = options.externalRotation.rotY;
             rotZ = options.externalRotation.rotZ;
@@ -598,104 +599,155 @@ const useMonogramSystem = (
             rotZ = 0;
         }
 
-        // Transform screen coordinates to face-relative coordinates
-        const relX = x - centerX;
-        const relY = y - centerY;
+        // Rotation matrices
+        const cosX = Math.cos(rotX), sinX = Math.sin(rotX);
+        const cosY = Math.cos(rotY), sinY = Math.sin(rotY);
+        const cosZ = Math.cos(rotZ), sinZ = Math.sin(rotZ);
 
-        // Inverse perspective projection
-        // We need to unproject the 2D point back to 3D space
-        const distance = 500;
+        // Helper function to rotate and project a 3D rectangle to 2D
+        const projectRectangle = (cx: number, cy: number, cz: number, width: number, height: number): {x: number, y: number, z: number}[] => {
+            // Define rectangle corners in 3D space (centered at cx, cy, cz)
+            const corners = [
+                {x: cx - width/2, y: cy - height/2, z: cz},
+                {x: cx + width/2, y: cy - height/2, z: cz},
+                {x: cx + width/2, y: cy + height/2, z: cz},
+                {x: cx - width/2, y: cy + height/2, z: cz}
+            ];
 
-        // For each possible depth, check if the 3D point would be inside face features
-        // We'll sample at z=0 since face features are flat
-        const z3d = 0;
-        const scale = (distance + z3d) / distance;
-        let unproj3dX = relX * scale / 0.5;
-        let unproj3dY = relY * scale / 0.25;
-        let unproj3dZ = z3d;
+            // Apply rotations and projection
+            return corners.map(corner => {
+                let x3d = corner.x * faceScale;
+                let y3d = corner.y * faceScale;
+                let z3d = corner.z * faceScale;
 
-        // Apply inverse rotations (in reverse order: Z, Y, X)
-        // Inverse Z rotation
-        const cosZ = Math.cos(-rotZ), sinZ = Math.sin(-rotZ);
-        let temp = unproj3dX;
-        unproj3dX = temp * cosZ - unproj3dY * sinZ;
-        unproj3dY = temp * sinZ + unproj3dY * cosZ;
+                // Rotate around X axis
+                let temp = y3d;
+                y3d = temp * cosX - z3d * sinX;
+                z3d = temp * sinX + z3d * cosX;
 
-        // Inverse Y rotation
-        const cosY = Math.cos(-rotY), sinY = Math.sin(-rotY);
-        temp = unproj3dX;
-        unproj3dX = temp * cosY + unproj3dZ * sinY;
-        unproj3dZ = -temp * sinY + unproj3dZ * cosY;
+                // Rotate around Y axis
+                temp = x3d;
+                x3d = temp * cosY + z3d * sinY;
+                z3d = -temp * sinY + z3d * cosY;
 
-        // Inverse X rotation
-        const cosX = Math.cos(-rotX), sinX = Math.sin(-rotX);
-        temp = unproj3dY;
-        unproj3dY = temp * cosX - unproj3dZ * sinX;
-        unproj3dZ = temp * sinX + unproj3dZ * cosX;
+                // Rotate around Z axis
+                temp = x3d;
+                x3d = temp * cosZ - y3d * sinZ;
+                y3d = temp * sinZ + y3d * cosZ;
 
-        // Convert back to face coordinate system
-        const nx = unproj3dX / faceScale;
-        const ny = unproj3dY / faceScale;
+                // Perspective projection
+                const distance = 500;
+                const projX = centerX + (x3d * distance * 0.5) / (distance + z3d);
+                const projY = centerY + (y3d * distance * 0.25) / (distance + z3d);
 
-        // Blink logic
-        const blinkCycle = time * 0.5;
-        const blinkPhase = blinkCycle % 5;
-        let eyeOpenness = 1.0;
-        if (blinkPhase < 0.15) {
-            eyeOpenness = Math.sin(blinkPhase / 0.15 * Math.PI);
-        } else if (blinkPhase > 4.5 && blinkPhase < 4.7) {
-            eyeOpenness = Math.sin((blinkPhase - 4.5) / 0.2 * Math.PI);
+                return {x: projX, y: projY, z: z3d};
+            });
+        };
+
+        // Helper to check if point is inside a projected quad
+        const isInsideQuad = (px: number, py: number, corners: {x: number, y: number, z: number}[]): {inside: boolean, depth: number} => {
+            if (corners.length !== 4) return {inside: false, depth: 0};
+
+            // Use cross product to check if point is on same side of all edges
+            let windingNumber = 0;
+            for (let i = 0; i < 4; i++) {
+                const j = (i + 1) % 4;
+                const cross = (corners[j].x - corners[i].x) * (py - corners[i].y) -
+                              (corners[j].y - corners[i].y) * (px - corners[i].x);
+                windingNumber += cross > 0 ? 1 : -1;
+            }
+
+            // If all edges have same orientation, point is inside
+            const inside = Math.abs(windingNumber) === 4;
+            const avgDepth = (corners[0].z + corners[1].z + corners[2].z + corners[3].z) / 4;
+
+            return {inside, depth: avgDepth};
+        };
+
+        // Eye blink logic - use tracked blinks if available, otherwise automatic
+        let leftEyeOpenness = 1.0;
+        let rightEyeOpenness = 1.0;
+
+        if (options.externalRotation?.leftEyeBlink !== undefined &&
+            options.externalRotation?.rightEyeBlink !== undefined) {
+            // Use tracked eye blinks (0=open, 1=closed, so invert)
+            leftEyeOpenness = 1 - options.externalRotation.leftEyeBlink;
+            rightEyeOpenness = 1 - options.externalRotation.rightEyeBlink;
+        } else {
+            // Fallback to automatic blink animation
+            const blinkCycle = time * 0.5;
+            const blinkPhase = blinkCycle % 5;
+            let autoEyeOpenness = 1.0;
+            if (blinkPhase < 0.15) {
+                autoEyeOpenness = Math.sin(blinkPhase / 0.15 * Math.PI);
+            } else if (blinkPhase > 4.5 && blinkPhase < 4.7) {
+                autoEyeOpenness = Math.sin((blinkPhase - 4.5) / 0.2 * Math.PI);
+            }
+            leftEyeOpenness = autoEyeOpenness;
+            rightEyeOpenness = autoEyeOpenness;
         }
 
         // Mouth openness from face tracking (0-1)
         const mouthOpen = options.externalRotation?.mouthOpen ?? 0;
-        // Scale mouth: closed is normal size, open expands vertically
         const mouthScale = 1 + mouthOpen * 3; // Up to 4x height when fully open
 
-        // Check if point is inside any face feature
-        // Left eye
-        if (Math.abs(nx + 14.3) < 2.9 && Math.abs(ny + 9.1) < 7.3 * eyeOpenness) {
-            // Add depth-based shading
-            const depthFactor = Math.max(0.5, 1 - Math.abs(unproj3dZ) / 100);
+        // Define face features as 3D rectangles (all at z=0 for flat face)
+        // Left eye - uses tracked left eye openness
+        const leftEyeCorners = projectRectangle(-14.3, -9.1, 0, 5.8, 14.6 * leftEyeOpenness);
+        const leftEyeCheck = isInsideQuad(x, y, leftEyeCorners);
+        if (leftEyeCheck.inside) {
+            const depthFactor = Math.max(0.5, 1 - Math.abs(leftEyeCheck.depth) / 100);
             return 1.0 * depthFactor;
         }
 
-        // Right eye
-        if (Math.abs(nx - 14.3) < 2.9 && Math.abs(ny + 9.1) < 7.3 * eyeOpenness) {
-            const depthFactor = Math.max(0.5, 1 - Math.abs(unproj3dZ) / 100);
+        // Right eye - uses tracked right eye openness
+        const rightEyeCorners = projectRectangle(14.3, -9.1, 0, 5.8, 14.6 * rightEyeOpenness);
+        const rightEyeCheck = isInsideQuad(x, y, rightEyeCorners);
+        if (rightEyeCheck.inside) {
+            const depthFactor = Math.max(0.5, 1 - Math.abs(rightEyeCheck.depth) / 100);
             return 1.0 * depthFactor;
         }
 
-        // Nose (L-shape) - vertical part
-        if (Math.abs(nx) < 2.2 && ny > -1.3 && ny < 9.1) {
-            const depthFactor = Math.max(0.5, 1 - Math.abs(unproj3dZ) / 100);
+        // Nose - vertical part
+        const noseVertCorners = projectRectangle(0, 3.9, 0, 4.4, 10.4);
+        const noseVertCheck = isInsideQuad(x, y, noseVertCorners);
+        if (noseVertCheck.inside) {
+            const depthFactor = Math.max(0.5, 1 - Math.abs(noseVertCheck.depth) / 100);
             return 1.0 * depthFactor;
         }
 
-        // Nose (L-shape) - horizontal part
-        if (nx > 0 && nx < 10.4 && Math.abs(ny - 9.1) < 2.2) {
-            const depthFactor = Math.max(0.5, 1 - Math.abs(unproj3dZ) / 100);
+        // Nose - horizontal part
+        const noseHorizCorners = projectRectangle(5.2, 9.1, 0, 10.4, 4.4);
+        const noseHorizCheck = isInsideQuad(x, y, noseHorizCorners);
+        if (noseHorizCheck.inside) {
+            const depthFactor = Math.max(0.5, 1 - Math.abs(noseHorizCheck.depth) / 100);
             return 1.0 * depthFactor;
         }
 
-        // Mouth (horizontal bar) - scales vertically when mouth opens
-        const mouthCenterY = 18.2 + (mouthOpen * 4); // Move down slightly when open
-        const mouthHeight = 2.2 * mouthScale;
-        if (Math.abs(ny - mouthCenterY) < mouthHeight && nx > -9.1 && nx < 14.3) {
-            const depthFactor = Math.max(0.5, 1 - Math.abs(unproj3dZ) / 100);
+        // Mouth - horizontal bar (moves and scales with mouth opening)
+        const mouthCenterY = 18.2 + (mouthOpen * 4);
+        const mouthHeight = 4.4 * mouthScale;
+        const mouthCorners = projectRectangle(2.6, mouthCenterY, 0, 23.4, mouthHeight);
+        const mouthCheck = isInsideQuad(x, y, mouthCorners);
+        if (mouthCheck.inside) {
+            const depthFactor = Math.max(0.5, 1 - Math.abs(mouthCheck.depth) / 100);
             return 1.0 * depthFactor;
         }
 
-        // Left mouth corner - moves with mouth opening
+        // Left mouth corner
         const cornerY = 16.2 + (mouthOpen * 3);
-        if (Math.abs(nx + 11) < 2.2 && Math.abs(ny - cornerY) < 2.2) {
-            const depthFactor = Math.max(0.5, 1 - Math.abs(unproj3dZ) / 100);
+        const leftCornerCorners = projectRectangle(-11, cornerY, 0, 4.4, 4.4);
+        const leftCornerCheck = isInsideQuad(x, y, leftCornerCorners);
+        if (leftCornerCheck.inside) {
+            const depthFactor = Math.max(0.5, 1 - Math.abs(leftCornerCheck.depth) / 100);
             return 1.0 * depthFactor;
         }
 
-        // Right mouth corner - moves with mouth opening
-        if (Math.abs(nx - 16.2) < 2.2 && Math.abs(ny - cornerY) < 2.2) {
-            const depthFactor = Math.max(0.5, 1 - Math.abs(unproj3dZ) / 100);
+        // Right mouth corner
+        const rightCornerCorners = projectRectangle(16.2, cornerY, 0, 4.4, 4.4);
+        const rightCornerCheck = isInsideQuad(x, y, rightCornerCorners);
+        if (rightCornerCheck.inside) {
+            const depthFactor = Math.max(0.5, 1 - Math.abs(rightCornerCheck.depth) / 100);
             return 1.0 * depthFactor;
         }
 

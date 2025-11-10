@@ -77,6 +77,8 @@ export interface ModeState {
         rotY: number;
         rotZ: number;
         mouthOpen?: number; // Mouth openness (0-1)
+        leftEyeBlink?: number; // Left eye blink (0=open, 1=closed)
+        rightEyeBlink?: number; // Right eye blink (0=open, 1=closed)
     };
 }
 
@@ -274,21 +276,29 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         if (modeState.isFaceDetectionEnabled && hasDetection && faceData) {
             const rotation = faceOrientationToRotation(smoothOrientation, false, false, false);
 
-            // Extract mouth openness from blendshapes
+            // Extract expressions from blendshapes
             let mouthOpen = 0;
+            let leftEyeBlink = 0;
+            let rightEyeBlink = 0;
+
             if (faceData.blendshapes) {
-                // MediaPipe provides jawOpen blendshape (0-1)
+                // Mouth openness
                 const jawOpen = faceData.blendshapes.get('jawOpen') ?? 0;
                 const mouthOpen1 = faceData.blendshapes.get('mouthOpen') ?? 0;
-                // Use the maximum of available mouth-related blendshapes
                 mouthOpen = Math.max(jawOpen, mouthOpen1);
+
+                // Eye blinks (MediaPipe provides separate left/right eye blinks)
+                leftEyeBlink = faceData.blendshapes.get('eyeBlinkLeft') ?? 0;
+                rightEyeBlink = faceData.blendshapes.get('eyeBlinkRight') ?? 0;
             }
 
             setModeState(prev => ({
                 ...prev,
                 faceOrientation: {
                     ...rotation,
-                    mouthOpen
+                    mouthOpen,
+                    leftEyeBlink,
+                    rightEyeBlink
                 }
             }));
         } else if (modeState.isFaceDetectionEnabled && !hasDetection) {
