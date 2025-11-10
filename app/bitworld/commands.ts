@@ -110,6 +110,9 @@ interface UseCommandSystemProps {
     triggerTutorialFlow?: () => void;
     onCommandExecuted?: (command: string, args: string[]) => void;
     cancelComposition?: () => void; // Callback to cancel IME composition
+    monogramSystem?: { // Monogram system for controlling face masks
+        updateOption: <K extends keyof any>(key: K, value: any) => void;
+    };
 }
 
 // --- Command System Constants ---
@@ -171,7 +174,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'note': 'Quick shortcut to enter note mode. This creates a focused writing space perfect for drafting ideas before placing them on your main canvas.',
     'mail': '[SUPER ONLY] Create an email region. Select a rectangular area, type /mail. Row 1 = recipient email, Row 2 = subject line, Row 3+ = message body. Click the send button to deliver the email.',
     'chat': 'Quick shortcut to enter chat mode. Talk with AI to transform, expand, or generate text. The AI can help you develop ideas or create content based on your prompts.',
-    'talk': 'Enable face-piloted geometry. Activates your webcam and tracks your face to control 3D monogram rotation. Turn your head to pilot the geometry in real-time. Type /talk front or /talk back to choose camera.',
+    'talk': 'Enable face-piloted geometry with different face styles. Type /talk to use default Macintosh face, or /talk [facename] to select a specific face (macintosh, robot, kawaii). Activates your webcam and tracks your face to control the face in real-time. Defaults to front camera.',
     'tutorial': 'Start the interactive tutorial. Learn the basics of spatial writing through hands-on exercises that teach you core commands and concepts.',
     'help': 'Show this detailed help menu. The command list stays open with descriptions for every available command, so you can explore what\'s possible.',
     'tab': 'Toggle AI-powered autocomplete suggestions. When enabled, type and see AI suggestions appear as gray text. Press Tab to accept suggestions.',
@@ -208,7 +211,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllLabels, getAllBounds, availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllLabels, getAllBounds, availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, monogramSystem }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const previousBackgroundStateRef = useRef<{
@@ -1397,21 +1400,27 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         // Handle /talk command for face-piloted geometry
         if (commandToExecute.startsWith('talk')) {
             const inputParts = commandState.input.trim().split(/\s+/);
-            const cameraArg = inputParts.length > 1 ? inputParts[1] : undefined;
+            const firstArg = inputParts.length > 1 ? inputParts[1] : undefined;
 
             try {
-                // Determine which camera to use
-                let facingMode: 'user' | 'environment' = 'user'; // Default to front camera for face detection
+                // Determine face mask and camera
+                let maskName = 'macintosh'; // Default face mask
+                let facingMode: 'user' | 'environment' = 'user'; // Default to front camera
                 let cameraLabel = 'front';
 
-                if (cameraArg) {
-                    const camera = cameraArg.toLowerCase();
-                    if (camera === 'back' || camera === 'rear') {
+                if (firstArg) {
+                    const arg = firstArg.toLowerCase();
+
+                    // Check if it's a camera specification (backward compatibility)
+                    if (arg === 'back' || arg === 'rear') {
                         facingMode = 'environment';
                         cameraLabel = 'back';
-                    } else if (camera === 'front' || camera === 'user') {
+                    } else if (arg === 'front' || arg === 'user') {
                         facingMode = 'user';
                         cameraLabel = 'front';
+                    } else {
+                        // Treat as face mask name
+                        maskName = arg;
                     }
                 }
 
@@ -1427,13 +1436,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                 // Log which camera was actually selected
                 const videoTrack = stream.getVideoTracks()[0];
-                const settings = videoTrack.getSettings();
-                console.log('[Camera] Requested:', facingMode, '| Actual:', settings.facingMode, '| Label:', videoTrack.label);
+                const trackSettings = videoTrack.getSettings();
+                console.log('[Camera] Requested:', facingMode, '| Actual:', trackSettings.facingMode, '| Label:', videoTrack.label);
 
                 // Warn if wrong camera was selected
-                if (facingMode === 'user' && settings.facingMode === 'environment') {
+                if (facingMode === 'user' && trackSettings.facingMode === 'environment') {
                     console.warn('[Camera] Warning: Requested front camera but got back camera. Try /talk front explicitly or check browser permissions.');
-                    setDialogueWithRevert(`Using ${settings.facingMode || 'unknown'} camera. If face detection fails, your device might be showing the wrong camera. Try flipping your device or use /talk back.`, setDialogueText);
+                    setDialogueWithRevert(`Using ${trackSettings.facingMode || 'unknown'} camera. If face detection fails, your device might be showing the wrong camera. Try flipping your device or use /talk back.`, setDialogueText);
                 }
 
                 // Stop any existing stream
@@ -1454,12 +1463,24 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 // Show webcam feed as background (clears backgroundColor so stream shows through)
                 switchBackgroundMode('stream');
 
-                // Automatically activate face3d monogram
-                if (updateSettings) {
-                    updateSettings({ monogramMode: 'face3d', monogramEnabled: true });
+                // Automatically activate face3d monogram with selected mask
+                if (updateSettings && settings) {
+                    updateSettings({
+                        monogramMode: 'face3d',
+                        monogramEnabled: true,
+                        monogramOptions: {
+                            ...settings.monogramOptions,
+                            maskName: maskName
+                        }
+                    });
                 }
 
-                setDialogueWithRevert(`Face-piloted geometry active (${cameraLabel} camera). Turn your head to pilot the octahedron!`, setDialogueText);
+                // Also update the monogram system directly if available
+                if (monogramSystem) {
+                    monogramSystem.updateOption('maskName', maskName);
+                }
+
+                setDialogueWithRevert(`Face-piloted geometry active (${cameraLabel} camera, ${maskName} face). Turn your head to pilot the face!`, setDialogueText);
             } catch (error) {
                 console.error('Failed to start face detection:', error);
                 setDialogueWithRevert("Failed to access camera. Please grant permission.", setDialogueText);

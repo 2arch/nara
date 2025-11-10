@@ -206,6 +206,8 @@ export interface WorldEngine {
     selectionStart: Point | null;
     selectionEnd: Point | null;
     aiProcessingRegion: { startX: number, endX: number, startY: number, endY: number } | null;
+    selectedNoteKey: string | null; // Track selected note region from canvas
+    setSelectedNoteKey: React.Dispatch<React.SetStateAction<string | null>>; // Allow canvas to update selected note
     handleSelectionStart: (canvasRelativeX: number, canvasRelativeY: number) => void;
     handleSelectionMove: (canvasRelativeX: number, canvasRelativeY: number) => void;
     handleSelectionEnd: () => void;
@@ -630,6 +632,7 @@ export function useWorldEngine({
     const [selectionStart, setSelectionStart] = useState<Point | null>(null);
     const [selectionEnd, setSelectionEnd] = useState<Point | null>(null);
     const [aiProcessingRegion, setAiProcessingRegion] = useState<{ startX: number, endX: number, startY: number, endY: number } | null>(null);
+    const [selectedNoteKey, setSelectedNoteKey] = useState<string | null>(null); // Track selected note region from canvas
 
     // === State ===
     const [worldData, setWorldData] = useState<WorldData>(initialWorldData);
@@ -1236,14 +1239,37 @@ export function useWorldEngine({
 
     // === Selection Helper Functions ===
     // Helper function to get normalized selection bounds
+    // Includes support for selected note regions when there's no text selection
     const getNormalizedSelection = useCallback(() => {
-        if (!selectionStart || !selectionEnd) return null;
-        const startX = Math.min(selectionStart.x, selectionEnd.x);
-        const startY = Math.min(selectionStart.y, selectionEnd.y);
-        const endX = Math.max(selectionStart.x, selectionEnd.x);
-        const endY = Math.max(selectionStart.y, selectionEnd.y);
-        return { startX, startY, endX, endY };
-    }, [selectionStart, selectionEnd]);
+        // First check for text selection
+        if (selectionStart && selectionEnd) {
+            const startX = Math.min(selectionStart.x, selectionEnd.x);
+            const startY = Math.min(selectionStart.y, selectionEnd.y);
+            const endX = Math.max(selectionStart.x, selectionEnd.x);
+            const endY = Math.max(selectionStart.y, selectionEnd.y);
+            return { startX, startY, endX, endY };
+        }
+
+        // If no text selection, check for selected note region
+        if (selectedNoteKey) {
+            try {
+                const noteData = JSON.parse(worldData[selectedNoteKey] as string);
+                if (noteData && noteData.startX !== undefined && noteData.endX !== undefined &&
+                    noteData.startY !== undefined && noteData.endY !== undefined) {
+                    return {
+                        startX: noteData.startX,
+                        endX: noteData.endX,
+                        startY: noteData.startY,
+                        endY: noteData.endY
+                    };
+                }
+            } catch (e) {
+                // Invalid note data, return null
+            }
+        }
+
+        return null;
+    }, [selectionStart, selectionEnd, selectedNoteKey, worldData]);
 
     // Helper function to check if there's an active selection
     const hasActiveSelection = useCallback(() => {
@@ -10774,6 +10800,8 @@ export function useWorldEngine({
         selectionStart,
         selectionEnd,
         aiProcessingRegion,
+        selectedNoteKey, // Expose selected note key for canvas
+        setSelectedNoteKey, // Allow canvas to update selected note
         handleSelectionStart,
         handleSelectionMove,
         handleSelectionEnd,
