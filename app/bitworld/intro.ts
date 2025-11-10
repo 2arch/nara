@@ -60,7 +60,7 @@ export const IMAGE_INTRO: IntroConfig = {
     backgroundImage: 'https://d2w9rnfcy7mm78.cloudfront.net/40525619/original_8f6196d0fda2a540ef8e380980921d25.jpg?1761186290?bc=0',
     monogramType: 'perlin',
     textColor: '#FFFFFF',
-    hostTextColor: '#FFA500',
+    hostTextColor: '#FFFFFF',
     showBanner: true,
     bannerDuration: 1500,
     bannerBackgroundColor: undefined, // No solid color - show image through banner
