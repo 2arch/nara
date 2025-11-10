@@ -600,7 +600,7 @@ const useMonogramSystem = (
             faceBounds,
             viewportWidth,
             viewportHeight,
-            0.7, // 70% fill percentage
+            1.2, // Fill viewport generously (was 0.7)
             complexity
         );
 
