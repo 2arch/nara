@@ -277,7 +277,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
     // Update face orientation in state when detected
     useEffect(() => {
         if (modeState.isFaceDetectionEnabled && hasDetection && faceData) {
-            const rotation = faceOrientationToRotation(smoothOrientation, false, false, false);
+            const rotation = faceOrientationToRotation(smoothOrientation, true, false, false);
 
             // Extract expressions from blendshapes
             let mouthOpen = 0;
