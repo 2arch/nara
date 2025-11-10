@@ -5604,12 +5604,16 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         // === Render Dialogue ===
-        if (dialogueEnabled) {
+        if (dialogueEnabled && engine.dialogueText) {
             renderDialogue({
                 canvasWidth: cssWidth,
                 canvasHeight: cssHeight,
                 ctx,
-                dialogueText: engine.dialogueText
+                dialogueText: engine.dialogueText,
+                displayName: 'host', // Use host display for AI responses
+                textColor: engine.textColor,
+                backgroundColor: engine.backgroundColor || '#FFFFFF',
+                timestamp: engine.dialogueTimestamp
             });
         }
 
