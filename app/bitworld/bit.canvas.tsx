@@ -10,6 +10,7 @@ import { COLOR_MAP, COMMAND_CATEGORIES, COMMAND_HELP } from './commands';
 import { useHostDialogue } from './host.dialogue';
 import { setDialogueWithRevert } from './ai';
 import { CanvasRecorder } from './tape';
+import { FaceDebugOverlay } from './face.debug';
 
 // --- Constants --- (Copied and relevant ones kept)
 const GRID_COLOR = '#F2F2F233';
@@ -8464,6 +8465,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     }}
                 />
             )}
+
+            {/* Face Detection Debug Overlay */}
+            <FaceDebugOverlay enabled={engine.isFaceDetectionEnabled} />
         </>
     );
 }
