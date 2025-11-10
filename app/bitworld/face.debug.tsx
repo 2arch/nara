@@ -46,6 +46,7 @@ export const addFaceDebugLog = (level: DebugLog['level'], message: string) => {
 
 export const FaceDebugOverlay: React.FC<FaceDebugOverlayProps> = ({ enabled }) => {
     const [logs, setLogs] = React.useState<DebugLog[]>([]);
+    const [copySuccess, setCopySuccess] = React.useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -66,6 +67,27 @@ export const FaceDebugOverlay: React.FC<FaceDebugOverlayProps> = ({ enabled }) =
 
         return () => clearInterval(interval);
     }, [enabled]);
+
+    const handleCopyLogs = async () => {
+        const logsText = logs.map(log => {
+            const timeStr = new Date(log.timestamp).toLocaleTimeString('en-US', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                fractionalSecondDigits: 1
+            });
+            return `${timeStr} [${log.level.toUpperCase()}] ${log.message}`;
+        }).join('\n');
+
+        try {
+            await navigator.clipboard.writeText(logsText);
+            setCopySuccess(true);
+            setTimeout(() => setCopySuccess(false), 2000);
+        } catch (err) {
+            console.error('Failed to copy logs:', err);
+        }
+    };
 
     if (!enabled) return null;
 
@@ -96,36 +118,72 @@ export const FaceDebugOverlay: React.FC<FaceDebugOverlayProps> = ({ enabled }) =
     };
 
     return (
-        <div
-            ref={containerRef}
-            style={{
-                position: 'fixed',
-                bottom: '20px',
-                right: '20px',
-                width: '400px',
-                maxHeight: '300px',
-                backgroundColor: 'rgba(0, 0, 0, 0.9)',
-                color: '#FFFFFF',
-                fontFamily: 'IBM Plex Mono, monospace',
-                fontSize: '11px',
-                padding: '12px',
-                borderRadius: '8px',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-                overflowY: 'auto',
-                zIndex: 10000,
-                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)',
-                backdropFilter: 'blur(10px)',
-            }}
-        >
-            <div style={{
-                marginBottom: '8px',
-                paddingBottom: '8px',
-                borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
-                fontWeight: 'bold',
-                color: '#FFA500'
-            }}>
-                🎯 Face Detection Debug
-            </div>
+        <>
+            {/* Copy Button - Bottom Left */}
+            <button
+                onClick={handleCopyLogs}
+                style={{
+                    position: 'fixed',
+                    bottom: '20px',
+                    left: '20px',
+                    backgroundColor: copySuccess ? '#66BB6A' : 'rgba(0, 0, 0, 0.9)',
+                    color: '#FFFFFF',
+                    fontFamily: 'IBM Plex Mono, monospace',
+                    fontSize: '11px',
+                    padding: '10px 16px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                    cursor: 'pointer',
+                    zIndex: 10001,
+                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)',
+                    backdropFilter: 'blur(10px)',
+                    transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                    if (!copySuccess) {
+                        e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+                    }
+                }}
+                onMouseLeave={(e) => {
+                    if (!copySuccess) {
+                        e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+                    }
+                }}
+            >
+                {copySuccess ? '✓ Copied!' : '📋 Copy Logs'}
+            </button>
+
+            {/* Debug Overlay - Bottom Right */}
+            <div
+                ref={containerRef}
+                style={{
+                    position: 'fixed',
+                    bottom: '20px',
+                    right: '20px',
+                    width: '400px',
+                    maxHeight: '300px',
+                    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                    color: '#FFFFFF',
+                    fontFamily: 'IBM Plex Mono, monospace',
+                    fontSize: '11px',
+                    padding: '12px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                    overflowY: 'auto',
+                    zIndex: 10000,
+                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)',
+                    backdropFilter: 'blur(10px)',
+                }}
+            >
+                <div style={{
+                    marginBottom: '8px',
+                    paddingBottom: '8px',
+                    borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
+                    fontWeight: 'bold',
+                    color: '#FFA500'
+                }}>
+                    🎯 Face Detection Debug
+                </div>
 
             {logs.length === 0 ? (
                 <div style={{ color: '#888', fontStyle: 'italic' }}>
@@ -164,6 +222,7 @@ export const FaceDebugOverlay: React.FC<FaceDebugOverlayProps> = ({ enabled }) =
                     );
                 })
             )}
-        </div>
+            </div>
+        </>
     );
 };
