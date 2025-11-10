@@ -117,11 +117,77 @@ export function calculateFaceScale(
 // ============================================================================
 
 /**
- * Chibi-style Macintosh face with expressive features (default)
+ * Classic Macintosh face with simple features (default)
  */
 export const MacintoshMask: Mask = {
     name: 'macintosh',
-    description: 'Chibi-style Macintosh face with cute proportions and expressive features',
+    description: 'Classic Macintosh face with simple iconic features',
+
+    baseFeatures: [
+        // Eyes - simple rectangles
+        { cx: -14.3, cy: -9.1, cz: 0, width: 5.8, height: 14.6, type: 'leftEye' },
+        { cx: 14.3, cy: -9.1, cz: 0, width: 5.8, height: 14.6, type: 'rightEye' },
+        // Nose - vertical part
+        { cx: 0, cy: 3.9, cz: 0, width: 4.4, height: 10.4, type: 'noseVert' },
+        // Nose - horizontal part
+        { cx: 5.2, cy: 9.1, cz: 0, width: 10.4, height: 4.4, type: 'noseHoriz' },
+        // Mouth - horizontal bar
+        { cx: 2.6, cy: 18.2, cz: 0, width: 23.4, height: 4.4, type: 'mouth' },
+        // Mouth corners
+        { cx: -11, cy: 16.2, cz: 0, width: 4.4, height: 4.4, type: 'leftCorner' },
+        { cx: 16.2, cy: 16.2, cz: 0, width: 4.4, height: 4.4, type: 'rightCorner' },
+    ],
+
+    getFeaturesWithDynamics(dynamics: FaceDynamics): FaceFeature[] {
+        const { leftEyeBlink = 0, rightEyeBlink = 0, mouthOpen = 0 } = dynamics;
+
+        return this.baseFeatures.map(feature => {
+            const modulated = { ...feature };
+
+            // Eyes blink by collapsing height
+            if (feature.type === 'leftEye') {
+                const eyeOpenness = 1 - leftEyeBlink;
+                modulated.height = feature.height * eyeOpenness;
+            } else if (feature.type === 'rightEye') {
+                const eyeOpenness = 1 - rightEyeBlink;
+                modulated.height = feature.height * eyeOpenness;
+            }
+            // Mouth expands and shifts down when opening
+            else if (feature.type === 'mouth') {
+                const mouthScale = 1 + mouthOpen * 3; // Up to 4x height
+                modulated.height = feature.height * mouthScale;
+                modulated.cy = feature.cy + mouthOpen * 4;
+            }
+            // Corners shift down with mouth
+            else if (feature.type === 'leftCorner' || feature.type === 'rightCorner') {
+                modulated.cy = feature.cy + mouthOpen * 3;
+            }
+
+            return modulated;
+        });
+    },
+
+    getBounds(dynamics?: FaceDynamics): FaceBounds {
+        const maxDynamics: FaceDynamics = {
+            leftEyeBlink: 0,      // Fully open
+            rightEyeBlink: 0,
+            mouthOpen: 1.0,       // Fully open mouth
+        };
+
+        const featuresWithMax = this.getFeaturesWithDynamics(
+            dynamics || maxDynamics
+        );
+
+        return calculateBounds(featuresWithMax);
+    },
+};
+
+/**
+ * Expressive chibi-style face with smile, frown, and squint
+ */
+export const ChibiMask: Mask = {
+    name: 'chibi',
+    description: 'Chibi-style face with cute proportions and expressive features',
 
     baseFeatures: [
         // Bigger, more chibi-like eyes (taller and slightly wider)
@@ -420,6 +486,7 @@ export const KawaiiMask: Mask = {
  */
 export const MaskRegistry: Record<string, Mask> = {
     macintosh: MacintoshMask,
+    chibi: ChibiMask,
     robot: RobotMask,
     kawaii: KawaiiMask,
 };
