@@ -76,6 +76,7 @@ interface UseCommandSystemProps {
     setDialogueText: (text: string) => void;
     initialBackgroundColor?: string;
     initialTextColor?: string;
+    skipInitialBackground?: boolean; // Skip applying initialBackgroundColor (let host flow control it)
     getAllLabels?: () => Array<{text: string, x: number, y: number, color: string}>;
     getAllBounds?: () => Array<{startX: number, endX: number, startY: number, endY: number, color: string, title?: string}>;
     availableStates?: string[];
@@ -196,7 +197,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, getAllLabels, getAllBounds, availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllLabels, getAllBounds, availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const previousBackgroundStateRef = useRef<{
@@ -798,10 +799,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
     }, [setDialogueText, updateSettings]);
 
     useEffect(() => {
-        if (initialBackgroundColor && modeState.backgroundMode !== 'stream') {
+        // Skip applying initial background if host flow will control it (prevents sulfur flash)
+        if (!skipInitialBackground && initialBackgroundColor && modeState.backgroundMode !== 'stream') {
             switchBackgroundMode('color', initialBackgroundColor, initialTextColor);
         }
-    }, [initialBackgroundColor, initialTextColor]); // Removed switchBackgroundMode to avoid dependency issues
+    }, [initialBackgroundColor, initialTextColor, skipInitialBackground]); // Removed switchBackgroundMode to avoid dependency issues
 
     // Load color preferences from settings when they change
     useEffect(() => {

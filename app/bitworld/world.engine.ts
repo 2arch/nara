@@ -408,6 +408,7 @@ interface UseWorldEngineProps {
     initialPatternId?: string; // Pattern ID from URL for deterministic pattern generation
     onMonogramCommand?: (args: string[]) => void; // Callback for monogram commands
     isReadOnly?: boolean; // Read-only mode (observer/viewer)
+    skipInitialBackground?: boolean; // Skip applying initialBackgroundColor (let host flow control it)
 }
 
 
@@ -581,6 +582,7 @@ export function useWorldEngine({
     initialPatternId,    // Pattern ID from URL for deterministic generation
     onMonogramCommand,   // Callback for monogram commands
     isReadOnly = false,  // Read-only mode (default to writeable)
+    skipInitialBackground = false, // Skip applying initialBackgroundColor
 }: UseWorldEngineProps): WorldEngine {
     // === Router ===
     const router = useRouter();
@@ -1307,7 +1309,7 @@ export function useWorldEngine({
         startCommandWithInput,
         addComposedText,
         removeCompositionTrigger,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, getAllLabels, getAllBounds, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, triggerUpgradeFlow: () => {
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllLabels, getAllBounds, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
         }
