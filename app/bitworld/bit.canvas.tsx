@@ -98,6 +98,11 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const lastEnterPressRef = useRef<number>(0);
     const [isPasswordVisible, setIsPasswordVisible] = useState<boolean>(false);
 
+    // Sync selectedNoteKey with engine for cross-compatibility with selection-based commands
+    useEffect(() => {
+        engine.setSelectedNoteKey(selectedNoteKey);
+    }, [selectedNoteKey, engine]);
+
     // Track host mode dim fade-in (should only happen once when host mode activates)
     const hostDimFadeStartRef = useRef<number | null>(null);
     const hasHostDimFadedInRef = useRef<boolean>(false);
@@ -743,7 +748,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             geometryType: 'octahedron',
             interactiveTrails: true,
             trailIntensity: 1.0,
-            trailFadeMs: 2000
+            trailFadeMs: 2000,
+            maskName: 'macintosh'
         },
         (options) => {
             // Save monogram mode and enabled state to settings when changed
