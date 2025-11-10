@@ -586,12 +586,18 @@ const useMonogramSystem = (
         // Scale for face features (in world units)
         const faceScale = viewportWidth * 0.015 * complexity;
 
-        // Rotation angles - use external rotation
+        // Rotation angles - use external rotation with clamping
         let rotX: number, rotY: number, rotZ: number;
         if (options.externalRotation) {
+            // X-axis (pitch/nodding): Allow full range for up/down movement
             rotX = options.externalRotation.rotX;
-            rotY = options.externalRotation.rotY;
-            rotZ = options.externalRotation.rotZ;
+
+            // Y-axis (yaw/turning): Clamp to ±60 degrees to prevent extreme side views
+            const maxYaw = Math.PI / 3; // 60 degrees
+            rotY = Math.max(-maxYaw, Math.min(maxYaw, options.externalRotation.rotY));
+
+            // Z-axis (roll/tilting): Reduce to 30% to keep face more upright
+            rotZ = options.externalRotation.rotZ * 0.3;
         } else {
             // Neutral pose if no face data yet
             rotX = 0;
