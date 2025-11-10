@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { FilesetResolver, FaceLandmarker, FaceLandmarkerResult } from '@mediapipe/tasks-vision';
+import { addFaceDebugLog } from './face.debug';
 
 // Face orientation data extracted from landmarks
 export interface FaceOrientation {
@@ -50,17 +51,17 @@ export const useFaceDetection = ({
 
         const initializeMediaPipe = async () => {
             try {
-                console.log('[MediaPipe] Starting initialization...');
+                addFaceDebugLog('info', 'Starting MediaPipe initialization...');
 
                 // Load MediaPipe vision tasks
-                console.log('[MediaPipe] Loading vision tasks from CDN...');
+                addFaceDebugLog('info', 'Loading vision tasks from CDN...');
                 const vision = await FilesetResolver.forVisionTasks(
                     'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
                 );
-                console.log('[MediaPipe] Vision tasks loaded ✓');
+                addFaceDebugLog('success', 'Vision tasks loaded');
 
                 // Create Face Landmarker with optimized settings
-                console.log('[MediaPipe] Creating Face Landmarker...');
+                addFaceDebugLog('info', 'Creating Face Landmarker...');
                 const faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
                     baseOptions: {
                         modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
@@ -74,16 +75,16 @@ export const useFaceDetection = ({
                     outputFaceBlendshapes: true, // Enable expression detection
                     outputFacialTransformationMatrixes: true // Enable transformation matrices
                 });
-                console.log('[MediaPipe] Face Landmarker ready ✓');
+                addFaceDebugLog('success', 'Face Landmarker ready');
 
                 if (mounted) {
                     faceLandmarkerRef.current = faceLandmarker;
                     setIsReady(true);
                     setError(null);
-                    console.log('[MediaPipe] Initialization complete! Ready for face detection.');
+                    addFaceDebugLog('success', 'MediaPipe ready for detection!');
                 }
             } catch (err) {
-                console.error('[MediaPipe] FAILED to initialize:', err);
+                addFaceDebugLog('error', `Failed to initialize: ${err}`);
                 if (mounted) {
                     setError('Failed to load face detection. Check console for details.');
                 }
@@ -103,14 +104,14 @@ export const useFaceDetection = ({
         if (!videoStream || !enabled) {
             // Clean up video element if stream is removed
             if (videoElementRef.current) {
-                console.log('[Face Video] Cleaning up video element');
+                addFaceDebugLog('info', 'Cleaning up video element');
                 videoElementRef.current.srcObject = null;
                 videoElementRef.current = null;
             }
             return;
         }
 
-        console.log('[Face Video] Setting up video element for face detection');
+        addFaceDebugLog('info', 'Setting up video for face detection');
 
         // Create video element for MediaPipe processing
         const video = document.createElement('video');
@@ -123,11 +124,11 @@ export const useFaceDetection = ({
 
         // Wait for video to be ready
         video.addEventListener('loadeddata', () => {
-            console.log('[Face Video] Video ready:', video.videoWidth, 'x', video.videoHeight);
+            addFaceDebugLog('success', `Video ready: ${video.videoWidth}x${video.videoHeight}`);
             video.play().then(() => {
-                console.log('[Face Video] Video playing ✓');
+                addFaceDebugLog('success', 'Video playing');
             }).catch(err => {
-                console.error('[Face Video] Failed to play:', err);
+                addFaceDebugLog('error', `Video play failed: ${err}`);
                 setError('Failed to start video stream');
             });
         });
@@ -262,16 +263,20 @@ export const useFaceDetection = ({
     // Start/stop detection loop
     useEffect(() => {
         if (enabled && isReady && videoElementRef.current) {
-            console.log('[Face Detection] Starting detection loop...');
+            addFaceDebugLog('success', 'Starting detection loop');
             // Start detection loop
             animationFrameRef.current = requestAnimationFrame(processFrame);
         } else {
-            console.log('[Face Detection] Not starting:', { enabled, isReady, hasVideo: !!videoElementRef.current });
+            const reasons = [];
+            if (!enabled) reasons.push('not enabled');
+            if (!isReady) reasons.push('not ready');
+            if (!videoElementRef.current) reasons.push('no video');
+            addFaceDebugLog('warn', `Not starting detection: ${reasons.join(', ')}`);
         }
 
         return () => {
             if (animationFrameRef.current) {
-                console.log('[Face Detection] Stopping detection loop');
+                addFaceDebugLog('info', 'Stopping detection loop');
                 cancelAnimationFrame(animationFrameRef.current);
                 animationFrameRef.current = null;
             }
