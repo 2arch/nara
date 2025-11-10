@@ -1383,21 +1383,35 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                 if (cameraArg) {
                     const camera = cameraArg.toLowerCase();
-                    if (camera === 'back') {
+                    if (camera === 'back' || camera === 'rear') {
                         facingMode = 'environment';
                         cameraLabel = 'back';
+                    } else if (camera === 'front' || camera === 'user') {
+                        facingMode = 'user';
+                        cameraLabel = 'front';
                     }
                 }
 
-                // Request webcam access
+                // Request webcam access with explicit facingMode constraint
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: {
                         width: { ideal: 1920 },
                         height: { ideal: 1080 },
-                        facingMode: facingMode
+                        facingMode: { ideal: facingMode, exact: facingMode === 'user' ? undefined : facingMode }
                     },
                     audio: false
                 });
+
+                // Log which camera was actually selected
+                const videoTrack = stream.getVideoTracks()[0];
+                const settings = videoTrack.getSettings();
+                console.log('[Camera] Requested:', facingMode, '| Actual:', settings.facingMode, '| Label:', videoTrack.label);
+
+                // Warn if wrong camera was selected
+                if (facingMode === 'user' && settings.facingMode === 'environment') {
+                    console.warn('[Camera] Warning: Requested front camera but got back camera. Try /talk front explicitly or check browser permissions.');
+                    setDialogueWithRevert(`Using ${settings.facingMode || 'unknown'} camera. If face detection fails, your device might be showing the wrong camera. Try flipping your device or use /talk back.`, setDialogueText);
+                }
 
                 // Stop any existing stream
                 if (backgroundStreamRef.current) {
