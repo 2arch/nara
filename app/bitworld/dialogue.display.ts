@@ -245,56 +245,67 @@ export const HostDisplay: DialogueDisplay = {
         const bgG = parseInt(bgHex.substring(2, 4), 16);
         const bgB = parseInt(bgHex.substring(4, 6), 16);
 
-        // Collect all text cell positions
+        // Collect all text cell positions and calculate bounding box
         const textCells = new Set<string>();
+        let minCol = Infinity, maxCol = -Infinity;
+        let minRow = Infinity, maxRow = -Infinity;
+
         wrappedLines.forEach((line, lineIndex) => {
             for (let x = 0; x < line.length; x++) {
                 const char = line[x];
                 if (char && char.trim() !== '') {
-                    textCells.add(`${startCol + x},${startRow + lineIndex}`);
+                    const col = startCol + x;
+                    const row = startRow + lineIndex;
+                    textCells.add(`${col},${row}`);
+
+                    // Update bounding box
+                    minCol = Math.min(minCol, col);
+                    maxCol = Math.max(maxCol, col);
+                    minRow = Math.min(minRow, row);
+                    maxRow = Math.max(maxRow, row);
                 }
             }
         });
 
-        // Render glow for each text cell
+        // Render glow around the entire text bounding box (not individual cells)
         const maxRadius = GLOW_RADIUS + CARDINAL_EXTENSION;
-        textCells.forEach(cellKey => {
-            const [cx, cy] = cellKey.split(',').map(Number);
 
-            for (let dy = -maxRadius; dy <= maxRadius; dy++) {
-                for (let dx = -maxRadius; dx <= maxRadius; dx++) {
-                    if (dx === 0 && dy === 0) continue; // Skip the text cell itself
+        // Iterate over the extended bounding box
+        for (let row = minRow - maxRadius; row <= maxRow + maxRadius; row++) {
+            for (let col = minCol - maxRadius; col <= maxCol + maxRadius; col++) {
+                // Skip if this is a text cell itself
+                if (textCells.has(`${col},${row}`)) continue;
 
-                    const glowCol = cx + dx;
-                    const glowRow = cy + dy;
+                // Calculate distance from this cell to the nearest edge of the text bounding box
+                const distX = Math.max(0, Math.max(minCol - col, col - maxCol));
+                const distY = Math.max(0, Math.max(minRow - row, row - maxRow));
+                const distance = Math.max(distX, distY); // Chebyshev distance to bounding box
 
-                    // Skip if this is also a text cell
-                    if (textCells.has(`${glowCol},${glowRow}`)) continue;
+                if (distance === 0 || distance > maxRadius) continue;
 
-                    // Check if on cardinal direction
-                    const isCardinal = (dx === 0 || dy === 0);
-                    const effectiveRadius = isCardinal ? maxRadius : GLOW_RADIUS;
+                // Check if on cardinal direction (aligned with bounding box edge)
+                const isCardinal = (distX === 0 || distY === 0);
+                const effectiveRadius = isCardinal ? maxRadius : GLOW_RADIUS;
 
-                    const distance = Math.max(Math.abs(dx), Math.abs(dy));
-                    if (distance > effectiveRadius) continue;
+                if (distance > effectiveRadius) continue;
 
-                    // Calculate alpha
-                    let alpha;
-                    if (distance <= GLOW_RADIUS) {
-                        alpha = glowAlphas[distance - 1];
-                    } else {
-                        alpha = glowAlphas[GLOW_RADIUS - 1] * 0.3;
-                    }
-                    if (!alpha) continue;
-
-                    const screenX = glowCol * charWidth;
-                    const screenY = glowRow * charHeight;
-
-                    ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, ${alpha})`;
-                    ctx.fillRect(screenX, screenY, charWidth, charHeight);
+                // Calculate alpha based on distance
+                let alpha;
+                if (distance <= GLOW_RADIUS) {
+                    alpha = glowAlphas[distance - 1];
+                } else {
+                    // Extended glow (only on cardinals)
+                    alpha = glowAlphas[GLOW_RADIUS - 1] * 0.3;
                 }
+                if (!alpha) continue;
+
+                const screenX = col * charWidth;
+                const screenY = row * charHeight;
+
+                ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, ${alpha})`;
+                ctx.fillRect(screenX, screenY, charWidth, charHeight);
             }
-        });
+        }
 
         // Render actual text with full background
         ctx.globalAlpha = fadeProgress;
