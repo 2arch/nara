@@ -769,6 +769,16 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         }
     }, [engine.settings.monogramMode, engine.settings.monogramEnabled, hostModeEnabled]);
 
+    // Sync face orientation to monogram rotation
+    useEffect(() => {
+        if (engine.isFaceDetectionEnabled && engine.faceOrientation) {
+            monogramSystem.setExternalRotation(engine.faceOrientation);
+        } else {
+            // Clear external rotation when face detection is disabled
+            monogramSystem.setExternalRotation(undefined);
+        }
+    }, [engine.isFaceDetectionEnabled, engine.faceOrientation]);
+
     // Monogram command handler
     const handleMonogramCommand = useCallback((args: string[]) => {
         if (args.length === 0) {

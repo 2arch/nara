@@ -390,6 +390,14 @@ export interface WorldEngine {
     handleCompositionStart: () => void;
     handleCompositionUpdate: (text: string) => void;
     handleCompositionEnd: (text: string) => void;
+    // Face detection for piloting geometry
+    isFaceDetectionEnabled: boolean;
+    faceOrientation?: {
+        rotX: number;
+        rotY: number;
+        rotZ: number;
+    };
+    setFaceDetectionEnabled: (enabled: boolean) => void;
 }
 
 // --- Hook Input ---
@@ -1309,6 +1317,9 @@ export function useWorldEngine({
         startCommandWithInput,
         addComposedText,
         removeCompositionTrigger,
+        isFaceDetectionEnabled,
+        faceOrientation,
+        setFaceDetectionEnabled,
     } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllLabels, getAllBounds, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
@@ -10895,5 +10906,9 @@ export function useWorldEngine({
         handleCompositionStart,
         handleCompositionUpdate,
         handleCompositionEnd,
+        // Face detection
+        isFaceDetectionEnabled,
+        faceOrientation,
+        setFaceDetectionEnabled,
     };
 }
