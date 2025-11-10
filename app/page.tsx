@@ -63,7 +63,8 @@ export default function Home() {
     worldId: null, // Always null for home page (anonymous users)
     initialBackgroundColor: hostColors.background,
     userUid: null, // Always null for home page
-    initialZoomLevel: 1.6 // Zoomed in for host mode onboarding
+    initialZoomLevel: 1.6, // Zoomed in for host mode onboarding
+    skipInitialBackground: !isVerifyingEmail // Skip initial bg when intro flow is active
   });
 
   const handleAuthSuccess = useCallback((username: string) => {
