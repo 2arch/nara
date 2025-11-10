@@ -176,7 +176,7 @@ export interface WorldEngine {
     cursorPos: Point;
     zoomLevel: number;
     backgroundMode: BackgroundMode;
-    backgroundColor: string;
+    backgroundColor?: string; // Optional - undefined for transparent stream/image backgrounds
     backgroundImage?: string;
     backgroundVideo?: string;
     backgroundStream?: MediaStream;
