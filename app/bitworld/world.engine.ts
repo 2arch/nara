@@ -228,6 +228,7 @@ export interface WorldEngine {
     getBlocksInRegion: (center: Point, radius: number) => Point[];
     isBlock: (x: number, y: number) => boolean;
     dialogueText: string;
+    dialogueTimestamp: number | undefined; // Timestamp when dialogue text was set (for animations)
     setDialogueText: (text: string) => void;
     setTapeRecordingCallback: (callback: () => Promise<void> | void) => void;
     tapeRecordingCallback: (() => Promise<void> | void) | null;
@@ -642,8 +643,15 @@ export function useWorldEngine({
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
     const [focusedBoundKey, setFocusedBoundKey] = useState<string | null>(null); // Track which bound is focused
     const [boundCycleIndex, setBoundCycleIndex] = useState<number>(0); // Track which bound to cycle to next
-    const [dialogueText, setDialogueText] = useState('');
+    const [dialogueText, setDialogueTextState] = useState('');
+    const [dialogueTimestamp, setDialogueTimestamp] = useState<number | undefined>(undefined);
     const tapeRecordingCallbackRef = useRef<(() => Promise<void> | void) | null>(null);
+
+    // Wrapper for setDialogueText that also updates timestamp
+    const setDialogueText = useCallback((text: string) => {
+        setDialogueTextState(text);
+        setDialogueTimestamp(text ? Date.now() : undefined); // Set timestamp if text exists, clear if empty
+    }, []);
     const [membershipLevel, setMembershipLevel] = useState<string | undefined>(undefined);
 
     // Inline autocomplete state
@@ -10836,6 +10844,7 @@ export function useWorldEngine({
         setIsNavVisible,
         navOriginPosition,
         dialogueText,
+        dialogueTimestamp,
         setDialogueText,
         setTapeRecordingCallback,
         tapeRecordingCallback: tapeRecordingCallbackRef.current,
