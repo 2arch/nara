@@ -476,7 +476,6 @@ const useMonogramSystem = (
             rotX = options.externalRotation.rotX;
             rotY = options.externalRotation.rotY;
             rotZ = options.externalRotation.rotZ;
-            console.log('[Monogram 3D] Using face rotation:', { rotX, rotY, rotZ });
         } else {
             // Static neutral pose when no face control (slight angle for depth)
             rotX = 0.3;
