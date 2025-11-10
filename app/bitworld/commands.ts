@@ -43,7 +43,7 @@ export interface ModeState {
     currentMode: CanvasMode;
     lightModeData: WorldData; // Ephemeral text data for air mode
     backgroundMode: BackgroundMode;
-    backgroundColor: string;
+    backgroundColor?: string; // Optional - undefined for transparent stream/image backgrounds
     backgroundImage?: string; // URL or data URL for generated images
     backgroundVideo?: string; // URL or data URL for generated videos
     backgroundStream?: MediaStream; // MediaStream for screen share

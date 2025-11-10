@@ -1916,7 +1916,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         ctx.save();
         ctx.scale(dpr, dpr);
         
-        if (engine.backgroundMode === 'color') {
+        if (engine.backgroundMode === 'color' && engine.backgroundColor) {
             ctx.fillStyle = engine.backgroundColor;
             ctx.fillRect(0, 0, cssWidth, cssHeight);
         } else if (engine.backgroundMode === 'image' && engine.backgroundImage) {
@@ -2866,7 +2866,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             ctx.fillStyle = engine.textColor;
                         } else if (isInActiveTask) {
                             // Text within task highlight uses background color for contrast
-                            ctx.fillStyle = engine.backgroundColor;
+                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
                         } else if (boundInfo) {
                             ctx.fillStyle = boundInfo.textColor;
                         } else {
@@ -3091,7 +3091,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             if (char && char.trim() !== '') {
                                 // Apply background highlight for host text with fade-in
                                 const bgColorWithAlpha = (() => {
-                                    const color = engine.backgroundColor;
+                                    const color = engine.backgroundColor || '#000000'; // Fallback to black
                                     if (color.startsWith('#')) {
                                         const hex = color.replace('#', '');
                                         const r = parseInt(hex.substring(0, 2), 16);
@@ -3169,7 +3169,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             if (char && char.trim() !== '') {
                                 // Render the hint character in backgroundColor with fade-in
                                 const hintColorWithAlpha = (() => {
-                                    const color = engine.backgroundColor;
+                                    const color = engine.backgroundColor || '#000000'; // Fallback to black
                                     if (color.startsWith('#')) {
                                         const hex = color.replace('#', '');
                                         const r = parseInt(hex.substring(0, 2), 16);
@@ -3240,7 +3240,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     });
 
                     // Draw main arrow in solid backgroundColor (no pulsing)
-                    drawArrow(ctx, adjustedX, adjustedY, intersection.angle, engine.backgroundColor);
+                    drawArrow(ctx, adjustedX, adjustedY, intersection.angle, engine.backgroundColor || '#FFFFFF');
                 }
             }
         } else {
@@ -3988,7 +3988,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 ctx.fillRect(charScreenPos.x, charScreenPos.y, effectiveCharWidth, effectiveCharHeight);
 
                                 // Render text with background color (cutout effect)
-                                ctx.fillStyle = engine.backgroundColor;
+                                ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
                                 ctx.fillText(text[charIndex], charScreenPos.x, charScreenPos.y + verticalTextOffset);
                             }
                         } else {
