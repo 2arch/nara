@@ -174,7 +174,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'note': 'Quick shortcut to enter note mode. This creates a focused writing space perfect for drafting ideas before placing them on your main canvas.',
     'mail': '[SUPER ONLY] Create an email region. Select a rectangular area, type /mail. Row 1 = recipient email, Row 2 = subject line, Row 3+ = message body. Click the send button to deliver the email.',
     'chat': 'Quick shortcut to enter chat mode. Talk with AI to transform, expand, or generate text. The AI can help you develop ideas or create content based on your prompts.',
-    'talk': 'Enable face-piloted geometry with different face styles. Type /talk to use default Macintosh face, or /talk [facename] to select a specific face (macintosh, robot, kawaii). Activates your webcam and tracks your face to control the face in real-time. Defaults to front camera.',
+    'talk': 'Enable face-piloted geometry with different face styles. Type /talk to use default Macintosh face, or /talk [facename] to select a specific face (macintosh, robot, kawaii). Activates your front webcam and tracks your face to control the face in real-time.',
     'tutorial': 'Start the interactive tutorial. Learn the basics of spatial writing through hands-on exercises that teach you core commands and concepts.',
     'help': 'Show this detailed help menu. The command list stays open with descriptions for every available command, so you can explore what\'s possible.',
     'tab': 'Toggle AI-powered autocomplete suggestions. When enabled, type and see AI suggestions appear as gray text. Press Tab to accept suggestions.',
@@ -1400,36 +1400,19 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         // Handle /talk command for face-piloted geometry
         if (commandToExecute.startsWith('talk')) {
             const inputParts = commandState.input.trim().split(/\s+/);
-            const firstArg = inputParts.length > 1 ? inputParts[1] : undefined;
+            const faceName = inputParts.length > 1 ? inputParts[1].toLowerCase() : 'macintosh';
 
             try {
-                // Determine face mask and camera
-                let maskName = 'macintosh'; // Default face mask
-                let facingMode: 'user' | 'environment' = 'user'; // Default to front camera
-                let cameraLabel = 'front';
+                // Always use front camera for face tracking
+                const facingMode: 'user' | 'environment' = 'user';
+                const maskName = faceName; // Use provided face name or default to macintosh
 
-                if (firstArg) {
-                    const arg = firstArg.toLowerCase();
-
-                    // Check if it's a camera specification (backward compatibility)
-                    if (arg === 'back' || arg === 'rear') {
-                        facingMode = 'environment';
-                        cameraLabel = 'back';
-                    } else if (arg === 'front' || arg === 'user') {
-                        facingMode = 'user';
-                        cameraLabel = 'front';
-                    } else {
-                        // Treat as face mask name
-                        maskName = arg;
-                    }
-                }
-
-                // Request webcam access with explicit facingMode constraint
+                // Request webcam access with front camera
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: {
                         width: { ideal: 1920 },
                         height: { ideal: 1080 },
-                        facingMode: { ideal: facingMode, exact: facingMode === 'user' ? undefined : facingMode }
+                        facingMode: { ideal: 'user' }
                     },
                     audio: false
                 });
@@ -1437,13 +1420,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 // Log which camera was actually selected
                 const videoTrack = stream.getVideoTracks()[0];
                 const trackSettings = videoTrack.getSettings();
-                console.log('[Camera] Requested:', facingMode, '| Actual:', trackSettings.facingMode, '| Label:', videoTrack.label);
-
-                // Warn if wrong camera was selected
-                if (facingMode === 'user' && trackSettings.facingMode === 'environment') {
-                    console.warn('[Camera] Warning: Requested front camera but got back camera. Try /talk front explicitly or check browser permissions.');
-                    setDialogueWithRevert(`Using ${trackSettings.facingMode || 'unknown'} camera. If face detection fails, your device might be showing the wrong camera. Try flipping your device or use /talk back.`, setDialogueText);
-                }
+                console.log('[Camera] Facetalk active | Actual:', trackSettings.facingMode, '| Label:', videoTrack.label, '| Mask:', maskName);
 
                 // Stop any existing stream
                 if (backgroundStreamRef.current) {
@@ -1480,7 +1457,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     monogramSystem.updateOption('maskName', maskName);
                 }
 
-                setDialogueWithRevert(`Face-piloted geometry active (${cameraLabel} camera, ${maskName} face). Turn your head to pilot the face!`, setDialogueText);
+                setDialogueWithRevert(`Face-piloted geometry active (${maskName} face). Turn your head to pilot the face!`, setDialogueText);
             } catch (error) {
                 console.error('Failed to start face detection:', error);
                 setDialogueWithRevert("Failed to access camera. Please grant permission.", setDialogueText);
