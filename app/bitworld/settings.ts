@@ -36,7 +36,8 @@ export const initialSettings: WorldSettings = {
         geometryType: 'octahedron',
         interactiveTrails: true,
         trailIntensity: 0.5,
-        trailFadeMs: 500
+        trailFadeMs: 500,
+        maskName: 'macintosh'
     },
     labelProximityThreshold: 999999,
     isAutocompleteEnabled: false, // Autocomplete disabled by default

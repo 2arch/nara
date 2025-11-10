@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Point } from './world.engine';
+import { getMask, calculateFaceScale, type FaceDynamics, type Mask } from './mask';
 
 // Trail position interface for interactive monogram trails
 interface MonogramTrailPosition {
@@ -68,6 +69,8 @@ export interface MonogramOptions {
     interactiveTrails: boolean; // Enable mouse interaction trails
     trailIntensity: number; // Trail effect intensity (0.1 - 2.0)
     trailFadeMs: number; // Trail fade duration in milliseconds
+    // Face mask options
+    maskName: string; // Name of the face mask to use (e.g., 'macintosh', 'robot', 'kawaii')
     // Face-controlled rotation and expression (overrides time-based rotation)
     externalRotation?: {
         rotX: number;
@@ -94,7 +97,8 @@ const useMonogramSystem = (
             geometryType: 'octahedron',
             interactiveTrails: true,
             trailIntensity: 1.0,
-            trailFadeMs: 2000
+            trailFadeMs: 2000,
+            maskName: 'macintosh' // Default face mask
         }
     );
 
@@ -583,65 +587,18 @@ const useMonogramSystem = (
         const centerX = (viewportBounds.startX + viewportBounds.endX) / 2;
         const centerY = (viewportBounds.startY + viewportBounds.endY) / 2;
 
-        // Define face features as a reusable data structure (in face coordinate space)
-        // Note: Eye height will be modulated by eye openness, mouth by mouth opening
-        interface FaceFeature {
-            cx: number;      // center x
-            cy: number;      // center y (base position)
-            width: number;
-            height: number;  // base height
-            type: 'leftEye' | 'rightEye' | 'noseVert' | 'noseHoriz' | 'mouth' | 'leftCorner' | 'rightCorner';
-        }
+        // Get the selected face mask
+        const mask = getMask(options.maskName);
 
-        const baseFaceFeatures: FaceFeature[] = [
-            { cx: -14.3, cy: -9.1, width: 5.8, height: 14.6, type: 'leftEye' },
-            { cx: 14.3, cy: -9.1, width: 5.8, height: 14.6, type: 'rightEye' },
-            { cx: 0, cy: 3.9, width: 4.4, height: 10.4, type: 'noseVert' },
-            { cx: 5.2, cy: 9.1, width: 10.4, height: 4.4, type: 'noseHoriz' },
-            { cx: 2.6, cy: 18.2, width: 23.4, height: 4.4, type: 'mouth' },
-            { cx: -11, cy: 16.2, width: 4.4, height: 4.4, type: 'leftCorner' },
-            { cx: 16.2, cy: 16.2, width: 4.4, height: 4.4, type: 'rightCorner' },
-        ];
-
-        // Calculate bounding box accounting for maximum possible mouth opening
-        const maxMouthOpen = 1.0; // Maximum mouth openness value
-        const maxMouthScale = 1 + maxMouthOpen * 3; // Up to 4x height when fully open
-
-        const faceBounds = baseFaceFeatures.reduce((acc, feature) => {
-            let cy = feature.cy;
-            let height = feature.height;
-
-            // Account for dynamic mouth movement in bounding box
-            if (feature.type === 'mouth') {
-                cy = cy + maxMouthOpen * 4; // Maximum Y shift
-                height = height * maxMouthScale; // Maximum height scale
-            } else if (feature.type === 'leftCorner' || feature.type === 'rightCorner') {
-                cy = cy + maxMouthOpen * 3; // Maximum corner Y shift
-            }
-
-            const minX = feature.cx - feature.width / 2;
-            const maxX = feature.cx + feature.width / 2;
-            const minY = cy - height / 2;
-            const maxY = cy + height / 2;
-
-            return {
-                minX: Math.min(acc.minX, minX),
-                maxX: Math.max(acc.maxX, maxX),
-                minY: Math.min(acc.minY, minY),
-                maxY: Math.max(acc.maxY, maxY),
-            };
-        }, { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
-
-        const faceWidth = faceBounds.maxX - faceBounds.minX;
-        const faceHeight = faceBounds.maxY - faceBounds.minY;
-
-        // Cat-in-container scaling: fill viewport while maintaining aspect ratio
-        const fillPercentage = 0.7; // Use 70% of viewport for safety margin
-        const scaleX = (viewportWidth * fillPercentage) / faceWidth;
-        const scaleY = (viewportHeight * fillPercentage) / faceHeight;
-
-        // Scale to fit the smaller dimension (guarantees fit in both dimensions)
-        const faceScale = Math.min(scaleX, scaleY) * complexity;
+        // Calculate bounding box and scale from mask
+        const faceBounds = mask.getBounds();
+        const faceScale = calculateFaceScale(
+            faceBounds,
+            viewportWidth,
+            viewportHeight,
+            0.7, // 70% fill percentage
+            complexity
+        );
 
         // Rotation angles - use external rotation with clamping
         let rotX: number, rotY: number, rotZ: number;
@@ -727,95 +684,59 @@ const useMonogramSystem = (
             return {inside, depth: avgDepth};
         };
 
-        // Eye blink logic - use tracked blinks if available, otherwise automatic
-        let leftEyeOpenness = 1.0;
-        let rightEyeOpenness = 1.0;
+        // Prepare dynamics for mask
+        let leftEyeBlink = 0;
+        let rightEyeBlink = 0;
 
         if (options.externalRotation?.leftEyeBlink !== undefined &&
             options.externalRotation?.rightEyeBlink !== undefined) {
-            // Use tracked eye blinks (0=open, 1=closed, so invert)
-            leftEyeOpenness = 1 - options.externalRotation.leftEyeBlink;
-            rightEyeOpenness = 1 - options.externalRotation.rightEyeBlink;
+            // Use tracked eye blinks
+            leftEyeBlink = options.externalRotation.leftEyeBlink;
+            rightEyeBlink = options.externalRotation.rightEyeBlink;
         } else {
             // Fallback to automatic blink animation
             const blinkCycle = time * 0.5;
             const blinkPhase = blinkCycle % 5;
-            let autoEyeOpenness = 1.0;
+            let autoBlink = 0;
             if (blinkPhase < 0.15) {
-                autoEyeOpenness = Math.sin(blinkPhase / 0.15 * Math.PI);
+                autoBlink = 1 - Math.sin(blinkPhase / 0.15 * Math.PI);
             } else if (blinkPhase > 4.5 && blinkPhase < 4.7) {
-                autoEyeOpenness = Math.sin((blinkPhase - 4.5) / 0.2 * Math.PI);
+                autoBlink = 1 - Math.sin((blinkPhase - 4.5) / 0.2 * Math.PI);
             }
-            leftEyeOpenness = autoEyeOpenness;
-            rightEyeOpenness = autoEyeOpenness;
+            leftEyeBlink = autoBlink;
+            rightEyeBlink = autoBlink;
         }
 
-        // Mouth openness from face tracking (0-1)
         const mouthOpen = options.externalRotation?.mouthOpen ?? 0;
-        const mouthScale = 1 + mouthOpen * 3; // Up to 4x height when fully open
 
-        // Define face features as 3D rectangles (all at z=0 for flat face)
-        // Left eye - uses tracked left eye openness
-        const leftEyeCorners = projectRectangle(-14.3, -9.1, 0, 5.8, 14.6 * leftEyeOpenness);
-        const leftEyeCheck = isInsideQuad(x, y, leftEyeCorners);
-        if (leftEyeCheck.inside) {
-            const depthFactor = Math.max(0.5, 1 - Math.abs(leftEyeCheck.depth) / 100);
-            return 1.0 * depthFactor;
-        }
+        // Get face features with current dynamics applied
+        const dynamics: FaceDynamics = {
+            leftEyeBlink,
+            rightEyeBlink,
+            mouthOpen,
+        };
 
-        // Right eye - uses tracked right eye openness
-        const rightEyeCorners = projectRectangle(14.3, -9.1, 0, 5.8, 14.6 * rightEyeOpenness);
-        const rightEyeCheck = isInsideQuad(x, y, rightEyeCorners);
-        if (rightEyeCheck.inside) {
-            const depthFactor = Math.max(0.5, 1 - Math.abs(rightEyeCheck.depth) / 100);
-            return 1.0 * depthFactor;
-        }
+        const features = mask.getFeaturesWithDynamics(dynamics);
 
-        // Nose - vertical part
-        const noseVertCorners = projectRectangle(0, 3.9, 0, 4.4, 10.4);
-        const noseVertCheck = isInsideQuad(x, y, noseVertCorners);
-        if (noseVertCheck.inside) {
-            const depthFactor = Math.max(0.5, 1 - Math.abs(noseVertCheck.depth) / 100);
-            return 1.0 * depthFactor;
-        }
+        // Render each feature
+        for (const feature of features) {
+            const corners = projectRectangle(
+                feature.cx,
+                feature.cy,
+                feature.cz,
+                feature.width,
+                feature.height
+            );
 
-        // Nose - horizontal part
-        const noseHorizCorners = projectRectangle(5.2, 9.1, 0, 10.4, 4.4);
-        const noseHorizCheck = isInsideQuad(x, y, noseHorizCorners);
-        if (noseHorizCheck.inside) {
-            const depthFactor = Math.max(0.5, 1 - Math.abs(noseHorizCheck.depth) / 100);
-            return 1.0 * depthFactor;
-        }
-
-        // Mouth - horizontal bar (moves and scales with mouth opening)
-        const mouthCenterY = 18.2 + (mouthOpen * 4);
-        const mouthHeight = 4.4 * mouthScale;
-        const mouthCorners = projectRectangle(2.6, mouthCenterY, 0, 23.4, mouthHeight);
-        const mouthCheck = isInsideQuad(x, y, mouthCorners);
-        if (mouthCheck.inside) {
-            const depthFactor = Math.max(0.5, 1 - Math.abs(mouthCheck.depth) / 100);
-            return 1.0 * depthFactor;
-        }
-
-        // Left mouth corner
-        const cornerY = 16.2 + (mouthOpen * 3);
-        const leftCornerCorners = projectRectangle(-11, cornerY, 0, 4.4, 4.4);
-        const leftCornerCheck = isInsideQuad(x, y, leftCornerCorners);
-        if (leftCornerCheck.inside) {
-            const depthFactor = Math.max(0.5, 1 - Math.abs(leftCornerCheck.depth) / 100);
-            return 1.0 * depthFactor;
-        }
-
-        // Right mouth corner
-        const rightCornerCorners = projectRectangle(16.2, cornerY, 0, 4.4, 4.4);
-        const rightCornerCheck = isInsideQuad(x, y, rightCornerCorners);
-        if (rightCornerCheck.inside) {
-            const depthFactor = Math.max(0.5, 1 - Math.abs(rightCornerCheck.depth) / 100);
-            return 1.0 * depthFactor;
+            const check = isInsideQuad(x, y, corners);
+            if (check.inside) {
+                const depthFactor = Math.max(0.5, 1 - Math.abs(check.depth) / 100);
+                return 1.0 * depthFactor;
+            }
         }
 
         return 0;
-    }, [options.complexity, options.externalRotation]);
+    }, [options.complexity, options.externalRotation, options.maskName]);
 
     // Curated font list for randomization
     const curatedFonts = [

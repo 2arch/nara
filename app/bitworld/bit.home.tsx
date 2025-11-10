@@ -149,6 +149,7 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         interactiveTrails: true,
         trailIntensity: 0.5,
         trailFadeMs: 500,
+        maskName: 'macintosh',
     });
     
     // === Form Layout Calculation (Dialogue.tsx pattern) ===
