@@ -68,6 +68,12 @@ export interface MonogramOptions {
     interactiveTrails: boolean; // Enable mouse interaction trails
     trailIntensity: number; // Trail effect intensity (0.1 - 2.0)
     trailFadeMs: number; // Trail fade duration in milliseconds
+    // Face-controlled rotation (overrides time-based rotation)
+    externalRotation?: {
+        rotX: number;
+        rotY: number;
+        rotZ: number;
+    };
 }
 
 // --- Mathematical Pattern Generators ---
@@ -462,12 +468,21 @@ const useMonogramSystem = (
         
         // Geometry size based on viewport
         const geometrySize = viewportWidth * 0.25 * complexity;
-        
-        // Rotation angles
-        const rotX = time * options.speed;
-        const rotY = time * options.speed;
-        const rotZ = time * options.speed;
-        
+
+        // Rotation angles - use external rotation if provided, otherwise time-based
+        let rotX: number, rotY: number, rotZ: number;
+        if (options.externalRotation) {
+            // Face-controlled rotation
+            rotX = options.externalRotation.rotX;
+            rotY = options.externalRotation.rotY;
+            rotZ = options.externalRotation.rotZ;
+        } else {
+            // Default time-based rotation
+            rotX = time * options.speed;
+            rotY = time * options.speed;
+            rotZ = time * options.speed;
+        }
+
         // Rotation matrices
         const cosX = Math.cos(rotX), sinX = Math.sin(rotX);
         const cosY = Math.cos(rotY), sinY = Math.sin(rotY);
@@ -1461,6 +1476,11 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
         });
     }, []);
 
+    // Update external rotation (for face control)
+    const setExternalRotation = useCallback((rotation: { rotX: number; rotY: number; rotZ: number } | undefined) => {
+        setOptions(prev => ({ ...prev, externalRotation: rotation }));
+    }, []);
+
     return {
         options,
         generateMonogramPattern,
@@ -1469,7 +1489,8 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
         updateOption,
         setOptions,
         updateMousePosition,
-        mouseTrail
+        mouseTrail,
+        setExternalRotation
     };
 };
 
