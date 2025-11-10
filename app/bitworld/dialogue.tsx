@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { WorldEngine, WorldData } from './world.engine';
+import { getDialogueDisplay, type DialogueRenderContext } from './dialogue.display';
 
 // --- Dialogue Constants ---
 const DIALOGUE_FONT_SIZE = 16; // Fixed font size in pixels
@@ -159,42 +160,49 @@ export function useDialogue() {
         };
     }, [wrapText]);
 
-    const renderDialogue = useCallback((props: DialogueProps & { dialogueText: string }) => {
-        const { canvasWidth, canvasHeight, ctx, dialogueText } = props;
+    const renderDialogue = useCallback((props: DialogueProps & {
+        dialogueText: string,
+        displayName?: string,
+        textColor?: string,
+        backgroundColor?: string,
+        timestamp?: number
+    }) => {
+        const {
+            canvasWidth,
+            canvasHeight,
+            ctx,
+            dialogueText,
+            displayName = 'subtitle',
+            textColor = DIALOGUE_TEXT_COLOR,
+            backgroundColor = '#FFFFFF',
+            timestamp
+        } = props;
+
         // Use fixed dimensions for dialogue, independent of world zoom
         const charHeight = DIALOGUE_FONT_SIZE;
         const charWidth = DIALOGUE_FONT_SIZE * CHAR_WIDTH_RATIO;
-        const verticalTextOffset = (charHeight - DIALOGUE_FONT_SIZE) / 2 + (DIALOGUE_FONT_SIZE * 0.1);
 
-        const dialogueLayout = calculateDialogueLayout(dialogueText, canvasWidth, canvasHeight, charWidth, charHeight);
-        
-        // Set font properties for rendering
-        ctx.save();
-        ctx.font = `${DIALOGUE_FONT_SIZE}px "${FONT_FAMILY}"`;
-        ctx.textBaseline = 'top';
+        // Get the selected dialogue display
+        const display = getDialogueDisplay(displayName);
 
-        // Draw background
-        ctx.fillStyle = DIALOGUE_BACKGROUND_COLOR;
-        for (let lineIndex = 0; lineIndex < dialogueLayout.lines.length; lineIndex++) {
-            const rowIndex = dialogueLayout.startRow + lineIndex;
-            const line = dialogueLayout.lines[lineIndex];
-            const screenX = dialogueLayout.startCol * charWidth;
-            const screenY = rowIndex * charHeight;
-            const lineWidth = line.length * charWidth;
-            ctx.fillRect(screenX, screenY, lineWidth, charHeight);
-        }
-        
-        // Draw text
-        ctx.fillStyle = DIALOGUE_TEXT_COLOR;
-        for (let lineIndex = 0; lineIndex < dialogueLayout.lines.length; lineIndex++) {
-            const rowIndex = dialogueLayout.startRow + lineIndex;
-            const line = dialogueLayout.lines[lineIndex];
-            const screenX = dialogueLayout.startCol * charWidth;
-            const screenY = rowIndex * charHeight;
-            ctx.fillText(line, screenX, screenY + verticalTextOffset);
-        }
-        ctx.restore();
-    }, [calculateDialogueLayout]);
+        // Prepare render context
+        const renderContext: DialogueRenderContext = {
+            ctx,
+            text: dialogueText,
+            canvasWidth,
+            canvasHeight,
+            charWidth,
+            charHeight,
+            fontSize: DIALOGUE_FONT_SIZE,
+            fontFamily: FONT_FAMILY,
+            textColor,
+            backgroundColor,
+            timestamp
+        };
+
+        // Render using the selected display
+        display.render(renderContext);
+    }, []);
 
     const calculateDebugLayout = useCallback((canvasWidth: number, canvasHeight: number, charWidth: number, charHeight: number, debugText: string): DialogueLayout => {
         const availableHeightChars = Math.floor(canvasHeight / charHeight);
