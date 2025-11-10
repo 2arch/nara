@@ -50,6 +50,7 @@ export const TIME_BASED_INTRO: IntroConfig = {
 /**
  * Image-based intro: Perlin monogram over curated image
  * Premium feel with visual depth
+ * Shows image background throughout (NARA banner → Perlin transition)
  */
 export const IMAGE_INTRO: IntroConfig = {
     id: 'image-based',
@@ -62,6 +63,7 @@ export const IMAGE_INTRO: IntroConfig = {
     hostTextColor: '#FFA500',
     showBanner: true,
     bannerDuration: 1500,
+    bannerBackgroundColor: undefined, // No solid color - show image through banner
     hostFlow: 'intro'
 };
 
