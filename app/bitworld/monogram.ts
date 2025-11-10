@@ -10,7 +10,7 @@ interface MonogramTrailPosition {
 }
 
 // --- Monogram Pattern Types ---
-export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'geometry3d' | 'macintosh' | 'loading' | 'road' | 'terrain';
+export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'geometry3d' | 'face3d' | 'macintosh' | 'loading' | 'road' | 'terrain';
 
 // Label position interface for road mode
 export interface LabelPosition {
@@ -218,6 +218,7 @@ const useMonogramSystem = (
             perlin: [' ', '░', '▒', '▓', '█'],
             nara: ['░', '▒', '▓', '█'], // Back to varied blocks for texture
             geometry3d: [' ', '░', '▒', '▓', '█'], // Standard block progression for 3D
+            face3d: [' ', '░', '▒', '▓', '█'], // Standard block progression for face-controlled 3D
             macintosh: [' ', '░', '▒', '▓', '█'], // Standard block progression for Mac face
             loading: [' ', '░', '▒', '▓', '█'], // Standard block progression for loading text
             road: [' ', '░', '▒', '▓', '█'], // Standard block progression for roads between labels
@@ -231,8 +232,8 @@ const useMonogramSystem = (
 
     // Get color from palette based on value
     const getColorFromPalette = useCallback((value: number, mode: MonogramMode, accentColor: string): string => {
-        if (mode === 'nara' || mode === 'macintosh' || mode === 'loading' || mode === 'road' || mode === 'terrain') {
-            // Use accent color for NARA, Macintosh, Loading, Road, and Terrain modes
+        if (mode === 'nara' || mode === 'macintosh' || mode === 'loading' || mode === 'road' || mode === 'terrain' || mode === 'face3d') {
+            // Use accent color for NARA, Macintosh, Loading, Road, Terrain, and Face3D modes
             return accentColor;
         }
 
@@ -561,6 +562,120 @@ const useMonogramSystem = (
         
         return 0;
     }, [options.complexity, options.speed, options.geometryType, options.customGeometry, generateGeometry]);
+
+    // Face-controlled 3D geometry - specifically designed for face tracking
+    const calculateFace3D = useCallback((x: number, y: number, time: number, viewportBounds?: {
+        startX: number,
+        startY: number,
+        endX: number,
+        endY: number
+    }): number => {
+        if (!viewportBounds) return 0;
+
+        const complexity = options.complexity;
+        const geometry = generateGeometry('octahedron'); // Fixed octahedron for face mode
+
+        // Calculate viewport dimensions and center
+        const viewportWidth = viewportBounds.endX - viewportBounds.startX;
+        const viewportHeight = viewportBounds.endY - viewportBounds.startY;
+        const centerX = (viewportBounds.startX + viewportBounds.endX) / 2;
+        const centerY = (viewportBounds.startY + viewportBounds.endY) / 2;
+
+        // Larger geometry size for better visibility
+        const geometrySize = viewportWidth * 0.3 * complexity;
+
+        // Rotation angles - ALWAYS use external rotation
+        let rotX: number, rotY: number, rotZ: number;
+        if (options.externalRotation) {
+            // Face-controlled rotation (dynamic based on head movement)
+            rotX = options.externalRotation.rotX;
+            rotY = options.externalRotation.rotY;
+            rotZ = options.externalRotation.rotZ;
+        } else {
+            // Neutral pose if no face data yet
+            rotX = 0;
+            rotY = 0;
+            rotZ = 0;
+        }
+
+        // Rotation matrices
+        const cosX = Math.cos(rotX), sinX = Math.sin(rotX);
+        const cosY = Math.cos(rotY), sinY = Math.sin(rotY);
+        const cosZ = Math.cos(rotZ), sinZ = Math.sin(rotZ);
+
+        // Project all vertices to 2D
+        const projectedVertices = geometry.vertices.map(vertex => {
+            // Scale by geometry size
+            let x3d = vertex.x * geometrySize;
+            let y3d = vertex.y * geometrySize;
+            let z3d = vertex.z * geometrySize;
+
+            // Apply rotations
+            // Rotate around X axis
+            let temp = y3d;
+            y3d = temp * cosX - z3d * sinX;
+            z3d = temp * sinX + z3d * cosX;
+
+            // Rotate around Y axis
+            temp = x3d;
+            x3d = temp * cosY + z3d * sinY;
+            z3d = -temp * sinY + z3d * cosY;
+
+            // Rotate around Z axis
+            temp = x3d;
+            x3d = temp * cosZ - y3d * sinZ;
+            y3d = temp * sinZ + y3d * cosZ;
+
+            // Simple perspective projection
+            const distance = 500;
+            const projX = centerX + (x3d * distance * 0.5) / (distance + z3d);
+            const projY = centerY + (y3d * distance * 0.25) / (distance + z3d);
+
+            return [projX, projY, z3d];
+        });
+
+        // Check if current point is near any edge
+        let minDistance = Infinity;
+        let closestEdgeDepth = 0;
+
+        for (const edge of geometry.edges) {
+            const [x1, y1, z1] = projectedVertices[edge.start];
+            const [x2, y2, z2] = projectedVertices[edge.end];
+
+            // Calculate distance from point to line segment
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const len = Math.sqrt(dx * dx + dy * dy);
+
+            if (len > 0) {
+                const t = Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / (len * len)));
+                const projX = x1 + t * dx;
+                const projY = y1 + t * dy;
+                const distance = Math.sqrt((x - projX) ** 2 + (y - projY) ** 2);
+
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closestEdgeDepth = z1 + t * (z2 - z1); // Interpolate depth
+                }
+            }
+        }
+
+        // Thicker lines for better visibility
+        const lineThickness = 3 + complexity * 2;
+
+        if (minDistance <= lineThickness) {
+            // Intensity based on distance to edge and depth
+            let intensity = 1 - (minDistance / lineThickness);
+
+            // Depth-based intensity (closer edges are brighter)
+            const depthFactor = Math.max(0.4, 1 - (closestEdgeDepth + geometrySize) / (geometrySize * 2));
+            intensity *= depthFactor;
+
+            return Math.max(0, Math.min(1, intensity));
+        }
+
+        return 0;
+    }, [options.complexity, options.externalRotation, generateGeometry]);
 
     // Curated font list for randomization
     const curatedFonts = [
@@ -1244,13 +1359,14 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
             case 'perlin': return calculatePerlin(x, y, time);
             case 'nara': return calculateNara(x, y, time, viewportBounds);
             case 'geometry3d': return calculate3DGeometry(x, y, time, viewportBounds);
+            case 'face3d': return calculateFace3D(x, y, time, viewportBounds);
             case 'macintosh': return calculateMacintosh(x, y, time, viewportBounds);
             case 'loading': return calculateLoading(x, y, time, viewportBounds);
             case 'road': return calculateRoad(x, y, time, labels || []);
             case 'terrain': return calculateTerrain(x, y, time, labels || []);
             default: return calculatePerlin(x, y, time);
         }
-    }, [calculatePerlin, calculateNara, calculate3DGeometry, calculateMacintosh, calculateLoading, calculateRoad, calculateTerrain]);
+    }, [calculatePerlin, calculateNara, calculate3DGeometry, calculateFace3D, calculateMacintosh, calculateLoading, calculateRoad, calculateTerrain]);
 
     // Calculate comet trail effect at a specific position
     const calculateTrailEffect = useCallback((x: number, y: number): number => {
@@ -1337,7 +1453,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
         }
 
         // For NARA, Macintosh, Loading, Road, Terrain, and 3D geometry modes, use finer sampling for better quality
-        const step = (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') ? 1 : Math.max(1, Math.floor(3 - options.complexity * 2));
+        const step = (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') ? 1 : Math.max(1, Math.floor(3 - options.complexity * 2));
         
         for (let worldY = Math.floor(startWorldY); worldY <= Math.ceil(endWorldY); worldY += step) {
             for (let worldX = Math.floor(startWorldX); worldX <= Math.ceil(endWorldX); worldX += step) {
@@ -1354,7 +1470,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
 
                 // Calculate new mode intensity
                 let newIntensity: number;
-                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') {
+                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') {
                     newIntensity = calculatePattern(worldX, worldY, time, options.mode, viewportBounds, labels);
                 } else {
                     newIntensity = Math.abs(calculatePattern(worldX, worldY, time, options.mode));
@@ -1365,7 +1481,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                     let oldIntensity: number;
                     const oldMode = transitionFromModeRef.current;
 
-                    if (oldMode === 'nara' || oldMode === 'geometry3d' || oldMode === 'macintosh' || oldMode === 'loading' || oldMode === 'road' || oldMode === 'terrain') {
+                    if (oldMode === 'nara' || oldMode === 'geometry3d' || oldMode === 'face3d' || oldMode === 'macintosh' || oldMode === 'loading' || oldMode === 'road' || oldMode === 'terrain') {
                         oldIntensity = calculatePattern(worldX, worldY, time, oldMode, viewportBounds, labels);
                     } else {
                         oldIntensity = Math.abs(calculatePattern(worldX, worldY, time, oldMode));
@@ -1385,7 +1501,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                 
                 // Skip very low intensity cells for performance (adjusted for trail effects)
                 const minThreshold = trailEffect > 0 ? 0.05 :
-                    ((options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') ? 0.15 : 0.1);
+                    ((options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') ? 0.15 : 0.1);
                 if (intensity < minThreshold) continue;
                 
                 const char = getCharForIntensity(intensity, options.mode);
@@ -1400,16 +1516,16 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                     const g = parseInt(hex.substring(2, 4), 16);
                     const b = parseInt(hex.substring(4, 6), 16);
                     color = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-                } else if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'clear' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') {
+                } else if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'clear' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') {
                     // Use text color for all monochromatic modes
                     color = accentColor;
                 } else {
                     const colorValue = rawValue * Math.PI + time * 0.5;
                     color = getColorFromPalette(colorValue, options.mode, accentColor);
                 }
-                
+
                 // For NARA, Macintosh, Loading, Road, Terrain, and geometry3d modes, only set the exact position to avoid grid artifacts
-                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') {
+                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') {
                     const key = `${worldX},${worldY}`;
                     pattern[key] = {
                         char,
