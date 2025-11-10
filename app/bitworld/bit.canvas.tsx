@@ -774,10 +774,18 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     useEffect(() => {
         if (engine.isFaceDetectionEnabled && engine.faceOrientation) {
             console.log('[Monogram] Setting external rotation:', engine.faceOrientation);
+            import('./face.debug').then(({ addFaceDebugLog }) => {
+                addFaceDebugLog('success', `Monogram rotation applied: rotX=${engine.faceOrientation!.rotX.toFixed(2)}, rotY=${engine.faceOrientation!.rotY.toFixed(2)}, rotZ=${engine.faceOrientation!.rotZ.toFixed(2)}`);
+            });
             monogramSystem.setExternalRotation(engine.faceOrientation);
         } else {
             // Clear external rotation when face detection is disabled
             console.log('[Monogram] Clearing external rotation');
+            if (engine.isFaceDetectionEnabled) {
+                import('./face.debug').then(({ addFaceDebugLog }) => {
+                    addFaceDebugLog('info', 'Monogram rotation cleared');
+                });
+            }
             monogramSystem.setExternalRotation(undefined);
         }
     }, [engine.isFaceDetectionEnabled, engine.faceOrientation]);

@@ -273,6 +273,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         if (modeState.isFaceDetectionEnabled && hasDetection && faceData) {
             const rotation = faceOrientationToRotation(smoothOrientation, true, false, false);
             console.log('[Face Detection] Orientation:', rotation);
+            import('./face.debug').then(({ addFaceDebugLog }) => {
+                addFaceDebugLog('info', `Rotation updated: rotX=${rotation.rotX.toFixed(2)}, rotY=${rotation.rotY.toFixed(2)}, rotZ=${rotation.rotZ.toFixed(2)}`);
+            });
             setModeState(prev => ({
                 ...prev,
                 faceOrientation: rotation
@@ -280,6 +283,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         } else if (modeState.isFaceDetectionEnabled && !hasDetection) {
             // Clear orientation when no face detected
             console.log('[Face Detection] No face detected');
+            import('./face.debug').then(({ addFaceDebugLog }) => {
+                addFaceDebugLog('warn', 'Face orientation cleared - no detection');
+            });
             setModeState(prev => ({
                 ...prev,
                 faceOrientation: undefined
