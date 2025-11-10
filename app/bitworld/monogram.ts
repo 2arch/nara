@@ -563,7 +563,7 @@ const useMonogramSystem = (
         return 0;
     }, [options.complexity, options.speed, options.geometryType, options.customGeometry, generateGeometry]);
 
-    // Face-controlled 3D geometry - specifically designed for face tracking
+    // Face-controlled 3D face - Macintosh-style face that rotates with head tracking
     const calculateFace3D = useCallback((x: number, y: number, time: number, viewportBounds?: {
         startX: number,
         startY: number,
@@ -573,7 +573,6 @@ const useMonogramSystem = (
         if (!viewportBounds) return 0;
 
         const complexity = options.complexity;
-        const geometry = generateGeometry('octahedron'); // Fixed octahedron for face mode
 
         // Calculate viewport dimensions and center
         const viewportWidth = viewportBounds.endX - viewportBounds.startX;
@@ -581,8 +580,8 @@ const useMonogramSystem = (
         const centerX = (viewportBounds.startX + viewportBounds.endX) / 2;
         const centerY = (viewportBounds.startY + viewportBounds.endY) / 2;
 
-        // Larger geometry size for better visibility
-        const geometrySize = viewportWidth * 0.3 * complexity;
+        // Scale for face features
+        const faceScale = viewportWidth * 0.015 * complexity;
 
         // Rotation angles - ALWAYS use external rotation
         let rotX: number, rotY: number, rotZ: number;
@@ -598,84 +597,101 @@ const useMonogramSystem = (
             rotZ = 0;
         }
 
-        // Rotation matrices
-        const cosX = Math.cos(rotX), sinX = Math.sin(rotX);
-        const cosY = Math.cos(rotY), sinY = Math.sin(rotY);
-        const cosZ = Math.cos(rotZ), sinZ = Math.sin(rotZ);
+        // Transform screen coordinates to face-relative coordinates
+        const relX = x - centerX;
+        const relY = y - centerY;
 
-        // Project all vertices to 2D
-        const projectedVertices = geometry.vertices.map(vertex => {
-            // Scale by geometry size
-            let x3d = vertex.x * geometrySize;
-            let y3d = vertex.y * geometrySize;
-            let z3d = vertex.z * geometrySize;
+        // Inverse perspective projection
+        // We need to unproject the 2D point back to 3D space
+        const distance = 500;
 
-            // Apply rotations
-            // Rotate around X axis
-            let temp = y3d;
-            y3d = temp * cosX - z3d * sinX;
-            z3d = temp * sinX + z3d * cosX;
+        // For each possible depth, check if the 3D point would be inside face features
+        // We'll sample at z=0 since face features are flat
+        const z3d = 0;
+        const scale = (distance + z3d) / distance;
+        let unproj3dX = relX * scale / 0.5;
+        let unproj3dY = relY * scale / 0.25;
+        let unproj3dZ = z3d;
 
-            // Rotate around Y axis
-            temp = x3d;
-            x3d = temp * cosY + z3d * sinY;
-            z3d = -temp * sinY + z3d * cosY;
+        // Apply inverse rotations (in reverse order: Z, Y, X)
+        // Inverse Z rotation
+        const cosZ = Math.cos(-rotZ), sinZ = Math.sin(-rotZ);
+        let temp = unproj3dX;
+        unproj3dX = temp * cosZ - unproj3dY * sinZ;
+        unproj3dY = temp * sinZ + unproj3dY * cosZ;
 
-            // Rotate around Z axis
-            temp = x3d;
-            x3d = temp * cosZ - y3d * sinZ;
-            y3d = temp * sinZ + y3d * cosZ;
+        // Inverse Y rotation
+        const cosY = Math.cos(-rotY), sinY = Math.sin(-rotY);
+        temp = unproj3dX;
+        unproj3dX = temp * cosY + unproj3dZ * sinY;
+        unproj3dZ = -temp * sinY + unproj3dZ * cosY;
 
-            // Simple perspective projection
-            const distance = 500;
-            const projX = centerX + (x3d * distance * 0.5) / (distance + z3d);
-            const projY = centerY + (y3d * distance * 0.25) / (distance + z3d);
+        // Inverse X rotation
+        const cosX = Math.cos(-rotX), sinX = Math.sin(-rotX);
+        temp = unproj3dY;
+        unproj3dY = temp * cosX - unproj3dZ * sinX;
+        unproj3dZ = temp * sinX + unproj3dZ * cosX;
 
-            return [projX, projY, z3d];
-        });
+        // Convert back to face coordinate system
+        const nx = unproj3dX / faceScale;
+        const ny = unproj3dY / faceScale;
 
-        // Check if current point is near any edge
-        let minDistance = Infinity;
-        let closestEdgeDepth = 0;
-
-        for (const edge of geometry.edges) {
-            const [x1, y1, z1] = projectedVertices[edge.start];
-            const [x2, y2, z2] = projectedVertices[edge.end];
-
-            // Calculate distance from point to line segment
-            const dx = x2 - x1;
-            const dy = y2 - y1;
-            const len = Math.sqrt(dx * dx + dy * dy);
-
-            if (len > 0) {
-                const t = Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / (len * len)));
-                const projX = x1 + t * dx;
-                const projY = y1 + t * dy;
-                const distance = Math.sqrt((x - projX) ** 2 + (y - projY) ** 2);
-
-                if (distance < minDistance) {
-                    minDistance = distance;
-                    closestEdgeDepth = z1 + t * (z2 - z1); // Interpolate depth
-                }
-            }
+        // Blink logic
+        const blinkCycle = time * 0.5;
+        const blinkPhase = blinkCycle % 5;
+        let eyeOpenness = 1.0;
+        if (blinkPhase < 0.15) {
+            eyeOpenness = Math.sin(blinkPhase / 0.15 * Math.PI);
+        } else if (blinkPhase > 4.5 && blinkPhase < 4.7) {
+            eyeOpenness = Math.sin((blinkPhase - 4.5) / 0.2 * Math.PI);
         }
 
-        // Thicker lines for better visibility
-        const lineThickness = 3 + complexity * 2;
+        // Check if point is inside any face feature
+        // Left eye
+        if (Math.abs(nx + 14.3) < 2.9 && Math.abs(ny + 9.1) < 7.3 * eyeOpenness) {
+            // Add depth-based shading
+            const depthFactor = Math.max(0.5, 1 - Math.abs(unproj3dZ) / 100);
+            return 1.0 * depthFactor;
+        }
 
-        if (minDistance <= lineThickness) {
-            // Intensity based on distance to edge and depth
-            let intensity = 1 - (minDistance / lineThickness);
+        // Right eye
+        if (Math.abs(nx - 14.3) < 2.9 && Math.abs(ny + 9.1) < 7.3 * eyeOpenness) {
+            const depthFactor = Math.max(0.5, 1 - Math.abs(unproj3dZ) / 100);
+            return 1.0 * depthFactor;
+        }
 
-            // Depth-based intensity (closer edges are brighter)
-            const depthFactor = Math.max(0.4, 1 - (closestEdgeDepth + geometrySize) / (geometrySize * 2));
-            intensity *= depthFactor;
+        // Nose (L-shape) - vertical part
+        if (Math.abs(nx) < 2.2 && ny > -1.3 && ny < 9.1) {
+            const depthFactor = Math.max(0.5, 1 - Math.abs(unproj3dZ) / 100);
+            return 1.0 * depthFactor;
+        }
 
-            return Math.max(0, Math.min(1, intensity));
+        // Nose (L-shape) - horizontal part
+        if (nx > 0 && nx < 10.4 && Math.abs(ny - 9.1) < 2.2) {
+            const depthFactor = Math.max(0.5, 1 - Math.abs(unproj3dZ) / 100);
+            return 1.0 * depthFactor;
+        }
+
+        // Mouth (horizontal bar)
+        if (Math.abs(ny - 18.2) < 2.2 && nx > -9.1 && nx < 14.3) {
+            const depthFactor = Math.max(0.5, 1 - Math.abs(unproj3dZ) / 100);
+            return 1.0 * depthFactor;
+        }
+
+        // Left mouth corner
+        if (Math.abs(nx + 11) < 2.2 && Math.abs(ny - 16.2) < 2.2) {
+            const depthFactor = Math.max(0.5, 1 - Math.abs(unproj3dZ) / 100);
+            return 1.0 * depthFactor;
+        }
+
+        // Right mouth corner
+        if (Math.abs(nx - 16.2) < 2.2 && Math.abs(ny - 16.2) < 2.2) {
+            const depthFactor = Math.max(0.5, 1 - Math.abs(unproj3dZ) / 100);
+            return 1.0 * depthFactor;
         }
 
         return 0;
-    }, [options.complexity, options.externalRotation, generateGeometry]);
+    }, [options.complexity, options.externalRotation]);
 
     // Curated font list for randomization
     const curatedFonts = [
