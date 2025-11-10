@@ -225,6 +225,8 @@ export const useFaceDetection = ({
                 // Calculate orientation from landmarks
                 const orientation = calculateOrientation(result);
 
+                addFaceDebugLog('success', `Face detected! Pitch: ${orientation.pitch.toFixed(2)}, Yaw: ${orientation.yaw.toFixed(2)}, Roll: ${orientation.roll.toFixed(2)}`);
+
                 // Extract blendshapes if available
                 const blendshapes = result.faceBlendshapes?.[0]?.categories
                     ? new Map(
@@ -247,12 +249,17 @@ export const useFaceDetection = ({
                 // Notify parent component
                 if (onFaceDetected) {
                     onFaceDetected(faceData);
+                    addFaceDebugLog('info', 'Face data sent to parent component');
                 }
             } else {
                 // No face detected
+                if (faceData !== null) {
+                    addFaceDebugLog('warn', 'Face lost - no face detected in frame');
+                }
                 setFaceData(null);
             }
         } catch (err) {
+            addFaceDebugLog('error', `Detection error: ${err}`);
             console.error('Face detection error:', err);
         }
 
