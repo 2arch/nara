@@ -600,11 +600,12 @@ const useMonogramSystem = (
         // Rotation angles - use external rotation with clamping
         let rotX: number, rotY: number, rotZ: number;
         if (options.externalRotation) {
-            // X-axis (pitch/nodding): Allow full range for up/down movement
-            rotX = options.externalRotation.rotX;
+            // X-axis (pitch/nodding): Clamp to ±45 degrees to prevent extreme up/down views
+            const maxPitch = Math.PI / 4; // 45 degrees
+            rotX = Math.max(-maxPitch, Math.min(maxPitch, options.externalRotation.rotX));
 
-            // Y-axis (yaw/turning): Clamp to ±60 degrees to prevent extreme side views
-            const maxYaw = Math.PI / 3; // 60 degrees
+            // Y-axis (yaw/turning): Clamp to ±45 degrees to prevent face becoming a sliver
+            const maxYaw = Math.PI / 4; // 45 degrees
             rotY = Math.max(-maxYaw, Math.min(maxYaw, options.externalRotation.rotY));
 
             // Z-axis (roll/tilting): Reduce to 30% to keep face more upright
