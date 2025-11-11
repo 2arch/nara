@@ -6759,6 +6759,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const newCenterX = newBounds.startX + newWidth / 2;
                         const newCenterY = newBounds.startY + newHeight / 2;
 
+                        // Calculate pattern top-left corners (for top-left anchor scaling like legacy rooms)
+                        const oldTopLeftX = Math.floor(oldCenterX - oldWidth / 2);
+                        const oldTopLeftY = Math.floor(oldCenterY - oldHeight / 2);
+                        const newTopLeftX = newBounds.startX;
+                        const newTopLeftY = newBounds.startY;
+
                         // Calculate scale factors
                         const scaleX = newWidth / oldWidth;
                         const scaleY = newHeight / oldHeight;
@@ -6775,13 +6781,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 try {
                                     const noteData = JSON.parse(engine.worldData[noteKey] as string);
 
-                                    // Get note top-left position relative to old pattern center (like legacy rooms)
+                                    // Get note dimensions
                                     const noteWidth = noteData.endX - noteData.startX + 1;
                                     const noteHeight = noteData.endY - noteData.startY + 1;
 
-                                    // Use top-left corner position (startX, startY) as reference point
-                                    const relX = noteData.startX - oldCenterX;
-                                    const relY = noteData.startY - oldCenterY;
+                                    // Calculate position relative to OLD pattern top-left corner
+                                    const relX = noteData.startX - oldTopLeftX;
+                                    const relY = noteData.startY - oldTopLeftY;
 
                                     // Scale relative position and size
                                     const newRelX = relX * scaleX;
@@ -6789,9 +6795,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     const newNoteWidth = Math.round(noteWidth * scaleX);  // Round width directly
                                     const newNoteHeight = Math.round(noteHeight * scaleY);  // Round height directly
 
-                                    // Calculate new absolute top-left position
-                                    const newStartX = Math.round(newCenterX + newRelX);
-                                    const newStartY = Math.round(newCenterY + newRelY);
+                                    // Calculate new absolute position from NEW pattern top-left corner
+                                    const newStartX = Math.round(newTopLeftX + newRelX);
+                                    const newStartY = Math.round(newTopLeftY + newRelY);
 
                                     // Update note with new bounds (no second round - preserves scaled size)
                                     updatedNotes[noteKey] = JSON.stringify({
@@ -6821,9 +6827,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         } else {
                             // Legacy inline rooms format
                             const scaledRooms = rooms.map((room: any) => {
-                                // Get room position relative to old pattern center
-                                const relX = room.x - oldCenterX;
-                                const relY = room.y - oldCenterY;
+                                // Get room position relative to old pattern top-left corner
+                                const relX = room.x - oldTopLeftX;
+                                const relY = room.y - oldTopLeftY;
 
                                 // Scale relative position and size
                                 const newRelX = relX * scaleX;
@@ -6831,11 +6837,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 const newRoomWidth = room.width * scaleX;
                                 const newRoomHeight = room.height * scaleY;
 
-                                // Convert back to absolute position and round to integers
+                                // Convert back to absolute position from new pattern top-left corner
                                 // (grid rendering requires integer coordinates)
                                 return {
-                                    x: Math.round(newCenterX + newRelX),
-                                    y: Math.round(newCenterY + newRelY),
+                                    x: Math.round(newTopLeftX + newRelX),
+                                    y: Math.round(newTopLeftY + newRelY),
                                     width: Math.round(newRoomWidth),
                                     height: Math.round(newRoomHeight)
                                 };
@@ -7903,6 +7909,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const newCenterX = newBounds.startX + newWidth / 2;
                         const newCenterY = newBounds.startY + newHeight / 2;
 
+                        // Calculate pattern top-left corners (for top-left anchor scaling like legacy rooms)
+                        const oldTopLeftX = Math.floor(oldCenterX - oldWidth / 2);
+                        const oldTopLeftY = Math.floor(oldCenterY - oldHeight / 2);
+                        const newTopLeftX = newBounds.startX;
+                        const newTopLeftY = newBounds.startY;
+
                         // Calculate scale factors
                         const scaleX = newWidth / oldWidth;
                         const scaleY = newHeight / oldHeight;
@@ -7919,13 +7931,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 try {
                                     const noteData = JSON.parse(engine.worldData[noteKey] as string);
 
-                                    // Get note top-left position relative to old pattern center (like legacy rooms)
+                                    // Get note dimensions
                                     const noteWidth = noteData.endX - noteData.startX + 1;
                                     const noteHeight = noteData.endY - noteData.startY + 1;
 
-                                    // Use top-left corner position (startX, startY) as reference point
-                                    const relX = noteData.startX - oldCenterX;
-                                    const relY = noteData.startY - oldCenterY;
+                                    // Calculate position relative to OLD pattern top-left corner
+                                    const relX = noteData.startX - oldTopLeftX;
+                                    const relY = noteData.startY - oldTopLeftY;
 
                                     // Scale relative position and size
                                     const newRelX = relX * scaleX;
@@ -7933,9 +7945,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     const newNoteWidth = Math.round(noteWidth * scaleX);  // Round width directly
                                     const newNoteHeight = Math.round(noteHeight * scaleY);  // Round height directly
 
-                                    // Calculate new absolute top-left position
-                                    const newStartX = Math.round(newCenterX + newRelX);
-                                    const newStartY = Math.round(newCenterY + newRelY);
+                                    // Calculate new absolute position from NEW pattern top-left corner
+                                    const newStartX = Math.round(newTopLeftX + newRelX);
+                                    const newStartY = Math.round(newTopLeftY + newRelY);
 
                                     // Update note with new bounds (no second round - preserves scaled size)
                                     updatedNotes[noteKey] = JSON.stringify({
@@ -7965,9 +7977,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         } else {
                             // Legacy inline rooms format
                             const scaledRooms = rooms.map((room: any) => {
-                                // Get room position relative to old pattern center
-                                const relX = room.x - oldCenterX;
-                                const relY = room.y - oldCenterY;
+                                // Get room position relative to old pattern top-left corner
+                                const relX = room.x - oldTopLeftX;
+                                const relY = room.y - oldTopLeftY;
 
                                 // Scale relative position and size
                                 const newRelX = relX * scaleX;
@@ -7975,11 +7987,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 const newRoomWidth = room.width * scaleX;
                                 const newRoomHeight = room.height * scaleY;
 
-                                // Convert back to absolute position and round to integers
+                                // Convert back to absolute position from new pattern top-left corner
                                 // (grid rendering requires integer coordinates)
                                 return {
-                                    x: Math.round(newCenterX + newRelX),
-                                    y: Math.round(newCenterY + newRelY),
+                                    x: Math.round(newTopLeftX + newRelX),
+                                    y: Math.round(newTopLeftY + newRelY),
                                     width: Math.round(newRoomWidth),
                                     height: Math.round(newRoomHeight)
                                 };
