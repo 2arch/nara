@@ -6591,8 +6591,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                                     const noteMinX = currentNoteData.startX;
                                     const noteMinY = currentNoteData.startY;
-                                    const noteMaxX = currentNoteData.endX;
-                                    const noteMaxY = currentNoteData.endY;
+                                    // endX/endY are inclusive, add 1 to get exclusive boundary (like legacy rooms)
+                                    const noteMaxX = currentNoteData.endX + 1;
+                                    const noteMaxY = currentNoteData.endY + 1;
                                     const noteCenterX = (noteMinX + noteMaxX) / 2;
                                     const noteCenterY = (noteMinY + noteMaxY) / 2;
 
@@ -7732,8 +7733,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                                     const noteMinX = currentNoteData.startX;
                                     const noteMinY = currentNoteData.startY;
-                                    const noteMaxX = currentNoteData.endX;
-                                    const noteMaxY = currentNoteData.endY;
+                                    // endX/endY are inclusive, add 1 to get exclusive boundary (like legacy rooms)
+                                    const noteMaxX = currentNoteData.endX + 1;
+                                    const noteMaxY = currentNoteData.endY + 1;
                                     const noteCenterX = (noteMinX + noteMaxX) / 2;
                                     const noteCenterY = (noteMinY + noteMaxY) / 2;
 
