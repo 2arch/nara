@@ -807,6 +807,30 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             // Set to geometry3d mode (3D wireframe shapes)
             monogramSystem.updateOption('mode', 'geometry3d');
             monogramSystem.updateOption('enabled', true);
+        } else if (args[0] === 'face3d' || args[0] === 'face') {
+            // Set to face3d mode (face-controlled 3D geometry)
+            monogramSystem.updateOption('mode', 'face3d');
+            monogramSystem.updateOption('enabled', true);
+            // Optionally set face mask if provided: /monogram face3d macintosh
+            if (args.length > 1) {
+                monogramSystem.updateOption('maskName', args[1]);
+            }
+        } else if (args[0] === 'macintosh' || args[0] === 'mac') {
+            // Set to macintosh mode (Mac face rendering)
+            monogramSystem.updateOption('mode', 'macintosh');
+            monogramSystem.updateOption('enabled', true);
+        } else if (args[0] === 'nara') {
+            // Set to nara mode (signature NARA pattern)
+            monogramSystem.updateOption('mode', 'nara');
+            monogramSystem.updateOption('enabled', true);
+        } else if (args[0] === 'loading') {
+            // Set to loading mode (loading text pattern)
+            monogramSystem.updateOption('mode', 'loading');
+            monogramSystem.updateOption('enabled', true);
+        } else if (args[0] === 'terrain') {
+            // Set to terrain mode (terrain visualization)
+            monogramSystem.updateOption('mode', 'terrain');
+            monogramSystem.updateOption('enabled', true);
         }
     }, [monogramSystem]);
 
