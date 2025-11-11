@@ -11,7 +11,7 @@ interface MonogramTrailPosition {
 }
 
 // --- Monogram Pattern Types ---
-export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'geometry3d' | 'face3d' | 'macintosh' | 'loading' | 'road' | 'terrain';
+export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'geometry3d' | 'face3d' | 'road';
 
 // Label position interface for road mode
 export interface LabelPosition {
@@ -231,10 +231,7 @@ const useMonogramSystem = (
             nara: ['░', '▒', '▓', '█'], // Back to varied blocks for texture
             geometry3d: [' ', '░', '▒', '▓', '█'], // Standard block progression for 3D
             face3d: [' ', '░', '▒', '▓', '█'], // Standard block progression for face-controlled 3D
-            macintosh: [' ', '░', '▒', '▓', '█'], // Standard block progression for Mac face
-            loading: [' ', '░', '▒', '▓', '█'], // Standard block progression for loading text
             road: [' ', '░', '▒', '▓', '█'], // Standard block progression for roads between labels
-            terrain: [' ', '░', '▒', '▓', '█'], // Contour lines for topographic visualization
         };
 
         const charSet = chars[mode] || chars.perlin;
@@ -244,7 +241,7 @@ const useMonogramSystem = (
 
     // Get color from palette based on value
     const getColorFromPalette = useCallback((value: number, mode: MonogramMode, accentColor: string): string => {
-        if (mode === 'nara' || mode === 'macintosh' || mode === 'loading' || mode === 'road' || mode === 'terrain' || mode === 'face3d') {
+        if (mode === 'nara' || mode === 'road' || mode === 'face3d') {
             // Use accent color for NARA, Macintosh, Loading, Road, Terrain, and Face3D modes
             return accentColor;
         }
@@ -726,13 +723,13 @@ const useMonogramSystem = (
             rightEyeBlink = autoBlink;
         }
 
-        // Mouth dynamics - use tracked or add subtle autonomous breathing
+        // Mouth dynamics - use tracked, AI talking, or add subtle autonomous breathing
         let mouthOpen = 0;
-        if (isTracked && options.externalRotation?.mouthOpen !== undefined) {
-            // Use tracked mouth opening
+        if (options.externalRotation?.mouthOpen !== undefined) {
+            // Use explicitly provided mouth opening (from face tracking OR AI talking animation)
             mouthOpen = options.externalRotation.mouthOpen;
         } else if (!isTracked && options.externalRotation) {
-            // Autonomous mode - add very subtle breathing
+            // Autonomous mode with no explicit mouthOpen - add very subtle breathing
             const breathCycle = time * 0.2;
             mouthOpen = Math.max(0, Math.sin(breathCycle) * 0.05); // Very subtle
         }
@@ -943,122 +940,8 @@ const useMonogramSystem = (
         return result;
     }, [perlinNoise, vibrantColors]);
 
-const calculateMacintosh = useCallback((x: number, y: number, time: number, viewportBounds?: {
-    startX: number,
-    startY: number,
-    endX: number,
-    endY: number
-}): number => {
-    if (!viewportBounds) return 0;
-
-    // viewportBounds are in WORLD COORDINATES (character grid positions)
-    const viewportWidth = viewportBounds.endX - viewportBounds.startX;  // e.g., 100 chars wide
-    const viewportHeight = viewportBounds.endY - viewportBounds.startY; // e.g., 50 chars tall
-    const centerX = (viewportBounds.startX + viewportBounds.endX) / 2;
-    const centerY = (viewportBounds.startY + viewportBounds.endY) / 2;
-
-    // Since cells are w1 x h2, we need to account for that in our coordinate system
-    // Normalize to a square coordinate system
-    const nx = (x - centerX);
-    const ny = (y - centerY) * 2; // multiply by 2 because cells are twice as tall
-
-    // blink logic
-    const blinkCycle = time * 0.5;
-    const blinkPhase = blinkCycle % 5;
-    let eyeOpenness = 1.0;
-    if (blinkPhase < 0.15) {
-        eyeOpenness = Math.sin(blinkPhase / 0.15 * Math.PI);
-    } else if (blinkPhase > 4.5 && blinkPhase < 4.7) {
-        eyeOpenness = Math.sin((blinkPhase - 4.5) / 0.2 * Math.PI);
-    }
-
-    // Eyes - shorter vertical rectangles (30% larger overall, 20% shorter height)
-    // Left eye
-    if (Math.abs(nx + 14.3) < 2.9 && Math.abs(ny + 9.1) < 7.3 * eyeOpenness) return 1.0;
-
-    // Right eye
-    if (Math.abs(nx - 14.3) < 2.9 && Math.abs(ny + 9.1) < 7.3 * eyeOpenness) return 1.0;
-
-    // Nose (L-shape) - thinner stroke
-    if (Math.abs(nx) < 2.2 && ny > -1.3 && ny < 9.1) return 1.0;
-    if (nx > 0 && nx < 10.4 && Math.abs(ny - 9.1) < 2.2) return 1.0;
-
-    // Mouth (horizontal bar) - more distance from nose
-    if (Math.abs(ny - 18.2) < 2.2 && nx > -9.1 && nx < 14.3) return 1.0;
-
-    // Left mouth corner
-    if (Math.abs(nx + 11) < 2.2 && Math.abs(ny - 16.2) < 2.2) return 1.0;
-
-    // Right mouth corner
-    if (Math.abs(nx - 16.2) < 2.2 && Math.abs(ny - 16.2) < 2.2) return 1.0;
-
-    return 0;
-}, []);
 
     // Loading text - static centered display with progress bar
-    const calculateLoading = useCallback((x: number, y: number, time: number, viewportBounds?: {
-        startX: number,
-        startY: number,
-        endX: number,
-        endY: number
-    }): number => {
-        if (!viewportBounds) return 0;
-
-        // Use simple text bitmap (same size as NARA, but bold)
-        const textBitmap = textToBitmap("LOADING", 120, true);
-        if (!textBitmap) return 0;
-
-        // Calculate viewport dimensions and center
-        const viewportWidth = viewportBounds.endX - viewportBounds.startX;
-        const viewportHeight = viewportBounds.endY - viewportBounds.startY;
-        const centerX = (viewportBounds.startX + viewportBounds.endX) / 2;
-        const centerY = (viewportBounds.startY + viewportBounds.endY) / 2;
-
-        // Scale text to match NARA (60% of viewport width)
-        const scale = (viewportWidth * 0.6) / textBitmap.width;
-
-        // Transform screen coordinates relative to center
-        const relX = x - centerX;
-        const relY = y - centerY;
-
-        // Check if we're in the text area (centered vertically)
-        const textBitmapX = Math.floor(relX / scale + textBitmap.width / 2);
-        const textBitmapY = Math.floor(relY / scale + textBitmap.height / 2);
-
-        // Text rendering
-        if (textBitmapX >= 0 && textBitmapX < textBitmap.width &&
-            textBitmapY >= 0 && textBitmapY < textBitmap.height) {
-            const pixelIndex = (textBitmapY * textBitmap.width + textBitmapX) * 4;
-            const brightness = textBitmap.data[pixelIndex] / 255;
-            if (brightness > 0) {
-                return Math.max(0, Math.min(1, brightness));
-            }
-        }
-
-        // Loading bar - absolutely positioned at bottom center
-        const barMarginFromBottom = 3; // characters from bottom
-        const barY = viewportHeight / 2 - barMarginFromBottom - 1; // Position from center
-        const barWidth = viewportWidth * 0.5; // 50% of viewport width
-        const barStartX = -barWidth / 2;
-        const barEndX = barWidth / 2;
-
-        // Check if we're on the loading bar row (1 character tall)
-        if (Math.abs(relY - barY) < 0.5) {
-            if (relX >= barStartX && relX <= barEndX) {
-                // Calculate position along bar
-                const progress = (relX - barStartX) / barWidth;
-
-                // 67% filled with solid, 33% with dithered
-                if (progress <= 0.67) {
-                    return 1.0; // Solid fill (█)
-                } else {
-                    return 0.5; // Dithered unfilled (▒)
-                }
-            }
-        }
-
-        return 0;
-    }, [textToBitmap]);
 
     // Road mode - Single line with NARA-style noise distortion for wavy/loopy effect
     const calculateRoad = useCallback((x: number, y: number, time: number, labels: LabelPosition[]): number => {
@@ -1221,67 +1104,6 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
     }, [options.complexity, options.speed, perlinNoise]);
 
     // Terrain mode - Topographic visualization creating distance field contours around labels
-    const calculateTerrain = useCallback((x: number, y: number, time: number, labels: LabelPosition[]): number => {
-        if (!labels || labels.length === 0) return 0;
-
-        const complexity = options.complexity;
-
-        // Calculate distance field from all labels
-        let minDistance = Infinity;
-        let nearestLabelColor = '#FFFFFF';
-
-        for (const label of labels) {
-            const dx = x - label.x;
-            const dy = y - label.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-
-            if (distance < minDistance) {
-                minDistance = distance;
-                nearestLabelColor = label.color;
-            }
-        }
-
-        // Add organic variation using Perlin noise for realistic terrain feel
-        const noiseScale = 0.02 * complexity;
-        const terrainNoise = perlinNoise(
-            x * noiseScale + time * 0.1,
-            y * noiseScale - time * 0.08
-        );
-
-        // Add noise to distance to create varied terrain (±20% variation)
-        const noisyDistance = minDistance + (terrainNoise * minDistance * 0.2);
-
-        // Create contour lines at regular intervals
-        const contourInterval = 15 / complexity; // Denser contours with higher complexity
-        const contourPosition = (noisyDistance % contourInterval) / contourInterval;
-
-        // Create sharp contour lines (higher intensity near contour boundaries)
-        const contourThickness = 0.15; // Width of the contour line
-        let intensity = 0;
-
-        if (contourPosition < contourThickness || contourPosition > (1 - contourThickness)) {
-            // We're on a contour line
-            const distanceToContour = Math.min(contourPosition, 1 - contourPosition);
-            intensity = 1 - (distanceToContour / contourThickness);
-
-            // Add elevation-based intensity variation (higher = dimmer, lower = brighter)
-            const elevationFactor = Math.max(0.3, 1 - (noisyDistance / 200));
-            intensity *= elevationFactor;
-
-            // Add animated pulse along contours
-            const pulse = Math.sin(time * options.speed + noisyDistance * 0.1) * 0.15 + 0.85;
-            intensity *= pulse;
-        }
-
-        // Add subtle gradient fill between contours for depth
-        if (intensity < 0.2) {
-            const gradientIntensity = 0.1 * (1 - contourPosition);
-            const elevationFactor = Math.max(0.1, 1 - (noisyDistance / 300));
-            intensity = Math.max(intensity, gradientIntensity * elevationFactor);
-        }
-
-        return Math.max(0, Math.min(1, intensity));
-    }, [options.complexity, options.speed, perlinNoise]);
 
     // NARA text stretch distortion effect
     const calculateNara = useCallback((x: number, y: number, time: number, viewportBounds?: {
@@ -1459,13 +1281,10 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
             case 'nara': return calculateNara(x, y, time, viewportBounds);
             case 'geometry3d': return calculate3DGeometry(x, y, time, viewportBounds);
             case 'face3d': return calculateFace3D(x, y, time, viewportBounds);
-            case 'macintosh': return calculateMacintosh(x, y, time, viewportBounds);
-            case 'loading': return calculateLoading(x, y, time, viewportBounds);
             case 'road': return calculateRoad(x, y, time, labels || []);
-            case 'terrain': return calculateTerrain(x, y, time, labels || []);
             default: return calculatePerlin(x, y, time);
         }
-    }, [calculatePerlin, calculateNara, calculate3DGeometry, calculateFace3D, calculateMacintosh, calculateLoading, calculateRoad, calculateTerrain]);
+    }, [calculatePerlin, calculateNara, calculate3DGeometry, calculateFace3D, calculateRoad]);
 
     // Calculate comet trail effect at a specific position
     const calculateTrailEffect = useCallback((x: number, y: number): number => {
@@ -1552,7 +1371,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
         }
 
         // For NARA, Macintosh, Loading, Road, Terrain, and 3D geometry modes, use finer sampling for better quality
-        const step = (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') ? 1 : Math.max(1, Math.floor(3 - options.complexity * 2));
+        const step = (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'road') ? 1 : Math.max(1, Math.floor(3 - options.complexity * 2));
         
         for (let worldY = Math.floor(startWorldY); worldY <= Math.ceil(endWorldY); worldY += step) {
             for (let worldX = Math.floor(startWorldX); worldX <= Math.ceil(endWorldX); worldX += step) {
@@ -1569,7 +1388,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
 
                 // Calculate new mode intensity
                 let newIntensity: number;
-                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') {
+                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'road') {
                     newIntensity = calculatePattern(worldX, worldY, time, options.mode, viewportBounds, labels);
                 } else {
                     newIntensity = Math.abs(calculatePattern(worldX, worldY, time, options.mode));
@@ -1580,7 +1399,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                     let oldIntensity: number;
                     const oldMode = transitionFromModeRef.current;
 
-                    if (oldMode === 'nara' || oldMode === 'geometry3d' || oldMode === 'face3d' || oldMode === 'macintosh' || oldMode === 'loading' || oldMode === 'road' || oldMode === 'terrain') {
+                    if (oldMode === 'nara' || oldMode === 'geometry3d' || oldMode === 'face3d' || oldMode === 'road') {
                         oldIntensity = calculatePattern(worldX, worldY, time, oldMode, viewportBounds, labels);
                     } else {
                         oldIntensity = Math.abs(calculatePattern(worldX, worldY, time, oldMode));
@@ -1600,7 +1419,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                 
                 // Skip very low intensity cells for performance (adjusted for trail effects)
                 const minThreshold = trailEffect > 0 ? 0.05 :
-                    ((options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') ? 0.15 : 0.1);
+                    ((options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'road') ? 0.15 : 0.1);
                 if (intensity < minThreshold) continue;
                 
                 const char = getCharForIntensity(intensity, options.mode);
@@ -1615,7 +1434,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                     const g = parseInt(hex.substring(2, 4), 16);
                     const b = parseInt(hex.substring(4, 6), 16);
                     color = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-                } else if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'clear' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') {
+                } else if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'clear' || options.mode === 'road') {
                     // Use text color for all monochromatic modes
                     color = accentColor;
                 } else {
@@ -1624,7 +1443,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
                 }
 
                 // For NARA, Macintosh, Loading, Road, Terrain, and geometry3d modes, only set the exact position to avoid grid artifacts
-                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'macintosh' || options.mode === 'loading' || options.mode === 'road' || options.mode === 'terrain') {
+                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'road') {
                     const key = `${worldX},${worldY}`;
                     pattern[key] = {
                         char,
