@@ -6785,20 +6785,20 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     // Scale relative position and size
                                     const newRelX = relX * scaleX;
                                     const newRelY = relY * scaleY;
-                                    const newNoteWidth = noteWidth * scaleX;
-                                    const newNoteHeight = noteHeight * scaleY;
+                                    const newNoteWidth = Math.round(noteWidth * scaleX);  // Round width directly
+                                    const newNoteHeight = Math.round(noteHeight * scaleY);  // Round height directly
 
                                     // Calculate new absolute top-left position
                                     const newStartX = Math.round(newCenterX + newRelX);
                                     const newStartY = Math.round(newCenterY + newRelY);
 
-                                    // Update note with new bounds (inclusive endX/endY, so subtract 1)
+                                    // Update note with new bounds (no second round - preserves scaled size)
                                     updatedNotes[noteKey] = JSON.stringify({
                                         ...noteData,
                                         startX: newStartX,
                                         startY: newStartY,
-                                        endX: Math.round(newStartX + newNoteWidth - 1),
-                                        endY: Math.round(newStartY + newNoteHeight - 1)
+                                        endX: newStartX + newNoteWidth - 1,
+                                        endY: newStartY + newNoteHeight - 1
                                     });
                                 } catch (e) {
                                     // Skip invalid notes
@@ -7928,20 +7928,20 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     // Scale relative position and size
                                     const newRelX = relX * scaleX;
                                     const newRelY = relY * scaleY;
-                                    const newNoteWidth = noteWidth * scaleX;
-                                    const newNoteHeight = noteHeight * scaleY;
+                                    const newNoteWidth = Math.round(noteWidth * scaleX);  // Round width directly
+                                    const newNoteHeight = Math.round(noteHeight * scaleY);  // Round height directly
 
                                     // Calculate new absolute top-left position
                                     const newStartX = Math.round(newCenterX + newRelX);
                                     const newStartY = Math.round(newCenterY + newRelY);
 
-                                    // Update note with new bounds (inclusive endX/endY, so subtract 1)
+                                    // Update note with new bounds (no second round - preserves scaled size)
                                     updatedNotes[noteKey] = JSON.stringify({
                                         ...noteData,
                                         startX: newStartX,
                                         startY: newStartY,
-                                        endX: Math.round(newStartX + newNoteWidth - 1),
-                                        endY: Math.round(newStartY + newNoteHeight - 1)
+                                        endX: newStartX + newNoteWidth - 1,
+                                        endY: newStartY + newNoteHeight - 1
                                     });
                                 } catch (e) {
                                     // Skip invalid notes
