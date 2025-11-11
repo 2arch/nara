@@ -6899,18 +6899,17 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             let imageKey = null;
                             for (const key in engine.worldData) {
                                 if (key.startsWith('image_')) {
-                                        const data = engine.worldData[key];
-                                        if (engine.isImageData(data) && data === imageAtPosition) {
-                                            imageKey = key;
-                                            break;
-                                        }
+                                    const data = engine.worldData[key];
+                                    if (engine.isImageData(data) && data === imageAtPosition) {
+                                        imageKey = key;
+                                        break;
                                     }
                                 }
+                            }
 
-                                if (imageKey) {
-                                    // Use the engine's moveImage method
-                                    engine.moveImage(imageKey, distanceX, distanceY);
-                                }
+                            if (imageKey) {
+                                // Use the engine's moveImage method
+                                engine.moveImage(imageKey, distanceX, distanceY);
                             }
                         } else if (selectedNoteKey) {
                             // Check if we're moving a selected note region
@@ -8032,16 +8031,15 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         for (const key in engine.worldData) {
                             if (key.startsWith('image_')) {
                                 const data = engine.worldData[key];
-                                    if (engine.isImageData(data) && data === imageAtPosition) {
-                                        imageKey = key;
-                                        break;
-                                    }
+                                if (engine.isImageData(data) && data === imageAtPosition) {
+                                    imageKey = key;
+                                    break;
                                 }
                             }
+                        }
 
-                            if (imageKey) {
-                                engine.moveImage(imageKey, distanceX, distanceY);
-                            }
+                        if (imageKey) {
+                            engine.moveImage(imageKey, distanceX, distanceY);
                         }
                     } else if (selectedNoteKey) {
                         // Move note
