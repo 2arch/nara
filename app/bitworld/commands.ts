@@ -3027,8 +3027,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     }
                 }
 
-                if (overlappingNotes.length < 2) {
-                    setDialogueWithRevert("Need at least 2 notes in selection to connect", setDialogueText);
+                if (overlappingNotes.length < 1) {
+                    setDialogueWithRevert("Need at least 1 note in selection to connect", setDialogueText);
                     setCommandState({
                         isActive: false,
                         input: '',
@@ -3042,19 +3042,88 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     return null;
                 }
 
-                // Calculate pattern bounds from notes
+                // Check if any notes are already in a pattern
+                const existingPatternKeys = new Set<string>();
+                for (const noteKey of overlappingNotes) {
+                    const noteData = JSON.parse(worldData[noteKey] as string);
+                    if (noteData.patternKey) {
+                        existingPatternKeys.add(noteData.patternKey);
+                    }
+                }
+
+                let patternKey: string;
+                let allNoteKeys: string[];
+                let isNewPattern = false;
+
+                if (existingPatternKeys.size > 0) {
+                    // Use the first existing pattern and merge all notes into it
+                    patternKey = Array.from(existingPatternKeys)[0];
+                    const existingPatternData = JSON.parse(worldData[patternKey] as string);
+
+                    // Combine existing noteKeys with new overlapping notes (deduplicate)
+                    const combinedNoteKeys = new Set([
+                        ...(existingPatternData.noteKeys || []),
+                        ...overlappingNotes
+                    ]);
+                    allNoteKeys = Array.from(combinedNoteKeys);
+
+                    // If there were multiple patterns, merge them all
+                    if (existingPatternKeys.size > 1) {
+                        for (const oldPatternKey of existingPatternKeys) {
+                            if (oldPatternKey !== patternKey) {
+                                const oldPatternData = JSON.parse(worldData[oldPatternKey] as string);
+                                for (const noteKey of oldPatternData.noteKeys || []) {
+                                    allNoteKeys.push(noteKey);
+                                }
+                            }
+                        }
+                        // Deduplicate again
+                        allNoteKeys = Array.from(new Set(allNoteKeys));
+                    }
+                } else {
+                    // No existing pattern - create a new one
+                    if (overlappingNotes.length < 2) {
+                        setDialogueWithRevert("Need at least 2 notes to create a new pattern", setDialogueText);
+                        setCommandState({
+                            isActive: false,
+                            input: '',
+                            matchedCommands: [],
+                            selectedIndex: 0,
+                            commandStartPos: { x: 0, y: 0 },
+                            originalCursorPos: { x: 0, y: 0 },
+                            hasNavigated: false
+                        });
+                        setCommandData({});
+                        return null;
+                    }
+                    const timestamp = Date.now();
+                    patternKey = `pattern_${timestamp}`;
+                    allNoteKeys = overlappingNotes;
+                    isNewPattern = true;
+                }
+
+                // Calculate pattern bounds from all notes
                 let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
                 const corridorPadding = 3;
 
-                for (const noteKey of overlappingNotes) {
-                    const noteData = JSON.parse(worldData[noteKey] as string);
-                    const centerX = (noteData.startX + noteData.endX) / 2;
-                    const centerY = (noteData.startY + noteData.endY) / 2;
+                for (const noteKey of allNoteKeys) {
+                    try {
+                        const noteData = JSON.parse(worldData[noteKey] as string);
+                        const noteMinX = noteData.startX;
+                        const noteMinY = noteData.startY;
+                        // endX/endY are inclusive, add 1 to get exclusive boundary
+                        const noteMaxX = noteData.endX + 1;
+                        const noteMaxY = noteData.endY + 1;
+                        const noteCenterX = (noteMinX + noteMaxX) / 2;
+                        const noteCenterY = (noteMinY + noteMaxY) / 2;
 
-                    minX = Math.min(minX, noteData.startX, centerX - corridorPadding);
-                    minY = Math.min(minY, noteData.startY, centerY - corridorPadding);
-                    maxX = Math.max(maxX, noteData.endX, centerX + corridorPadding);
-                    maxY = Math.max(maxY, noteData.endY, centerY + corridorPadding);
+                        minX = Math.min(minX, noteMinX, noteCenterX - corridorPadding);
+                        minY = Math.min(minY, noteMinY, noteCenterY - corridorPadding);
+                        maxX = Math.max(maxX, noteMaxX, noteCenterX + corridorPadding);
+                        maxY = Math.max(maxY, noteMaxY, noteCenterY + corridorPadding);
+                    } catch (e) {
+                        // Skip invalid notes
+                    }
                 }
 
                 const actualWidth = maxX - minX;
@@ -3062,35 +3131,61 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 const actualCenterX = minX + actualWidth / 2;
                 const actualCenterY = minY + actualHeight / 2;
 
-                // Create pattern with note references
+                // Create or update pattern data
                 const timestamp = Date.now();
-                const patternKey = `pattern_${timestamp}`;
                 const patternData = {
                     centerX: actualCenterX,
                     centerY: actualCenterY,
                     width: actualWidth,
                     height: actualHeight,
                     timestamp: timestamp,
-                    noteKeys: overlappingNotes
+                    noteKeys: allNoteKeys
                 };
 
                 // Update all notes to reference this pattern
                 const updatedNotes: Record<string, string> = {};
-                for (const noteKey of overlappingNotes) {
-                    const noteData = JSON.parse(worldData[noteKey] as string);
-                    updatedNotes[noteKey] = JSON.stringify({
-                        ...noteData,
-                        patternKey: patternKey
-                    });
+                for (const noteKey of allNoteKeys) {
+                    try {
+                        const noteData = JSON.parse(worldData[noteKey] as string);
+                        updatedNotes[noteKey] = JSON.stringify({
+                            ...noteData,
+                            patternKey: patternKey
+                        });
+                    } catch (e) {
+                        // Skip invalid notes
+                    }
                 }
 
-                setWorldData((prev: WorldData) => ({
-                    ...prev,
+                // Prepare update data - delete old patterns if merging
+                const updateData: Record<string, string> = {
                     [patternKey]: JSON.stringify(patternData),
                     ...updatedNotes
-                }));
+                };
 
-                setDialogueWithRevert(`Pattern created from ${overlappingNotes.length} notes`, setDialogueText);
+                // If merging multiple patterns, delete the old ones
+                if (existingPatternKeys.size > 1) {
+                    setWorldData((prev: WorldData) => {
+                        const newData = { ...prev, ...updateData };
+                        for (const oldPatternKey of existingPatternKeys) {
+                            if (oldPatternKey !== patternKey) {
+                                delete newData[oldPatternKey];
+                            }
+                        }
+                        return newData;
+                    });
+                    setDialogueWithRevert(`Merged ${existingPatternKeys.size} patterns into one with ${allNoteKeys.length} notes`, setDialogueText);
+                } else {
+                    setWorldData((prev: WorldData) => ({
+                        ...prev,
+                        ...updateData
+                    }));
+
+                    if (isNewPattern) {
+                        setDialogueWithRevert(`Pattern created from ${allNoteKeys.length} notes`, setDialogueText);
+                    } else {
+                        setDialogueWithRevert(`Added notes to existing pattern (now ${allNoteKeys.length} notes total)`, setDialogueText);
+                    }
+                }
             }
 
             // Clear command mode
