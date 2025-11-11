@@ -776,14 +776,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     }, [engine.settings.monogramMode, engine.settings.monogramEnabled, hostModeEnabled]);
 
     // Helper function to generate talking mouth animation
-    const generateTalkingMouth = useCallback((elapsed: number, textLength: number): number => {
-        // Duration of talking based on text length (roughly 50ms per character, min 2s, max 10s)
-        const talkDuration = Math.min(10000, Math.max(2000, textLength * 50));
-
-        if (elapsed > talkDuration) {
-            return 0; // Stop talking after duration
-        }
-
+    const generateTalkingMouth = useCallback((elapsed: number): number => {
         // Varying mouth open/close pattern (not just sine wave - more natural)
         const time = elapsed * 0.01; // Convert to smoother time scale
 
@@ -796,13 +789,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         const combined = (primary * 0.5 + secondary * 0.3 + tertiary * 0.2);
         const mouthOpen = combined * 0.4;
 
-        // Add fade-out in last 500ms
-        const fadeOutStart = talkDuration - 500;
-        if (elapsed > fadeOutStart) {
-            const fadeProgress = (elapsed - fadeOutStart) / 500;
-            return mouthOpen * (1 - fadeProgress);
-        }
-
         return mouthOpen;
     }, []);
 
@@ -811,36 +797,35 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
     // Continuous update loop while AI is talking
     useEffect(() => {
-        const isAITalking = engine.hostData && engine.hostData.timestamp;
+        // Check both dialogueText (for AI responses) and hostData (for host dialogue)
+        const dialogueTimestamp = engine.dialogueTimestamp || engine.hostData?.timestamp;
+        const dialogueTextContent = engine.dialogueText || engine.hostData?.text;
+        const isAITalking = dialogueTimestamp && dialogueTextContent;
 
         if (!isAITalking) return;
 
         // Update at ~30fps while AI is talking
+        // Keep talking as long as there's dialogue text (don't limit by duration)
         const interval = setInterval(() => {
-            const elapsed = Date.now() - (engine.hostData?.timestamp || 0);
-            const textLength = engine.hostData?.text?.length || 0;
-            const talkDuration = Math.min(10000, Math.max(2000, textLength * 50));
-
-            if (elapsed < talkDuration) {
-                setAiTalkingTick(tick => tick + 1);
-            }
+            setAiTalkingTick(tick => tick + 1);
         }, 33); // ~30fps
 
         return () => clearInterval(interval);
-    }, [engine.hostData]);
+    }, [engine.dialogueText, engine.dialogueTimestamp, engine.hostData]);
 
     // Sync face orientation to monogram rotation with AI talking animation
     useEffect(() => {
-        // Check if AI is currently "talking" (displaying a response)
-        const isAITalking = engine.hostData && engine.hostData.timestamp;
-        const aiTalkElapsed = isAITalking ? Date.now() - (engine.hostData?.timestamp || 0) : 0;
-        const aiTextLength = engine.hostData?.text?.length || 0;
+        // Check if AI is currently "talking" (displaying a response via dialogueText or hostData)
+        const dialogueTimestamp = engine.dialogueTimestamp || engine.hostData?.timestamp;
+        const dialogueTextContent = engine.dialogueText || engine.hostData?.text;
+        const isAITalking = dialogueTimestamp && dialogueTextContent;
+        const aiTalkElapsed = isAITalking ? Date.now() - dialogueTimestamp : 0;
 
         if (engine.isFaceDetectionEnabled && engine.faceOrientation) {
             // Face tracking is active - use real tracking data
             // But if AI is talking and NOT tracked, add talking mouth
             if (isAITalking && !engine.faceOrientation.isTracked) {
-                const talkingMouth = generateTalkingMouth(aiTalkElapsed, aiTextLength);
+                const talkingMouth = generateTalkingMouth(aiTalkElapsed);
                 monogramSystem.setExternalRotation({
                     ...engine.faceOrientation,
                     mouthOpen: talkingMouth,
@@ -851,7 +836,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             }
         } else if (isAITalking) {
             // No face tracking, but AI is talking - create autonomous talking face
-            const talkingMouth = generateTalkingMouth(aiTalkElapsed, aiTextLength);
+            const talkingMouth = generateTalkingMouth(aiTalkElapsed);
             monogramSystem.setExternalRotation({
                 rotX: 0,
                 rotY: 0,
@@ -865,7 +850,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             // No face tracking and no AI talking
             monogramSystem.setExternalRotation(undefined);
         }
-    }, [engine.isFaceDetectionEnabled, engine.faceOrientation, engine.hostData, aiTalkingTick, generateTalkingMouth]);
+    }, [engine.isFaceDetectionEnabled, engine.faceOrientation, engine.dialogueText, engine.dialogueTimestamp, engine.hostData, aiTalkingTick, generateTalkingMouth]);
 
     // Monogram command handler
     const handleMonogramCommand = useCallback((args: string[]) => {
