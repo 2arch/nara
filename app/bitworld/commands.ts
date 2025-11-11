@@ -182,7 +182,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'bg': 'Change background color. Use /bg [color] for solid colors like /bg white, /bg black, /bg sulfur, etc.',
     'text': 'Change text color. Type /text followed by a color name (garden, sky, sunset, etc.). This sets the color for all new text you write on the canvas.',
     'font': 'Change font family. Type /font followed by a font name: "IBM Plex Mono" for a clean monospace font, or "Neureal" for a more stylized aesthetic.',
-    'style': 'Apply visual styles to selected notes or patterns. Select a note/pattern, then type /style [stylename]. Available styles: glow (pulsing glow border), solid (simple border), glowing (enhanced glow). Use /style note glow or /style pattern glowing.',
+    'style': 'Apply visual styles to selected notes or patterns. Select a note/pattern, then type /style [stylename]. Available: solid, glow, glowing (borders), stripe, dither, dots, cross, diagonal (lo-fi infill patterns). Example: /style stripe or /style glow',
     'state': 'Save or load canvas states. Type /state to see saved states, /state save [name] to save current canvas, /state load [name] to restore a saved state. Perfect for versioning your work.',
     'random': 'Randomize text styling. Applies random colors and styles to your text for a more organic, playful aesthetic. Great for breaking out of rigid design patterns.',
     'clear': 'Clear all text from the canvas. WARNING: This deletes everything on your current canvas. Use /state save first if you want to preserve your work.',
