@@ -8659,10 +8659,99 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             // Delete the selected note region
             engine.setWorldData(prev => {
                 const newData = { ...prev };
+
+                // Check if note is part of a pattern
+                try {
+                    const noteData = JSON.parse(newData[selectedNoteKey] as string);
+                    if (noteData.patternKey) {
+                        // Remove note from pattern's noteKeys array
+                        try {
+                            const patternData = JSON.parse(newData[noteData.patternKey] as string);
+                            const noteKeys = patternData.noteKeys || [];
+                            const updatedNoteKeys = noteKeys.filter((key: string) => key !== selectedNoteKey);
+
+                            if (updatedNoteKeys.length === 0) {
+                                // No notes left, delete the pattern entirely
+                                delete newData[noteData.patternKey];
+                            } else {
+                                // Recalculate pattern boundary from remaining notes
+                                const corridorPadding = 3;
+                                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+                                for (const noteKey of updatedNoteKeys) {
+                                    try {
+                                        const currentNoteData = JSON.parse(newData[noteKey] as string);
+                                        const noteMinX = currentNoteData.startX;
+                                        const noteMinY = currentNoteData.startY;
+                                        const noteMaxX = currentNoteData.endX;
+                                        const noteMaxY = currentNoteData.endY;
+                                        const noteCenterX = (noteMinX + noteMaxX) / 2;
+                                        const noteCenterY = (noteMinY + noteMaxY) / 2;
+
+                                        minX = Math.min(minX, noteMinX, noteCenterX - corridorPadding);
+                                        minY = Math.min(minY, noteMinY, noteCenterY - corridorPadding);
+                                        maxX = Math.max(maxX, noteMaxX, noteCenterX + corridorPadding);
+                                        maxY = Math.max(maxY, noteMaxY, noteCenterY + corridorPadding);
+                                    } catch (e) {
+                                        // Skip invalid notes
+                                    }
+                                }
+
+                                const actualWidth = maxX - minX;
+                                const actualHeight = maxY - minY;
+                                const actualCenterX = minX + actualWidth / 2;
+                                const actualCenterY = minY + actualHeight / 2;
+
+                                // Update pattern with remaining notes
+                                newData[noteData.patternKey] = JSON.stringify({
+                                    ...patternData,
+                                    noteKeys: updatedNoteKeys,
+                                    centerX: actualCenterX,
+                                    centerY: actualCenterY,
+                                    width: actualWidth,
+                                    height: actualHeight
+                                });
+                            }
+                        } catch (e) {
+                            // Pattern data invalid, just delete note
+                        }
+                    }
+                } catch (e) {
+                    // Note data invalid, just delete
+                }
+
                 delete newData[selectedNoteKey];
                 return newData;
             });
             setSelectedNoteKey(null); // Clear selection
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+
+        // Handle pattern-specific keys before passing to engine
+        if (selectedPatternKey && e.key === 'Backspace') {
+            // Delete the selected pattern and all its notes
+            engine.setWorldData(prev => {
+                const newData = { ...prev };
+
+                try {
+                    const patternData = JSON.parse(newData[selectedPatternKey] as string);
+                    const noteKeys = patternData.noteKeys || [];
+
+                    // Delete all notes that belong to this pattern
+                    for (const noteKey of noteKeys) {
+                        delete newData[noteKey];
+                    }
+                } catch (e) {
+                    // Pattern data invalid, just delete pattern
+                }
+
+                // Delete the pattern itself
+                delete newData[selectedPatternKey];
+                return newData;
+            });
+            setSelectedPatternKey(null); // Clear selection
             e.preventDefault();
             e.stopPropagation();
             return;
@@ -8706,7 +8795,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             e.preventDefault();
             e.stopPropagation();
         }
-    }, [engine, handleKeyDownFromController, selectedImageKey, selectedNoteKey, selectedIframeKey, selectedMailKey, hostDialogue]);
+    }, [engine, handleKeyDownFromController, selectedImageKey, selectedNoteKey, selectedPatternKey, selectedIframeKey, selectedMailKey, hostDialogue]);
 
     const hiddenInputRef = useRef<HTMLInputElement>(null);
 
