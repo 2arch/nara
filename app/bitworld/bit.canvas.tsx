@@ -6970,13 +6970,14 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             try {
                                 const noteData = JSON.parse(engine.worldData[selectedNoteKey] as string);
 
-                                // Create new note region with shifted coordinates
+                                // Create new note region with shifted coordinates, preserving patternKey
                                 const newPlanData = {
                                     startX: noteData.startX + distanceX,
                                     endX: noteData.endX + distanceX,
                                     startY: noteData.startY + distanceY,
                                     endY: noteData.endY + distanceY,
-                                    timestamp: Date.now()
+                                    timestamp: Date.now(),
+                                    ...(noteData.patternKey && { patternKey: noteData.patternKey })
                                 };
 
                                 // Delete old note and create new one with shifted position
@@ -6986,6 +6987,60 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     const newData = { ...prev };
                                     delete newData[selectedNoteKey];
                                     newData[newPlanKey] = JSON.stringify(newPlanData);
+
+                                    // If note is part of a pattern, update pattern's noteKeys array and recalculate boundary
+                                    if (noteData.patternKey) {
+                                        try {
+                                            const patternData = JSON.parse(newData[noteData.patternKey] as string);
+                                            const noteKeys = patternData.noteKeys || [];
+
+                                            // Replace old note key with new note key
+                                            const updatedNoteKeys = noteKeys.map((key: string) =>
+                                                key === selectedNoteKey ? newPlanKey : key
+                                            );
+
+                                            // Recalculate pattern boundary from all notes
+                                            const corridorPadding = 3;
+                                            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+                                            for (const noteKey of updatedNoteKeys) {
+                                                try {
+                                                    const currentNoteData = JSON.parse(newData[noteKey] as string);
+                                                    const noteMinX = currentNoteData.startX;
+                                                    const noteMinY = currentNoteData.startY;
+                                                    const noteMaxX = currentNoteData.endX;
+                                                    const noteMaxY = currentNoteData.endY;
+                                                    const noteCenterX = (noteMinX + noteMaxX) / 2;
+                                                    const noteCenterY = (noteMinY + noteMaxY) / 2;
+
+                                                    minX = Math.min(minX, noteMinX, noteCenterX - corridorPadding);
+                                                    minY = Math.min(minY, noteMinY, noteCenterY - corridorPadding);
+                                                    maxX = Math.max(maxX, noteMaxX, noteCenterX + corridorPadding);
+                                                    maxY = Math.max(maxY, noteMaxY, noteCenterY + corridorPadding);
+                                                } catch (e) {
+                                                    // Skip invalid notes
+                                                }
+                                            }
+
+                                            const actualWidth = maxX - minX;
+                                            const actualHeight = maxY - minY;
+                                            const actualCenterX = minX + actualWidth / 2;
+                                            const actualCenterY = minY + actualHeight / 2;
+
+                                            // Update pattern with new noteKeys and boundary
+                                            newData[noteData.patternKey] = JSON.stringify({
+                                                ...patternData,
+                                                noteKeys: updatedNoteKeys,
+                                                centerX: actualCenterX,
+                                                centerY: actualCenterY,
+                                                width: actualWidth,
+                                                height: actualHeight
+                                            });
+                                        } catch (e) {
+                                            // Pattern update failed, but note move still succeeds
+                                        }
+                                    }
+
                                     return newData;
                                 });
 
@@ -8135,7 +8190,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 endX: noteData.endX + distanceX,
                                 startY: noteData.startY + distanceY,
                                 endY: noteData.endY + distanceY,
-                                timestamp: Date.now()
+                                timestamp: Date.now(),
+                                ...(noteData.patternKey && { patternKey: noteData.patternKey })
                             };
 
                             const newNoteKey = `note_${newNoteData.startX},${newNoteData.startY}_${Date.now()}`;
@@ -8143,6 +8199,60 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 const newData = { ...prev };
                                 delete newData[selectedNoteKey];
                                 newData[newNoteKey] = JSON.stringify(newNoteData);
+
+                                // If note is part of a pattern, update pattern's noteKeys array and recalculate boundary
+                                if (noteData.patternKey) {
+                                    try {
+                                        const patternData = JSON.parse(newData[noteData.patternKey] as string);
+                                        const noteKeys = patternData.noteKeys || [];
+
+                                        // Replace old note key with new note key
+                                        const updatedNoteKeys = noteKeys.map((key: string) =>
+                                            key === selectedNoteKey ? newNoteKey : key
+                                        );
+
+                                        // Recalculate pattern boundary from all notes
+                                        const corridorPadding = 3;
+                                        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+                                        for (const noteKey of updatedNoteKeys) {
+                                            try {
+                                                const currentNoteData = JSON.parse(newData[noteKey] as string);
+                                                const noteMinX = currentNoteData.startX;
+                                                const noteMinY = currentNoteData.startY;
+                                                const noteMaxX = currentNoteData.endX;
+                                                const noteMaxY = currentNoteData.endY;
+                                                const noteCenterX = (noteMinX + noteMaxX) / 2;
+                                                const noteCenterY = (noteMinY + noteMaxY) / 2;
+
+                                                minX = Math.min(minX, noteMinX, noteCenterX - corridorPadding);
+                                                minY = Math.min(minY, noteMinY, noteCenterY - corridorPadding);
+                                                maxX = Math.max(maxX, noteMaxX, noteCenterX + corridorPadding);
+                                                maxY = Math.max(maxY, noteMaxY, noteCenterY + corridorPadding);
+                                            } catch (e) {
+                                                // Skip invalid notes
+                                            }
+                                        }
+
+                                        const actualWidth = maxX - minX;
+                                        const actualHeight = maxY - minY;
+                                        const actualCenterX = minX + actualWidth / 2;
+                                        const actualCenterY = minY + actualHeight / 2;
+
+                                        // Update pattern with new noteKeys and boundary
+                                        newData[noteData.patternKey] = JSON.stringify({
+                                            ...patternData,
+                                            noteKeys: updatedNoteKeys,
+                                            centerX: actualCenterX,
+                                            centerY: actualCenterY,
+                                            width: actualWidth,
+                                            height: actualHeight
+                                        });
+                                    } catch (e) {
+                                        // Pattern update failed, but note move still succeeds
+                                    }
+                                }
+
                                 return newData;
                             });
 
