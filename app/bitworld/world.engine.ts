@@ -169,7 +169,6 @@ export interface WorldEngine {
     suggestionData: WorldData;
     lightModeData: WorldData;
     hostData: { text: string; color?: string; centerPos: Point; timestamp?: number } | null; // Host messages rendered at fixed position with streaming
-    stagedImageData: ImageData[]; // Ephemeral staged images (cleared with Escape, supports multiple)
     clipboardItems: ClipboardItem[]; // Clipboard items from Cmd+click on bounds
     searchData: WorldData;
     viewOffset: Point;
@@ -297,7 +296,6 @@ export interface WorldEngine {
         currentInputType: import('./host.flows').InputType | null;
     }>>;
     setHostData: React.Dispatch<React.SetStateAction<{ text: string; color?: string; centerPos: Point; timestamp?: number } | null>>;
-    setStagedImageData: React.Dispatch<React.SetStateAction<ImageData[]>>;
     // Ephemeral text rendering for host dialogue
     addInstantAIResponse: (startPos: Point, text: string, options?: {
         wrapWidth?: number;
@@ -876,7 +874,6 @@ export function useWorldEngine({
     const [smilesData, setSmilesData] = useState<WorldData>({});
     const [searchData, setSearchData] = useState<WorldData>({});
     const [hostData, setHostData] = useState<{ text: string; color?: string; centerPos: Point; timestamp?: number } | null>(null);
-    const [stagedImageData, setStagedImageData] = useState<ImageData[]>([]); // Ephemeral staged images (supports multiple)
     const [clipboardItems, setClipboardItems] = useState<ClipboardItem[]>([]); // Clipboard items from Cmd+click on bounds
 
     // === IME Composition State ===
@@ -997,8 +994,20 @@ export function useWorldEngine({
     }, [worldData]);
 
     // Cache bound keys to avoid filtering on every render
+    // Include both legacy bound_ keys and new note_ keys with contentType='bound'
     const boundKeys = useMemo(() => {
-        return Object.keys(worldData).filter(k => k.startsWith('bound_'));
+        return Object.keys(worldData).filter(k => {
+            if (k.startsWith('bound_')) return true;
+            if (k.startsWith('note_')) {
+                try {
+                    const data = JSON.parse(worldData[k] as string);
+                    return data.contentType === 'bound';
+                } catch (e) {
+                    return false;
+                }
+            }
+            return false;
+        });
     }, [worldData]);
 
     const getAllBounds = useCallback(() => {
@@ -3531,8 +3540,7 @@ export function useWorldEngine({
         }
 
         // === Staged Artifact Clearing ===
-        if (key === 'Escape' && (stagedImageData.length > 0 || Object.keys(lightModeData).length > 0)) {
-            setStagedImageData([]);
+        if (key === 'Escape' && Object.keys(lightModeData).length > 0) {
             clearLightModeData();
             setDialogueWithRevert("Staged artifact cleared", setDialogueText);
             return true;
@@ -5145,206 +5153,6 @@ export function useWorldEngine({
                     const newSettings = { spawnPoint };
                     updateSettings(newSettings);
                     setDialogueWithRevert(`Spawn point set at (${spawnPoint.x}, ${spawnPoint.y})`, setDialogueText);
-                } else if (exec.command === 'stage') {
-                    // Check if using template file (--up flag)
-                    const hasUpFlag = exec.args.length > 0 && exec.args[0] === '--up';
-
-                    if (hasUpFlag) {
-                        // Open file picker for .nara or .stage template
-                        const input = document.createElement('input');
-                        input.type = 'file';
-                        input.accept = '.nara,.stage,.json';
-
-                        input.onchange = (e) => {
-                            const file = (e.target as HTMLInputElement).files?.[0];
-                            if (!file) return;
-
-                            setDialogueWithRevert(`Loading ${file.name}...`, setDialogueText);
-
-                            const reader = new FileReader();
-                            reader.onload = (event) => {
-                                const templateContent = event.target?.result as string;
-
-                                import('./stage.parser').then(({ parseAndRenderTemplate }) => {
-                                    parseAndRenderTemplate(templateContent, cursorPos)
-                                        .then(({ textData, imageData }) => {
-                                            setLightModeData(textData);
-                                            setStagedImageData(imageData);
-                                            setDialogueWithRevert(`Template staged: ${file.name}`, setDialogueText);
-                                        })
-                                        .catch((error) => {
-                                            setDialogueWithRevert(`Failed to parse template: ${error.message}`, setDialogueText);
-                                        });
-                                });
-                            };
-
-                            reader.onerror = () => {
-                                setDialogueWithRevert('Failed to read template file', setDialogueText);
-                            };
-
-                            reader.readAsText(file);
-                        };
-
-                        input.click();
-                        return true; // Command handled
-                    }
-
-                    // Original hardcoded template behavior
-                    // Stage a structured artifact with image + text regions
-                    // Default image if no URL provided
-                    const defaultImageUrl = 'https://d2w9rnfcy7mm78.cloudfront.net/40233614/original_0d11441860fbe41b13c3a9bf97c18e42.webp?1760119834?bc=0';
-                    const imageUrl = exec.args.length > 0 ? exec.args[0] : defaultImageUrl;
-
-                    setDialogueWithRevert("Staging artifact...", setDialogueText);
-
-                    // Bogus text generator
-                    const generateBogusText = (length: number): string => {
-                        const words = ['lorem', 'ipsum', 'dolor', 'sit', 'amet', 'consectetur', 'adipiscing', 'elit', 'sed', 'do', 'eiusmod', 'tempor', 'incididunt', 'ut', 'labore', 'et', 'dolore', 'magna', 'aliqua'];
-                        let result = '';
-                        for (let i = 0; i < length; i++) {
-                            result += words[Math.floor(Math.random() * words.length)] + ' ';
-                        }
-                        return result.trim();
-                    };
-
-                    // Load image to get dimensions
-                    const img = new Image();
-                    img.crossOrigin = 'anonymous';
-
-                    img.onload = () => {
-                        // Image dimensions: 40 cells wide
-                        const imageWidthInCells = 40;
-                        const aspectRatio = img.height / img.width;
-                        const imageHeightInCells = Math.round(imageWidthInCells * aspectRatio);
-
-                        const startX = cursorPos.x;
-                        const startY = cursorPos.y;
-
-                        // Create structured artifact
-                        const stagedData: any = {};
-                        const stagedImages: ImageData[] = [];
-
-                        // === TITLE (above image) ===
-                        const titleText = generateBogusText(3).toUpperCase();
-                        let titleY = startY - 3;
-                        for (let i = 0; i < titleText.length; i++) {
-                            const key = `${startX + i},${titleY}`;
-                            stagedData[key] = titleText[i];
-                        }
-
-                        // === MAIN IMAGE ===
-                        const imageData: ImageData = {
-                            type: 'image',
-                            src: imageUrl,
-                            startX,
-                            startY,
-                            endX: startX + imageWidthInCells,
-                            endY: startY + imageHeightInCells,
-                            originalWidth: img.width,
-                            originalHeight: img.height
-                        };
-                        stagedImages.push(imageData);
-
-                        // === CAPTION (below image) ===
-                        const captionText = generateBogusText(8);
-                        let captionY = startY + imageHeightInCells + 2;
-                        const captionWidth = imageWidthInCells;
-
-                        // Word wrap caption
-                        const captionWords = captionText.split(' ');
-                        let currentLine = '';
-                        let lineY = captionY;
-
-                        for (const word of captionWords) {
-                            const testLine = currentLine ? `${currentLine} ${word}` : word;
-                            if (testLine.length <= captionWidth) {
-                                currentLine = testLine;
-                            } else {
-                                // Write current line
-                                for (let i = 0; i < currentLine.length; i++) {
-                                    const key = `${startX + i},${lineY}`;
-                                    stagedData[key] = currentLine[i];
-                                }
-                                lineY++;
-                                currentLine = word;
-                            }
-                        }
-                        // Write final line
-                        if (currentLine) {
-                            for (let i = 0; i < currentLine.length; i++) {
-                                const key = `${startX + i},${lineY}`;
-                                stagedData[key] = currentLine[i];
-                            }
-                        }
-
-                        // === SIDEBAR TEXT (right of image) ===
-                        const sidebarX = startX + imageWidthInCells + 3;
-                        const sidebarWidth = 30;
-                        const sidebarStartY = startY;
-
-                        // Sidebar header
-                        const sidebarHeader = 'NOTES';
-                        for (let i = 0; i < sidebarHeader.length; i++) {
-                            const key = `${sidebarX + i},${sidebarStartY}`;
-                            stagedData[key] = sidebarHeader[i];
-                        }
-
-                        // Sidebar divider
-                        const dividerY = sidebarStartY + 1;
-                        for (let i = 0; i < sidebarWidth; i++) {
-                            const key = `${sidebarX + i},${dividerY}`;
-                            stagedData[key] = '-';
-                        }
-
-                        // Sidebar body text (multiple lines)
-                        const sidebarText = generateBogusText(40);
-                        const sidebarWords = sidebarText.split(' ');
-                        let sidebarLine = '';
-                        let sidebarLineY = dividerY + 2;
-
-                        for (const word of sidebarWords) {
-                            const testLine = sidebarLine ? `${sidebarLine} ${word}` : word;
-                            if (testLine.length <= sidebarWidth) {
-                                sidebarLine = testLine;
-                            } else {
-                                // Write line
-                                for (let i = 0; i < sidebarLine.length; i++) {
-                                    const key = `${sidebarX + i},${sidebarLineY}`;
-                                    stagedData[key] = sidebarLine[i];
-                                }
-                                sidebarLineY++;
-                                sidebarLine = word;
-                            }
-                        }
-                        // Write final line
-                        if (sidebarLine) {
-                            for (let i = 0; i < sidebarLine.length; i++) {
-                                const key = `${sidebarX + i},${sidebarLineY}`;
-                                stagedData[key] = sidebarLine[i];
-                            }
-                        }
-
-                        // === FOOTER (centered below everything) ===
-                        const footerY = startY + imageHeightInCells + 5;
-                        const footerText = '— ' + generateBogusText(2) + ' —';
-                        const footerStartX = startX + Math.floor((imageWidthInCells - footerText.length) / 2);
-                        for (let i = 0; i < footerText.length; i++) {
-                            const key = `${footerStartX + i},${footerY}`;
-                            stagedData[key] = footerText[i];
-                        }
-
-                        // Store in ephemeral light mode data (text) and staged images
-                        setLightModeData(stagedData);
-                        setStagedImageData(stagedImages);
-
-                        setDialogueWithRevert(`Artifact staged (ephemeral) - press Escape to clear`, setDialogueText);
-                    };
-
-                    img.onerror = () => {
-                        setDialogueWithRevert("Failed to load image. Check URL.", setDialogueText);
-                    };
-
-                    img.src = imageUrl;
                 } else if (exec.command === 'zoom') {
                     // Gradually zoom in by 30%
                     const startZoom = zoomLevel;
@@ -5472,7 +5280,6 @@ export function useWorldEngine({
                     clearLightModeData();
                     // Clear client-side data
                     setClipboardItems([]);
-                    setStagedImageData([]);
                     setHostData(null);
                     // Reset cursor to origin
                     setCursorPos({ x: 0, y: 0 });
@@ -6122,39 +5929,32 @@ export function useWorldEngine({
 
                     setDialogueWithRevert(`Region glitched (${width}x${height} → ${width}x${height*2} square cells)`, setDialogueText);
                 } else if (exec.command === 'upload') {
-                    // Check if there's a selection for image placement
-                    const selection = getNormalizedSelection();
-                    if (!selection) {
-                        setDialogueWithRevert("Please select a region first, then use /upload", setDialogueText);
-                        return true;
-                    }
-
                     // Determine target note and bounds for upload
-                    // Priority: 1) exact bounds match, 2) cursor inside note region, 3) use selection
+                    // Priority: 1) cursor inside note region, 2) exact selection match, 3) use selection
                     let targetNote: { key: string; data: any } | null = null;
-                    let uploadBounds = selection;
+                    let uploadBounds: { startX: number; startY: number; endX: number; endY: number } | null = null;
 
-                    // Check if selection exactly matches an existing note
-                    targetNote = findNoteAtSelection(selection.startX, selection.startY, selection.endX, selection.endY, worldData);
-
-                    // If no exact match, check if cursor is inside a note (and selection is small)
-                    if (!targetNote) {
-                        const selectionWidth = selection.endX - selection.startX + 1;
-                        const selectionHeight = selection.endY - selection.startY + 1;
-                        const isSmallSelection = selectionWidth <= 2 && selectionHeight <= 2;
-
-                        if (isSmallSelection) {
-                            const noteAtCursor = findNoteContainingPoint(selection.startX, selection.startY, worldData);
-                            if (noteAtCursor) {
-                                targetNote = noteAtCursor;
-                                uploadBounds = {
-                                    startX: noteAtCursor.data.startX,
-                                    startY: noteAtCursor.data.startY,
-                                    endX: noteAtCursor.data.endX,
-                                    endY: noteAtCursor.data.endY
-                                };
-                            }
+                    // First check if cursor is inside a note region (no selection needed)
+                    const noteAtCursor = findNoteContainingPoint(cursorPos.x, cursorPos.y, worldData);
+                    if (noteAtCursor) {
+                        targetNote = noteAtCursor;
+                        uploadBounds = {
+                            startX: noteAtCursor.data.startX,
+                            startY: noteAtCursor.data.startY,
+                            endX: noteAtCursor.data.endX,
+                            endY: noteAtCursor.data.endY
+                        };
+                    } else {
+                        // No note at cursor, require a selection
+                        const selection = getNormalizedSelection();
+                        if (!selection) {
+                            setDialogueWithRevert("Please select a region or position cursor inside a note, then use /upload", setDialogueText);
+                            return true;
                         }
+
+                        // Check if selection exactly matches an existing note
+                        targetNote = findNoteAtSelection(selection.startX, selection.startY, selection.endX, selection.endY, worldData);
+                        uploadBounds = selection;
                     }
 
                     // Check if --bitmap flag is present
@@ -9374,30 +9174,6 @@ export function useWorldEngine({
                 }
             }
 
-            // Check if cursor is in a glitched region - block typing if so
-            let isInGlitchedRegion = false;
-            for (const key in worldData) {
-                if (key.startsWith('note_')) {
-                    try {
-                        const noteData = JSON.parse(worldData[key] as string);
-                        if (noteData.contentType === 'glitch') {
-                            if (cursorPos.x >= noteData.startX && cursorPos.x <= noteData.endX &&
-                                cursorPos.y >= noteData.startY && cursorPos.y <= noteData.endY) {
-                                isInGlitchedRegion = true;
-                                break;
-                            }
-                        }
-                    } catch (e) {
-                        // Skip invalid note data
-                    }
-                }
-            }
-
-            if (isInGlitchedRegion) {
-                // Don't allow typing in glitched regions - they use a different coordinate system
-                return true;
-            }
-
             let dataToDeleteFrom = worldData;
             let cursorAfterDelete = cursorPos;
 
@@ -10080,30 +9856,6 @@ export function useWorldEngine({
 
                 return; // Don't process regular click behavior
             }
-        }
-
-        // Check if clicking in a glitched region - block cursor movement if so
-        let isInGlitchedRegion = false;
-        for (const key in worldData) {
-            if (key.startsWith('note_')) {
-                try {
-                    const noteData = JSON.parse(worldData[key] as string);
-                    if (noteData.contentType === 'glitch') {
-                        if (newCursorPos.x >= noteData.startX && newCursorPos.x <= noteData.endX &&
-                            newCursorPos.y >= noteData.startY && newCursorPos.y <= noteData.endY) {
-                            isInGlitchedRegion = true;
-                            break;
-                        }
-                    }
-                } catch (e) {
-                    // Skip invalid note data
-                }
-            }
-        }
-
-        if (isInGlitchedRegion) {
-            // Don't allow cursor movement into glitched regions
-            return;
         }
 
         // === Click to Toggle Task Completion ===
@@ -11094,8 +10846,6 @@ export function useWorldEngine({
         setHostMode,
         hostData,
         setHostData,
-        stagedImageData, // Ephemeral staged images
-        setStagedImageData, // Update staged image (for moving/resizing)
         clipboardItems, // Clipboard items from Cmd+click on bounds
         addInstantAIResponse,
         setWorldData,
