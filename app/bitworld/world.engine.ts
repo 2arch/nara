@@ -562,6 +562,7 @@ function generatePatternFromId(patternId: string, centerPos: Point = { x: 0, y: 
             endX: room.x + room.width - 1,
             endY: room.y + room.height - 1,
             timestamp: numericSeed,
+            contentType: 'text',  // Default to text content type
             patternKey: patternKey  // Reference back to parent pattern
         };
         noteKeys.push(noteKey);
@@ -2794,6 +2795,57 @@ export function useWorldEngine({
         }
         return null;
     }, [worldData]);
+
+    // === Find Note at Selection Region ===
+    // Helper function to find note at exact bounds (not a hook to avoid stale closures in async callbacks)
+    const findNoteAtSelection = (startX: number, startY: number, endX: number, endY: number, currentWorldData: Record<string, WorldDataValue>): { key: string; data: any } | null => {
+        for (const key in currentWorldData) {
+            if (key.startsWith('note_') || key.startsWith('image_') ||
+                key.startsWith('iframe_') || key.startsWith('mail_') ||
+                key.startsWith('bound_') || key.startsWith('glitched_') ||
+                key.startsWith('list_')) {
+                try {
+                    const noteData = typeof currentWorldData[key] === 'string'
+                        ? JSON.parse(currentWorldData[key] as string)
+                        : currentWorldData[key];
+
+                    // Check if the selection overlaps with this note
+                    if (noteData.startX === startX && noteData.startY === startY &&
+                        noteData.endX === endX && noteData.endY === endY) {
+                        return { key, data: noteData };
+                    }
+                } catch (e) {
+                    // Skip invalid note data
+                }
+            }
+        }
+        return null;
+    };
+
+    // Helper function to find note containing a point
+    const findNoteContainingPoint = (x: number, y: number, currentWorldData: Record<string, WorldDataValue>): { key: string; data: any } | null => {
+        for (const key in currentWorldData) {
+            if (key.startsWith('note_') || key.startsWith('image_') ||
+                key.startsWith('iframe_') || key.startsWith('mail_') ||
+                key.startsWith('bound_') || key.startsWith('glitched_') ||
+                key.startsWith('list_')) {
+                try {
+                    const noteData = typeof currentWorldData[key] === 'string'
+                        ? JSON.parse(currentWorldData[key] as string)
+                        : currentWorldData[key];
+
+                    // Check if point is inside this note
+                    if (x >= noteData.startX && x <= noteData.endX &&
+                        y >= noteData.startY && y <= noteData.endY) {
+                        return { key, data: noteData };
+                    }
+                } catch (e) {
+                    // Skip invalid note data
+                }
+            }
+        }
+        return null;
+    };
 
     // === Helper Functions (Largely unchanged, but use state variables) ===
     const worldToScreen = useCallback((worldX: number, worldY: number, currentZoom: number, currentOffset: Point): Point => {
@@ -6077,6 +6129,34 @@ export function useWorldEngine({
                         return true;
                     }
 
+                    // Determine target note and bounds for upload
+                    // Priority: 1) exact bounds match, 2) cursor inside note region, 3) use selection
+                    let targetNote: { key: string; data: any } | null = null;
+                    let uploadBounds = selection;
+
+                    // Check if selection exactly matches an existing note
+                    targetNote = findNoteAtSelection(selection.startX, selection.startY, selection.endX, selection.endY, worldData);
+
+                    // If no exact match, check if cursor is inside a note (and selection is small)
+                    if (!targetNote) {
+                        const selectionWidth = selection.endX - selection.startX + 1;
+                        const selectionHeight = selection.endY - selection.startY + 1;
+                        const isSmallSelection = selectionWidth <= 2 && selectionHeight <= 2;
+
+                        if (isSmallSelection) {
+                            const noteAtCursor = findNoteContainingPoint(selection.startX, selection.startY, worldData);
+                            if (noteAtCursor) {
+                                targetNote = noteAtCursor;
+                                uploadBounds = {
+                                    startX: noteAtCursor.data.startX,
+                                    startY: noteAtCursor.data.startY,
+                                    endX: noteAtCursor.data.endX,
+                                    endY: noteAtCursor.data.endY
+                                };
+                            }
+                        }
+                    }
+
                     // Check if --bitmap flag is present
                     const isBitmapMode = exec.args.includes('--bitmap');
 
@@ -6115,25 +6195,36 @@ export function useWorldEngine({
                                                 const dataUrl = e.target?.result as string;
                                                 const img = new Image();
                                                 img.onload = async () => {
-                                                    const selectionWidth = selection.endX - selection.startX + 1;
-                                                    const selectionHeight = selection.endY - selection.startY + 1;
+                                                    const selectionWidth = uploadBounds.endX - uploadBounds.startX + 1;
+                                                    const selectionHeight = uploadBounds.endY - uploadBounds.startY + 1;
                                                     const storageUrl = await uploadImageToStorage(dataUrl);
-                                                    const noteData = {
-                                                        startX: selection.startX,
-                                                        startY: selection.startY,
-                                                        endX: selection.endX,
-                                                        endY: selection.endY,
-                                                        timestamp: Date.now(),
-                                                        contentType: 'image',
-                                                        src: storageUrl,
-                                                        originalWidth: img.width,
-                                                        originalHeight: img.height
-                                                    };
-                                                    const noteKey = `note_${selection.startX},${selection.startY}_${Date.now()}`;
-                                                    setWorldData(prev => ({ ...prev, [noteKey]: JSON.stringify(noteData) }));
+
+                                                    // Use functional form of setWorldData to get current state
+                                                    setWorldData(prev => {
+                                                        // Use targetNote if found, otherwise check for exact match
+                                                        const existingNote = targetNote || findNoteAtSelection(uploadBounds.startX, uploadBounds.startY, uploadBounds.endX, uploadBounds.endY, prev);
+
+                                                        const noteData = {
+                                                            startX: uploadBounds.startX,
+                                                            startY: uploadBounds.startY,
+                                                            endX: uploadBounds.endX,
+                                                            endY: uploadBounds.endY,
+                                                            timestamp: existingNote?.data.timestamp || Date.now(),
+                                                            contentType: 'image',
+                                                            src: storageUrl,
+                                                            originalWidth: img.width,
+                                                            originalHeight: img.height
+                                                        };
+
+                                                        // Use existing key or create new one
+                                                        const noteKey = existingNote?.key || `note_${uploadBounds.startX},${uploadBounds.startY}_${Date.now()}`;
+                                                        const action = existingNote ? 'updated' : 'uploaded';
+                                                        setDialogueWithRevert(`Image ${action} to region (${selectionWidth}x${selectionHeight} cells)`, setDialogueText);
+
+                                                        return { ...prev, [noteKey]: JSON.stringify(noteData) };
+                                                    });
                                                     setSelectionStart(null);
                                                     setSelectionEnd(null);
-                                                    setDialogueWithRevert(`Image uploaded to region (${selectionWidth}x${selectionHeight} cells)`, setDialogueText);
                                                 };
                                                 img.src = dataUrl;
                                             };
@@ -6142,8 +6233,8 @@ export function useWorldEngine({
                                         }
 
                                         // Calculate selection dimensions
-                                        const selectionWidth = selection.endX - selection.startX + 1;
-                                        const selectionHeight = selection.endY - selection.startY + 1;
+                                        const selectionWidth = uploadBounds.endX - uploadBounds.startX + 1;
+                                        const selectionHeight = uploadBounds.endY - uploadBounds.startY + 1;
 
                                         // Convert frames to local data URLs immediately
                                         const localFrameTiming: Array<{ url: string; delay: number }> = [];
@@ -6168,36 +6259,44 @@ export function useWorldEngine({
                                             }
                                         }
 
-                                        // Create note key
-                                        const noteKey = `note_${selection.startX}_${selection.startY}_${Date.now()}`;
+                                        // Use functional form to get current state and determine key
+                                        let noteKey = '';
+                                        setWorldData(prev => {
+                                            // Use targetNote if found, otherwise check for exact match
+                                            const existingNote = targetNote || findNoteAtSelection(uploadBounds.startX, uploadBounds.startY, uploadBounds.endX, uploadBounds.endY, prev);
 
-                                        // Show GIF immediately with local data URLs (optimistic)
-                                        const optimisticNoteData = {
-                                            startX: selection.startX,
-                                            startY: selection.startY,
-                                            endX: selection.endX,
-                                            endY: selection.endY,
-                                            timestamp: Date.now(),
-                                            contentType: 'image',
-                                            src: localFrameTiming[0].url,
-                                            originalWidth: parsedGIF.width,
-                                            originalHeight: parsedGIF.height,
-                                            isAnimated: true,
-                                            frameTiming: localFrameTiming,
-                                            totalDuration: parsedGIF.totalDuration,
-                                            animationStartTime: Date.now()
-                                        };
+                                            // Use existing key or create new one
+                                            noteKey = existingNote?.key || `note_${uploadBounds.startX}_${uploadBounds.startY}_${Date.now()}`;
 
-                                        setWorldData(prev => ({
-                                            ...prev,
-                                            [noteKey]: JSON.stringify(optimisticNoteData)
-                                        }));
+                                            // Show GIF immediately with local data URLs (optimistic)
+                                            const optimisticNoteData = {
+                                                startX: uploadBounds.startX,
+                                                startY: uploadBounds.startY,
+                                                endX: uploadBounds.endX,
+                                                endY: uploadBounds.endY,
+                                                timestamp: existingNote?.data.timestamp || Date.now(),
+                                                contentType: 'image',
+                                                src: localFrameTiming[0].url,
+                                                originalWidth: parsedGIF.width,
+                                                originalHeight: parsedGIF.height,
+                                                isAnimated: true,
+                                                frameTiming: localFrameTiming,
+                                                totalDuration: parsedGIF.totalDuration,
+                                                animationStartTime: Date.now()
+                                            };
+
+                                            const action = existingNote ? 'updated' : 'loaded';
+                                            setDialogueWithRevert(`GIF ${action} (${localFrameTiming.length} frames)`, setDialogueText);
+
+                                            return {
+                                                ...prev,
+                                                [noteKey]: JSON.stringify(optimisticNoteData)
+                                            };
+                                        });
 
                                         // Clear selection immediately
                                         setSelectionStart(null);
                                         setSelectionEnd(null);
-
-                                        setDialogueWithRevert(`GIF loaded (${localFrameTiming.length} frames)`, setDialogueText);
 
                                         // Upload to Firebase in background
                                         (async () => {
@@ -6249,8 +6348,8 @@ export function useWorldEngine({
                                     const img = new Image();
                                     img.onload = async () => {
                                         // Calculate selection dimensions
-                                        const selectionWidth = selection.endX - selection.startX + 1;
-                                        const selectionHeight = selection.endY - selection.startY + 1;
+                                        const selectionWidth = uploadBounds.endX - uploadBounds.startX + 1;
+                                        const selectionHeight = uploadBounds.endY - uploadBounds.startY + 1;
 
                                         let finalSrc = dataUrl;
 
@@ -6279,32 +6378,40 @@ export function useWorldEngine({
                                         // Upload to Firebase Storage and get URL
                                         const storageUrl = await uploadImageToStorage(finalSrc);
 
-                                        // Create note data entry
-                                        const noteData = {
-                                            startX: selection.startX,
-                                            startY: selection.startY,
-                                            endX: selection.endX,
-                                            endY: selection.endY,
-                                            timestamp: Date.now(),
-                                            contentType: 'image',
-                                            src: storageUrl,
-                                            originalWidth: img.width,
-                                            originalHeight: img.height
-                                        };
+                                        // Use functional form of setWorldData to get current state
+                                        setWorldData(prev => {
+                                            // Use targetNote if found, otherwise check for exact match
+                                            const existingNote = targetNote || findNoteAtSelection(uploadBounds.startX, uploadBounds.startY, uploadBounds.endX, uploadBounds.endY, prev);
 
-                                        // Store note with unique key
-                                        const noteKey = `note_${selection.startX}_${selection.startY}_${Date.now()}`;
-                                        setWorldData(prev => ({
-                                            ...prev,
-                                            [noteKey]: JSON.stringify(noteData)
-                                        }));
+                                            // Create note data entry
+                                            const noteData = {
+                                                startX: uploadBounds.startX,
+                                                startY: uploadBounds.startY,
+                                                endX: uploadBounds.endX,
+                                                endY: uploadBounds.endY,
+                                                timestamp: existingNote?.data.timestamp || Date.now(),
+                                                contentType: 'image',
+                                                src: storageUrl,
+                                                originalWidth: img.width,
+                                                originalHeight: img.height
+                                            };
+
+                                            // Use existing key or create new one
+                                            const noteKey = existingNote?.key || `note_${uploadBounds.startX}_${uploadBounds.startY}_${Date.now()}`;
+
+                                            const modeText = isBitmapMode ? "Bitmap" : "Image";
+                                            const action = existingNote ? 'updated' : 'uploaded';
+                                            setDialogueWithRevert(`${modeText} ${action} to region (${selectionWidth}x${selectionHeight} cells)`, setDialogueText);
+
+                                            return {
+                                                ...prev,
+                                                [noteKey]: JSON.stringify(noteData)
+                                            };
+                                        });
 
                                         // Clear selection
                                         setSelectionStart(null);
                                         setSelectionEnd(null);
-
-                                        const modeText = isBitmapMode ? "Bitmap" : "Image";
-                                        setDialogueWithRevert(`${modeText} uploaded to region (${selectionWidth}x${selectionHeight} cells)`, setDialogueText);
                                     };
                                     img.src = dataUrl;
                                 };
