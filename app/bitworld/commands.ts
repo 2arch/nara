@@ -129,7 +129,7 @@ const AVAILABLE_COMMANDS = [
     // Special
     'mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help',
     // Styling & Display
-    'bg', 'text', 'font',
+    'bg', 'text', 'font', 'style',
     // State Management
     'state', 'random', 'clear', 'replay',
     // Sharing & Publishing
@@ -145,7 +145,7 @@ export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map'],
     'create': ['label', 'task', 'link', 'clip', 'upload'],
     'special': ['mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help'],
-    'style': ['bg', 'text', 'font'],
+    'style': ['bg', 'text', 'font', 'style'],
     'state': ['state', 'random', 'clear', 'replay'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
     'account': ['signin', 'signout', 'account', 'upgrade'],
@@ -182,6 +182,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'bg': 'Change background color. Use /bg [color] for solid colors like /bg white, /bg black, /bg sulfur, etc.',
     'text': 'Change text color. Type /text followed by a color name (garden, sky, sunset, etc.). This sets the color for all new text you write on the canvas.',
     'font': 'Change font family. Type /font followed by a font name: "IBM Plex Mono" for a clean monospace font, or "Neureal" for a more stylized aesthetic.',
+    'style': 'Apply visual styles to selected notes or patterns. Select a note/pattern, then type /style [stylename]. Available styles: glow (pulsing glow border), solid (simple border), glowing (enhanced glow). Use /style note glow or /style pattern glowing.',
     'state': 'Save or load canvas states. Type /state to see saved states, /state save [name] to save current canvas, /state load [name] to restore a saved state. Perfect for versioning your work.',
     'random': 'Randomize text styling. Applies random colors and styles to your text for a more organic, playful aesthetic. Great for breaking out of rigid design patterns.',
     'clear': 'Clear all text from the canvas. WARNING: This deletes everything on your current canvas. Use /state save first if you want to preserve your work.',
@@ -3201,6 +3202,93 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             setCommandData({});
 
             return null; // Pattern doesn't need further processing
+        }
+
+        if (commandToExecute.startsWith('style ')) {
+            // Apply visual style to selected note or pattern
+            const styleName = commandToExecute.substring(6).trim().toLowerCase();
+
+            if (!styleName) {
+                setDialogueWithRevert("Usage: /style [stylename] - Available: glow, solid, glowing", setDialogueText);
+                setCommandState({
+                    isActive: false,
+                    input: '',
+                    matchedCommands: [],
+                    selectedIndex: 0,
+                    commandStartPos: { x: 0, y: 0 },
+                    originalCursorPos: { x: 0, y: 0 },
+                    hasNavigated: false
+                });
+                setCommandData({});
+                return null;
+            }
+
+            // Get the selected note key from commandData (passed via execution context)
+            const selectedNoteKey = commandData?.selectedNoteKey;
+            const selectedPatternKey = commandData?.selectedPatternKey;
+
+            if (!selectedNoteKey && !selectedPatternKey) {
+                setDialogueWithRevert("Select a note or pattern first, then use /style [stylename]", setDialogueText);
+                setCommandState({
+                    isActive: false,
+                    input: '',
+                    matchedCommands: [],
+                    selectedIndex: 0,
+                    commandStartPos: { x: 0, y: 0 },
+                    originalCursorPos: { x: 0, y: 0 },
+                    hasNavigated: false
+                });
+                setCommandData({});
+                return null;
+            }
+
+            if (setWorldData && worldData) {
+                if (selectedNoteKey) {
+                    // Apply style to note
+                    try {
+                        const noteData = JSON.parse(worldData[selectedNoteKey] as string);
+                        setWorldData((prev: WorldData) => ({
+                            ...prev,
+                            [selectedNoteKey]: JSON.stringify({
+                                ...noteData,
+                                style: styleName
+                            })
+                        }));
+                        setDialogueWithRevert(`Applied '${styleName}' style to note`, setDialogueText);
+                    } catch (e) {
+                        setDialogueWithRevert("Invalid note data", setDialogueText);
+                    }
+                } else if (selectedPatternKey) {
+                    // Apply style to pattern
+                    try {
+                        const patternData = JSON.parse(worldData[selectedPatternKey] as string);
+                        setWorldData((prev: WorldData) => ({
+                            ...prev,
+                            [selectedPatternKey]: JSON.stringify({
+                                ...patternData,
+                                style: styleName
+                            })
+                        }));
+                        setDialogueWithRevert(`Applied '${styleName}' style to pattern`, setDialogueText);
+                    } catch (e) {
+                        setDialogueWithRevert("Invalid pattern data", setDialogueText);
+                    }
+                }
+            }
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            return null;
         }
 
         // Check if this is an unrecognized command - treat as AI prompt
