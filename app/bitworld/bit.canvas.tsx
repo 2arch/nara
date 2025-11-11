@@ -1512,8 +1512,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                     const startX = Math.floor(centerX - width / 2);
                     const startY = Math.floor(centerY - height / 2);
-                    const endX = startX + width;
-                    const endY = startY + height;
+                    const endX = startX + width - 1;  // Inclusive endX
+                    const endY = startY + height - 1;  // Inclusive endY
 
                     if (pos.x >= startX && pos.x <= endX && pos.y >= startY && pos.y <= endY) {
                         return { key, data: patternData };
@@ -4821,15 +4821,15 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const patternData = JSON.parse(engine.worldData[selectedPatternKey] as string);
                 const { centerX, centerY, width = 120, height = 60, rooms = [] } = patternData;
 
-                // Convert center/dimensions to bounds (same as image format)
+                // Convert center/dimensions to bounds (inclusive coordinates)
                 const startX = Math.floor(centerX - width / 2);
                 const startY = Math.floor(centerY - height / 2);
-                const endX = startX + width;
-                const endY = startY + height;
+                const endX = startX + width - 1;  // Inclusive endX
+                const endY = startY + height - 1;  // Inclusive endY
 
                 // Draw selection border around the selected pattern
                 const topLeftScreen = engine.worldToScreen(startX, startY, currentZoom, currentOffset);
-                const bottomRightScreen = engine.worldToScreen(endX, endY, currentZoom, currentOffset);
+                const bottomRightScreen = engine.worldToScreen(endX + 1, endY + 1, currentZoom, currentOffset);
 
                 // Use text accent color for selection border
                 ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
@@ -6300,14 +6300,14 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     }
 
                     // If no room thumb hit, check pattern boundary
-                    // Convert center/dimensions to bounds (same as image format)
+                    // Convert center/dimensions to bounds (inclusive coordinates)
                     const startX = Math.floor(centerX - width / 2);
                     const startY = Math.floor(centerY - height / 2);
-                    const endX = startX + width;
-                    const endY = startY + height;
+                    const endX = startX + width - 1;  // Inclusive endX
+                    const endY = startY + height - 1;  // Inclusive endY
 
                     const topLeftScreen = engine.worldToScreen(startX, startY, engine.zoomLevel, engine.viewOffset);
-                    const bottomRightScreen = engine.worldToScreen(endX, endY, engine.zoomLevel, engine.viewOffset);
+                    const bottomRightScreen = engine.worldToScreen(endX + 1, endY + 1, engine.zoomLevel, engine.viewOffset);
 
                     const left = topLeftScreen.x;
                     const right = bottomRightScreen.x;
@@ -6749,9 +6749,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const oldCenterX = patternData.centerX;
                         const oldCenterY = patternData.centerY;
 
-                        // Calculate new dimensions
-                        const newWidth = newBounds.endX - newBounds.startX;
-                        const newHeight = newBounds.endY - newBounds.startY;
+                        // Calculate new dimensions (inclusive coordinates, so add 1)
+                        const newWidth = newBounds.endX - newBounds.startX + 1;
+                        const newHeight = newBounds.endY - newBounds.startY + 1;
                         const newCenterX = newBounds.startX + newWidth / 2;
                         const newCenterY = newBounds.startY + newHeight / 2;
 
@@ -7480,14 +7480,14 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     }
 
                     // If no room thumb hit, check pattern boundary
-                    // Convert center/dimensions to bounds (same as image format)
+                    // Convert center/dimensions to bounds (inclusive coordinates)
                     const startX = Math.floor(centerX - width / 2);
                     const startY = Math.floor(centerY - height / 2);
-                    const endX = startX + width;
-                    const endY = startY + height;
+                    const endX = startX + width - 1;  // Inclusive endX
+                    const endY = startY + height - 1;  // Inclusive endY
 
                     const topLeftScreen = engine.worldToScreen(startX, startY, engine.zoomLevel, engine.viewOffset);
-                    const bottomRightScreen = engine.worldToScreen(endX, endY, engine.zoomLevel, engine.viewOffset);
+                    const bottomRightScreen = engine.worldToScreen(endX + 1, endY + 1, engine.zoomLevel, engine.viewOffset);
 
                     const left = topLeftScreen.x;
                     const right = bottomRightScreen.x;
@@ -7889,9 +7889,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const oldCenterX = patternData.centerX;
                         const oldCenterY = patternData.centerY;
 
-                        // Calculate new dimensions
-                        const newWidth = newBounds.endX - newBounds.startX;
-                        const newHeight = newBounds.endY - newBounds.startY;
+                        // Calculate new dimensions (inclusive coordinates, so add 1)
+                        const newWidth = newBounds.endX - newBounds.startX + 1;
+                        const newHeight = newBounds.endY - newBounds.startY + 1;
                         const newCenterX = newBounds.startX + newWidth / 2;
                         const newCenterY = newBounds.startY + newHeight / 2;
 
