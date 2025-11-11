@@ -4815,34 +4815,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
-        // === Render Selected Pattern Border ===
+        // === Render Selected Pattern Rooms ===
         if (selectedPatternKey) {
             try {
                 const patternData = JSON.parse(engine.worldData[selectedPatternKey] as string);
-                const { centerX, centerY, width = 120, height = 60, rooms = [] } = patternData;
-
-                // Convert center/dimensions to bounds
-                // width/height represent coordinate spans (maxCoord - minCoord)
-                const startX = Math.floor(centerX - width / 2);
-                const startY = Math.floor(centerY - height / 2);
-                const endX = startX + width;
-                const endY = startY + height;
-
-                // Draw selection border around pattern extent (visual only, not resizable)
-                const topLeftScreen = engine.worldToScreen(startX, startY, currentZoom, currentOffset);
-                const bottomRightScreen = engine.worldToScreen(endX, endY, currentZoom, currentOffset);
-
-                // Use text accent color for selection border
-                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
-                const lineWidth = 3; // Slightly thicker to indicate selection
-                ctx.lineWidth = lineWidth;
-                const halfWidth = lineWidth / 2;
-                ctx.strokeRect(
-                    topLeftScreen.x + halfWidth,
-                    topLeftScreen.y + halfWidth,
-                    bottomRightScreen.x - topLeftScreen.x - lineWidth,
-                    bottomRightScreen.y - topLeftScreen.y - lineWidth
-                );
+                const { rooms = [] } = patternData;
 
                 // Draw corner thumbs for each individual room
                 for (const room of rooms) {
@@ -4854,9 +4831,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     const roomTop = roomTopLeft.y;
                     const roomBottom = roomBottomRight.y;
 
-                    // Room corner thumbs (smaller and slightly transparent to distinguish from pattern border)
-                    const roomThumbSize = 6;
-                    ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.7)`;
+                    // Room corner thumbs
+                    const roomThumbSize = 8;
+                    ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
                     ctx.fillRect(roomLeft - roomThumbSize / 2, roomTop - roomThumbSize / 2, roomThumbSize, roomThumbSize);
                     ctx.fillRect(roomRight - roomThumbSize / 2, roomTop - roomThumbSize / 2, roomThumbSize, roomThumbSize);
                     ctx.fillRect(roomLeft - roomThumbSize / 2, roomBottom - roomThumbSize / 2, roomThumbSize, roomThumbSize);
