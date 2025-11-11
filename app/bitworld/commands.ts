@@ -184,7 +184,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'bg': 'Change background color. Use /bg [color] for solid colors like /bg white, /bg black, /bg sulfur, etc.',
     'text': 'Change text color. Type /text followed by a color name (garden, sky, sunset, etc.). This sets the color for all new text you write on the canvas.',
     'font': 'Change font family. Type /font followed by a font name: "IBM Plex Mono" for a clean monospace font, or "Neureal" for a more stylized aesthetic.',
-    'style': 'Apply visual styles to selected notes or patterns. Select a note/pattern, then type /style [stylename]. Available: solid, glow, glowing (borders), stripe, dither, dots, cross, diagonal (lo-fi infill patterns). Example: /style stripe or /style glow',
+    'style': 'Apply visual styles to selected notes or patterns. Select a note/pattern or position cursor inside one, then type /style [stylename]. Available: solid (white border), glow (pulsing gray glow), glowing (enhanced bright glow). Example: /style glow',
     'state': 'Save or load canvas states. Type /state to see saved states, /state save [name] to save current canvas, /state load [name] to restore a saved state. Perfect for versioning your work.',
     'random': 'Randomize text styling. Applies random colors and styles to your text for a more organic, playful aesthetic. Great for breaking out of rigid design patterns.',
     'clear': 'Clear all text from the canvas. WARNING: This deletes everything on your current canvas. Use /state save first if you want to preserve your work.',
@@ -3211,7 +3211,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const styleName = commandToExecute.substring(6).trim().toLowerCase();
 
             if (!styleName) {
-                setDialogueWithRevert("Usage: /style [stylename] - Available: glow, solid, glowing", setDialogueText);
+                setDialogueWithRevert("Usage: /style [stylename] - Available: solid, glow, glowing", setDialogueText);
                 setCommandState({
                     isActive: false,
                     input: '',
