@@ -765,8 +765,26 @@ const useMonogramSystem = (
 
             const check = isInsideQuad(x, y, corners);
             if (check.inside) {
-                const depthFactor = Math.max(0.5, 1 - Math.abs(check.depth) / 100);
-                return 1.0 * depthFactor;
+                // Calculate depth-based shading
+                const depthFactor = Math.max(0.3, 1 - Math.abs(check.depth) / 100);
+
+                // Add distance-based shading from center of the quad for better depth perception
+                const centerX = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
+                const centerY = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
+                const distFromCenter = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
+
+                // Calculate the approximate radius of the quad
+                const quadWidth = Math.sqrt((corners[1].x - corners[0].x) ** 2 + (corners[1].y - corners[0].y) ** 2);
+                const quadHeight = Math.sqrt((corners[2].x - corners[1].x) ** 2 + (corners[2].y - corners[1].y) ** 2);
+                const maxDist = Math.sqrt(quadWidth ** 2 + quadHeight ** 2) / 2;
+
+                // Edge falloff for softer shading (0 at center, 1 at edges)
+                const edgeFalloff = Math.min(1, distFromCenter / maxDist);
+
+                // Combine depth and edge falloff for varied intensity
+                const intensity = depthFactor * (1 - edgeFalloff * 0.4); // 0.4 controls edge darkening strength
+
+                return Math.max(0.3, Math.min(1.0, intensity));
             }
         }
 
