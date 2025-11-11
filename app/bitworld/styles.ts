@@ -33,12 +33,9 @@ export interface CellBounds {
  * Fill style - how to fill an area
  */
 export interface FillStyle {
-    type: 'solid' | 'none' | 'stripe' | 'dither' | 'dots' | 'cross' | 'diagonal';
-    color?: string;           // For solid/pattern fills
-    backgroundColor?: string; // For patterns (background color)
+    type: 'solid' | 'none';
+    color?: string;           // For solid fills
     alpha?: number;           // Optional alpha override (0-1)
-    density?: number;         // Pattern density (0-1), default 0.5
-    angle?: number;           // Pattern rotation in degrees
 }
 
 /**
@@ -124,43 +121,6 @@ export const FILLS = {
         type: 'solid',
         color,
         alpha
-    }),
-
-    // Lo-fi infill patterns
-    stripe: (color: string, bgColor: string = 'transparent', density: number = 0.5): FillStyle => ({
-        type: 'stripe',
-        color,
-        backgroundColor: bgColor,
-        density
-    }),
-
-    dither: (color: string, bgColor: string = 'transparent', density: number = 0.5): FillStyle => ({
-        type: 'dither',
-        color,
-        backgroundColor: bgColor,
-        density
-    }),
-
-    dots: (color: string, bgColor: string = 'transparent', density: number = 0.5): FillStyle => ({
-        type: 'dots',
-        color,
-        backgroundColor: bgColor,
-        density
-    }),
-
-    cross: (color: string, bgColor: string = 'transparent', density: number = 0.5): FillStyle => ({
-        type: 'cross',
-        color,
-        backgroundColor: bgColor,
-        density
-    }),
-
-    diagonal: (color: string, bgColor: string = 'transparent', density: number = 0.5, angle: number = 45): FillStyle => ({
-        type: 'diagonal',
-        color,
-        backgroundColor: bgColor,
-        density,
-        angle
     }),
 };
 
@@ -278,32 +238,6 @@ export const RECT_STYLES = {
             flicker: true,
             cardinalExtension: 2
         })
-    } as RectStyle,
-
-    // Lo-fi infill patterns (for /style stripe, /style dither, etc.)
-    stripe: {
-        fill: FILLS.stripe('#888888', 'transparent', 0.5),
-        border: BORDERS.solid('#888888', 1)
-    } as RectStyle,
-
-    dither: {
-        fill: FILLS.dither('#888888', 'transparent', 0.5),
-        border: BORDERS.solid('#888888', 1)
-    } as RectStyle,
-
-    dots: {
-        fill: FILLS.dots('#888888', 'transparent', 0.3),
-        border: BORDERS.solid('#888888', 1)
-    } as RectStyle,
-
-    cross: {
-        fill: FILLS.cross('#888888', 'transparent', 0.5),
-        border: BORDERS.solid('#888888', 1)
-    } as RectStyle,
-
-    diagonal: {
-        fill: FILLS.diagonal('#888888', 'transparent', 0.5, 45),
-        border: BORDERS.solid('#888888', 1)
     } as RectStyle,
 
     // Image frame
@@ -433,7 +367,7 @@ export function hexToRgb(hex: string): { r: number; g: number; b: number } {
 }
 
 /**
- * Render fill patterns (solid, stripe, dither, dots, cross, diagonal)
+ * Render fill (solid or none)
  */
 function renderFill(
     context: BaseRenderContext,
@@ -451,102 +385,14 @@ function renderFill(
     const alpha = fill.alpha ?? 1.0;
     ctx.globalAlpha = fadeProgress * alpha;
 
-    // Render background if specified
-    if (fill.backgroundColor && fill.backgroundColor !== 'transparent') {
-        ctx.fillStyle = fill.backgroundColor;
-        ctx.fillRect(screenX, screenY, screenWidth, screenHeight);
-    }
-
-    if (!fill.color) {
+    if (!fill.color || fill.type === 'none') {
         ctx.globalAlpha = fadeProgress;
         return;
     }
 
-    switch (fill.type) {
-        case 'solid':
-            ctx.fillStyle = fill.color;
-            ctx.fillRect(screenX, screenY, screenWidth, screenHeight);
-            break;
-
-        case 'stripe':
-            // Horizontal stripes
-            ctx.fillStyle = fill.color;
-            const stripeSpacing = 2; // cells between stripes
-            for (let row = bounds.y; row < bounds.y + bounds.height; row++) {
-                if (row % (stripeSpacing + 1) === 0) {
-                    const y = row * charHeight;
-                    ctx.fillRect(screenX, y, screenWidth, charHeight);
-                }
-            }
-            break;
-
-        case 'dither':
-            // Checkerboard dither pattern
-            ctx.fillStyle = fill.color;
-            const density = fill.density ?? 0.5;
-            for (let row = bounds.y; row < bounds.y + bounds.height; row++) {
-                for (let col = bounds.x; col < bounds.x + bounds.width; col++) {
-                    // Checkerboard pattern with density control
-                    const isEvenRow = row % 2 === 0;
-                    const isEvenCol = col % 2 === 0;
-                    const shouldFill = (isEvenRow === isEvenCol);
-
-                    if (shouldFill && Math.random() < density) {
-                        const x = col * charWidth;
-                        const y = row * charHeight;
-                        ctx.fillRect(x, y, charWidth, charHeight);
-                    }
-                }
-            }
-            break;
-
-        case 'dots':
-            // Dot pattern
-            ctx.fillStyle = fill.color;
-            const dotDensity = fill.density ?? 0.3;
-            const dotSpacing = 2; // cells between dots
-            for (let row = bounds.y; row < bounds.y + bounds.height; row += dotSpacing) {
-                for (let col = bounds.x; col < bounds.x + bounds.width; col += dotSpacing) {
-                    if (Math.random() < dotDensity) {
-                        const x = col * charWidth + charWidth / 4;
-                        const y = row * charHeight + charHeight / 4;
-                        const size = Math.min(charWidth, charHeight) / 2;
-                        ctx.fillRect(x, y, size, size);
-                    }
-                }
-            }
-            break;
-
-        case 'cross':
-            // Cross/plus pattern
-            ctx.fillStyle = fill.color;
-            const crossSpacing = 3; // cells between crosses
-            for (let row = bounds.y; row < bounds.y + bounds.height; row += crossSpacing) {
-                for (let col = bounds.x; col < bounds.x + bounds.width; col += crossSpacing) {
-                    const x = col * charWidth;
-                    const y = row * charHeight;
-                    // Horizontal line
-                    ctx.fillRect(x, y + charHeight / 2 - 1, charWidth, 2);
-                    // Vertical line
-                    ctx.fillRect(x + charWidth / 2 - 1, y, 2, charHeight);
-                }
-            }
-            break;
-
-        case 'diagonal':
-            // Diagonal lines
-            ctx.fillStyle = fill.color;
-            ctx.save();
-            ctx.translate(screenX + screenWidth / 2, screenY + screenHeight / 2);
-            ctx.rotate((fill.angle ?? 45) * Math.PI / 180);
-
-            const diagSpacing = 3;
-            const maxDim = Math.max(screenWidth, screenHeight) * 2;
-            for (let offset = -maxDim; offset < maxDim; offset += diagSpacing * charWidth) {
-                ctx.fillRect(offset, -maxDim, 2, maxDim * 2);
-            }
-            ctx.restore();
-            break;
+    if (fill.type === 'solid') {
+        ctx.fillStyle = fill.color;
+        ctx.fillRect(screenX, screenY, screenWidth, screenHeight);
     }
 
     ctx.globalAlpha = fadeProgress;

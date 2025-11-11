@@ -28,7 +28,581 @@ const CURSOR_TRAIL_FADE_MS = 200; // Time in ms for trail to fully fade
 const ARROW_SIZE = 12; // Size of waypoint arrows
 const ARROW_MARGIN = 20; // Distance from viewport edge
 
+// ============================================================================
+// UNIFIED BOUNDED REGION ARCHITECTURE
+// ============================================================================
 
+/**
+ * Universal bounds interface - all regions have these properties
+ */
+interface RegionBounds {
+    startX: number;
+    endX: number;
+    startY: number;
+    endY: number;
+}
+
+/**
+ * Content type for note regions (text container with overlay)
+ */
+interface NoteContent {
+    type: 'note';
+    // No additional content - just a text container
+}
+
+/**
+ * Content type for image regions
+ */
+interface ImageContent {
+    type: 'image';
+    src: string;              // Data URL or blob URL
+    originalWidth: number;
+    originalHeight: number;
+    // GIF animation support
+    isAnimated?: boolean;
+    frameTiming?: Array<{ url: string; delay: number }>;
+    totalDuration?: number;
+    animationStartTime?: number;
+}
+
+/**
+ * Content type for iframe regions (embedded web pages)
+ */
+interface IframeContent {
+    type: 'iframe';
+    url: string;              // The iframe src URL
+}
+
+/**
+ * Content type for mail regions (email composer)
+ */
+interface MailContent {
+    type: 'mail';
+    // Mail specific data could go here (recipient, subject, etc.)
+}
+
+/**
+ * Union type of all possible content types
+ */
+type RegionContent = NoteContent | ImageContent | IframeContent | MailContent;
+
+/**
+ * Unified bounded region - the universal container for all content types
+ * All notes, images, iframes, and mail regions can be represented by this
+ */
+interface BoundedRegion extends RegionBounds {
+    timestamp: number;
+    style?: string;           // Style name (e.g., "glow", "solid", "glowing")
+    patternKey?: string;      // Reference to parent pattern if part of one
+    content: RegionContent;   // What's inside the region
+}
+
+// ============================================================================
+// REGION CONVERSION FUNCTIONS
+// ============================================================================
+
+/**
+ * Convert legacy note data to unified region
+ */
+function noteToRegion(noteData: any): BoundedRegion {
+    return {
+        startX: noteData.startX,
+        endX: noteData.endX,
+        startY: noteData.startY,
+        endY: noteData.endY,
+        timestamp: noteData.timestamp,
+        style: noteData.style,
+        patternKey: noteData.patternKey,
+        content: { type: 'note' }
+    };
+}
+
+/**
+ * Convert legacy image data to unified region
+ */
+function imageToRegion(imageData: any): BoundedRegion {
+    return {
+        startX: imageData.startX,
+        endX: imageData.endX,
+        startY: imageData.startY,
+        endY: imageData.endY,
+        timestamp: Date.now(), // Images don't have timestamp in old format
+        content: {
+            type: 'image',
+            src: imageData.src,
+            originalWidth: imageData.originalWidth,
+            originalHeight: imageData.originalHeight,
+            isAnimated: imageData.isAnimated,
+            frameTiming: imageData.frameTiming,
+            totalDuration: imageData.totalDuration,
+            animationStartTime: imageData.animationStartTime
+        }
+    };
+}
+
+/**
+ * Convert legacy iframe data to unified region
+ */
+function iframeToRegion(iframeData: any): BoundedRegion {
+    return {
+        startX: iframeData.startX,
+        endX: iframeData.endX,
+        startY: iframeData.startY,
+        endY: iframeData.endY,
+        timestamp: iframeData.timestamp,
+        content: {
+            type: 'iframe',
+            url: iframeData.url
+        }
+    };
+}
+
+/**
+ * Convert legacy mail data to unified region
+ */
+function mailToRegion(mailData: any): BoundedRegion {
+    return {
+        startX: mailData.startX,
+        endX: mailData.endX,
+        startY: mailData.startY,
+        endY: mailData.endY,
+        timestamp: mailData.timestamp,
+        content: { type: 'mail' }
+    };
+}
+
+/**
+ * Convert unified region back to legacy note format
+ */
+function regionToNote(region: BoundedRegion): any {
+    if (region.content.type !== 'note') {
+        throw new Error('Cannot convert non-note region to note format');
+    }
+    return {
+        startX: region.startX,
+        endX: region.endX,
+        startY: region.startY,
+        endY: region.endY,
+        timestamp: region.timestamp,
+        ...(region.style && { style: region.style }),
+        ...(region.patternKey && { patternKey: region.patternKey })
+    };
+}
+
+/**
+ * Convert unified region back to legacy image format
+ */
+function regionToImage(region: BoundedRegion): any {
+    if (region.content.type !== 'image') {
+        throw new Error('Cannot convert non-image region to image format');
+    }
+    const content = region.content;
+    return {
+        type: 'image',
+        startX: region.startX,
+        endX: region.endX,
+        startY: region.startY,
+        endY: region.endY,
+        src: content.src,
+        originalWidth: content.originalWidth,
+        originalHeight: content.originalHeight,
+        ...(content.isAnimated && { isAnimated: content.isAnimated }),
+        ...(content.frameTiming && { frameTiming: content.frameTiming }),
+        ...(content.totalDuration && { totalDuration: content.totalDuration }),
+        ...(content.animationStartTime && { animationStartTime: content.animationStartTime })
+    };
+}
+
+/**
+ * Convert unified region back to legacy iframe format
+ */
+function regionToIframe(region: BoundedRegion): any {
+    if (region.content.type !== 'iframe') {
+        throw new Error('Cannot convert non-iframe region to iframe format');
+    }
+    return {
+        startX: region.startX,
+        endX: region.endX,
+        startY: region.startY,
+        endY: region.endY,
+        timestamp: region.timestamp,
+        url: region.content.url
+    };
+}
+
+/**
+ * Convert unified region back to legacy mail format
+ */
+function regionToMail(region: BoundedRegion): any {
+    if (region.content.type !== 'mail') {
+        throw new Error('Cannot convert non-mail region to mail format');
+    }
+    return {
+        startX: region.startX,
+        endX: region.endX,
+        startY: region.startY,
+        endY: region.endY,
+        timestamp: region.timestamp
+    };
+}
+
+/**
+ * Convert region content type (e.g., note -> image, image -> iframe)
+ * This is the core conversion function for changing what's inside a region
+ */
+function convertRegionContent(
+    region: BoundedRegion,
+    newContentType: RegionContent['type'],
+    contentData?: Partial<RegionContent>
+): BoundedRegion {
+    const baseRegion: BoundedRegion = {
+        startX: region.startX,
+        endX: region.endX,
+        startY: region.startY,
+        endY: region.endY,
+        timestamp: region.timestamp,
+        style: region.style,
+        patternKey: region.patternKey,
+        content: { type: newContentType } as RegionContent
+    };
+
+    // Apply content-specific data if provided
+    switch (newContentType) {
+        case 'note':
+            baseRegion.content = { type: 'note' };
+            break;
+        case 'image':
+            if (!contentData || contentData.type !== 'image') {
+                throw new Error('Image content requires src, originalWidth, originalHeight');
+            }
+            baseRegion.content = contentData as ImageContent;
+            break;
+        case 'iframe':
+            if (!contentData || contentData.type !== 'iframe' || !('url' in contentData)) {
+                throw new Error('Iframe content requires url');
+            }
+            baseRegion.content = contentData as IframeContent;
+            break;
+        case 'mail':
+            baseRegion.content = { type: 'mail' };
+            break;
+    }
+
+    return baseRegion;
+}
+
+// ============================================================================
+// REGION UTILITY FUNCTIONS
+// ============================================================================
+
+/**
+ * Generate key for region based on content type
+ */
+function getRegionKey(region: BoundedRegion): string {
+    const prefix = region.content.type;
+    return `${prefix}_${region.startX},${region.startY}_${region.timestamp}`;
+}
+
+/**
+ * Parse region from worldData entry
+ * Handles both legacy formats and unified format
+ */
+function parseRegionFromWorldData(key: string, value: any): BoundedRegion | null {
+    try {
+        if (key.startsWith('note_')) {
+            const data = typeof value === 'string' ? JSON.parse(value) : value;
+            return noteToRegion(data);
+        } else if (key.startsWith('image_')) {
+            return imageToRegion(value);
+        } else if (key.startsWith('iframe_')) {
+            const data = typeof value === 'string' ? JSON.parse(value) : value;
+            return iframeToRegion(data);
+        } else if (key.startsWith('mail_')) {
+            const data = typeof value === 'string' ? JSON.parse(value) : value;
+            return mailToRegion(data);
+        } else if (key.startsWith('region_')) {
+            // Future: unified format
+            const data = typeof value === 'string' ? JSON.parse(value) : value;
+            return data as BoundedRegion;
+        }
+    } catch (e) {
+        console.error(`Failed to parse region from key ${key}:`, e);
+    }
+    return null;
+}
+
+/**
+ * Check if a point is inside a region
+ */
+function isPointInRegion(point: Point, region: BoundedRegion): boolean {
+    return point.x >= region.startX && point.x <= region.endX &&
+           point.y >= region.startY && point.y <= region.endY;
+}
+
+/**
+ * Find region at a specific position
+ * Returns both the key and the region data
+ */
+function findRegionAtPosition(
+    pos: Point,
+    worldData: any,
+    filterType?: RegionContent['type']
+): { key: string; region: BoundedRegion } | null {
+    for (const key in worldData) {
+        // Check all region types
+        if (key.startsWith('note_') || key.startsWith('image_') ||
+            key.startsWith('iframe_') || key.startsWith('mail_') ||
+            key.startsWith('region_')) {
+
+            const region = parseRegionFromWorldData(key, worldData[key]);
+            if (region) {
+                // Apply content type filter if specified
+                if (filterType && region.content.type !== filterType) {
+                    continue;
+                }
+
+                // Check if position is within region bounds
+                if (isPointInRegion(pos, region)) {
+                    return { key, region };
+                }
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * Calculate region dimensions
+ */
+function getRegionDimensions(region: BoundedRegion): { width: number; height: number } {
+    return {
+        width: region.endX - region.startX + 1,
+        height: region.endY - region.startY + 1
+    };
+}
+
+/**
+ * Unified region rendering function
+ * Renders any region type (note, image, iframe, mail) on canvas
+ */
+interface RegionRenderContext {
+    ctx: CanvasRenderingContext2D;
+    engine: any; // WorldEngine interface
+    currentZoom: number;
+    currentOffset: { x: number; y: number };
+    effectiveCharWidth: number;
+    effectiveCharHeight: number;
+    cssWidth: number;
+    cssHeight: number;
+    imageCache: Map<string, HTMLImageElement>;
+    gifFrameCache: Map<string, { frames: HTMLImageElement[]; delays: number[] }>;
+    hexToRgb: (hex: string) => string;
+}
+
+function renderRegion(region: BoundedRegion, context: RegionRenderContext, renderContext?: BaseRenderContext): void {
+    const { ctx, engine, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight, cssWidth, cssHeight, hexToRgb } = context;
+    const { startX, endX, startY, endY } = region;
+
+    switch (region.content.type) {
+        case 'note': {
+            // Check if note has a custom style
+            if (region.style) {
+                const style = getRectStyle(region.style);
+                const bounds: CellBounds = {
+                    x: startX,
+                    y: startY,
+                    width: endX - startX + 1,
+                    height: endY - startY + 1
+                };
+
+                const baseRenderContext: BaseRenderContext = renderContext || {
+                    ctx,
+                    charWidth: effectiveCharWidth,
+                    charHeight: effectiveCharHeight,
+                    timestamp: region.timestamp || Date.now()
+                };
+
+                // Save canvas state and transform to world space
+                ctx.save();
+                const topLeft = engine.worldToScreen(startX, startY, currentZoom, currentOffset);
+                ctx.translate(topLeft.x, topLeft.y);
+
+                // Adjust context for screen-space rendering
+                const screenBounds: CellBounds = {
+                    x: 0,
+                    y: 0,
+                    width: bounds.width,
+                    height: bounds.height
+                };
+
+                renderStyledRect(baseRenderContext, screenBounds, style);
+                ctx.restore();
+            } else {
+                // Default rendering: semi-transparent overlay
+                const planColor = `rgba(${hexToRgb(engine.textColor)}, 0.15)`;
+                ctx.fillStyle = planColor;
+
+                // Fill each cell in the note region
+                for (let worldY = startY; worldY <= endY; worldY++) {
+                    for (let worldX = startX; worldX <= endX; worldX++) {
+                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+
+                        // Only draw if cell is visible on screen
+                        if (screenPos.x >= -effectiveCharWidth && screenPos.x <= cssWidth &&
+                            screenPos.y >= -effectiveCharHeight && screenPos.y <= cssHeight) {
+                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        }
+                    }
+                }
+            }
+            break;
+        }
+
+        case 'mail': {
+            // Use yellow/amber semi-transparent overlay for mail regions
+            const mailColor = 'rgba(255, 193, 7, 0.15)'; // Amber color
+            ctx.fillStyle = mailColor;
+
+            // Fill each cell in the mail region
+            for (let worldY = startY; worldY <= endY; worldY++) {
+                for (let worldX = startX; worldX <= endX; worldX++) {
+                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+
+                    // Only draw if cell is visible on screen
+                    if (screenPos.x >= -effectiveCharWidth && screenPos.x <= cssWidth &&
+                        screenPos.y >= -effectiveCharHeight && screenPos.y <= cssHeight) {
+                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                    }
+                }
+            }
+            break;
+        }
+
+        case 'image': {
+            const imageContent = region.content;
+            const imageData = imageContent;
+
+            // Check if image is visible in current viewport
+            const startWorldX = startX;
+            const startWorldY = startY;
+            const endWorldX = endX;
+            const endWorldY = endY;
+
+            const viewportStartX = Math.floor(-currentOffset.x / currentZoom);
+            const viewportEndX = Math.ceil((cssWidth - currentOffset.x) / currentZoom);
+            const viewportStartY = Math.floor(-currentOffset.y / currentZoom);
+            const viewportEndY = Math.ceil((cssHeight - currentOffset.y) / currentZoom);
+
+            const imageVisible = startX <= viewportEndX && endX >= viewportStartX &&
+                                startY <= viewportEndY && endY >= viewportStartY;
+
+            if (!imageVisible) break;
+
+            // Calculate screen positions
+            const startScreenPos = engine.worldToScreen(startX, startY, currentZoom, currentOffset);
+            const endScreenPos = engine.worldToScreen(endX + 1, endY + 1, currentZoom, currentOffset);
+
+            // Calculate target dimensions based on grid cells
+            const targetWidth = endScreenPos.x - startScreenPos.x;
+            const targetHeight = endScreenPos.y - startScreenPos.y;
+
+            // Determine which image to use (animated GIF frame or static image)
+            let img: HTMLImageElement | undefined;
+
+            if (imageContent.isAnimated && imageContent.totalDuration && imageContent.animationStartTime) {
+                // Get parsed GIF frames from cache
+                const gifData = context.gifFrameCache.get(imageContent.src);
+
+                if (gifData && gifData.frames.length > 0) {
+                    // Calculate elapsed time since animation started
+                    const elapsedMs = Date.now() - imageContent.animationStartTime;
+
+                    // Calculate which frame to display (loop animation)
+                    const loopedTime = elapsedMs % imageContent.totalDuration;
+                    let accumulatedTime = 0;
+                    let frameIndex = 0;
+
+                    for (let i = 0; i < gifData.delays.length; i++) {
+                        accumulatedTime += gifData.delays[i];
+                        if (loopedTime < accumulatedTime) {
+                            frameIndex = i;
+                            break;
+                        }
+                    }
+
+                    // Use the current frame
+                    img = gifData.frames[frameIndex];
+
+                    // Fallback to first frame if current frame isn't loaded
+                    if (!img || !img.complete || img.naturalWidth === 0) {
+                        img = gifData.frames[0];
+                    }
+                } else {
+                    // GIF not parsed yet, use static image as fallback
+                    img = context.imageCache.get(imageContent.src);
+                }
+            } else {
+                // Static image
+                img = context.imageCache.get(imageContent.src);
+                if (!img) {
+                    img = new Image();
+                    img.src = imageContent.src;
+                    context.imageCache.set(imageContent.src, img);
+                }
+            }
+
+            // Only draw if image is fully loaded
+            if (img && img.complete && img.naturalWidth > 0) {
+                // Calculate crop and fit dimensions
+                const aspectRatio = img.width / img.height;
+                const targetAspectRatio = targetWidth / targetHeight;
+
+                let drawWidth = targetWidth;
+                let drawHeight = targetHeight;
+                let offsetX = 0;
+                let offsetY = 0;
+
+                // Crop to fit - fill the entire target area
+                if (aspectRatio > targetAspectRatio) {
+                    // Image is wider than target - crop sides
+                    const scaledWidth = targetHeight * aspectRatio;
+                    offsetX = (targetWidth - scaledWidth) / 2;
+                    drawWidth = scaledWidth;
+                } else {
+                    // Image is taller than target - crop top/bottom
+                    const scaledHeight = targetWidth / aspectRatio;
+                    offsetY = (targetHeight - scaledHeight) / 2;
+                    drawHeight = scaledHeight;
+                }
+
+                // Use clipping to ensure image doesn't exceed target bounds
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(startScreenPos.x, startScreenPos.y, targetWidth, targetHeight);
+                ctx.clip();
+
+                // Draw the image
+                ctx.drawImage(
+                    img,
+                    startScreenPos.x + offsetX,
+                    startScreenPos.y + offsetY,
+                    drawWidth,
+                    drawHeight
+                );
+
+                ctx.restore();
+            }
+            break;
+        }
+
+        case 'iframe':
+            // Iframes are rendered as React components, not on canvas
+            // This case is handled separately in the JSX render
+            break;
+    }
+}
+
+// ============================================================================
 
 interface CursorTrailPosition {
     x: number;
@@ -2688,114 +3262,29 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
-        // === Render Images ===
+        // === Setup Unified Region Rendering Context ===
+        const regionRenderCtx: RegionRenderContext = {
+            ctx,
+            engine,
+            currentZoom,
+            currentOffset,
+            effectiveCharWidth,
+            effectiveCharHeight,
+            cssWidth,
+            cssHeight,
+            imageCache: imageCache.current,
+            gifFrameCache: gifFrameCache.current,
+            hexToRgb
+        };
+
+        // === Render Images (Unified) ===
         const renderedImages = new Set<string>(); // Track which images we've already rendered
         for (const key in engine.worldData) {
             if (key.startsWith('image_') && !renderedImages.has(key)) {
-                const imageData = engine.worldData[key];
-                if (engine.isImageData(imageData)) {
-                    renderedImages.add(key);
-                    
-                    // Check if image is visible in current viewport
-                    const imageVisible = imageData.startX <= endWorldX && imageData.endX >= startWorldX &&
-                                        imageData.startY <= endWorldY && imageData.endY >= startWorldY;
-                    
-                    if (imageVisible) {
-                        // Calculate screen positions
-                        const startScreenPos = engine.worldToScreen(imageData.startX, imageData.startY, currentZoom, currentOffset);
-                        const endScreenPos = engine.worldToScreen(imageData.endX + 1, imageData.endY + 1, currentZoom, currentOffset);
-
-                        // Calculate target dimensions based on grid cells
-                        const targetWidth = endScreenPos.x - startScreenPos.x;
-                        const targetHeight = endScreenPos.y - startScreenPos.y;
-
-                        // Determine which image to use (animated GIF frame or static image)
-                        let img: HTMLImageElement | undefined;
-
-                        if (imageData.isAnimated && imageData.totalDuration && imageData.animationStartTime) {
-                            // Get parsed GIF frames from cache
-                            const gifData = gifFrameCache.current.get(imageData.src);
-
-                            if (gifData && gifData.frames.length > 0) {
-                                // Calculate elapsed time since animation started
-                                const elapsedMs = Date.now() - imageData.animationStartTime;
-
-                                // Calculate which frame to display (loop animation)
-                                const loopedTime = elapsedMs % imageData.totalDuration;
-                                let accumulatedTime = 0;
-                                let frameIndex = 0;
-
-                                for (let i = 0; i < gifData.delays.length; i++) {
-                                    accumulatedTime += gifData.delays[i];
-                                    if (loopedTime < accumulatedTime) {
-                                        frameIndex = i;
-                                        break;
-                                    }
-                                }
-
-                                // Use the current frame
-                                img = gifData.frames[frameIndex];
-
-                                // Fallback to first frame if current frame isn't loaded
-                                if (!img || !img.complete || img.naturalWidth === 0) {
-                                    img = gifData.frames[0];
-                                }
-                            } else {
-                                // GIF not parsed yet, use static image as fallback
-                                img = imageCache.current.get(imageData.src);
-                            }
-                        } else {
-                            // Static image
-                            img = imageCache.current.get(imageData.src);
-                            if (!img) {
-                                img = new Image();
-                                img.src = imageData.src;
-                                imageCache.current.set(imageData.src, img);
-                            }
-                        }
-
-                        // Only draw if image is fully loaded
-                        if (img && img.complete && img.naturalWidth > 0) {
-                            // Calculate crop and fit dimensions
-                            const aspectRatio = img.width / img.height;
-                            const targetAspectRatio = targetWidth / targetHeight;
-
-                            let drawWidth = targetWidth;
-                            let drawHeight = targetHeight;
-                            let offsetX = 0;
-                            let offsetY = 0;
-
-                            // Crop to fit - fill the entire target area
-                            if (aspectRatio > targetAspectRatio) {
-                                // Image is wider than target - crop sides
-                                const scaledWidth = targetHeight * aspectRatio;
-                                offsetX = (targetWidth - scaledWidth) / 2;
-                                drawWidth = scaledWidth;
-                            } else {
-                                // Image is taller than target - crop top/bottom
-                                const scaledHeight = targetWidth / aspectRatio;
-                                offsetY = (targetHeight - scaledHeight) / 2;
-                                drawHeight = scaledHeight;
-                            }
-
-                            // Use clipping to ensure image doesn't exceed target bounds
-                            ctx.save();
-                            ctx.beginPath();
-                            ctx.rect(startScreenPos.x, startScreenPos.y, targetWidth, targetHeight);
-                            ctx.clip();
-
-                            // Draw the image
-                            ctx.drawImage(
-                                img,
-                                startScreenPos.x + offsetX,
-                                startScreenPos.y + offsetY,
-                                drawWidth,
-                                drawHeight
-                            );
-
-                            ctx.restore();
-                        }
-                    }
+                renderedImages.add(key);
+                const region = parseRegionFromWorldData(key, engine.worldData[key]);
+                if (region && region.content.type === 'image') {
+                    renderRegion(region, regionRenderCtx);
                 }
             }
         }
@@ -4565,97 +5054,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
         }
 
-        // === Render Note Regions ===
-        // Render saved note regions with opaque sheen
+        // === Render Note and Mail Regions (Unified) ===
+        // Render all bounded regions (notes, mail) using unified architecture
         for (const key in engine.worldData) {
-            if (key.startsWith('note_')) {
-                try {
-                    const noteData = JSON.parse(engine.worldData[key] as string);
-                    const { startX, endX, startY, endY, style: styleName } = noteData;
-
-                    // Check if note has a custom style
-                    if (styleName) {
-                        // Use styled rendering system
-                        const style = getRectStyle(styleName);
-                        const bounds: CellBounds = {
-                            x: startX,
-                            y: startY,
-                            width: endX - startX + 1,
-                            height: endY - startY + 1
-                        };
-
-                        const renderContext: BaseRenderContext = {
-                            ctx,
-                            charWidth: effectiveCharWidth,
-                            charHeight: effectiveCharHeight,
-                            timestamp: noteData.timestamp || Date.now()
-                        };
-
-                        // Save canvas state and transform to world space
-                        ctx.save();
-                        const topLeft = engine.worldToScreen(startX, startY, currentZoom, currentOffset);
-                        ctx.translate(topLeft.x, topLeft.y);
-
-                        // Adjust context for screen-space rendering
-                        const screenBounds: CellBounds = {
-                            x: 0,
-                            y: 0,
-                            width: bounds.width,
-                            height: bounds.height
-                        };
-
-                        renderStyledRect(renderContext, screenBounds, style);
-                        ctx.restore();
-                    } else {
-                        // Default rendering: semi-transparent overlay
-                        const planColor = `rgba(${hexToRgb(engine.textColor)}, 0.15)`;
-                        ctx.fillStyle = planColor;
-
-                        // Fill each cell in the note region
-                        for (let worldY = startY; worldY <= endY; worldY++) {
-                            for (let worldX = startX; worldX <= endX; worldX++) {
-                                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-
-                                // Only draw if cell is visible on screen
-                                if (screenPos.x >= -effectiveCharWidth && screenPos.x <= cssWidth &&
-                                    screenPos.y >= -effectiveCharHeight && screenPos.y <= cssHeight) {
-                                    ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                                }
-                            }
-                        }
-                    }
-                } catch (e) {
-                    // Skip invalid note data
-                }
-            }
-        }
-
-        // === Render Mail Regions ===
-        // Render mail regions with distinctive yellow/amber overlay
-        for (const key in engine.worldData) {
-            if (key.startsWith('mail_')) {
-                try {
-                    const mailData = JSON.parse(engine.worldData[key] as string);
-                    const { startX, endX, startY, endY } = mailData;
-
-                    // Use yellow/amber semi-transparent overlay for mail regions
-                    const mailColor = 'rgba(255, 193, 7, 0.15)'; // Amber color
-                    ctx.fillStyle = mailColor;
-
-                    // Fill each cell in the mail region
-                    for (let worldY = startY; worldY <= endY; worldY++) {
-                        for (let worldX = startX; worldX <= endX; worldX++) {
-                            const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-
-                            // Only draw if cell is visible on screen
-                            if (screenPos.x >= -effectiveCharWidth && screenPos.x <= cssWidth &&
-                                screenPos.y >= -effectiveCharHeight && screenPos.y <= cssHeight) {
-                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                            }
-                        }
-                    }
-                } catch (e) {
-                    // Skip invalid mail data
+            if (key.startsWith('note_') || key.startsWith('mail_')) {
+                const region = parseRegionFromWorldData(key, engine.worldData[key]);
+                if (region) {
+                    renderRegion(region, regionRenderCtx);
                 }
             }
         }
@@ -4666,7 +5071,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             if (key.startsWith('pattern_')) {
                 try {
                     const patternData = JSON.parse(engine.worldData[key] as string);
-                    const { centerX, centerY, timestamp, width = 120, height = 60, noteKeys = [], rooms = [] } = patternData;
+                    const { centerX, centerY, timestamp, width = 120, height = 60, noteKeys = [], rooms = [], style: styleName } = patternData;
 
                     // Look up note objects from noteKeys (new format) or use inline rooms (legacy format)
                     const roomsFromNotes: Array<{ x: number; y: number; width: number; height: number }> = noteKeys.length > 0
@@ -4798,23 +5203,121 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         }
                     }
 
-                    // Draw the unified shape with a single outer border
-                    // Fill all cells
-                    ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.15)`;
-                    for (const cellKey of gridCells) {
-                        const [x, y] = cellKey.split(',').map(Number);
-                        const topLeft = engine.worldToScreen(x, y, currentZoom, currentOffset);
-                        const bottomRight = engine.worldToScreen(x + 1, y + 1, currentZoom, currentOffset);
-                        const w = bottomRight.x - topLeft.x;
-                        const h = bottomRight.y - topLeft.y;
-                        ctx.fillRect(topLeft.x, topLeft.y, w, h);
+                    // Get style if pattern has one
+                    const patternStyle = styleName ? getRectStyle(styleName) : null;
+
+                    // Render glow border if style has glow
+                    if (patternStyle?.border.type === 'glow' && patternStyle.border.color) {
+                        const { color, glowRadius = 2, glowIntensity = 0.6, pulse = true, flicker = true, cardinalExtension = 1 } = patternStyle.border;
+
+                        // Calculate dynamic intensity with pulsing/flicker
+                        let intensity = glowIntensity;
+                        if (pulse) {
+                            const pulseSpeed = 0.001;
+                            const pulsePhase = (Date.now() * pulseSpeed) % (Math.PI * 2);
+                            const basePulse = 0.6 + Math.sin(pulsePhase) * 0.2;
+                            intensity *= basePulse;
+                        }
+                        if (flicker) {
+                            const flickerSpeed = 0.05;
+                            const time = Date.now() * flickerSpeed;
+                            const flicker1 = Math.sin(time * 2.3) * 0.5 + 0.5;
+                            const flicker2 = Math.sin(time * 4.7) * 0.5 + 0.5;
+                            const randomNoise = Math.random();
+                            const flickerPerturbation = (flicker1 * 0.08 + flicker2 * 0.05 + randomNoise * 0.07);
+                            intensity += flickerPerturbation;
+                        }
+                        intensity = Math.max(0, Math.min(1, intensity));
+
+                        // Parse color (local hexToRgb returns "r, g, b" string)
+                        const rgbString = hexToRgb(color);
+                        const glowAlphas = [0.6 * intensity, 0.3 * intensity];
+                        const maxRadius = glowRadius + cardinalExtension;
+
+                        // Render glow cells around pattern border
+                        for (const cellKey of gridCells) {
+                            const [x, y] = cellKey.split(',').map(Number);
+
+                            // Check neighbors to find border cells
+                            const isBorder = !gridCells.has(`${x},${y-1}`) ||
+                                           !gridCells.has(`${x+1},${y}`) ||
+                                           !gridCells.has(`${x},${y+1}`) ||
+                                           !gridCells.has(`${x-1},${y}`);
+
+                            if (isBorder) {
+                                // Render glow around this border cell
+                                for (let dy = -maxRadius; dy <= maxRadius; dy++) {
+                                    for (let dx = -maxRadius; dx <= maxRadius; dx++) {
+                                        const glowX = x + dx;
+                                        const glowY = y + dy;
+
+                                        // Skip if inside pattern
+                                        if (gridCells.has(`${glowX},${glowY}`)) continue;
+
+                                        const distance = Math.max(Math.abs(dx), Math.abs(dy));
+                                        if (distance === 0 || distance > maxRadius) continue;
+
+                                        const isCardinal = (dx === 0 || dy === 0);
+                                        const effectiveRadius = isCardinal ? maxRadius : glowRadius;
+                                        if (distance > effectiveRadius) continue;
+
+                                        let alpha;
+                                        if (distance <= glowRadius) {
+                                            alpha = glowAlphas[distance - 1];
+                                        } else {
+                                            alpha = glowAlphas[glowRadius - 1] * 0.3;
+                                        }
+                                        if (!alpha) continue;
+
+                                        const topLeft = engine.worldToScreen(glowX, glowY, currentZoom, currentOffset);
+                                        const bottomRight = engine.worldToScreen(glowX + 1, glowY + 1, currentZoom, currentOffset);
+                                        const w = bottomRight.x - topLeft.x;
+                                        const h = bottomRight.y - topLeft.y;
+
+                                        ctx.fillStyle = `rgba(${rgbString}, ${alpha})`;
+                                        ctx.fillRect(topLeft.x, topLeft.y, w, h);
+                                    }
+                                }
+                            }
+                        }
                     }
 
-                    // Draw outer border only (cells that have an empty neighbor)
-                    ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.6)`;
-                    ctx.lineWidth = 2;
+                    // Draw the unified shape with a single outer border
+                    // Fill all cells
+                    const defaultFillColor = `rgba(${hexToRgb(engine.textColor)}, 0.15)`;
+                    const fillColor = patternStyle?.fill.type === 'solid' && patternStyle.fill.color
+                        ? patternStyle.fill.color
+                        : defaultFillColor;
+                    const fillAlpha = patternStyle?.fill.alpha ?? (patternStyle?.fill.type === 'solid' ? 1.0 : 0.15);
 
-                    for (const cellKey of gridCells) {
+                    if (patternStyle?.fill.type !== 'none') {
+                        ctx.globalAlpha = fillAlpha;
+                        ctx.fillStyle = fillColor;
+                        for (const cellKey of gridCells) {
+                            const [x, y] = cellKey.split(',').map(Number);
+                            const topLeft = engine.worldToScreen(x, y, currentZoom, currentOffset);
+                            const bottomRight = engine.worldToScreen(x + 1, y + 1, currentZoom, currentOffset);
+                            const w = bottomRight.x - topLeft.x;
+                            const h = bottomRight.y - topLeft.y;
+                            ctx.fillRect(topLeft.x, topLeft.y, w, h);
+                        }
+                        ctx.globalAlpha = 1.0;
+                    }
+
+                    // Draw outer border only if not glow (glow already rendered above)
+                    if (!patternStyle || patternStyle.border.type !== 'glow') {
+                        const defaultBorderColor = `rgba(${hexToRgb(engine.textColor)}, 0.6)`;
+                        const borderColor = patternStyle?.border.type === 'solid' && patternStyle.border.color
+                            ? patternStyle.border.color
+                            : defaultBorderColor;
+                        const borderWidth = patternStyle?.border.type === 'solid' && patternStyle.border.thickness
+                            ? patternStyle.border.thickness * 2
+                            : 2;
+
+                        ctx.strokeStyle = borderColor;
+                        ctx.lineWidth = borderWidth;
+
+                        for (const cellKey of gridCells) {
                         const [x, y] = cellKey.split(',').map(Number);
                         const topLeft = engine.worldToScreen(x, y, currentZoom, currentOffset);
                         const bottomRight = engine.worldToScreen(x + 1, y + 1, currentZoom, currentOffset);
@@ -4844,6 +5347,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         }
 
                         ctx.stroke();
+                        }
                     }
                 } catch (e) {
                     // Skip invalid pattern data
@@ -7977,7 +8481,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 startY: noteData.startY + distanceY,
                                 endY: noteData.endY + distanceY,
                                 timestamp: Date.now(),
-                                ...(noteData.patternKey && { patternKey: noteData.patternKey })
+                                ...(noteData.patternKey && { patternKey: noteData.patternKey }),
+                                ...(noteData.style && { style: noteData.style })
                             };
 
                             const newNoteKey = `note_${newNoteData.startX},${newNoteData.startY}_${Date.now()}`;
@@ -8735,15 +9240,16 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     </div>
                 );
             })()} */}
-            {/* Render iframes for iframe regions */}
+            {/* Render iframes for iframe regions (Unified) */}
             {(() => {
                 const iframes: React.JSX.Element[] = [];
 
                 for (const key in engine.worldData) {
                     if (key.startsWith('iframe_')) {
-                        try {
-                            const iframeData = JSON.parse(engine.worldData[key] as string);
-                            const { startX, endX, startY, endY, url } = iframeData;
+                        const region = parseRegionFromWorldData(key, engine.worldData[key]);
+                        if (region && region.content.type === 'iframe') {
+                            const { startX, endX, startY, endY } = region;
+                            const url = region.content.url;
 
                             // Convert world coordinates to screen coordinates
                             const topLeft = engine.worldToScreen(startX, startY, engine.zoomLevel, engine.viewOffset);
@@ -8788,8 +9294,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     />
                                 );
                             }
-                        } catch (e) {
-                            // Skip invalid iframe data
                         }
                     }
                 }
