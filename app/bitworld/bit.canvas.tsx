@@ -775,15 +775,97 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         }
     }, [engine.settings.monogramMode, engine.settings.monogramEnabled, hostModeEnabled]);
 
-    // Sync face orientation to monogram rotation
+    // Helper function to generate talking mouth animation
+    const generateTalkingMouth = useCallback((elapsed: number, textLength: number): number => {
+        // Duration of talking based on text length (roughly 50ms per character, min 2s, max 10s)
+        const talkDuration = Math.min(10000, Math.max(2000, textLength * 50));
+
+        if (elapsed > talkDuration) {
+            return 0; // Stop talking after duration
+        }
+
+        // Varying mouth open/close pattern (not just sine wave - more natural)
+        const time = elapsed * 0.01; // Convert to smoother time scale
+
+        // Combine multiple frequencies for natural variation
+        const primary = Math.sin(time * 2.3) * 0.5 + 0.5; // Main talking rhythm
+        const secondary = Math.sin(time * 3.7) * 0.3 + 0.3; // Variation
+        const tertiary = Math.sin(time * 1.1) * 0.2 + 0.2; // Slower modulation
+
+        // Combine and scale to mouth open range (0 to 0.4 for talking)
+        const combined = (primary * 0.5 + secondary * 0.3 + tertiary * 0.2);
+        const mouthOpen = combined * 0.4;
+
+        // Add fade-out in last 500ms
+        const fadeOutStart = talkDuration - 500;
+        if (elapsed > fadeOutStart) {
+            const fadeProgress = (elapsed - fadeOutStart) / 500;
+            return mouthOpen * (1 - fadeProgress);
+        }
+
+        return mouthOpen;
+    }, []);
+
+    // State to trigger updates during AI talking
+    const [aiTalkingTick, setAiTalkingTick] = useState(0);
+
+    // Continuous update loop while AI is talking
     useEffect(() => {
+        const isAITalking = engine.hostData && engine.hostData.timestamp;
+
+        if (!isAITalking) return;
+
+        // Update at ~30fps while AI is talking
+        const interval = setInterval(() => {
+            const elapsed = Date.now() - (engine.hostData?.timestamp || 0);
+            const textLength = engine.hostData?.text?.length || 0;
+            const talkDuration = Math.min(10000, Math.max(2000, textLength * 50));
+
+            if (elapsed < talkDuration) {
+                setAiTalkingTick(tick => tick + 1);
+            }
+        }, 33); // ~30fps
+
+        return () => clearInterval(interval);
+    }, [engine.hostData]);
+
+    // Sync face orientation to monogram rotation with AI talking animation
+    useEffect(() => {
+        // Check if AI is currently "talking" (displaying a response)
+        const isAITalking = engine.hostData && engine.hostData.timestamp;
+        const aiTalkElapsed = isAITalking ? Date.now() - (engine.hostData?.timestamp || 0) : 0;
+        const aiTextLength = engine.hostData?.text?.length || 0;
+
         if (engine.isFaceDetectionEnabled && engine.faceOrientation) {
-            monogramSystem.setExternalRotation(engine.faceOrientation);
+            // Face tracking is active - use real tracking data
+            // But if AI is talking and NOT tracked, add talking mouth
+            if (isAITalking && !engine.faceOrientation.isTracked) {
+                const talkingMouth = generateTalkingMouth(aiTalkElapsed, aiTextLength);
+                monogramSystem.setExternalRotation({
+                    ...engine.faceOrientation,
+                    mouthOpen: talkingMouth,
+                    isTracked: false
+                });
+            } else {
+                monogramSystem.setExternalRotation(engine.faceOrientation);
+            }
+        } else if (isAITalking) {
+            // No face tracking, but AI is talking - create autonomous talking face
+            const talkingMouth = generateTalkingMouth(aiTalkElapsed, aiTextLength);
+            monogramSystem.setExternalRotation({
+                rotX: 0,
+                rotY: 0,
+                rotZ: 0,
+                mouthOpen: talkingMouth,
+                leftEyeBlink: 0,
+                rightEyeBlink: 0,
+                isTracked: false
+            });
         } else {
-            // Clear external rotation when face detection is disabled
+            // No face tracking and no AI talking
             monogramSystem.setExternalRotation(undefined);
         }
-    }, [engine.isFaceDetectionEnabled, engine.faceOrientation]);
+    }, [engine.isFaceDetectionEnabled, engine.faceOrientation, engine.hostData, aiTalkingTick, generateTalkingMouth]);
 
     // Monogram command handler
     const handleMonogramCommand = useCallback((args: string[]) => {
