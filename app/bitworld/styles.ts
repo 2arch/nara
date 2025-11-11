@@ -503,3 +503,233 @@ export function getTextStyle(name: string, registry: StyleRegistry = DEFAULT_STY
 export function getPathStyle(name: string, registry: StyleRegistry = DEFAULT_STYLE_REGISTRY): PathStyle {
     return registry.paths[name] || PATH_STYLES.corridor;
 }
+
+// ============================================================================
+// TEXT RENDERING
+// ============================================================================
+
+/**
+ * Context for rendering text blocks (dialogue, canvas text, etc.)
+ */
+export interface TextRenderContext extends BaseRenderContext {
+    text: string;
+    canvasWidth: number;
+    canvasHeight: number;
+    fontSize: number;
+    fontFamily: string;
+    position?: 'center' | 'bottom';  // Vertical positioning
+}
+
+/**
+ * Wrap text to fit within a maximum width
+ */
+export function wrapText(text: string, maxWidth: number): string[] {
+    const paragraphs = text.split('\n');
+    const lines: string[] = [];
+
+    for (const paragraph of paragraphs) {
+        const trimmed = paragraph.trim();
+        if (trimmed === '') {
+            lines.push('');
+            continue;
+        }
+
+        const words = trimmed.split(' ');
+        let currentLine = '';
+
+        for (const word of words) {
+            const testLine = currentLine ? `${currentLine} ${word}` : word;
+            if (testLine.length <= maxWidth) {
+                currentLine = testLine;
+            } else {
+                if (currentLine) {
+                    lines.push(currentLine);
+                    currentLine = word;
+                } else {
+                    lines.push(word.substring(0, maxWidth));
+                    currentLine = word.substring(maxWidth);
+                }
+            }
+        }
+
+        if (currentLine) {
+            lines.push(currentLine);
+        }
+    }
+
+    return lines;
+}
+
+/**
+ * Render styled text block (replaces dialogue.display.ts functionality)
+ */
+export function renderStyledText(
+    context: TextRenderContext,
+    style: TextStyle
+): void {
+    const {
+        ctx,
+        text,
+        canvasWidth,
+        canvasHeight,
+        charWidth,
+        charHeight,
+        fontSize,
+        fontFamily,
+        timestamp,
+        position = 'bottom'
+    } = context;
+
+    // Constants
+    const MAX_WIDTH_CHARS = 60;
+    const MARGIN_CHARS = 4;
+
+    // Calculate layout
+    const availableWidthChars = Math.floor(canvasWidth / charWidth);
+    const availableHeightChars = Math.floor(canvasHeight / charHeight);
+    const maxWidthChars = Math.min(MAX_WIDTH_CHARS, availableWidthChars - (2 * MARGIN_CHARS));
+    const wrappedLines = wrapText(text, maxWidthChars);
+
+    const maxLineWidth = Math.max(...wrappedLines.map(line => line.length));
+    const totalHeight = wrappedLines.length;
+
+    // Calculate positioning
+    const startCol = Math.floor((availableWidthChars - maxLineWidth) / 2);
+    let startRow: number;
+
+    if (position === 'bottom') {
+        const bottomMargin = 3;
+        startRow = Math.max(MARGIN_CHARS, availableHeightChars - bottomMargin - totalHeight);
+    } else {
+        startRow = Math.floor((availableHeightChars - totalHeight) / 2);
+    }
+
+    const verticalTextOffset = (charHeight - fontSize) / 2 + (fontSize * 0.1);
+
+    // Calculate fade
+    const fadeProgress = calculateFadeProgress(style.fade, timestamp);
+
+    // Calculate text bounding box
+    let minCol = Infinity, maxCol = -Infinity;
+    let minRow = Infinity, maxRow = -Infinity;
+
+    wrappedLines.forEach((line, lineIndex) => {
+        if (line.length > 0) {
+            const col = startCol;
+            const row = startRow + lineIndex;
+            minCol = Math.min(minCol, col);
+            maxCol = Math.max(maxCol, col + line.length - 1);
+            minRow = Math.min(minRow, row);
+            maxRow = Math.max(maxRow, row);
+        }
+    });
+
+    ctx.save();
+    ctx.font = `${fontSize}px "${fontFamily}"`;
+    ctx.textBaseline = 'top';
+
+    // Render text glow if enabled
+    if (style.glow?.enabled && style.glow.color) {
+        renderTextGlow(context, { x: minCol, y: minRow, width: maxCol - minCol + 1, height: maxRow - minRow + 1 }, style.glow, fadeProgress);
+    }
+
+    // Render background if present
+    if (style.background?.type === 'solid' && style.background.color) {
+        ctx.globalAlpha = fadeProgress * (style.background.alpha ?? 1.0);
+        ctx.fillStyle = style.background.color;
+
+        // Fill per-line backgrounds (for subtitle style)
+        for (let lineIndex = 0; lineIndex < wrappedLines.length; lineIndex++) {
+            const line = wrappedLines[lineIndex];
+            const screenX = startCol * charWidth;
+            const screenY = (startRow + lineIndex) * charHeight;
+            const lineWidth = line.length * charWidth;
+            ctx.fillRect(screenX, screenY, lineWidth, charHeight);
+        }
+
+        ctx.globalAlpha = fadeProgress;
+    }
+
+    // Render text
+    if (style.fill.type === 'solid' && style.fill.color) {
+        ctx.globalAlpha = fadeProgress * (style.fill.alpha ?? 1.0);
+        ctx.fillStyle = style.fill.color;
+
+        wrappedLines.forEach((line, lineIndex) => {
+            const screenX = startCol * charWidth;
+            const screenY = (startRow + lineIndex) * charHeight;
+            ctx.fillText(line, screenX, screenY + verticalTextOffset);
+        });
+    }
+
+    ctx.restore();
+}
+
+/**
+ * Render glow effect around text bounding box
+ */
+function renderTextGlow(
+    context: TextRenderContext,
+    bounds: CellBounds,
+    glow: TextGlowStyle,
+    fadeProgress: number
+): void {
+    const { ctx, charWidth, charHeight } = context;
+    const { color, radius = 2, intensity = 0.6, pulse = true, flicker = true } = glow;
+
+    if (!color) return;
+
+    // Calculate dynamic intensity
+    const dynamicIntensity = calculateGlowIntensity(intensity, pulse, flicker);
+
+    // Parse color
+    const rgb = hexToRgb(color);
+
+    // Glow alphas (2 layers)
+    const glowAlphas = [
+        0.6 * dynamicIntensity * fadeProgress,
+        0.3 * dynamicIntensity * fadeProgress
+    ];
+
+    const minCol = bounds.x;
+    const maxCol = bounds.x + bounds.width - 1;
+    const minRow = bounds.y;
+    const maxRow = bounds.y + bounds.height - 1;
+
+    const cardinalExtension = 1;
+    const maxRadius = radius + cardinalExtension;
+
+    // Render glow cells
+    for (let row = minRow - maxRadius; row <= maxRow + maxRadius; row++) {
+        for (let col = minCol - maxRadius; col <= maxCol + maxRadius; col++) {
+            // Skip interior
+            if (col >= minCol && col <= maxCol && row >= minRow && row <= maxRow) continue;
+
+            // Calculate distance to bounding box
+            const distX = Math.max(0, Math.max(minCol - col, col - maxCol));
+            const distY = Math.max(0, Math.max(minRow - row, row - maxRow));
+            const distance = Math.max(distX, distY);
+
+            if (distance === 0 || distance > maxRadius) continue;
+
+            const isCardinal = (distX === 0 || distY === 0);
+            const effectiveRadius = isCardinal ? maxRadius : radius;
+
+            if (distance > effectiveRadius) continue;
+
+            let alpha;
+            if (distance <= radius) {
+                alpha = glowAlphas[distance - 1];
+            } else {
+                alpha = glowAlphas[radius - 1] * 0.3;
+            }
+            if (!alpha) continue;
+
+            const screenX = col * charWidth;
+            const screenY = row * charHeight;
+
+            ctx.fillStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+            ctx.fillRect(screenX, screenY, charWidth, charHeight);
+        }
+    }
+}

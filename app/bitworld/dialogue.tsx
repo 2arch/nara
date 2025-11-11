@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { WorldEngine, WorldData } from './world.engine';
-import { getDialogueDisplay, type DialogueRenderContext } from './dialogue.display';
+import { getTextStyle, renderStyledText, type TextRenderContext } from './styles';
 
 // --- Dialogue Constants ---
 const DIALOGUE_FONT_SIZE = 16; // Fixed font size in pixels
@@ -184,11 +184,11 @@ export function useDialogue() {
         const charHeight = DIALOGUE_FONT_SIZE;
         const charWidth = DIALOGUE_FONT_SIZE * CHAR_WIDTH_RATIO;
 
-        // Get the selected dialogue display
-        const display = getDialogueDisplay(displayName);
+        // Get the text style
+        const style = getTextStyle(displayName);
 
         // Prepare render context
-        const renderContext: DialogueRenderContext = {
+        const renderContext: TextRenderContext = {
             ctx,
             text: dialogueText,
             canvasWidth,
@@ -197,14 +197,12 @@ export function useDialogue() {
             charHeight,
             fontSize: DIALOGUE_FONT_SIZE,
             fontFamily: FONT_FAMILY,
-            textColor,
-            backgroundColor,
             timestamp,
             position
         };
 
-        // Render using the selected display
-        display.render(renderContext);
+        // Render using the style system
+        renderStyledText(renderContext, style);
     }, []);
 
     const calculateDebugLayout = useCallback((canvasWidth: number, canvasHeight: number, charWidth: number, charHeight: number, debugText: string): DialogueLayout => {
