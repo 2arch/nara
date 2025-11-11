@@ -4630,7 +4630,24 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             if (key.startsWith('pattern_')) {
                 try {
                     const patternData = JSON.parse(engine.worldData[key] as string);
-                    const { centerX, centerY, timestamp, width = 120, height = 60, rooms = [] } = patternData;
+                    const { centerX, centerY, timestamp, width = 120, height = 60, noteKeys = [], rooms = [] } = patternData;
+
+                    // Look up note objects from noteKeys (new format) or use inline rooms (legacy format)
+                    const roomsFromNotes: Array<{ x: number; y: number; width: number; height: number }> = noteKeys.length > 0
+                        ? noteKeys.map((noteKey: string) => {
+                            try {
+                                const noteData = JSON.parse(engine.worldData[noteKey] as string);
+                                return {
+                                    x: noteData.startX,
+                                    y: noteData.startY,
+                                    width: noteData.endX - noteData.startX,
+                                    height: noteData.endY - noteData.startY
+                                };
+                            } catch (e) {
+                                return null;
+                            }
+                        }).filter((room: any) => room !== null)
+                        : rooms;  // Fallback to inline rooms for backward compatibility
 
                     // Random function for corridor generation (still uses timestamp seed for consistency)
                     const seed = timestamp;
@@ -4643,7 +4660,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     const gridCells = new Set<string>();
 
                     // Add all room cells to grid
-                    for (const room of rooms) {
+                    for (const room of roomsFromNotes) {
                         for (let x = room.x; x < room.x + room.width; x++) {
                             for (let y = room.y; y < room.y + room.height; y++) {
                                 gridCells.add(`${x},${y}`);
@@ -4652,7 +4669,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     }
 
                     // Minimum Spanning Tree for guaranteed connectivity, then add extra corridors
-                    const drawCorridor = (room1: typeof rooms[0], room2: typeof rooms[0], rngSeed: number) => {
+                    const drawCorridor = (room1: typeof roomsFromNotes[0], room2: typeof roomsFromNotes[0], rngSeed: number) => {
                         const startX = room1.x + Math.floor(room1.width / 2);
                         const startY = room1.y + Math.floor(room1.height / 2);
                         const endX = room2.x + Math.floor(room2.width / 2);
@@ -4702,20 +4719,20 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     };
 
                     // Simple MST using Prim's algorithm
-                    if (rooms.length > 0) {
+                    if (roomsFromNotes.length > 0) {
                         const connected = new Set<number>([0]); // Start with first room
                         const edges: Array<{ from: number; to: number; dist: number }> = [];
 
                         // Build MST
-                        while (connected.size < rooms.length) {
+                        while (connected.size < roomsFromNotes.length) {
                             let bestEdge: { from: number; to: number; dist: number } | null = null;
 
                             // Find shortest edge from connected to unconnected room
                             for (const i of connected) {
-                                for (let j = 0; j < rooms.length; j++) {
+                                for (let j = 0; j < roomsFromNotes.length; j++) {
                                     if (!connected.has(j)) {
-                                        const dx = Math.abs(rooms[j].x - rooms[i].x);
-                                        const dy = Math.abs(rooms[j].y - rooms[i].y);
+                                        const dx = Math.abs(roomsFromNotes[j].x - roomsFromNotes[i].x);
+                                        const dy = Math.abs(roomsFromNotes[j].y - roomsFromNotes[i].y);
                                         const dist = dx + dy;
 
                                         if (!bestEdge || dist < bestEdge.dist) {
@@ -4728,7 +4745,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             if (bestEdge) {
                                 edges.push(bestEdge);
                                 connected.add(bestEdge.to);
-                                drawCorridor(rooms[bestEdge.from], rooms[bestEdge.to], bestEdge.from * 7 + bestEdge.to);
+                                drawCorridor(roomsFromNotes[bestEdge.from], roomsFromNotes[bestEdge.to], bestEdge.from * 7 + bestEdge.to);
                             } else {
                                 break; // No more rooms to connect
                             }
@@ -4736,11 +4753,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                         // Add 1-2 extra corridors for loops/cycles (makes exploration more interesting)
                         const extraCorridors = Math.floor(random(200) * 2) + 1;
-                        for (let e = 0; e < extraCorridors && rooms.length > 2; e++) {
-                            const i = Math.floor(random(300 + e) * rooms.length);
-                            const j = Math.floor(random(400 + e) * rooms.length);
+                        for (let e = 0; e < extraCorridors && roomsFromNotes.length > 2; e++) {
+                            const i = Math.floor(random(300 + e) * roomsFromNotes.length);
+                            const j = Math.floor(random(400 + e) * roomsFromNotes.length);
                             if (i !== j) {
-                                drawCorridor(rooms[i], rooms[j], i * 13 + j);
+                                drawCorridor(roomsFromNotes[i], roomsFromNotes[j], i * 13 + j);
                             }
                         }
                     }
@@ -6196,12 +6213,59 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             if (selectedPatternKey) {
                 try {
                     const patternData = JSON.parse(engine.worldData[selectedPatternKey] as string);
-                    const { centerX, centerY, width = 120, height = 60, rooms = [] } = patternData;
+                    const { centerX, centerY, width = 120, height = 60, noteKeys = [], rooms = [] } = patternData;
 
-                    // Check individual room corners first (smaller hit area for precision)
+                    // Get notes from noteKeys (new format) or use inline rooms (legacy)
+                    const noteKeysToUse = noteKeys.length > 0 ? noteKeys : [];
+                    const roomsToUse = noteKeys.length > 0 ? [] : rooms;
+
+                    // Check individual note/room corners first (smaller hit area for precision)
                     const roomThumbHitArea = 10; // 6px thumb + 4px padding
-                    for (let roomIndex = 0; roomIndex < rooms.length; roomIndex++) {
-                        const room = rooms[roomIndex];
+
+                    // Check notes (new format)
+                    for (let noteIndex = 0; noteIndex < noteKeysToUse.length; noteIndex++) {
+                        const noteKey = noteKeysToUse[noteIndex];
+                        try {
+                            const noteData = JSON.parse(engine.worldData[noteKey] as string);
+                            const roomTopLeft = engine.worldToScreen(noteData.startX, noteData.startY, engine.zoomLevel, engine.viewOffset);
+                            const roomBottomRight = engine.worldToScreen(noteData.endX, noteData.endY, engine.zoomLevel, engine.viewOffset);
+
+                            const roomLeft = roomTopLeft.x;
+                            const roomRight = roomBottomRight.x;
+                            const roomTop = roomTopLeft.y;
+                            const roomBottom = roomBottomRight.y;
+
+                            // Check if clicking on any room corner thumb
+                            let handle: ResizeHandle | null = null;
+                            if (Math.abs(x - roomLeft) <= roomThumbHitArea / 2 && Math.abs(y - roomTop) <= roomThumbHitArea / 2) handle = 'top-left';
+                            else if (Math.abs(x - roomRight) <= roomThumbHitArea / 2 && Math.abs(y - roomTop) <= roomThumbHitArea / 2) handle = 'top-right';
+                            else if (Math.abs(x - roomRight) <= roomThumbHitArea / 2 && Math.abs(y - roomBottom) <= roomThumbHitArea / 2) handle = 'bottom-right';
+                            else if (Math.abs(x - roomLeft) <= roomThumbHitArea / 2 && Math.abs(y - roomBottom) <= roomThumbHitArea / 2) handle = 'bottom-left';
+
+                            if (handle) {
+                                setResizeState({
+                                    active: true,
+                                    type: 'note',  // Resize as note, not pattern room
+                                    key: noteKey,  // Use note key directly
+                                    handle,
+                                    originalBounds: {
+                                        startX: noteData.startX,
+                                        startY: noteData.startY,
+                                        endX: noteData.endX,
+                                        endY: noteData.endY
+                                    },
+                                    roomIndex: null
+                                });
+                                return; // Early return, don't process other mouse events
+                            }
+                        } catch (e) {
+                            // Skip invalid note data
+                        }
+                    }
+
+                    // Check legacy inline rooms
+                    for (let roomIndex = 0; roomIndex < roomsToUse.length; roomIndex++) {
+                        const room = roomsToUse[roomIndex];
                         const roomTopLeft = engine.worldToScreen(room.x, room.y, engine.zoomLevel, engine.viewOffset);
                         const roomBottomRight = engine.worldToScreen(room.x + room.width, room.y + room.height, engine.zoomLevel, engine.viewOffset);
 
@@ -6615,7 +6679,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             })
                         }));
                     } else {
-                        // Resizing pattern boundary - scale entire pattern including rooms
+                        // Resizing pattern boundary - scale entire pattern including notes/rooms
                         const oldWidth = patternData.width || 120;
                         const oldHeight = patternData.height || 60;
                         const oldCenterX = patternData.centerX;
@@ -6631,40 +6695,97 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const scaleX = newWidth / oldWidth;
                         const scaleY = newHeight / oldHeight;
 
-                        // Scale and reposition all rooms relative to pattern center
+                        const noteKeys = patternData.noteKeys || [];
                         const rooms = patternData.rooms || [];
-                        const scaledRooms = rooms.map((room: any) => {
-                            // Get room position relative to old pattern center
-                            const relX = room.x - oldCenterX;
-                            const relY = room.y - oldCenterY;
 
-                            // Scale relative position and size
-                            const newRelX = relX * scaleX;
-                            const newRelY = relY * scaleY;
-                            const newWidth = room.width * scaleX;
-                            const newHeight = room.height * scaleY;
+                        // Handle new note-based format
+                        if (noteKeys.length > 0) {
+                            // Scale all referenced notes
+                            const updatedNotes: Record<string, string> = {};
 
-                            // Convert back to absolute position and round to integers
-                            // (grid rendering requires integer coordinates)
-                            return {
-                                x: Math.round(newCenterX + newRelX),
-                                y: Math.round(newCenterY + newRelY),
-                                width: Math.round(newWidth),
-                                height: Math.round(newHeight)
-                            };
-                        });
+                            for (const noteKey of noteKeys) {
+                                try {
+                                    const noteData = JSON.parse(engine.worldData[noteKey] as string);
 
-                        engine.setWorldData(prev => ({
-                            ...prev,
-                            [resizeState.key!]: JSON.stringify({
-                                ...patternData,
-                                centerX: newCenterX,
-                                centerY: newCenterY,
-                                width: newWidth,
-                                height: newHeight,
-                                rooms: scaledRooms
-                            })
-                        }));
+                                    // Get note center relative to old pattern center
+                                    const noteWidth = noteData.endX - noteData.startX;
+                                    const noteHeight = noteData.endY - noteData.startY;
+                                    const noteCenterX = noteData.startX + noteWidth / 2;
+                                    const noteCenterY = noteData.startY + noteHeight / 2;
+
+                                    const relX = noteCenterX - oldCenterX;
+                                    const relY = noteCenterY - oldCenterY;
+
+                                    // Scale relative position and size
+                                    const newRelX = relX * scaleX;
+                                    const newRelY = relY * scaleY;
+                                    const newNoteWidth = noteWidth * scaleX;
+                                    const newNoteHeight = noteHeight * scaleY;
+
+                                    // Calculate new absolute position
+                                    const newNoteCenterX = newCenterX + newRelX;
+                                    const newNoteCenterY = newCenterY + newRelY;
+
+                                    // Update note with new bounds
+                                    updatedNotes[noteKey] = JSON.stringify({
+                                        ...noteData,
+                                        startX: Math.round(newNoteCenterX - newNoteWidth / 2),
+                                        startY: Math.round(newNoteCenterY - newNoteHeight / 2),
+                                        endX: Math.round(newNoteCenterX + newNoteWidth / 2),
+                                        endY: Math.round(newNoteCenterY + newNoteHeight / 2)
+                                    });
+                                } catch (e) {
+                                    // Skip invalid notes
+                                }
+                            }
+
+                            // Update pattern and all notes
+                            engine.setWorldData(prev => ({
+                                ...prev,
+                                [resizeState.key!]: JSON.stringify({
+                                    ...patternData,
+                                    centerX: newCenterX,
+                                    centerY: newCenterY,
+                                    width: newWidth,
+                                    height: newHeight
+                                }),
+                                ...updatedNotes
+                            }));
+                        } else {
+                            // Legacy inline rooms format
+                            const scaledRooms = rooms.map((room: any) => {
+                                // Get room position relative to old pattern center
+                                const relX = room.x - oldCenterX;
+                                const relY = room.y - oldCenterY;
+
+                                // Scale relative position and size
+                                const newRelX = relX * scaleX;
+                                const newRelY = relY * scaleY;
+                                const newRoomWidth = room.width * scaleX;
+                                const newRoomHeight = room.height * scaleY;
+
+                                // Convert back to absolute position and round to integers
+                                // (grid rendering requires integer coordinates)
+                                return {
+                                    x: Math.round(newCenterX + newRelX),
+                                    y: Math.round(newCenterY + newRelY),
+                                    width: Math.round(newRoomWidth),
+                                    height: Math.round(newRoomHeight)
+                                };
+                            });
+
+                            engine.setWorldData(prev => ({
+                                ...prev,
+                                [resizeState.key!]: JSON.stringify({
+                                    ...patternData,
+                                    centerX: newCenterX,
+                                    centerY: newCenterY,
+                                    width: newWidth,
+                                    height: newHeight,
+                                    rooms: scaledRooms
+                                })
+                            }));
+                        }
                     }
                 } catch (e) {
                     // Invalid pattern data
@@ -7580,7 +7701,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             })
                         }));
                     } else {
-                        // Resizing pattern boundary - scale entire pattern including rooms
+                        // Resizing pattern boundary - scale entire pattern including notes/rooms
                         const oldWidth = patternData.width || 120;
                         const oldHeight = patternData.height || 60;
                         const oldCenterX = patternData.centerX;
@@ -7596,40 +7717,97 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const scaleX = newWidth / oldWidth;
                         const scaleY = newHeight / oldHeight;
 
-                        // Scale and reposition all rooms relative to pattern center
+                        const noteKeys = patternData.noteKeys || [];
                         const rooms = patternData.rooms || [];
-                        const scaledRooms = rooms.map((room: any) => {
-                            // Get room position relative to old pattern center
-                            const relX = room.x - oldCenterX;
-                            const relY = room.y - oldCenterY;
 
-                            // Scale relative position and size
-                            const newRelX = relX * scaleX;
-                            const newRelY = relY * scaleY;
-                            const newWidth = room.width * scaleX;
-                            const newHeight = room.height * scaleY;
+                        // Handle new note-based format
+                        if (noteKeys.length > 0) {
+                            // Scale all referenced notes
+                            const updatedNotes: Record<string, string> = {};
 
-                            // Convert back to absolute position and round to integers
-                            // (grid rendering requires integer coordinates)
-                            return {
-                                x: Math.round(newCenterX + newRelX),
-                                y: Math.round(newCenterY + newRelY),
-                                width: Math.round(newWidth),
-                                height: Math.round(newHeight)
-                            };
-                        });
+                            for (const noteKey of noteKeys) {
+                                try {
+                                    const noteData = JSON.parse(engine.worldData[noteKey] as string);
 
-                        engine.setWorldData(prev => ({
-                            ...prev,
-                            [resizeState.key!]: JSON.stringify({
-                                ...patternData,
-                                centerX: newCenterX,
-                                centerY: newCenterY,
-                                width: newWidth,
-                                height: newHeight,
-                                rooms: scaledRooms
-                            })
-                        }));
+                                    // Get note center relative to old pattern center
+                                    const noteWidth = noteData.endX - noteData.startX;
+                                    const noteHeight = noteData.endY - noteData.startY;
+                                    const noteCenterX = noteData.startX + noteWidth / 2;
+                                    const noteCenterY = noteData.startY + noteHeight / 2;
+
+                                    const relX = noteCenterX - oldCenterX;
+                                    const relY = noteCenterY - oldCenterY;
+
+                                    // Scale relative position and size
+                                    const newRelX = relX * scaleX;
+                                    const newRelY = relY * scaleY;
+                                    const newNoteWidth = noteWidth * scaleX;
+                                    const newNoteHeight = noteHeight * scaleY;
+
+                                    // Calculate new absolute position
+                                    const newNoteCenterX = newCenterX + newRelX;
+                                    const newNoteCenterY = newCenterY + newRelY;
+
+                                    // Update note with new bounds
+                                    updatedNotes[noteKey] = JSON.stringify({
+                                        ...noteData,
+                                        startX: Math.round(newNoteCenterX - newNoteWidth / 2),
+                                        startY: Math.round(newNoteCenterY - newNoteHeight / 2),
+                                        endX: Math.round(newNoteCenterX + newNoteWidth / 2),
+                                        endY: Math.round(newNoteCenterY + newNoteHeight / 2)
+                                    });
+                                } catch (e) {
+                                    // Skip invalid notes
+                                }
+                            }
+
+                            // Update pattern and all notes
+                            engine.setWorldData(prev => ({
+                                ...prev,
+                                [resizeState.key!]: JSON.stringify({
+                                    ...patternData,
+                                    centerX: newCenterX,
+                                    centerY: newCenterY,
+                                    width: newWidth,
+                                    height: newHeight
+                                }),
+                                ...updatedNotes
+                            }));
+                        } else {
+                            // Legacy inline rooms format
+                            const scaledRooms = rooms.map((room: any) => {
+                                // Get room position relative to old pattern center
+                                const relX = room.x - oldCenterX;
+                                const relY = room.y - oldCenterY;
+
+                                // Scale relative position and size
+                                const newRelX = relX * scaleX;
+                                const newRelY = relY * scaleY;
+                                const newRoomWidth = room.width * scaleX;
+                                const newRoomHeight = room.height * scaleY;
+
+                                // Convert back to absolute position and round to integers
+                                // (grid rendering requires integer coordinates)
+                                return {
+                                    x: Math.round(newCenterX + newRelX),
+                                    y: Math.round(newCenterY + newRelY),
+                                    width: Math.round(newRoomWidth),
+                                    height: Math.round(newRoomHeight)
+                                };
+                            });
+
+                            engine.setWorldData(prev => ({
+                                ...prev,
+                                [resizeState.key!]: JSON.stringify({
+                                    ...patternData,
+                                    centerX: newCenterX,
+                                    centerY: newCenterY,
+                                    width: newWidth,
+                                    height: newHeight,
+                                    rooms: scaledRooms
+                                })
+                            }));
+                        }
                     }
                 } catch (e) {
                     // Invalid pattern data

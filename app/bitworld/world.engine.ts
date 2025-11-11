@@ -465,6 +465,7 @@ function getNearbySmartIndentation(worldData: WorldData, cursorPos: {x: number, 
 function generatePatternFromId(patternId: string, centerPos: Point = { x: 0, y: 0 }): {
     patternData: any;
     patternKey: string;
+    noteObjects: Record<string, string>;
 } {
     // Convert pattern ID to numeric seed (base36 decode)
     const seed = parseInt(patternId, 36);
@@ -545,6 +546,26 @@ function generatePatternFromId(patternId: string, centerPos: Point = { x: 0, y: 
     bspSplit(rootNode, 0, 3, random, 100);
     const rooms = collectRooms(rootNode);
 
+    // Create note objects for each room
+    const patternKey = `pattern_${patternId}`;
+    const noteKeys: string[] = [];
+    const noteObjects: Record<string, string> = {};
+
+    for (let i = 0; i < rooms.length; i++) {
+        const room = rooms[i];
+        const noteKey = `note_${room.x},${room.y}_${numericSeed}_${i}`;
+        const noteData = {
+            startX: room.x,
+            startY: room.y,
+            endX: room.x + room.width,
+            endY: room.y + room.height,
+            timestamp: numericSeed,
+            patternKey: patternKey  // Reference back to parent pattern
+        };
+        noteKeys.push(noteKey);
+        noteObjects[noteKey] = JSON.stringify(noteData);
+    }
+
     // Calculate actual bounding box from rooms
     const corridorPadding = 3;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -568,17 +589,16 @@ function generatePatternFromId(patternId: string, centerPos: Point = { x: 0, y: 
     const actualCenterX = minX + actualWidth / 2;
     const actualCenterY = minY + actualHeight / 2;
 
-    const patternKey = `pattern_${patternId}`;
     const patternData = {
         centerX: actualCenterX,
         centerY: actualCenterY,
         width: actualWidth,
         height: actualHeight,
         timestamp: numericSeed,
-        rooms: rooms
+        noteKeys: noteKeys  // Store note keys instead of inline rooms
     };
 
-    return { patternData, patternKey };
+    return { patternData, patternKey, noteObjects };
 }
 
 // --- The Hook ---
@@ -732,15 +752,16 @@ export function useWorldEngine({
 
             if (!patternExists) {
                 // Generate pattern at origin (0, 0)
-                const { patternData, patternKey: generatedKey } = generatePatternFromId(initialPatternId, { x: 0, y: 0 });
+                const { patternData, patternKey: generatedKey, noteObjects } = generatePatternFromId(initialPatternId, { x: 0, y: 0 });
 
-                // Add pattern to world data
+                // Add pattern and note objects to world data
                 setWorldData((prev: WorldData) => ({
                     ...prev,
-                    [generatedKey]: JSON.stringify(patternData)
+                    [generatedKey]: JSON.stringify(patternData),
+                    ...noteObjects  // Add all note objects
                 }));
 
-                console.log(`Pattern ${initialPatternId} generated from URL`);
+                console.log(`Pattern ${initialPatternId} generated from URL with ${Object.keys(noteObjects).length} notes`);
             }
         }
     }, [initialPatternId]); // Only run once on mount when initialPatternId exists

@@ -125,7 +125,7 @@ const AVAILABLE_COMMANDS = [
     // Navigation & View
     'nav', 'search', 'cam', 'indent', 'zoom', 'map',
     // Content Creation
-    'label', 'task', 'link', 'clip', 'upload', 'pattern',
+    'label', 'task', 'link', 'clip', 'upload', 'pattern', 'connect',
     // Special
     'mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help',
     // Styling & Display
@@ -2895,6 +2895,26 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 bspSplit(rootNode, 0, 3, random, 100);
                 const rooms = collectRooms(rootNode);
 
+                // Create note objects for each room
+                const patternKey = `pattern_${timestamp}`;
+                const noteKeys: string[] = [];
+                const noteObjects: Record<string, string> = {};
+
+                for (let i = 0; i < rooms.length; i++) {
+                    const room = rooms[i];
+                    const noteKey = `note_${room.x},${room.y}_${timestamp}_${i}`;
+                    const noteData = {
+                        startX: room.x,
+                        startY: room.y,
+                        endX: room.x + room.width,
+                        endY: room.y + room.height,
+                        timestamp: timestamp,
+                        patternKey: patternKey  // Reference back to parent pattern
+                    };
+                    noteKeys.push(noteKey);
+                    noteObjects[noteKey] = JSON.stringify(noteData);
+                }
+
                 // Calculate actual bounding box from rooms (accounting for corridors)
                 // Corridors are 3 cells wide horizontally, 2 cells tall vertically
                 const corridorPadding = 3; // Max corridor extension from room centers
@@ -2923,23 +2943,154 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 const actualCenterX = minX + actualWidth / 2;
                 const actualCenterY = minY + actualHeight / 2;
 
-                // Generate pattern data with stored rooms
-                const patternKey = `pattern_${Date.now()}`;
+                // Generate pattern data with note keys instead of inline rooms
                 const patternData = {
                     centerX: actualCenterX,
                     centerY: actualCenterY,
                     width: actualWidth,
                     height: actualHeight,
                     timestamp: timestamp,
-                    rooms: rooms // Store generated rooms
+                    noteKeys: noteKeys  // Store note keys instead of inline rooms
                 };
 
                 setWorldData((prev: WorldData) => ({
                     ...prev,
-                    [patternKey]: JSON.stringify(patternData)
+                    [patternKey]: JSON.stringify(patternData),
+                    ...noteObjects  // Add all note objects
                 }));
 
-                setDialogueWithRevert("Pattern generated", setDialogueText);
+                setDialogueWithRevert(`Pattern generated with ${noteKeys.length} notes`, setDialogueText);
+            }
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            return null; // Pattern doesn't need further processing
+        }
+
+        if (commandToExecute === 'connect') {
+            // Connect selected notes into a pattern with corridors
+            const existingSelection = getNormalizedSelection?.();
+
+            if (!existingSelection) {
+                setDialogueWithRevert("Make a selection containing notes, then run /connect", setDialogueText);
+                setCommandState({
+                    isActive: false,
+                    input: '',
+                    matchedCommands: [],
+                    selectedIndex: 0,
+                    commandStartPos: { x: 0, y: 0 },
+                    originalCursorPos: { x: 0, y: 0 },
+                    hasNavigated: false
+                });
+                setCommandData({});
+                return null;
+            }
+
+            if (setWorldData && worldData) {
+                // Find all notes that overlap with the selection
+                const selectionStartX = Math.min(existingSelection.startX, existingSelection.endX);
+                const selectionEndX = Math.max(existingSelection.startX, existingSelection.endX);
+                const selectionStartY = Math.min(existingSelection.startY, existingSelection.endY);
+                const selectionEndY = Math.max(existingSelection.startY, existingSelection.endY);
+
+                const overlappingNotes: string[] = [];
+
+                for (const key in worldData) {
+                    if (key.startsWith('note_')) {
+                        try {
+                            const noteData = JSON.parse(worldData[key] as string);
+                            // Check if note overlaps with selection
+                            const noteStartX = Math.min(noteData.startX, noteData.endX);
+                            const noteEndX = Math.max(noteData.startX, noteData.endX);
+                            const noteStartY = Math.min(noteData.startY, noteData.endY);
+                            const noteEndY = Math.max(noteData.startY, noteData.endY);
+
+                            const overlapsX = noteStartX <= selectionEndX && noteEndX >= selectionStartX;
+                            const overlapsY = noteStartY <= selectionEndY && noteEndY >= selectionStartY;
+
+                            if (overlapsX && overlapsY) {
+                                overlappingNotes.push(key);
+                            }
+                        } catch (e) {
+                            // Skip invalid notes
+                        }
+                    }
+                }
+
+                if (overlappingNotes.length < 2) {
+                    setDialogueWithRevert("Need at least 2 notes in selection to connect", setDialogueText);
+                    setCommandState({
+                        isActive: false,
+                        input: '',
+                        matchedCommands: [],
+                        selectedIndex: 0,
+                        commandStartPos: { x: 0, y: 0 },
+                        originalCursorPos: { x: 0, y: 0 },
+                        hasNavigated: false
+                    });
+                    setCommandData({});
+                    return null;
+                }
+
+                // Calculate pattern bounds from notes
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                const corridorPadding = 3;
+
+                for (const noteKey of overlappingNotes) {
+                    const noteData = JSON.parse(worldData[noteKey] as string);
+                    const centerX = (noteData.startX + noteData.endX) / 2;
+                    const centerY = (noteData.startY + noteData.endY) / 2;
+
+                    minX = Math.min(minX, noteData.startX, centerX - corridorPadding);
+                    minY = Math.min(minY, noteData.startY, centerY - corridorPadding);
+                    maxX = Math.max(maxX, noteData.endX, centerX + corridorPadding);
+                    maxY = Math.max(maxY, noteData.endY, centerY + corridorPadding);
+                }
+
+                const actualWidth = maxX - minX;
+                const actualHeight = maxY - minY;
+                const actualCenterX = minX + actualWidth / 2;
+                const actualCenterY = minY + actualHeight / 2;
+
+                // Create pattern with note references
+                const timestamp = Date.now();
+                const patternKey = `pattern_${timestamp}`;
+                const patternData = {
+                    centerX: actualCenterX,
+                    centerY: actualCenterY,
+                    width: actualWidth,
+                    height: actualHeight,
+                    timestamp: timestamp,
+                    noteKeys: overlappingNotes
+                };
+
+                // Update all notes to reference this pattern
+                const updatedNotes: Record<string, string> = {};
+                for (const noteKey of overlappingNotes) {
+                    const noteData = JSON.parse(worldData[noteKey] as string);
+                    updatedNotes[noteKey] = JSON.stringify({
+                        ...noteData,
+                        patternKey: patternKey
+                    });
+                }
+
+                setWorldData((prev: WorldData) => ({
+                    ...prev,
+                    [patternKey]: JSON.stringify(patternData),
+                    ...updatedNotes
+                }));
+
+                setDialogueWithRevert(`Pattern created from ${overlappingNotes.length} notes`, setDialogueText);
             }
 
             // Clear command mode
