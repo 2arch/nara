@@ -7371,6 +7371,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
             // Check if touch is over a moveable object (selection, image, note, iframe, mail)
             let isOverMoveableObject = false;
+            let foundNoteKey: string | null = null;
+            let foundIframeKey: string | null = null;
+            let foundMailKey: string | null = null;
 
             // Check for active selection
             if (engine.selectionStart && engine.selectionEnd) {
@@ -7390,48 +7393,84 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 isOverMoveableObject = true;
             }
 
-            // Check for notes
-            if (!isOverMoveableObject && selectedNoteKey) {
-                try {
-                    const noteData = JSON.parse(engine.worldData[selectedNoteKey] as string);
-                    if (touchWorldX >= noteData.startX && touchWorldX <= noteData.endX &&
-                        touchWorldY >= noteData.startY && touchWorldY <= noteData.endY) {
-                        isOverMoveableObject = true;
+            // Check for ANY note at this position (not just selected one)
+            if (!isOverMoveableObject) {
+                for (const key in engine.worldData) {
+                    if (key.startsWith('note_')) {
+                        try {
+                            const noteData = JSON.parse(engine.worldData[key] as string);
+                            if (touchWorldX >= noteData.startX && touchWorldX <= noteData.endX &&
+                                touchWorldY >= noteData.startY && touchWorldY <= noteData.endY) {
+                                isOverMoveableObject = true;
+                                foundNoteKey = key;
+                                break;
+                            }
+                        } catch (e) {
+                            // Invalid note data
+                        }
                     }
-                } catch (e) {
-                    // Invalid note data
                 }
             }
 
-            // Check for iframes
-            if (!isOverMoveableObject && selectedIframeKey) {
-                try {
-                    const iframeData = JSON.parse(engine.worldData[selectedIframeKey] as string);
-                    if (touchWorldX >= iframeData.startX && touchWorldX <= iframeData.endX &&
-                        touchWorldY >= iframeData.startY && touchWorldY <= iframeData.endY) {
-                        isOverMoveableObject = true;
+            // Check for ANY iframe at this position
+            if (!isOverMoveableObject) {
+                for (const key in engine.worldData) {
+                    if (key.startsWith('iframe_')) {
+                        try {
+                            const iframeData = JSON.parse(engine.worldData[key] as string);
+                            if (touchWorldX >= iframeData.startX && touchWorldX <= iframeData.endX &&
+                                touchWorldY >= iframeData.startY && touchWorldY <= iframeData.endY) {
+                                isOverMoveableObject = true;
+                                foundIframeKey = key;
+                                break;
+                            }
+                        } catch (e) {
+                            // Invalid iframe data
+                        }
                     }
-                } catch (e) {
-                    // Invalid iframe data
                 }
             }
 
-            // Check for mail
-            if (!isOverMoveableObject && selectedMailKey) {
-                try {
-                    const mailData = JSON.parse(engine.worldData[selectedMailKey] as string);
-                    if (touchWorldX >= mailData.startX && touchWorldX <= mailData.endX &&
-                        touchWorldY >= mailData.startY && touchWorldY <= mailData.endY) {
-                        isOverMoveableObject = true;
+            // Check for ANY mail at this position
+            if (!isOverMoveableObject) {
+                for (const key in engine.worldData) {
+                    if (key.startsWith('mail_')) {
+                        try {
+                            const mailData = JSON.parse(engine.worldData[key] as string);
+                            if (touchWorldX >= mailData.startX && touchWorldX <= mailData.endX &&
+                                touchWorldY >= mailData.startY && touchWorldY <= mailData.endY) {
+                                isOverMoveableObject = true;
+                                foundMailKey = key;
+                                break;
+                            }
+                        } catch (e) {
+                            // Invalid mail data
+                        }
                     }
-                } catch (e) {
-                    // Invalid mail data
                 }
             }
 
             // If touch is over a moveable object, start long press timer
             if (isOverMoveableObject) {
                 longPressTimerRef.current = setTimeout(() => {
+                    // Auto-select the object under the touch
+                    if (foundNoteKey) {
+                        setSelectedNoteKey(foundNoteKey);
+                        setSelectedIframeKey(null);
+                        setSelectedMailKey(null);
+                        setSelectedPatternKey(null);
+                    } else if (foundIframeKey) {
+                        setSelectedIframeKey(foundIframeKey);
+                        setSelectedNoteKey(null);
+                        setSelectedMailKey(null);
+                        setSelectedPatternKey(null);
+                    } else if (foundMailKey) {
+                        setSelectedMailKey(foundMailKey);
+                        setSelectedNoteKey(null);
+                        setSelectedIframeKey(null);
+                        setSelectedPatternKey(null);
+                    }
+
                     // Activate long press mode (ready to move or open command menu)
                     longPressActivatedRef.current = true;
                     touchMoveStartPosRef.current = touchWorldPos;
@@ -7450,7 +7489,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         canvasRef.current?.focus();
-    }, [engine, findImageAtPosition, selectedNoteKey, selectedIframeKey, selectedMailKey]);
+    }, [engine, findImageAtPosition]);
 
     const handleTouchMove = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
