@@ -1890,15 +1890,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
     }, []);
     
     const findImageAtPosition = useCallback((pos: Point): any => {
-        // First check staged images (ephemeral, higher priority)
-        for (const imageData of engine.stagedImageData) {
-            if (pos.x >= imageData.startX && pos.x <= imageData.endX &&
-                pos.y >= imageData.startY && pos.y <= imageData.endY) {
-                return imageData;
-            }
-        }
-
-        // Then check persistent images in worldData
+        // Check persistent images in worldData
         for (const key in engine.worldData) {
             if (key.startsWith('image_')) {
                 const imageData = engine.worldData[key];
@@ -2739,55 +2731,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
-        // === Render Bounded Region Backgrounds ===
-        for (const key in engine.worldData) {
-            if (key.startsWith('bound_')) {
-                try {
-                    const boundData = JSON.parse(engine.worldData[key] as string);
-                    const { startX, endX, startY, endY, maxY, color } = boundData;
-                    
-                    // Determine the actual end Y for rendering based on maxY
-                    // If maxY is set, use it as the render boundary (it extends beyond endY)
-                    const renderEndY = (maxY !== null && maxY !== undefined) ? maxY : endY;
-                    
-                    // Check if this is a finite height bound (has maxY)
-                    const isFiniteHeight = (maxY !== null && maxY !== undefined);
-                    
-                    // Always render just bars, never full fill
-                    // Use text color for bounds bars (programmatic - matches current theme)
-                    const isFocused = engine.focusedBoundKey === key;
-
-                    // Use the engine's text color with higher opacity when focused
-                    const baseColor = engine.textColor;
-                    const topBarColor = isFocused ? baseColor : `${baseColor}99`; // Full opacity if focused, 60% if not
-                    
-                    for (let x = startX; x <= endX; x++) {
-                        // Always render top bar 
-                        if (x >= startWorldX - 5 && x <= endWorldX + 5 && startY >= startWorldY - 5 && startY <= endWorldY + 5) {
-                            const topScreenPos = engine.worldToScreen(x, startY, currentZoom, currentOffset);
-                            if (topScreenPos.x > -effectiveCharWidth * 2 && topScreenPos.x < cssWidth + effectiveCharWidth && 
-                                topScreenPos.y > -effectiveCharHeight * 2 && topScreenPos.y < cssHeight + effectiveCharHeight) {
-                                ctx.fillStyle = topBarColor;
-                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight);
-                            }
-                        }
-                        
-                        // Only render bottom bar if this is a finite height bound
-                        if (isFiniteHeight && x >= startWorldX - 5 && x <= endWorldX + 5 && renderEndY >= startWorldY - 5 && renderEndY <= endWorldY + 5) {
-                            const bottomScreenPos = engine.worldToScreen(x, renderEndY, currentZoom, currentOffset);
-                            if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
-                                bottomScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
-                                ctx.fillStyle = `${baseColor}99`; // Same as unfocused - 60% opacity
-                                ctx.fillRect(bottomScreenPos.x, bottomScreenPos.y, effectiveCharWidth, effectiveCharHeight);
-                            }
-                        }
-                    }
-                } catch (e) {
-                    // Skip invalid bound data
-                }
-            }
-        }
-
         // === Render Task Highlights ===
         for (const key in engine.worldData) {
             if (key.startsWith('task_')) {
@@ -3047,57 +2990,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
-        // === Render Glitched Regions (1:1 square cells via vertical subdivision) ===
-        // Build index of glitched regions for efficient lookup
-        const glitchedRegions: Array<{startX: number, endX: number, startY: number, endY: number}> = [];
-        for (const key in engine.worldData) {
-            if (key.startsWith('glitched_')) {
-                try {
-                    const glitchData = JSON.parse(engine.worldData[key] as string);
-                    glitchedRegions.push(glitchData);
-                } catch (e) {
-                    // Skip invalid glitch data
-                }
-            }
-        }
-
-        // Helper function to check if a coordinate is in a glitched region
-        const isInGlitchedRegion = (x: number, y: number) => {
-            for (const region of glitchedRegions) {
-                if (x >= region.startX && x <= region.endX &&
-                    y >= region.startY && y <= region.endY) {
-                    return true;
-                }
-            }
-            return false;
-        };
-
-        // Render glitched regions with subdivided grid (draw as lines like main grid)
-        ctx.strokeStyle = GRID_COLOR;
-        ctx.lineWidth = GRID_LINE_WIDTH / dpr;
-
-        for (const region of glitchedRegions) {
-            const { startX, endX, startY, endY } = region;
-            const squareHeight = effectiveCharHeight / 2;
-
-            // Draw horizontal subdivision lines (the middle line of each cell)
-            for (let y = startY; y <= endY; y++) {
-                if (y >= startWorldY - 5 && y <= endWorldY + 5) {
-                    // Draw the middle horizontal line for this row
-                    const leftScreenPos = engine.worldToScreen(startX, y, currentZoom, currentOffset);
-                    const rightScreenPos = engine.worldToScreen(endX + 1, y, currentZoom, currentOffset);
-                    const middleY = leftScreenPos.y + squareHeight;
-
-                    if (middleY >= -10 && middleY <= cssHeight + 10) {
-                        ctx.beginPath();
-                        ctx.moveTo(leftScreenPos.x, middleY);
-                        ctx.lineTo(rightScreenPos.x, middleY);
-                        ctx.stroke();
-                    }
-                }
-            }
-        }
-
         // === Setup Note Rendering Context ===
         const noteRenderCtx: NoteRenderContext = {
             ctx,
@@ -3112,122 +3004,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             gifFrameCache: gifFrameCache.current,
             hexToRgb
         };
-
-        // === Render Image Notes ===
-        const renderedImages = new Set<string>(); // Track which images we've already rendered
-        for (const key in engine.worldData) {
-            if (key.startsWith('image_') && !renderedImages.has(key)) {
-                renderedImages.add(key);
-                const note = parseNoteFromWorldData(key, engine.worldData[key]);
-                if (note && note.imageData) {
-                    renderNote(note, noteRenderCtx);
-                }
-            }
-        }
-
-        // === Render Staged Images (Ephemeral) ===
-        for (const imageData of engine.stagedImageData) {
-            // Check if image is visible in current viewport
-            const imageVisible = imageData.startX <= endWorldX && imageData.endX >= startWorldX &&
-                                imageData.startY <= endWorldY && imageData.endY >= startWorldY;
-
-            if (imageVisible) {
-                // Calculate screen positions
-                const startScreenPos = engine.worldToScreen(imageData.startX, imageData.startY, currentZoom, currentOffset);
-                const endScreenPos = engine.worldToScreen(imageData.endX + 1, imageData.endY + 1, currentZoom, currentOffset);
-
-                // Calculate target dimensions
-                const targetWidth = endScreenPos.x - startScreenPos.x;
-                const targetHeight = endScreenPos.y - startScreenPos.y;
-
-                // Determine which image to use (animated GIF frame or static image)
-                let img: HTMLImageElement | undefined;
-
-                if (imageData.isAnimated && imageData.totalDuration && imageData.animationStartTime) {
-                    // Get parsed GIF frames from cache
-                    const gifData = gifFrameCache.current.get(imageData.src);
-
-                    if (gifData && gifData.frames.length > 0) {
-                        // Calculate elapsed time since animation started
-                        const elapsedMs = Date.now() - imageData.animationStartTime;
-
-                        // Calculate which frame to display (loop animation)
-                        const loopedTime = elapsedMs % imageData.totalDuration;
-                        let accumulatedTime = 0;
-                        let frameIndex = 0;
-
-                        for (let i = 0; i < gifData.delays.length; i++) {
-                            accumulatedTime += gifData.delays[i];
-                            if (loopedTime < accumulatedTime) {
-                                frameIndex = i;
-                                break;
-                            }
-                        }
-
-                        // Use the current frame
-                        img = gifData.frames[frameIndex];
-
-                        // Fallback to first frame if current frame isn't loaded
-                        if (!img || !img.complete || img.naturalWidth === 0) {
-                            img = gifData.frames[0];
-                        }
-                    } else {
-                        // GIF not parsed yet, use static image as fallback
-                        img = imageCache.current.get(imageData.src);
-                    }
-                } else {
-                    // Static image
-                    img = imageCache.current.get(imageData.src);
-                    if (!img) {
-                        img = new Image();
-                        img.crossOrigin = 'anonymous';
-                        img.src = imageData.src;
-                        imageCache.current.set(imageData.src, img);
-                    }
-                }
-
-                // Only draw if image is fully loaded
-                if (img && img.complete && img.naturalWidth > 0) {
-                    // Calculate crop and fit
-                    const aspectRatio = img.width / img.height;
-                    const targetAspectRatio = targetWidth / targetHeight;
-
-                    let drawWidth = targetWidth;
-                    let drawHeight = targetHeight;
-                    let offsetX = 0;
-                    let offsetY = 0;
-
-                    // Crop to fit
-                    if (aspectRatio > targetAspectRatio) {
-                        const scaledWidth = targetHeight * aspectRatio;
-                        offsetX = (targetWidth - scaledWidth) / 2;
-                        drawWidth = scaledWidth;
-                    } else {
-                        const scaledHeight = targetWidth / aspectRatio;
-                        offsetY = (targetHeight - scaledHeight) / 2;
-                        drawHeight = scaledHeight;
-                    }
-
-                    // Use clipping
-                    ctx.save();
-                    ctx.beginPath();
-                    ctx.rect(startScreenPos.x, startScreenPos.y, targetWidth, targetHeight);
-                    ctx.clip();
-
-                    // Draw with slight transparency to indicate it's ephemeral
-                    ctx.globalAlpha = 0.9;
-                    ctx.drawImage(
-                        img,
-                        startScreenPos.x + offsetX,
-                        startScreenPos.y + offsetY,
-                        drawWidth,
-                        drawHeight
-                    );
-
-                    ctx.restore();
-                }
-            }
-        }
 
         ctx.fillStyle = engine.textColor;
         for (const key in engine.worldData) {
@@ -4470,10 +4246,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         // === Render Waypoint Arrows for Ephemeral Labels (lightModeData) ===
-        // Skip if we have staged artifacts active (staged artifacts use lightModeData but shouldn't trigger arrows)
-        // Also skip if lightModeData is substantial (likely from staged template, not ephemeral labels)
+        // Skip if lightModeData is substantial (likely from staged template, not ephemeral labels)
         const lightModeDataSize = Object.keys(engine.lightModeData).length;
-        if (engine.stagedImageData.length === 0 && lightModeDataSize < 100) {
+        if (lightModeDataSize < 100) {
             // Check lightModeData for label patterns (ephemeral labels from host mode)
             const ephemeralLabels: Map<string, { x: number, y: number, text: string, color: string }> = new Map();
 
@@ -4572,7 +4347,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     }
                 }
             });
-        } // Close stagedImageData check
+        } // Close lightModeData check
 
         // === Render Waypoint Arrows for Off-Screen Bounds ===
         if (!engine.isNavVisible) {
@@ -7118,32 +6893,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     if (distanceX !== 0 || distanceY !== 0) {
                         // First, check if we're moving an image
                         const imageAtPosition = findImageAtPosition(shiftDragStartPos);
-                        
+
                         if (imageAtPosition) {
-                            // Check if it's a staged image (ephemeral)
-                            const stagedImageIndex = engine.stagedImageData.findIndex(img => img === imageAtPosition);
-
-                            if (stagedImageIndex !== -1) {
-                                // Move staged image by updating its coordinates
-                                const newImageData = {
-                                    ...imageAtPosition,
-                                    startX: imageAtPosition.startX + distanceX,
-                                    startY: imageAtPosition.startY + distanceY,
-                                    endX: imageAtPosition.endX + distanceX,
-                                    endY: imageAtPosition.endY + distanceY
-                                };
-
-                                // Update the array with the moved image
-                                engine.setStagedImageData(prev => {
-                                    const newArray = [...prev];
-                                    newArray[stagedImageIndex] = newImageData;
-                                    return newArray;
-                                });
-                            } else {
-                                // Find the original image key in worldData
-                                let imageKey = null;
-                                for (const key in engine.worldData) {
-                                    if (key.startsWith('image_')) {
+                            // Find the original image key in worldData
+                            let imageKey = null;
+                            for (const key in engine.worldData) {
+                                if (key.startsWith('image_')) {
                                         const data = engine.worldData[key];
                                         if (engine.isImageData(data) && data === imageAtPosition) {
                                             imageKey = key;
@@ -8272,30 +8027,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     const imageAtPosition = findImageAtPosition(touchMoveStartPosRef.current);
 
                     if (imageAtPosition) {
-                        // Move image (similar to shift+drag logic)
-                        const stagedImageIndex = engine.stagedImageData.findIndex(img => img === imageAtPosition);
-
-                        if (stagedImageIndex !== -1) {
-                            // Move staged image
-                            const newImageData = {
-                                ...imageAtPosition,
-                                startX: imageAtPosition.startX + distanceX,
-                                startY: imageAtPosition.startY + distanceY,
-                                endX: imageAtPosition.endX + distanceX,
-                                endY: imageAtPosition.endY + distanceY
-                            };
-
-                            engine.setStagedImageData(prev => {
-                                const newArray = [...prev];
-                                newArray[stagedImageIndex] = newImageData;
-                                return newArray;
-                            });
-                        } else {
-                            // Find and move persisted image
-                            let imageKey = null;
-                            for (const key in engine.worldData) {
-                                if (key.startsWith('image_')) {
-                                    const data = engine.worldData[key];
+                        // Find and move persisted image
+                        let imageKey = null;
+                        for (const key in engine.worldData) {
+                            if (key.startsWith('image_')) {
+                                const data = engine.worldData[key];
                                     if (engine.isImageData(data) && data === imageAtPosition) {
                                         imageKey = key;
                                         break;
