@@ -8495,46 +8495,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             return;
         }
 
-        // Handle pattern-specific keys before passing to engine
-        if (selectedPatternKey && e.key === 'Backspace') {
-            // Check if user is actively typing (has text content at or before cursor)
-            // If so, let backspace delete text instead of the pattern
-            const cursorKey = `${engine.cursorPos.x},${engine.cursorPos.y}`;
-            const beforeCursorKey = `${engine.cursorPos.x - 1},${engine.cursorPos.y}`;
-            const hasTextAtCursor = engine.worldData[cursorKey] && typeof engine.worldData[cursorKey] === 'string';
-            const hasTextBeforeCursor = engine.worldData[beforeCursorKey] && typeof engine.worldData[beforeCursorKey] === 'string';
-
-            if (hasTextAtCursor || hasTextBeforeCursor) {
-                // User is typing, let engine handle backspace normally
-                return;
-            }
-
-            // No text content - safe to delete the pattern
-            // Delete the selected pattern and all its notes
-            engine.setWorldData(prev => {
-                const newData = { ...prev };
-
-                try {
-                    const patternData = JSON.parse(newData[selectedPatternKey] as string);
-                    const noteKeys = patternData.noteKeys || [];
-
-                    // Delete all notes that belong to this pattern
-                    for (const noteKey of noteKeys) {
-                        delete newData[noteKey];
-                    }
-                } catch (e) {
-                    // Pattern data invalid, just delete pattern
-                }
-
-                // Delete the pattern itself
-                delete newData[selectedPatternKey];
-                return newData;
-            });
-            setSelectedPatternKey(null); // Clear selection
-            e.preventDefault();
-            e.stopPropagation();
-            return;
-        }
+        // Patterns cannot be deleted directly with backspace
+        // They are deleted automatically when all their notes are removed
 
         // Handle iframe region-specific keys before passing to engine
         if (selectedIframeKey && e.key === 'Backspace') {
