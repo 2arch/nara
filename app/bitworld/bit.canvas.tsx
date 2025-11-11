@@ -4828,9 +4828,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const endX = startX + width;
                 const endY = startY + height;
 
-                // Draw selection border - add 1 to include the full last cell
+                // Draw selection border around pattern extent
                 const topLeftScreen = engine.worldToScreen(startX, startY, currentZoom, currentOffset);
-                const bottomRightScreen = engine.worldToScreen(endX + 1, endY + 1, currentZoom, currentOffset);
+                const bottomRightScreen = engine.worldToScreen(endX, endY, currentZoom, currentOffset);
 
                 // Use text accent color for selection border
                 ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
