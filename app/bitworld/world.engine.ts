@@ -2807,7 +2807,7 @@ export function useWorldEngine({
 
     // === Find Note at Selection Region ===
     // Helper function to find note at exact bounds (not a hook to avoid stale closures in async callbacks)
-    const findNoteAtSelection = (startX: number, startY: number, endX: number, endY: number, currentWorldData: Record<string, WorldDataValue>): { key: string; data: any } | null => {
+    const findNoteAtSelection = (startX: number, startY: number, endX: number, endY: number, currentWorldData: WorldData): { key: string; data: any } | null => {
         for (const key in currentWorldData) {
             if (key.startsWith('note_') || key.startsWith('image_') ||
                 key.startsWith('iframe_') || key.startsWith('mail_') ||
@@ -2832,7 +2832,7 @@ export function useWorldEngine({
     };
 
     // Helper function to find note containing a point
-    const findNoteContainingPoint = (x: number, y: number, currentWorldData: Record<string, WorldDataValue>): { key: string; data: any } | null => {
+    const findNoteContainingPoint = (x: number, y: number, currentWorldData: WorldData): { key: string; data: any } | null => {
         for (const key in currentWorldData) {
             if (key.startsWith('note_') || key.startsWith('image_') ||
                 key.startsWith('iframe_') || key.startsWith('mail_') ||
@@ -10528,7 +10528,7 @@ export function useWorldEngine({
                 startY: imageDataOrNote.startY,
                 endX: imageDataOrNote.endX,
                 endY: imageDataOrNote.endY,
-                timestamp: imageDataOrNote.timestamp || Date.now(),
+                timestamp: Date.now(),
                 contentType: 'image',
                 src: imageDataOrNote.src,
                 originalWidth: imageDataOrNote.originalWidth,

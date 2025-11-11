@@ -288,7 +288,8 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
     // Handle different content types
     if (contentType === 'image' && (note.imageData || note.content?.imageData)) {
         // IMAGE NOTE: Render image attachment
-        const imageData = note.imageData;
+        const imageData = note.imageData || note.content?.imageData;
+        if (!imageData) return;
 
         // Check if image is visible in current viewport
         const viewportStartX = Math.floor(-currentOffset.x / currentZoom);
@@ -2074,13 +2075,15 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             if (textBlock.length === 0) continue;
 
             // Mark all positions in this block as processed
-            textBlock.forEach(pos => processedPositions.add(`${pos.x},${pos.y}`));
+            textBlock.forEach(pos => {
+                if (pos) processedPositions.add(`${pos.x},${pos.y}`);
+            });
 
             // Extract text content
             let content = '';
-            const minX = Math.min(...textBlock.map(p => p.x));
-            const maxX = Math.max(...textBlock.map(p => p.x));
-            const minY = Math.min(...textBlock.map(p => p.y));
+            const minX = Math.min(...textBlock.filter(p => p).map(p => p.x));
+            const maxX = Math.max(...textBlock.filter(p => p).map(p => p.x));
+            const minY = Math.min(...textBlock.filter(p => p).map(p => p.y));
             const maxY = Math.max(...textBlock.map(p => p.y));
 
             for (let y = minY; y <= maxY; y++) {
