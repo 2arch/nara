@@ -200,19 +200,43 @@ export const FADES = {
  * Rect styles for notes, patterns, images
  */
 export const RECT_STYLES = {
-    // Simple solid note
+    // Default styles (no style applied)
     note: {
         fill: FILLS.none,
         border: BORDERS.solid('#888888', 1)
     } as RectStyle,
 
-    // Glowing pattern
     pattern: {
+        fill: FILLS.none,
+        border: BORDERS.solid('#888888', 1)
+    } as RectStyle,
+
+    // Solid border (for /style solid)
+    solid: {
+        fill: FILLS.none,
+        border: BORDERS.solid('#ffffff', 1)
+    } as RectStyle,
+
+    // Glow border (for /style glow)
+    glow: {
         fill: FILLS.none,
         border: BORDERS.glow('#888888', {
             radius: 2,
             intensity: 0.5,
-            pulse: true
+            pulse: true,
+            flicker: true
+        })
+    } as RectStyle,
+
+    // Enhanced glow (for /style glowing)
+    glowing: {
+        fill: FILLS.none,
+        border: BORDERS.glow('#ffffff', {
+            radius: 3,
+            intensity: 0.7,
+            pulse: true,
+            flicker: true,
+            cardinalExtension: 2
         })
     } as RectStyle,
 
