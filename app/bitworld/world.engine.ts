@@ -652,8 +652,21 @@ export function useWorldEngine({
 
     // Wrapper for setDialogueText that also updates timestamp
     const setDialogueText = useCallback((text: string) => {
-        setDialogueTextState(text);
-        setDialogueTimestamp(text ? Date.now() : undefined); // Set timestamp if text exists, clear if empty
+        setDialogueTextState(prevText => {
+            const wasEmpty = !prevText || prevText === '';
+            const isNowNonEmpty = text && text !== '';
+
+            // Only update timestamp when dialogue STARTS (empty -> has content)
+            // Don't update when cycling through chunks (content -> different content)
+            if (wasEmpty && isNowNonEmpty) {
+                setDialogueTimestamp(Date.now());
+            } else if (!text || text === '') {
+                setDialogueTimestamp(undefined);
+            }
+            // If prevText had content and text has content, keep existing timestamp
+
+            return text;
+        });
     }, []);
     const [membershipLevel, setMembershipLevel] = useState<string | undefined>(undefined);
 
