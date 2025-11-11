@@ -48,34 +48,57 @@ interface ImageAttachment {
 }
 
 /**
- * Unified Note interface - the universal container for all content
+ * Unified Note interface - the universal container for all region-spanning content
  *
- * A note is a bounded region that can display different content types:
- * - Default: text overlay (no attachments)
- * - With imageData: displays an image
- * - With iframeUrl: displays an embedded webpage
- * - With mailData: email composer interface
+ * Content types determine function and rendering:
+ * - 'text': Text overlay (default)
+ * - 'image': Image display
+ * - 'iframe': Embedded webpage
+ * - 'mail': Email composer
+ * - 'bound': Selection/grouping region
+ * - 'glitch': Glitch effect region
+ * - 'list': Scrollable list
  *
  * All notes work with patterns, styles, and standard operations (move, resize, delete)
  */
 interface Note {
-    // Bounds
+    // Bounds (required)
     startX: number;
     endX: number;
     startY: number;
     endY: number;
     timestamp: number;
 
-    // Composition & Styling
+    // Content type determines function (defaults to 'text' if omitted)
+    contentType?: 'text' | 'image' | 'iframe' | 'mail' | 'bound' | 'glitch' | 'list';
+
+    // Visual styling
     style?: string;           // Style name (e.g., "glow", "solid", "glowing")
     patternKey?: string;      // Reference to parent pattern if part of one
 
-    // Optional attachments (only one should be present at a time)
+    // Content-specific data (based on contentType)
+    content?: {
+        // Image content
+        imageData?: ImageAttachment;
+        // Iframe content
+        iframeUrl?: string;
+        // Mail content
+        mailData?: {};
+        // List content
+        listData?: {
+            visibleHeight: number;
+            scrollOffset: number;
+            color: string;
+            title?: string;
+        };
+        // Bound content (no additional data needed)
+        // Glitch content (no additional data needed)
+    };
+
+    // Legacy support: top-level properties for backward compatibility
     imageData?: ImageAttachment;
     iframeUrl?: string;
-    mailData?: {};            // Mail-specific data (future: recipient, subject, etc.)
-
-    // Note: If no attachments present, renders as text overlay (default note behavior)
+    mailData?: {};
 }
 
 // ============================================================================
@@ -84,7 +107,8 @@ interface Note {
 
 /**
  * Parse note from worldData entry
- * Treats all storage formats (note_, image_, iframe_, mail_) as notes with attachments
+ * Treats all region-spanning storage formats as unified notes with contentType
+ * Supports: note_, image_, iframe_, mail_, bound_, glitched_, list_
  */
 function parseNoteFromWorldData(key: string, value: any): Note | null {
     try {
@@ -101,26 +125,72 @@ function parseNoteFromWorldData(key: string, value: any): Note | null {
             ...(data.patternKey && { patternKey: data.patternKey })
         };
 
-        // Add attachments based on key prefix (backward compatibility)
-        if (key.startsWith('image_')) {
-            // Image note - has imageData attachment
-            baseNote.imageData = {
-                src: data.src,
-                originalWidth: data.originalWidth,
-                originalHeight: data.originalHeight,
-                ...(data.isAnimated && { isAnimated: data.isAnimated }),
-                ...(data.frameTiming && { frameTiming: data.frameTiming }),
-                ...(data.totalDuration && { totalDuration: data.totalDuration }),
-                ...(data.animationStartTime && { animationStartTime: data.animationStartTime })
-            };
+        // Detect content type from key prefix or explicit contentType field
+        if (data.contentType) {
+            baseNote.contentType = data.contentType;
+        } else if (key.startsWith('image_')) {
+            baseNote.contentType = 'image';
         } else if (key.startsWith('iframe_')) {
-            // Iframe note - has iframeUrl attachment
-            baseNote.iframeUrl = data.url;
+            baseNote.contentType = 'iframe';
         } else if (key.startsWith('mail_')) {
-            // Mail note - has mailData attachment
-            baseNote.mailData = {};
+            baseNote.contentType = 'mail';
+        } else if (key.startsWith('bound_')) {
+            baseNote.contentType = 'bound';
+        } else if (key.startsWith('glitched_')) {
+            baseNote.contentType = 'glitch';
+        } else if (key.startsWith('list_')) {
+            baseNote.contentType = 'list';
+        } else {
+            baseNote.contentType = 'text';
         }
-        // else: plain text note (no attachment)
+
+        // Populate content-specific data based on type
+        switch (baseNote.contentType) {
+            case 'image':
+                const imageData: ImageAttachment = {
+                    src: data.src,
+                    originalWidth: data.originalWidth,
+                    originalHeight: data.originalHeight,
+                    ...(data.isAnimated && { isAnimated: data.isAnimated }),
+                    ...(data.frameTiming && { frameTiming: data.frameTiming }),
+                    ...(data.totalDuration && { totalDuration: data.totalDuration }),
+                    ...(data.animationStartTime && { animationStartTime: data.animationStartTime })
+                };
+                // Store in both new and legacy locations for backward compat
+                baseNote.content = { imageData };
+                baseNote.imageData = imageData;
+                break;
+
+            case 'iframe':
+                const iframeUrl = data.url || data.iframeUrl;
+                baseNote.content = { iframeUrl };
+                baseNote.iframeUrl = iframeUrl;
+                break;
+
+            case 'mail':
+                const mailData = data.mailData || {};
+                baseNote.content = { mailData };
+                baseNote.mailData = mailData;
+                break;
+
+            case 'list':
+                baseNote.content = {
+                    listData: {
+                        visibleHeight: data.visibleHeight || data.endY - data.startY + 1,
+                        scrollOffset: data.scrollOffset || 0,
+                        color: data.color || '#FFFFFF',
+                        title: data.title
+                    }
+                };
+                break;
+
+            case 'bound':
+            case 'glitch':
+            case 'text':
+            default:
+                // No additional content data needed
+                break;
+        }
 
         return baseNote;
     } catch (e) {
@@ -146,9 +216,11 @@ function findNoteAtPosition(
     worldData: any
 ): { key: string; note: Note } | null {
     for (const key in worldData) {
-        // Check all note types (includes image_, iframe_, mail_ for backward compatibility)
+        // Check all region-spanning note types
         if (key.startsWith('note_') || key.startsWith('image_') ||
-            key.startsWith('iframe_') || key.startsWith('mail_')) {
+            key.startsWith('iframe_') || key.startsWith('mail_') ||
+            key.startsWith('bound_') || key.startsWith('glitched_') ||
+            key.startsWith('list_')) {
 
             const note = parseNoteFromWorldData(key, worldData[key]);
             if (note && isPointInNote(pos, note)) {
@@ -170,9 +242,13 @@ function getNoteDimensions(note: Note): { width: number; height: number } {
 }
 
 /**
- * Get note type based on attachments
+ * Get note type based on contentType (with legacy fallback)
  */
-function getNoteType(note: Note): 'text' | 'image' | 'iframe' | 'mail' {
+function getNoteType(note: Note): 'text' | 'image' | 'iframe' | 'mail' | 'bound' | 'glitch' | 'list' {
+    // Use explicit contentType if available
+    if (note.contentType) return note.contentType;
+
+    // Legacy fallback: infer from top-level properties
     if (note.imageData) return 'image';
     if (note.iframeUrl) return 'iframe';
     if (note.mailData) return 'mail';
@@ -199,14 +275,18 @@ interface NoteRenderContext {
 
 /**
  * Unified note rendering function
- * Renders notes based on their attachments (text, image, iframe, mail)
+ * Renders notes based on contentType (text, image, iframe, mail)
+ * Note: bound, glitch, and list are rendered separately in the main canvas loop
  */
 function renderNote(note: Note, context: NoteRenderContext, renderContext?: BaseRenderContext): void {
     const { ctx, engine, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight, cssWidth, cssHeight, hexToRgb } = context;
     const { startX, endX, startY, endY } = note;
 
-    // Determine rendering based on attachments
-    if (note.imageData) {
+    // Get content type (with legacy fallback)
+    const contentType = getNoteType(note);
+
+    // Handle different content types
+    if (contentType === 'image' && (note.imageData || note.content?.imageData)) {
         // IMAGE NOTE: Render image attachment
         const imageData = note.imageData;
 
@@ -290,11 +370,11 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
             ctx.restore();
         }
 
-    } else if (note.iframeUrl) {
+    } else if (contentType === 'iframe') {
         // IFRAME NOTE: Rendered as React component, not on canvas
         return;
 
-    } else if (note.mailData) {
+    } else if (contentType === 'mail') {
         // MAIL NOTE: Render yellow/amber overlay
         const mailColor = 'rgba(255, 193, 7, 0.15)';
         ctx.fillStyle = mailColor;

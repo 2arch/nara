@@ -2774,18 +2774,21 @@ export function useWorldEngine({
     // === List Detection ===
     const findListAt = useCallback((x: number, y: number): { key: string; data: ListData } | null => {
         for (const key in worldData) {
-            if (key.startsWith('list_')) {
+            if (key.startsWith('note_')) {
                 try {
-                    const listData = JSON.parse(worldData[key] as string) as ListData;
-                    const { startX, endX, startY, visibleHeight } = listData;
+                    const noteData = JSON.parse(worldData[key] as string);
+                    if (noteData.contentType === 'list') {
+                        const listData = noteData as ListData;
+                        const { startX, endX, startY, visibleHeight } = listData;
 
-                    // Check if position is within list viewport (no title bar)
-                    if (x >= startX && x <= endX &&
-                        y >= startY && y < startY + visibleHeight) {
-                        return { key, data: listData };
+                        // Check if position is within list viewport (no title bar)
+                        if (x >= startX && x <= endX &&
+                            y >= startY && y < startY + visibleHeight) {
+                            return { key, data: listData };
+                        }
                     }
                 } catch (e) {
-                    // Skip invalid list data
+                    // Skip invalid note data
                 }
             }
         }
@@ -3104,18 +3107,20 @@ export function useWorldEngine({
                                     }
                                 }
 
-                                // Add image
-                                (newWorldData[`image_${Date.now()}`] as any) = {
-                                    type: 'image',
-                                    src: finalImageUrl,
+                                // Add image as note
+                                const noteData = {
                                     startX: minX,
                                     startY: minY,
                                     endX: minX + cellsWide - 1,
                                     endY: minY + cellsHigh - 1,
-                                    width: img.width,
-                                    height: img.height,
-                                    timestamp: Date.now()
+                                    timestamp: Date.now(),
+                                    contentType: 'image',
+                                    src: finalImageUrl,
+                                    originalWidth: img.width,
+                                    originalHeight: img.height
                                 };
+                                const noteKey = `note_${minX}_${minY}_${Date.now()}`;
+                                newWorldData[noteKey] = JSON.stringify(noteData);
 
                                 setWorldData(newWorldData);
                                 setSelectionStart(null);
@@ -3693,17 +3698,19 @@ export function useWorldEngine({
                                             delete updatedWorldData[selectedImageKey];
                                         }
 
-                                        (updatedWorldData[`image_${Date.now()}`] as any) = {
-                                            type: 'image',
-                                            src: finalImageUrl,
+                                        const noteData = {
                                             startX: minX,
                                             startY: minY,
                                             endX: minX + cellsWide - 1,
                                             endY: minY + cellsHigh - 1,
-                                            width: img.width,
-                                            height: img.height,
-                                            timestamp: Date.now()
+                                            timestamp: Date.now(),
+                                            contentType: 'image',
+                                            src: finalImageUrl,
+                                            originalWidth: img.width,
+                                            originalHeight: img.height
                                         };
+                                        const noteKey = `note_${minX}_${minY}_${Date.now()}`;
+                                        updatedWorldData[noteKey] = JSON.stringify(noteData);
                                         setWorldData(updatedWorldData);
                                         setAiProcessingRegion(null); // Clear visual feedback
                                         setDialogueWithRevert("Image transformed", setDialogueText);
@@ -3803,16 +3810,19 @@ export function useWorldEngine({
                                             }
                                         }
 
-                                        (updatedWorldData[`image_${Date.now()}`] as any) = {
-                                            type: 'image',
-                                            src: finalImageUrl,
+                                        const noteData = {
                                             startX: minX,
                                             startY: minY,
                                             endX: minX + cellsWide - 1,
                                             endY: minY + cellsHigh - 1,
+                                            timestamp: Date.now(),
+                                            contentType: 'image',
+                                            src: finalImageUrl,
                                             originalWidth: img.width,
                                             originalHeight: img.height
                                         };
+                                        const noteKey = `note_${minX}_${minY}_${Date.now()}`;
+                                        updatedWorldData[noteKey] = JSON.stringify(noteData);
 
                                         setWorldData(updatedWorldData);
                                         setAiProcessingRegion(null); // Clear visual feedback
@@ -5367,29 +5377,32 @@ export function useWorldEngine({
                         // If no bound found, check for list
                         if (!foundRegion) {
                             for (const key in worldData) {
-                                if (key.startsWith('list_')) {
+                                if (key.startsWith('note_')) {
                                     try {
-                                        const listData = JSON.parse(worldData[key] as string);
-                                        const { startX, endX, startY, visibleHeight } = listData;
-                                        const endY = startY + visibleHeight - 1;
+                                        const noteData = JSON.parse(worldData[key] as string);
+                                        if (noteData.contentType === 'list') {
+                                            const listData = noteData;
+                                            const { startX, endX, startY, visibleHeight } = listData;
+                                            const endY = startY + visibleHeight - 1;
 
-                                        // Check if cursor is within list viewport
-                                        if (cursorX >= startX && cursorX <= endX &&
-                                            cursorY >= startY && cursorY <= endY) {
-                                            setFullscreenMode(true, {
-                                                type: 'list',
-                                                key,
-                                                startX,
-                                                endX,
-                                                startY,
-                                                endY
-                                            });
-                                            setDialogueWithRevert("Entered fullscreen mode - Press Escape or /full to exit", setDialogueText);
-                                            foundRegion = true;
-                                            break;
+                                            // Check if cursor is within list viewport
+                                            if (cursorX >= startX && cursorX <= endX &&
+                                                cursorY >= startY && cursorY <= endY) {
+                                                setFullscreenMode(true, {
+                                                    type: 'list',
+                                                    key,
+                                                    startX,
+                                                    endX,
+                                                    startY,
+                                                    endY
+                                                });
+                                                setDialogueWithRevert("Entered fullscreen mode - Press Escape or /full to exit", setDialogueText);
+                                                foundRegion = true;
+                                                break;
+                                            }
                                         }
                                     } catch (e) {
-                                        // Skip invalid list data
+                                        // Skip invalid note data
                                     }
                                 }
                             }
@@ -5683,20 +5696,22 @@ export function useWorldEngine({
                             title = title.trim();
 
                             // Create merged bound with new dimensions
-                            const boundKey = `bound_${selection.startX},${selection.startY}`;
-                            const boundData = {
+                            const noteData = {
                                 startX: selection.startX,
-                                endX: selection.endX,
                                 startY: selection.startY,
+                                endX: selection.endX,
                                 endY: selection.endY,
-                                maxY: maxY, // Use new height if specified
+                                timestamp: Date.now(),
+                                contentType: 'bound',
                                 color: color, // Use new color
-                                title: title || undefined // Only include title if non-empty
+                                title: title || undefined, // Only include title if non-empty
+                                ...(maxY !== undefined && maxY !== null && { maxY })
                             };
-                            
-                            newWorldData[boundKey] = JSON.stringify(boundData);
+                            const noteKey = `note_${selection.startX}_${selection.startY}_${Date.now()}`;
+
+                            newWorldData[noteKey] = JSON.stringify(noteData);
                             setWorldData(newWorldData);
-                            logger.debug('Created merged bound:', boundData);
+                            logger.debug('Created merged bound:', noteData);
                             
                             const mergeMsg = enclosedBounds.length > 1 ? 
                                 `Merged ${enclosedBounds.length} bounds` : 
@@ -5719,21 +5734,23 @@ export function useWorldEngine({
                             title = title.trim();
 
                             // Store bounded region as a single entry like labels
-                            const boundKey = `bound_${selection.startX},${selection.startY}`;
-                            const boundData = {
+                            const noteData = {
                                 startX: selection.startX,
-                                endX: selection.endX,
                                 startY: selection.startY,
+                                endX: selection.endX,
                                 endY: selection.endY,
-                                maxY: maxY, // New field: maximum Y where this bound has effect
+                                timestamp: Date.now(),
+                                contentType: 'bound',
                                 color: color,
-                                title: title || undefined // Only include title if non-empty
+                                title: title || undefined, // Only include title if non-empty
+                                ...(maxY !== undefined && maxY !== null && { maxY })
                             };
-                            logger.debug('boundKey:', boundKey);
-                            logger.debug('boundData:', boundData);
+                            const noteKey = `note_${selection.startX}_${selection.startY}_${Date.now()}`;
+                            logger.debug('noteKey:', noteKey);
+                            logger.debug('noteData:', noteData);
 
                             let newWorldData = { ...worldData };
-                            newWorldData[boundKey] = JSON.stringify(boundData);
+                            newWorldData[noteKey] = JSON.stringify(noteData);
                             
                             logger.debug('Setting worldData with new bound region');
                             setWorldData(newWorldData);
@@ -5928,21 +5945,24 @@ export function useWorldEngine({
 
 
                         // Create list metadata
-                        const listKey = `list_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                        const listData: ListData = {
+                        const noteData = {
                             startX: selection.startX,
-                            endX: selection.endX,
                             startY: selection.startY,
+                            endX: selection.endX,
+                            endY: selection.startY + visibleHeight - 1,
+                            timestamp: Date.now(),
+                            contentType: 'list',
                             visibleHeight: visibleHeight,
                             scrollOffset: 0,
                             color: color
                         };
+                        const noteKey = `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
 
                         // Store list and content
                         let newWorldData = { ...worldData };
-                        newWorldData[listKey] = JSON.stringify(listData);
-                        newWorldData[`${listKey}_content`] = JSON.stringify(initialContent);
+                        newWorldData[noteKey] = JSON.stringify(noteData);
+                        newWorldData[`${noteKey}_content`] = JSON.stringify(initialContent);
 
 
                         // Clear the selection area (content now in list storage)
@@ -5969,24 +5989,27 @@ export function useWorldEngine({
                     let newWorldData = { ...worldData };
 
 
-                    // Look through all list_ entries to find one that contains the cursor
+                    // Look through all note_ entries to find one that contains the cursor
                     for (const key in worldData) {
-                        if (key.startsWith('list_')) {
+                        if (key.startsWith('note_')) {
                             try {
-                                const listData = JSON.parse(worldData[key] as string);
+                                const noteData = JSON.parse(worldData[key] as string);
+                                if (noteData.contentType === 'list') {
+                                    const listData = noteData;
 
-                                // Check if cursor is within the list viewport
-                                const withinList = cursorX >= listData.startX && cursorX <= listData.endX &&
-                                                  cursorY >= listData.startY && cursorY < listData.startY + listData.visibleHeight;
+                                    // Check if cursor is within the list viewport
+                                    const withinList = cursorX >= listData.startX && cursorX <= listData.endX &&
+                                                      cursorY >= listData.startY && cursorY < listData.startY + listData.visibleHeight;
 
-                                if (withinList) {
-                                    // Remove this list and its content
-                                    delete newWorldData[key];
-                                    delete newWorldData[`${key}_content`];
-                                    foundList = true;
+                                    if (withinList) {
+                                        // Remove this list and its content
+                                        delete newWorldData[key];
+                                        delete newWorldData[`${key}_content`];
+                                        foundList = true;
+                                    }
                                 }
                             } catch (e) {
-                                console.error('Error parsing list data:', key, e);
+                                console.error('Error parsing note data:', key, e);
                             }
                         }
                     }
@@ -6028,14 +6051,16 @@ export function useWorldEngine({
                     }
 
                     // Create glitch metadata entry to mark this region as glitched
-                    const glitchKey = `glitched_${selection.startX},${selection.startY}`;
-                    const glitchData = {
+                    const noteData = {
                         startX: selection.startX,
-                        endX: selection.endX,
                         startY: selection.startY,
-                        endY: selection.endY
+                        endX: selection.endX,
+                        endY: selection.endY,
+                        timestamp: Date.now(),
+                        contentType: 'glitch'
                     };
-                    newWorldData[glitchKey] = JSON.stringify(glitchData);
+                    const noteKey = `note_${selection.startX},${selection.startY}_${Date.now()}`;
+                    newWorldData[noteKey] = JSON.stringify(noteData);
 
                     setWorldData(newWorldData);
 
@@ -6093,18 +6118,19 @@ export function useWorldEngine({
                                                     const selectionWidth = selection.endX - selection.startX + 1;
                                                     const selectionHeight = selection.endY - selection.startY + 1;
                                                     const storageUrl = await uploadImageToStorage(dataUrl);
-                                                    const imageData: ImageData = {
-                                                        type: 'image',
-                                                        src: storageUrl,
+                                                    const noteData = {
                                                         startX: selection.startX,
                                                         startY: selection.startY,
                                                         endX: selection.endX,
                                                         endY: selection.endY,
+                                                        timestamp: Date.now(),
+                                                        contentType: 'image',
+                                                        src: storageUrl,
                                                         originalWidth: img.width,
                                                         originalHeight: img.height
                                                     };
-                                                    const imageKey = `image_${selection.startX},${selection.startY}`;
-                                                    setWorldData(prev => ({ ...prev, [imageKey]: imageData }));
+                                                    const noteKey = `note_${selection.startX},${selection.startY}_${Date.now()}`;
+                                                    setWorldData(prev => ({ ...prev, [noteKey]: JSON.stringify(noteData) }));
                                                     setSelectionStart(null);
                                                     setSelectionEnd(null);
                                                     setDialogueWithRevert(`Image uploaded to region (${selectionWidth}x${selectionHeight} cells)`, setDialogueText);
@@ -6142,17 +6168,18 @@ export function useWorldEngine({
                                             }
                                         }
 
-                                        // Create image key
-                                        const imageKey = `image_${selection.startX},${selection.startY}`;
+                                        // Create note key
+                                        const noteKey = `note_${selection.startX}_${selection.startY}_${Date.now()}`;
 
                                         // Show GIF immediately with local data URLs (optimistic)
-                                        const optimisticImageData: ImageData = {
-                                            type: 'image',
-                                            src: localFrameTiming[0].url,
+                                        const optimisticNoteData = {
                                             startX: selection.startX,
                                             startY: selection.startY,
                                             endX: selection.endX,
                                             endY: selection.endY,
+                                            timestamp: Date.now(),
+                                            contentType: 'image',
+                                            src: localFrameTiming[0].url,
                                             originalWidth: parsedGIF.width,
                                             originalHeight: parsedGIF.height,
                                             isAnimated: true,
@@ -6163,7 +6190,7 @@ export function useWorldEngine({
 
                                         setWorldData(prev => ({
                                             ...prev,
-                                            [imageKey]: optimisticImageData
+                                            [noteKey]: JSON.stringify(optimisticNoteData)
                                         }));
 
                                         // Clear selection immediately
@@ -6186,16 +6213,22 @@ export function useWorldEngine({
 
                                             // Update with Firebase URLs once upload complete
                                             setWorldData(prev => {
-                                                const existing = prev[imageKey];
-                                                if (existing && typeof existing === 'object' && 'type' in existing && existing.type === 'image') {
-                                                    return {
-                                                        ...prev,
-                                                        [imageKey]: {
-                                                            ...existing,
+                                                const existing = prev[noteKey];
+                                                if (existing && typeof existing === 'string') {
+                                                    try {
+                                                        const parsedNote = JSON.parse(existing);
+                                                        const updatedNote = {
+                                                            ...parsedNote,
                                                             src: uploadedFrameTiming[0].url,
                                                             frameTiming: uploadedFrameTiming
-                                                        }
-                                                    };
+                                                        };
+                                                        return {
+                                                            ...prev,
+                                                            [noteKey]: JSON.stringify(updatedNote)
+                                                        };
+                                                    } catch (e) {
+                                                        logger.error('Error parsing note data for GIF update:', e);
+                                                    }
                                                 }
                                                 return prev;
                                             });
@@ -6246,23 +6279,24 @@ export function useWorldEngine({
                                         // Upload to Firebase Storage and get URL
                                         const storageUrl = await uploadImageToStorage(finalSrc);
 
-                                        // Create image data entry
-                                        const imageData: ImageData = {
-                                            type: 'image',
-                                            src: storageUrl,
+                                        // Create note data entry
+                                        const noteData = {
                                             startX: selection.startX,
                                             startY: selection.startY,
                                             endX: selection.endX,
                                             endY: selection.endY,
+                                            timestamp: Date.now(),
+                                            contentType: 'image',
+                                            src: storageUrl,
                                             originalWidth: img.width,
                                             originalHeight: img.height
                                         };
 
-                                        // Store image with unique key
-                                        const imageKey = `image_${selection.startX},${selection.startY}`;
+                                        // Store note with unique key
+                                        const noteKey = `note_${selection.startX}_${selection.startY}_${Date.now()}`;
                                         setWorldData(prev => ({
                                             ...prev,
-                                            [imageKey]: imageData
+                                            [noteKey]: JSON.stringify(noteData)
                                         }));
 
                                         // Clear selection
@@ -6957,20 +6991,22 @@ export function useWorldEngine({
                             title = title.trim();
 
                             // Store bounded region as a single entry like labels
-                            const boundKey = `bound_${selection.startX},${selection.startY}`;
-                            const boundData = {
+                            const noteData = {
                                 startX: selection.startX,
-                                endX: selection.endX,
                                 startY: selection.startY,
+                                endX: selection.endX,
                                 endY: selection.endY,
+                                timestamp: Date.now(),
+                                contentType: 'bound',
                                 color: color,
                                 title: title || undefined // Only include title if non-empty
                             };
-                            logger.debug('boundKey:', boundKey);
-                            logger.debug('boundData:', boundData);
+                            const noteKey = `note_${selection.startX}_${selection.startY}_${Date.now()}`;
+                            logger.debug('noteKey:', noteKey);
+                            logger.debug('noteData:', noteData);
 
                             let newWorldData = { ...worldData };
-                            newWorldData[boundKey] = JSON.stringify(boundData);
+                            newWorldData[noteKey] = JSON.stringify(noteData);
                             
                             logger.debug('Setting worldData with new bound region');
                             setWorldData(newWorldData);
@@ -7038,21 +7074,24 @@ export function useWorldEngine({
                             }
 
                             // Create list metadata
-                            const listKey = `list_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                            const listData: ListData = {
+                            const noteData = {
                                 startX: selection.startX,
-                                endX: selection.endX,
                                 startY: selection.startY,
+                                endX: selection.endX,
+                                endY: selection.startY + visibleHeight - 1,
+                                timestamp: Date.now(),
+                                contentType: 'list',
                                 visibleHeight: visibleHeight,
                                 scrollOffset: 0,
                                 color: color,
                                 title: title || undefined
                             };
+                            const noteKey = `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
                             // Store list and content
                             let newWorldData = { ...worldData };
-                            newWorldData[listKey] = JSON.stringify(listData);
-                            newWorldData[`${listKey}_content`] = JSON.stringify(initialContent);
+                            newWorldData[noteKey] = JSON.stringify(noteData);
+                            newWorldData[`${noteKey}_content`] = JSON.stringify(initialContent);
 
                             // Clear the selection area (content now in list storage)
                             for (let y = selection.startY; y <= selection.endY; y++) {
@@ -7277,14 +7316,15 @@ export function useWorldEngine({
                                 // Upload to storage
                                 const storageUrl = await uploadImageToStorage(result.imageData!);
 
-                                // Create image data structure
-                                const imageData: ImageData = {
-                                    type: 'image',
-                                    src: storageUrl,
+                                // Create note data structure
+                                const noteData = {
                                     startX: targetRegion.startX,
                                     startY: targetRegion.startY,
                                     endX: targetRegion.startX + cellsWide - 1,
                                     endY: targetRegion.startY + cellsHigh - 1,
+                                    timestamp: Date.now(),
+                                    contentType: 'image',
+                                    src: storageUrl,
                                     originalWidth: img.width,
                                     originalHeight: img.height
                                 };
@@ -7305,9 +7345,9 @@ export function useWorldEngine({
                                     }
                                 }
 
-                                // Add new image
-                                const imageKey = `image_${targetRegion.startX},${targetRegion.startY}`;
-                                newWorldData[imageKey] = imageData;
+                                // Add new note
+                                const noteKey = `note_${targetRegion.startX}_${targetRegion.startY}_${Date.now()}`;
+                                newWorldData[noteKey] = JSON.stringify(noteData);
                                 setWorldData(newWorldData);
 
                                 // Clear selection if we were using a selection (not a saved plan region)
@@ -7639,24 +7679,25 @@ export function useWorldEngine({
                             // Upload to Firebase Storage and get URL
                             const storageUrl = await uploadImageToStorage(imageDataUrl);
 
-                            // Create image data structure
-                            const imageData: ImageData = {
-                                type: 'image',
-                                src: storageUrl,
+                            // Create note data structure
+                            const noteData = {
                                 startX: startPosition.x,
                                 startY: startPosition.y,
                                 endX: startPosition.x + cellsWide - 1,
                                 endY: startPosition.y + cellsHigh - 1,
+                                timestamp: Date.now(),
+                                contentType: 'image',
+                                src: storageUrl,
                                 originalWidth: img.width,
                                 originalHeight: img.height
                             };
 
                             // Add to world data
-                            const imageKey = `image_${startPosition.x},${startPosition.y}`;
+                            const noteKey = `note_${startPosition.x}_${startPosition.y}_${Date.now()}`;
                             setWorldData(prev => {
                                 const updated = {
                                     ...prev,
-                                    [imageKey]: imageData
+                                    [noteKey]: JSON.stringify(noteData)
                                 };
                                 return updated;
                             });
@@ -7711,24 +7752,25 @@ export function useWorldEngine({
                             // Upload to Firebase Storage and get URL
                             const storageUrl = await uploadImageToStorage(imageDataUrl);
 
-                            // Create image data structure
-                            const imageData: ImageData = {
-                                type: 'image',
-                                src: storageUrl,
+                            // Create note data structure
+                            const noteData = {
                                 startX: startPosition.x,
                                 startY: startPosition.y,
                                 endX: startPosition.x + cellsWide - 1,
                                 endY: startPosition.y + cellsHigh - 1,
+                                timestamp: Date.now(),
+                                contentType: 'image',
+                                src: storageUrl,
                                 originalWidth: img.width,
                                 originalHeight: img.height
                             };
 
                             // Add to world data
-                            const imageKey = `image_${startPosition.x},${startPosition.y}`;
+                            const noteKey = `note_${startPosition.x}_${startPosition.y}_${Date.now()}`;
                             setWorldData(prev => {
                                 const updated = {
                                     ...prev,
-                                    [imageKey]: imageData
+                                    [noteKey]: JSON.stringify(noteData)
                                 };
                                 return updated;
                             });
@@ -9228,16 +9270,18 @@ export function useWorldEngine({
             // Check if cursor is in a glitched region - block typing if so
             let isInGlitchedRegion = false;
             for (const key in worldData) {
-                if (key.startsWith('glitched_')) {
+                if (key.startsWith('note_')) {
                     try {
-                        const glitchData = JSON.parse(worldData[key] as string);
-                        if (cursorPos.x >= glitchData.startX && cursorPos.x <= glitchData.endX &&
-                            cursorPos.y >= glitchData.startY && cursorPos.y <= glitchData.endY) {
-                            isInGlitchedRegion = true;
-                            break;
+                        const noteData = JSON.parse(worldData[key] as string);
+                        if (noteData.contentType === 'glitch') {
+                            if (cursorPos.x >= noteData.startX && cursorPos.x <= noteData.endX &&
+                                cursorPos.y >= noteData.startY && cursorPos.y <= noteData.endY) {
+                                isInGlitchedRegion = true;
+                                break;
+                            }
                         }
                     } catch (e) {
-                        // Skip invalid glitch data
+                        // Skip invalid note data
                     }
                 }
             }
@@ -9934,16 +9978,18 @@ export function useWorldEngine({
         // Check if clicking in a glitched region - block cursor movement if so
         let isInGlitchedRegion = false;
         for (const key in worldData) {
-            if (key.startsWith('glitched_')) {
+            if (key.startsWith('note_')) {
                 try {
-                    const glitchData = JSON.parse(worldData[key] as string);
-                    if (newCursorPos.x >= glitchData.startX && newCursorPos.x <= glitchData.endX &&
-                        newCursorPos.y >= glitchData.startY && newCursorPos.y <= glitchData.endY) {
-                        isInGlitchedRegion = true;
-                        break;
+                    const noteData = JSON.parse(worldData[key] as string);
+                    if (noteData.contentType === 'glitch') {
+                        if (newCursorPos.x >= noteData.startX && newCursorPos.x <= noteData.endX &&
+                            newCursorPos.y >= noteData.startY && newCursorPos.y <= noteData.endY) {
+                            isInGlitchedRegion = true;
+                            break;
+                        }
                     }
                 } catch (e) {
-                    // Skip invalid glitch data
+                    // Skip invalid note data
                 }
             }
         }
@@ -10600,29 +10646,64 @@ export function useWorldEngine({
     }, [worldData]);
 
     const moveImage = useCallback((imageKey: string, deltaX: number, deltaY: number): void => {
-        const imageData = worldData[imageKey];
-        if (!imageData || !isImageData(imageData)) {
+        const imageDataOrNote = worldData[imageKey];
+        if (!imageDataOrNote) {
             logger.error('Invalid image key or data:', imageKey);
             return;
         }
-        
-        // Create new image data with updated coordinates
-        const newImageData: ImageData = {
-            ...imageData,
-            startX: imageData.startX + deltaX,
-            startY: imageData.startY + deltaY,
-            endX: imageData.endX + deltaX,
-            endY: imageData.endY + deltaY
+
+        // Handle both old ImageData format and new note format
+        let noteData: any;
+        if (typeof imageDataOrNote === 'string') {
+            // New note format
+            try {
+                noteData = JSON.parse(imageDataOrNote);
+            } catch (e) {
+                logger.error('Failed to parse note data:', e);
+                return;
+            }
+        } else if (isImageData(imageDataOrNote)) {
+            // Old ImageData format - convert to note format
+            noteData = {
+                startX: imageDataOrNote.startX,
+                startY: imageDataOrNote.startY,
+                endX: imageDataOrNote.endX,
+                endY: imageDataOrNote.endY,
+                timestamp: imageDataOrNote.timestamp || Date.now(),
+                contentType: 'image',
+                src: imageDataOrNote.src,
+                originalWidth: imageDataOrNote.originalWidth,
+                originalHeight: imageDataOrNote.originalHeight,
+                ...(imageDataOrNote.isAnimated && {
+                    isAnimated: imageDataOrNote.isAnimated,
+                    frameTiming: imageDataOrNote.frameTiming,
+                    totalDuration: imageDataOrNote.totalDuration,
+                    animationStartTime: imageDataOrNote.animationStartTime
+                })
+            };
+        } else {
+            logger.error('Invalid image data format:', imageDataOrNote);
+            return;
+        }
+
+        // Create new note data with updated coordinates
+        const newNoteData = {
+            ...noteData,
+            startX: noteData.startX + deltaX,
+            startY: noteData.startY + deltaY,
+            endX: noteData.endX + deltaX,
+            endY: noteData.endY + deltaY,
+            timestamp: Date.now()
         };
-        
-        // Create new image key based on new position
-        const newImageKey = `image_${newImageData.startX},${newImageData.startY}`;
-        
-        // Update world data - remove old image and add new one
+
+        // Create new note key based on new position
+        const newNoteKey = `note_${newNoteData.startX}_${newNoteData.startY}_${Date.now()}`;
+
+        // Update world data - remove old image/note and add new note
         setWorldData(prev => {
             const newData = { ...prev };
-            delete newData[imageKey]; // Remove old image
-            newData[newImageKey] = newImageData; // Add moved image
+            delete newData[imageKey]; // Remove old image/note
+            newData[newNoteKey] = JSON.stringify(newNoteData); // Add moved note
             return newData;
         });
     }, [worldData, isImageData]);
