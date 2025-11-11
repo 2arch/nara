@@ -245,36 +245,31 @@ export const HostDisplay: DialogueDisplay = {
         const bgG = parseInt(bgHex.substring(2, 4), 16);
         const bgB = parseInt(bgHex.substring(4, 6), 16);
 
-        // Collect all text cell positions and calculate bounding box
-        const textCells = new Set<string>();
+        // Calculate bounding box for all text (including spaces)
         let minCol = Infinity, maxCol = -Infinity;
         let minRow = Infinity, maxRow = -Infinity;
 
         wrappedLines.forEach((line, lineIndex) => {
-            for (let x = 0; x < line.length; x++) {
-                const char = line[x];
-                if (char && char.trim() !== '') {
-                    const col = startCol + x;
-                    const row = startRow + lineIndex;
-                    textCells.add(`${col},${row}`);
+            if (line.length > 0) {
+                const col = startCol;
+                const row = startRow + lineIndex;
 
-                    // Update bounding box
-                    minCol = Math.min(minCol, col);
-                    maxCol = Math.max(maxCol, col);
-                    minRow = Math.min(minRow, row);
-                    maxRow = Math.max(maxRow, row);
-                }
+                // Update bounding box to include entire line (including spaces)
+                minCol = Math.min(minCol, col);
+                maxCol = Math.max(maxCol, col + line.length - 1);
+                minRow = Math.min(minRow, row);
+                maxRow = Math.max(maxRow, row);
             }
         });
 
-        // Render glow around the entire text bounding box (not individual cells)
+        // Render glow around the entire text bounding box
         const maxRadius = GLOW_RADIUS + CARDINAL_EXTENSION;
 
         // Iterate over the extended bounding box
         for (let row = minRow - maxRadius; row <= maxRow + maxRadius; row++) {
             for (let col = minCol - maxRadius; col <= maxCol + maxRadius; col++) {
-                // Skip if this is a text cell itself
-                if (textCells.has(`${col},${row}`)) continue;
+                // Skip if this is inside the text bounding box (not glow area)
+                if (col >= minCol && col <= maxCol && row >= minRow && row <= maxRow) continue;
 
                 // Calculate distance from this cell to the nearest edge of the text bounding box
                 const distX = Math.max(0, Math.max(minCol - col, col - maxCol));
@@ -307,21 +302,26 @@ export const HostDisplay: DialogueDisplay = {
             }
         }
 
-        // Render actual text with full background
+        // Render the entire text block as a unified solid rectangle
         ctx.globalAlpha = fadeProgress;
+
+        // First, fill the entire bounding box with background color (solid block)
+        const blockX = minCol * charWidth;
+        const blockY = minRow * charHeight;
+        const blockWidth = (maxCol - minCol + 1) * charWidth;
+        const blockHeight = (maxRow - minRow + 1) * charHeight;
+
+        ctx.fillStyle = backgroundColor;
+        ctx.fillRect(blockX, blockY, blockWidth, blockHeight);
+
+        // Then, render all characters on top
+        ctx.fillStyle = textColor;
         wrappedLines.forEach((line, lineIndex) => {
             for (let x = 0; x < line.length; x++) {
                 const char = line[x];
-                const screenX = (startCol + x) * charWidth;
-                const screenY = (startRow + lineIndex) * charHeight;
-
                 if (char && char.trim() !== '') {
-                    // Full background for text cell
-                    ctx.fillStyle = backgroundColor;
-                    ctx.fillRect(screenX, screenY, charWidth, charHeight);
-
-                    // Render character
-                    ctx.fillStyle = textColor;
+                    const screenX = (startCol + x) * charWidth;
+                    const screenY = (startRow + lineIndex) * charHeight;
                     ctx.fillText(char, screenX, screenY + verticalTextOffset);
                 }
             }
