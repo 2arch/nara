@@ -10,6 +10,7 @@ import { COLOR_MAP, COMMAND_CATEGORIES, COMMAND_HELP } from './commands';
 import { useHostDialogue } from './host.dialogue';
 import { setDialogueWithRevert } from './ai';
 import { CanvasRecorder } from './tape';
+import { renderStyledRect, getRectStyle, type CellBounds, type BaseRenderContext } from './styles';
 
 // --- Constants --- (Copied and relevant ones kept)
 const GRID_COLOR = '#F2F2F233';
@@ -4570,21 +4571,56 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             if (key.startsWith('note_')) {
                 try {
                     const noteData = JSON.parse(engine.worldData[key] as string);
-                    const { startX, endX, startY, endY } = noteData;
+                    const { startX, endX, startY, endY, style: styleName } = noteData;
 
-                    // Use semi-transparent overlay for note regions
-                    const planColor = `rgba(${hexToRgb(engine.textColor)}, 0.15)`;
-                    ctx.fillStyle = planColor;
+                    // Check if note has a custom style
+                    if (styleName) {
+                        // Use styled rendering system
+                        const style = getRectStyle(styleName);
+                        const bounds: CellBounds = {
+                            x: startX,
+                            y: startY,
+                            width: endX - startX + 1,
+                            height: endY - startY + 1
+                        };
 
-                    // Fill each cell in the note region
-                    for (let worldY = startY; worldY <= endY; worldY++) {
-                        for (let worldX = startX; worldX <= endX; worldX++) {
-                            const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                        const renderContext: BaseRenderContext = {
+                            ctx,
+                            charWidth: effectiveCharWidth,
+                            charHeight: effectiveCharHeight,
+                            timestamp: noteData.timestamp || Date.now()
+                        };
 
-                            // Only draw if cell is visible on screen
-                            if (screenPos.x >= -effectiveCharWidth && screenPos.x <= cssWidth &&
-                                screenPos.y >= -effectiveCharHeight && screenPos.y <= cssHeight) {
-                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        // Save canvas state and transform to world space
+                        ctx.save();
+                        const topLeft = engine.worldToScreen(startX, startY, currentZoom, currentOffset);
+                        ctx.translate(topLeft.x, topLeft.y);
+
+                        // Adjust context for screen-space rendering
+                        const screenBounds: CellBounds = {
+                            x: 0,
+                            y: 0,
+                            width: bounds.width,
+                            height: bounds.height
+                        };
+
+                        renderStyledRect(renderContext, screenBounds, style);
+                        ctx.restore();
+                    } else {
+                        // Default rendering: semi-transparent overlay
+                        const planColor = `rgba(${hexToRgb(engine.textColor)}, 0.15)`;
+                        ctx.fillStyle = planColor;
+
+                        // Fill each cell in the note region
+                        for (let worldY = startY; worldY <= endY; worldY++) {
+                            for (let worldX = startX; worldX <= endX; worldX++) {
+                                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+
+                                // Only draw if cell is visible on screen
+                                if (screenPos.x >= -effectiveCharWidth && screenPos.x <= cssWidth &&
+                                    screenPos.y >= -effectiveCharHeight && screenPos.y <= cssHeight) {
+                                    ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                }
                             }
                         }
                     }
