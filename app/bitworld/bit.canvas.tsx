@@ -4828,7 +4828,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const endX = startX + width;
                 const endY = startY + height;
 
-                // Draw selection border around pattern extent
+                // Draw selection border around pattern extent (visual only, not resizable)
                 const topLeftScreen = engine.worldToScreen(startX, startY, currentZoom, currentOffset);
                 const bottomRightScreen = engine.worldToScreen(endX, endY, currentZoom, currentOffset);
 
@@ -4843,22 +4843,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     bottomRightScreen.x - topLeftScreen.x - lineWidth,
                     bottomRightScreen.y - topLeftScreen.y - lineWidth
                 );
-
-                // Draw resize thumbs (handles) at corners only
-                const thumbSize = 8;
-                const thumbColor = `rgba(${hexToRgb(engine.textColor)}, 1)`;
-                ctx.fillStyle = thumbColor;
-
-                const left = topLeftScreen.x;
-                const right = bottomRightScreen.x;
-                const top = topLeftScreen.y;
-                const bottom = bottomRightScreen.y;
-
-                // Pattern border corner thumbs
-                ctx.fillRect(left - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-left
-                ctx.fillRect(right - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-right
-                ctx.fillRect(left - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-left
-                ctx.fillRect(right - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-right
 
                 // Draw corner thumbs for each individual room
                 for (const room of rooms) {
@@ -6299,46 +6283,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             return; // Early return, don't process other mouse events
                         }
                     }
-
-                    // If no room thumb hit, check pattern boundary
-                    // Convert center/dimensions to bounds
-                    // width/height are spans (maxCoord - minCoord)
-                    const startX = Math.floor(centerX - width / 2);
-                    const startY = Math.floor(centerY - height / 2);
-                    const endX = startX + width;
-                    const endY = startY + height;
-
-                    const topLeftScreen = engine.worldToScreen(startX, startY, engine.zoomLevel, engine.viewOffset);
-                    const bottomRightScreen = engine.worldToScreen(endX, endY, engine.zoomLevel, engine.viewOffset);
-
-                    const left = topLeftScreen.x;
-                    const right = bottomRightScreen.x;
-                    const top = topLeftScreen.y;
-                    const bottom = bottomRightScreen.y;
-
-                    // Check each corner handle
-                    let handle: ResizeHandle | null = null;
-                    if (isWithinThumb(x, y, left, top)) handle = 'top-left';
-                    else if (isWithinThumb(x, y, right, top)) handle = 'top-right';
-                    else if (isWithinThumb(x, y, right, bottom)) handle = 'bottom-right';
-                    else if (isWithinThumb(x, y, left, bottom)) handle = 'bottom-left';
-
-                    if (handle) {
-                        setResizeState({
-                            active: true,
-                            type: 'pattern',
-                            key: selectedPatternKey,
-                            handle,
-                            originalBounds: {
-                                startX,
-                                startY,
-                                endX,
-                                endY
-                            },
-                            roomIndex: null // null means resizing pattern boundary
-                        });
-                        return; // Early return, don't process other mouse events
-                    }
                 } catch (e) {
                     // Skip invalid pattern data
                 }
@@ -6745,120 +6689,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 rooms: updatedRooms
                             })
                         }));
-                    } else {
-                        // Resizing pattern boundary - scale entire pattern including notes/rooms
-                        const oldWidth = patternData.width || 120;
-                        const oldHeight = patternData.height || 60;
-                        const oldCenterX = patternData.centerX;
-                        const oldCenterY = patternData.centerY;
-
-                        // Calculate new dimensions as cell count (matches how actualWidth is stored)
-                        // newBounds uses inclusive coords, so add 1 to get cell count
-                        const newWidth = newBounds.endX - newBounds.startX + 1;
-                        const newHeight = newBounds.endY - newBounds.startY + 1;
-                        const newCenterX = newBounds.startX + newWidth / 2;
-                        const newCenterY = newBounds.startY + newHeight / 2;
-
-                        // Calculate pattern top-left corners (for top-left anchor scaling like legacy rooms)
-                        const oldTopLeftX = Math.floor(oldCenterX - oldWidth / 2);
-                        const oldTopLeftY = Math.floor(oldCenterY - oldHeight / 2);
-                        const newTopLeftX = newBounds.startX;
-                        const newTopLeftY = newBounds.startY;
-
-                        // Calculate scale factors
-                        const scaleX = newWidth / oldWidth;
-                        const scaleY = newHeight / oldHeight;
-
-                        const noteKeys = patternData.noteKeys || [];
-                        const rooms = patternData.rooms || [];
-
-                        // Handle new note-based format
-                        if (noteKeys.length > 0) {
-                            // Scale all referenced notes
-                            const updatedNotes: Record<string, string> = {};
-
-                            for (const noteKey of noteKeys) {
-                                try {
-                                    const noteData = JSON.parse(engine.worldData[noteKey] as string);
-
-                                    // Get note dimensions
-                                    const noteWidth = noteData.endX - noteData.startX + 1;
-                                    const noteHeight = noteData.endY - noteData.startY + 1;
-
-                                    // Calculate position relative to OLD pattern top-left corner
-                                    const relX = noteData.startX - oldTopLeftX;
-                                    const relY = noteData.startY - oldTopLeftY;
-
-                                    // Scale relative position and size
-                                    const newRelX = relX * scaleX;
-                                    const newRelY = relY * scaleY;
-                                    const newNoteWidth = Math.round(noteWidth * scaleX);  // Round width directly
-                                    const newNoteHeight = Math.round(noteHeight * scaleY);  // Round height directly
-
-                                    // Calculate new absolute position from NEW pattern top-left corner
-                                    const newStartX = Math.round(newTopLeftX + newRelX);
-                                    const newStartY = Math.round(newTopLeftY + newRelY);
-
-                                    // Update note with new bounds (no second round - preserves scaled size)
-                                    updatedNotes[noteKey] = JSON.stringify({
-                                        ...noteData,
-                                        startX: newStartX,
-                                        startY: newStartY,
-                                        endX: newStartX + newNoteWidth - 1,
-                                        endY: newStartY + newNoteHeight - 1
-                                    });
-                                } catch (e) {
-                                    // Skip invalid notes
-                                }
-                            }
-
-                            // Update pattern and all notes
-                            engine.setWorldData(prev => ({
-                                ...prev,
-                                [resizeState.key!]: JSON.stringify({
-                                    ...patternData,
-                                    centerX: newCenterX,
-                                    centerY: newCenterY,
-                                    width: newWidth,
-                                    height: newHeight
-                                }),
-                                ...updatedNotes
-                            }));
-                        } else {
-                            // Legacy inline rooms format
-                            const scaledRooms = rooms.map((room: any) => {
-                                // Get room position relative to old pattern top-left corner
-                                const relX = room.x - oldTopLeftX;
-                                const relY = room.y - oldTopLeftY;
-
-                                // Scale relative position and size
-                                const newRelX = relX * scaleX;
-                                const newRelY = relY * scaleY;
-                                const newRoomWidth = room.width * scaleX;
-                                const newRoomHeight = room.height * scaleY;
-
-                                // Convert back to absolute position from new pattern top-left corner
-                                // (grid rendering requires integer coordinates)
-                                return {
-                                    x: Math.round(newTopLeftX + newRelX),
-                                    y: Math.round(newTopLeftY + newRelY),
-                                    width: Math.round(newRoomWidth),
-                                    height: Math.round(newRoomHeight)
-                                };
-                            });
-
-                            engine.setWorldData(prev => ({
-                                ...prev,
-                                [resizeState.key!]: JSON.stringify({
-                                    ...patternData,
-                                    centerX: newCenterX,
-                                    centerY: newCenterY,
-                                    width: newWidth,
-                                    height: newHeight,
-                                    rooms: scaledRooms
-                                })
-                            }));
-                        }
                     }
                 } catch (e) {
                     // Invalid pattern data
@@ -7895,120 +7725,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 rooms: updatedRooms
                             })
                         }));
-                    } else {
-                        // Resizing pattern boundary - scale entire pattern including notes/rooms
-                        const oldWidth = patternData.width || 120;
-                        const oldHeight = patternData.height || 60;
-                        const oldCenterX = patternData.centerX;
-                        const oldCenterY = patternData.centerY;
-
-                        // Calculate new dimensions as cell count (matches how actualWidth is stored)
-                        // newBounds uses inclusive coords, so add 1 to get cell count
-                        const newWidth = newBounds.endX - newBounds.startX + 1;
-                        const newHeight = newBounds.endY - newBounds.startY + 1;
-                        const newCenterX = newBounds.startX + newWidth / 2;
-                        const newCenterY = newBounds.startY + newHeight / 2;
-
-                        // Calculate pattern top-left corners (for top-left anchor scaling like legacy rooms)
-                        const oldTopLeftX = Math.floor(oldCenterX - oldWidth / 2);
-                        const oldTopLeftY = Math.floor(oldCenterY - oldHeight / 2);
-                        const newTopLeftX = newBounds.startX;
-                        const newTopLeftY = newBounds.startY;
-
-                        // Calculate scale factors
-                        const scaleX = newWidth / oldWidth;
-                        const scaleY = newHeight / oldHeight;
-
-                        const noteKeys = patternData.noteKeys || [];
-                        const rooms = patternData.rooms || [];
-
-                        // Handle new note-based format
-                        if (noteKeys.length > 0) {
-                            // Scale all referenced notes
-                            const updatedNotes: Record<string, string> = {};
-
-                            for (const noteKey of noteKeys) {
-                                try {
-                                    const noteData = JSON.parse(engine.worldData[noteKey] as string);
-
-                                    // Get note dimensions
-                                    const noteWidth = noteData.endX - noteData.startX + 1;
-                                    const noteHeight = noteData.endY - noteData.startY + 1;
-
-                                    // Calculate position relative to OLD pattern top-left corner
-                                    const relX = noteData.startX - oldTopLeftX;
-                                    const relY = noteData.startY - oldTopLeftY;
-
-                                    // Scale relative position and size
-                                    const newRelX = relX * scaleX;
-                                    const newRelY = relY * scaleY;
-                                    const newNoteWidth = Math.round(noteWidth * scaleX);  // Round width directly
-                                    const newNoteHeight = Math.round(noteHeight * scaleY);  // Round height directly
-
-                                    // Calculate new absolute position from NEW pattern top-left corner
-                                    const newStartX = Math.round(newTopLeftX + newRelX);
-                                    const newStartY = Math.round(newTopLeftY + newRelY);
-
-                                    // Update note with new bounds (no second round - preserves scaled size)
-                                    updatedNotes[noteKey] = JSON.stringify({
-                                        ...noteData,
-                                        startX: newStartX,
-                                        startY: newStartY,
-                                        endX: newStartX + newNoteWidth - 1,
-                                        endY: newStartY + newNoteHeight - 1
-                                    });
-                                } catch (e) {
-                                    // Skip invalid notes
-                                }
-                            }
-
-                            // Update pattern and all notes
-                            engine.setWorldData(prev => ({
-                                ...prev,
-                                [resizeState.key!]: JSON.stringify({
-                                    ...patternData,
-                                    centerX: newCenterX,
-                                    centerY: newCenterY,
-                                    width: newWidth,
-                                    height: newHeight
-                                }),
-                                ...updatedNotes
-                            }));
-                        } else {
-                            // Legacy inline rooms format
-                            const scaledRooms = rooms.map((room: any) => {
-                                // Get room position relative to old pattern top-left corner
-                                const relX = room.x - oldTopLeftX;
-                                const relY = room.y - oldTopLeftY;
-
-                                // Scale relative position and size
-                                const newRelX = relX * scaleX;
-                                const newRelY = relY * scaleY;
-                                const newRoomWidth = room.width * scaleX;
-                                const newRoomHeight = room.height * scaleY;
-
-                                // Convert back to absolute position from new pattern top-left corner
-                                // (grid rendering requires integer coordinates)
-                                return {
-                                    x: Math.round(newTopLeftX + newRelX),
-                                    y: Math.round(newTopLeftY + newRelY),
-                                    width: Math.round(newRoomWidth),
-                                    height: Math.round(newRoomHeight)
-                                };
-                            });
-
-                            engine.setWorldData(prev => ({
-                                ...prev,
-                                [resizeState.key!]: JSON.stringify({
-                                    ...patternData,
-                                    centerX: newCenterX,
-                                    centerY: newCenterY,
-                                    width: newWidth,
-                                    height: newHeight,
-                                    rooms: scaledRooms
-                                })
-                            }));
-                        }
                     }
                 } catch (e) {
                     // Invalid pattern data
