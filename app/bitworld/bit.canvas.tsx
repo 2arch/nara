@@ -6771,14 +6771,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 try {
                                     const noteData = JSON.parse(engine.worldData[noteKey] as string);
 
-                                    // Get note center relative to old pattern center
+                                    // Get note top-left position relative to old pattern center (like legacy rooms)
                                     const noteWidth = noteData.endX - noteData.startX + 1;
                                     const noteHeight = noteData.endY - noteData.startY + 1;
-                                    const noteCenterX = noteData.startX + noteWidth / 2;
-                                    const noteCenterY = noteData.startY + noteHeight / 2;
 
-                                    const relX = noteCenterX - oldCenterX;
-                                    const relY = noteCenterY - oldCenterY;
+                                    // Use top-left corner position (startX, startY) as reference point
+                                    const relX = noteData.startX - oldCenterX;
+                                    const relY = noteData.startY - oldCenterY;
 
                                     // Scale relative position and size
                                     const newRelX = relX * scaleX;
@@ -6786,17 +6785,17 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     const newNoteWidth = noteWidth * scaleX;
                                     const newNoteHeight = noteHeight * scaleY;
 
-                                    // Calculate new absolute position
-                                    const newNoteCenterX = newCenterX + newRelX;
-                                    const newNoteCenterY = newCenterY + newRelY;
+                                    // Calculate new absolute top-left position
+                                    const newStartX = Math.round(newCenterX + newRelX);
+                                    const newStartY = Math.round(newCenterY + newRelY);
 
-                                    // Update note with new bounds
+                                    // Update note with new bounds (inclusive endX/endY, so subtract 1)
                                     updatedNotes[noteKey] = JSON.stringify({
                                         ...noteData,
-                                        startX: Math.round(newNoteCenterX - newNoteWidth / 2),
-                                        startY: Math.round(newNoteCenterY - newNoteHeight / 2),
-                                        endX: Math.round(newNoteCenterX + newNoteWidth / 2),
-                                        endY: Math.round(newNoteCenterY + newNoteHeight / 2)
+                                        startX: newStartX,
+                                        startY: newStartY,
+                                        endX: Math.round(newStartX + newNoteWidth - 1),
+                                        endY: Math.round(newStartY + newNoteHeight - 1)
                                     });
                                 } catch (e) {
                                     // Skip invalid notes
@@ -7912,14 +7911,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 try {
                                     const noteData = JSON.parse(engine.worldData[noteKey] as string);
 
-                                    // Get note center relative to old pattern center
+                                    // Get note top-left position relative to old pattern center (like legacy rooms)
                                     const noteWidth = noteData.endX - noteData.startX + 1;
                                     const noteHeight = noteData.endY - noteData.startY + 1;
-                                    const noteCenterX = noteData.startX + noteWidth / 2;
-                                    const noteCenterY = noteData.startY + noteHeight / 2;
 
-                                    const relX = noteCenterX - oldCenterX;
-                                    const relY = noteCenterY - oldCenterY;
+                                    // Use top-left corner position (startX, startY) as reference point
+                                    const relX = noteData.startX - oldCenterX;
+                                    const relY = noteData.startY - oldCenterY;
 
                                     // Scale relative position and size
                                     const newRelX = relX * scaleX;
@@ -7927,17 +7925,17 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     const newNoteWidth = noteWidth * scaleX;
                                     const newNoteHeight = noteHeight * scaleY;
 
-                                    // Calculate new absolute position
-                                    const newNoteCenterX = newCenterX + newRelX;
-                                    const newNoteCenterY = newCenterY + newRelY;
+                                    // Calculate new absolute top-left position
+                                    const newStartX = Math.round(newCenterX + newRelX);
+                                    const newStartY = Math.round(newCenterY + newRelY);
 
-                                    // Update note with new bounds
+                                    // Update note with new bounds (inclusive endX/endY, so subtract 1)
                                     updatedNotes[noteKey] = JSON.stringify({
                                         ...noteData,
-                                        startX: Math.round(newNoteCenterX - newNoteWidth / 2),
-                                        startY: Math.round(newNoteCenterY - newNoteHeight / 2),
-                                        endX: Math.round(newNoteCenterX + newNoteWidth / 2),
-                                        endY: Math.round(newNoteCenterY + newNoteHeight / 2)
+                                        startX: newStartX,
+                                        startY: newStartY,
+                                        endX: Math.round(newStartX + newNoteWidth - 1),
+                                        endY: Math.round(newStartY + newNoteHeight - 1)
                                     });
                                 } catch (e) {
                                     // Skip invalid notes
