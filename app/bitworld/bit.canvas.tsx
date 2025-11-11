@@ -8409,6 +8409,19 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         // Handle note region-specific keys before passing to engine
         if (selectedNoteKey && e.key === 'Backspace') {
+            // Check if user is actively typing (has text content at or before cursor)
+            // If so, let backspace delete text instead of the note
+            const cursorKey = `${engine.cursorPos.x},${engine.cursorPos.y}`;
+            const beforeCursorKey = `${engine.cursorPos.x - 1},${engine.cursorPos.y}`;
+            const hasTextAtCursor = engine.worldData[cursorKey] && typeof engine.worldData[cursorKey] === 'string';
+            const hasTextBeforeCursor = engine.worldData[beforeCursorKey] && typeof engine.worldData[beforeCursorKey] === 'string';
+
+            if (hasTextAtCursor || hasTextBeforeCursor) {
+                // User is typing, let engine handle backspace normally
+                return;
+            }
+
+            // No text content - safe to delete the note
             // Delete the selected note region
             engine.setWorldData(prev => {
                 const newData = { ...prev };
@@ -8484,6 +8497,19 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         // Handle pattern-specific keys before passing to engine
         if (selectedPatternKey && e.key === 'Backspace') {
+            // Check if user is actively typing (has text content at or before cursor)
+            // If so, let backspace delete text instead of the pattern
+            const cursorKey = `${engine.cursorPos.x},${engine.cursorPos.y}`;
+            const beforeCursorKey = `${engine.cursorPos.x - 1},${engine.cursorPos.y}`;
+            const hasTextAtCursor = engine.worldData[cursorKey] && typeof engine.worldData[cursorKey] === 'string';
+            const hasTextBeforeCursor = engine.worldData[beforeCursorKey] && typeof engine.worldData[beforeCursorKey] === 'string';
+
+            if (hasTextAtCursor || hasTextBeforeCursor) {
+                // User is typing, let engine handle backspace normally
+                return;
+            }
+
+            // No text content - safe to delete the pattern
             // Delete the selected pattern and all its notes
             engine.setWorldData(prev => {
                 const newData = { ...prev };
@@ -8512,6 +8538,19 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         // Handle iframe region-specific keys before passing to engine
         if (selectedIframeKey && e.key === 'Backspace') {
+            // Check if user is actively typing (has text content at or before cursor)
+            // If so, let backspace delete text instead of the iframe
+            const cursorKey = `${engine.cursorPos.x},${engine.cursorPos.y}`;
+            const beforeCursorKey = `${engine.cursorPos.x - 1},${engine.cursorPos.y}`;
+            const hasTextAtCursor = engine.worldData[cursorKey] && typeof engine.worldData[cursorKey] === 'string';
+            const hasTextBeforeCursor = engine.worldData[beforeCursorKey] && typeof engine.worldData[beforeCursorKey] === 'string';
+
+            if (hasTextAtCursor || hasTextBeforeCursor) {
+                // User is typing, let engine handle backspace normally
+                return;
+            }
+
+            // No text content - safe to delete the iframe
             // Delete the selected iframe region
             engine.setWorldData(prev => {
                 const newData = { ...prev };
@@ -8527,6 +8566,19 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         // Handle mail region-specific keys before passing to engine
         if (selectedMailKey && e.key === 'Backspace') {
+            // Check if user is actively typing (has text content at or before cursor)
+            // If so, let backspace delete text instead of the mail
+            const cursorKey = `${engine.cursorPos.x},${engine.cursorPos.y}`;
+            const beforeCursorKey = `${engine.cursorPos.x - 1},${engine.cursorPos.y}`;
+            const hasTextAtCursor = engine.worldData[cursorKey] && typeof engine.worldData[cursorKey] === 'string';
+            const hasTextBeforeCursor = engine.worldData[beforeCursorKey] && typeof engine.worldData[beforeCursorKey] === 'string';
+
+            if (hasTextAtCursor || hasTextBeforeCursor) {
+                // User is typing, let engine handle backspace normally
+                return;
+            }
+
+            // No text content - safe to delete the mail
             // Delete the selected mail region and its button
             engine.setWorldData(prev => {
                 const newData = { ...prev };
