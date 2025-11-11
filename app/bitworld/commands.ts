@@ -3225,9 +3225,70 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 return null;
             }
 
-            // Check if a note or pattern is selected
-            if (!selectedNoteKey && !selectedPatternKey) {
-                setDialogueWithRevert("Select a note or pattern first, then use /style [stylename]", setDialogueText);
+            // Helper function to find note or pattern at cursor position
+            const findNoteOrPatternAtCursor = (cursorPos: Point): { key: string, type: 'note' | 'pattern' } | null => {
+                if (!worldData) return null;
+
+                const cursorX = cursorPos.x;
+                const cursorY = cursorPos.y;
+
+                // First check for notes
+                for (const key in worldData) {
+                    if (key.startsWith('note_')) {
+                        try {
+                            const noteData = JSON.parse(worldData[key] as string);
+                            if (cursorX >= noteData.startX && cursorX <= noteData.endX &&
+                                cursorY >= noteData.startY && cursorY <= noteData.endY) {
+                                return { key, type: 'note' };
+                            }
+                        } catch (e) {
+                            // Skip invalid note data
+                        }
+                    }
+                }
+
+                // Then check for patterns
+                for (const key in worldData) {
+                    if (key.startsWith('pattern_')) {
+                        try {
+                            const patternData = JSON.parse(worldData[key] as string);
+                            if (cursorX >= patternData.startX && cursorX <= patternData.endX &&
+                                cursorY >= patternData.startY && cursorY <= patternData.endY) {
+                                return { key, type: 'pattern' };
+                            }
+                        } catch (e) {
+                            // Skip invalid pattern data
+                        }
+                    }
+                }
+
+                return null;
+            };
+
+            // Determine which note/pattern to style
+            let targetKey: string | null = null;
+            let targetType: 'note' | 'pattern' | null = null;
+
+            // First priority: explicitly selected note/pattern
+            if (selectedNoteKey) {
+                targetKey = selectedNoteKey;
+                targetType = 'note';
+            } else if (selectedPatternKey) {
+                targetKey = selectedPatternKey;
+                targetType = 'pattern';
+            } else {
+                // Second priority: auto-detect from cursor position
+                const cursorPos = commandState.commandStartPos;
+                const detected = findNoteOrPatternAtCursor(cursorPos);
+                if (detected) {
+                    targetKey = detected.key;
+                    targetType = detected.type;
+                }
+            }
+
+            // If no target found, show error
+            if (!targetKey || !targetType) {
+                setDialogueWithRevert("No note or pattern found at cursor. Move cursor inside a note/pattern or select one first.", setDialogueText);
                 setCommandState({
                     isActive: false,
                     input: '',
@@ -3241,37 +3302,20 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 return null;
             }
 
+            // Apply the style
             if (setWorldData && worldData) {
-                if (selectedNoteKey) {
-                    // Apply style to note
-                    try {
-                        const noteData = JSON.parse(worldData[selectedNoteKey] as string);
-                        setWorldData((prev: WorldData) => ({
-                            ...prev,
-                            [selectedNoteKey]: JSON.stringify({
-                                ...noteData,
-                                style: styleName
-                            })
-                        }));
-                        setDialogueWithRevert(`Applied '${styleName}' style to note`, setDialogueText);
-                    } catch (e) {
-                        setDialogueWithRevert("Invalid note data", setDialogueText);
-                    }
-                } else if (selectedPatternKey) {
-                    // Apply style to pattern
-                    try {
-                        const patternData = JSON.parse(worldData[selectedPatternKey] as string);
-                        setWorldData((prev: WorldData) => ({
-                            ...prev,
-                            [selectedPatternKey]: JSON.stringify({
-                                ...patternData,
-                                style: styleName
-                            })
-                        }));
-                        setDialogueWithRevert(`Applied '${styleName}' style to pattern`, setDialogueText);
-                    } catch (e) {
-                        setDialogueWithRevert("Invalid pattern data", setDialogueText);
-                    }
+                try {
+                    const targetData = JSON.parse(worldData[targetKey] as string);
+                    setWorldData((prev: WorldData) => ({
+                        ...prev,
+                        [targetKey]: JSON.stringify({
+                            ...targetData,
+                            style: styleName
+                        })
+                    }));
+                    setDialogueWithRevert(`Applied '${styleName}' style to ${targetType}`, setDialogueText);
+                } catch (e) {
+                    setDialogueWithRevert(`Invalid ${targetType} data`, setDialogueText);
                 }
             }
 
