@@ -400,6 +400,9 @@ export interface WorldEngine {
         rotY: number;
         rotZ: number;
         mouthOpen?: number; // Mouth openness (0-1)
+        leftEyeBlink?: number; // Left eye blink (0=open, 1=closed)
+        rightEyeBlink?: number; // Right eye blink (0=open, 1=closed)
+        isTracked?: boolean; // True if from MediaPipe tracking, false if autonomous
     };
     setFaceDetectionEnabled: (enabled: boolean) => void;
 }

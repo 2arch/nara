@@ -1692,7 +1692,7 @@ const calculateMacintosh = useCallback((x: number, y: number, time: number, view
     }, []);
 
     // Update external rotation (for face control)
-    const setExternalRotation = useCallback((rotation: { rotX: number; rotY: number; rotZ: number } | undefined) => {
+    const setExternalRotation = useCallback((rotation: MonogramOptions['externalRotation']) => {
         setOptions(prev => ({ ...prev, externalRotation: rotation }));
     }, []);
 
