@@ -1,0 +1,505 @@
+/**
+ * styles.ts - Composable visual styling system
+ *
+ * Generalizes dialogue.display.ts concepts into reusable style primitives
+ * that can be applied to text, notes, patterns, paths, images, and more.
+ */
+
+// ============================================================================
+// TYPES & INTERFACES
+// ============================================================================
+
+/**
+ * Base render context - common properties needed for any rendering
+ */
+export interface BaseRenderContext {
+    ctx: CanvasRenderingContext2D;
+    charWidth: number;
+    charHeight: number;
+    timestamp?: number; // For animations
+}
+
+/**
+ * Rectangle bounds in cell coordinates
+ */
+export interface CellBounds {
+    x: number;      // Top-left X (in cells)
+    y: number;      // Top-left Y (in cells)
+    width: number;  // Width in cells
+    height: number; // Height in cells
+}
+
+/**
+ * Fill style - how to fill an area
+ */
+export interface FillStyle {
+    type: 'solid' | 'none';
+    color?: string;           // For solid fills
+    alpha?: number;           // Optional alpha override (0-1)
+}
+
+/**
+ * Border/Frame style - how to draw outlines
+ */
+export interface BorderStyle {
+    type: 'none' | 'solid' | 'glow';
+
+    // Common properties
+    color?: string;
+    thickness?: number;       // In cells (for solid borders)
+
+    // Glow-specific properties
+    glowRadius?: number;      // Glow radius in cells
+    glowIntensity?: number;   // Base intensity (0-1)
+    pulse?: boolean;          // Whether to pulse
+    flicker?: boolean;        // Whether to add flicker noise
+    cardinalExtension?: number; // Extra glow on cardinal directions
+}
+
+/**
+ * Text glow style - special glow for text characters
+ */
+export interface TextGlowStyle {
+    enabled: boolean;
+    color?: string;
+    radius?: number;          // Glow radius in cells
+    intensity?: number;       // Base intensity (0-1)
+    pulse?: boolean;
+    flicker?: boolean;
+}
+
+/**
+ * Fade animation style
+ */
+export interface FadeStyle {
+    enabled: boolean;
+    duration?: number;        // Fade duration in ms
+    easing?: 'linear' | 'smooth' | 'ease-in' | 'ease-out';
+}
+
+/**
+ * Complete style definition for rectangular objects (notes, patterns, images)
+ */
+export interface RectStyle {
+    fill: FillStyle;
+    border: BorderStyle;
+    fade?: FadeStyle;
+}
+
+/**
+ * Complete style definition for text
+ */
+export interface TextStyle {
+    fill: FillStyle;          // Text color
+    background?: FillStyle;   // Optional background behind text
+    glow?: TextGlowStyle;     // Optional glow effect
+    fade?: FadeStyle;
+}
+
+/**
+ * Style definition for paths/corridors
+ */
+export interface PathStyle {
+    fill: FillStyle;          // Path fill color
+    border?: BorderStyle;     // Optional border
+}
+
+// ============================================================================
+// PREDEFINED FILLS
+// ============================================================================
+
+export const FILLS = {
+    none: { type: 'none' } as FillStyle,
+
+    solid: (color: string, alpha: number = 1.0): FillStyle => ({
+        type: 'solid',
+        color,
+        alpha
+    }),
+
+    transparent: (color: string, alpha: number): FillStyle => ({
+        type: 'solid',
+        color,
+        alpha
+    }),
+};
+
+// ============================================================================
+// PREDEFINED BORDERS
+// ============================================================================
+
+export const BORDERS = {
+    none: { type: 'none' } as BorderStyle,
+
+    solid: (color: string, thickness: number = 1): BorderStyle => ({
+        type: 'solid',
+        color,
+        thickness
+    }),
+
+    glow: (color: string, options?: {
+        radius?: number;
+        intensity?: number;
+        pulse?: boolean;
+        flicker?: boolean;
+        cardinalExtension?: number;
+    }): BorderStyle => ({
+        type: 'glow',
+        color,
+        glowRadius: options?.radius ?? 2,
+        glowIntensity: options?.intensity ?? 0.6,
+        pulse: options?.pulse ?? true,
+        flicker: options?.flicker ?? true,
+        cardinalExtension: options?.cardinalExtension ?? 1
+    }),
+};
+
+// ============================================================================
+// PREDEFINED TEXT GLOWS
+// ============================================================================
+
+export const TEXT_GLOWS = {
+    none: { enabled: false } as TextGlowStyle,
+
+    subtle: (color: string): TextGlowStyle => ({
+        enabled: true,
+        color,
+        radius: 1,
+        intensity: 0.3,
+        pulse: false,
+        flicker: false
+    }),
+
+    pulsing: (color: string): TextGlowStyle => ({
+        enabled: true,
+        color,
+        radius: 2,
+        intensity: 0.6,
+        pulse: true,
+        flicker: true
+    }),
+};
+
+// ============================================================================
+// PREDEFINED FADES
+// ============================================================================
+
+export const FADES = {
+    none: { enabled: false } as FadeStyle,
+
+    quick: { enabled: true, duration: 400, easing: 'smooth' } as FadeStyle,
+    medium: { enabled: true, duration: 800, easing: 'smooth' } as FadeStyle,
+    slow: { enabled: true, duration: 1500, easing: 'smooth' } as FadeStyle,
+};
+
+// ============================================================================
+// PREDEFINED COMPLETE STYLES
+// ============================================================================
+
+/**
+ * Rect styles for notes, patterns, images
+ */
+export const RECT_STYLES = {
+    // Simple solid note
+    note: {
+        fill: FILLS.none,
+        border: BORDERS.solid('#888888', 1)
+    } as RectStyle,
+
+    // Glowing pattern
+    pattern: {
+        fill: FILLS.none,
+        border: BORDERS.glow('#888888', {
+            radius: 2,
+            intensity: 0.5,
+            pulse: true
+        })
+    } as RectStyle,
+
+    // Image frame
+    imageFrame: {
+        fill: FILLS.none,
+        border: BORDERS.solid('#ffffff', 1)
+    } as RectStyle,
+
+    // Subtle iframe
+    iframe: {
+        fill: FILLS.transparent('#000000', 0.3),
+        border: BORDERS.solid('#666666', 1)
+    } as RectStyle,
+};
+
+/**
+ * Text styles
+ */
+export const TEXT_STYLES = {
+    // Plain text (no styling)
+    plain: {
+        fill: FILLS.solid('#ffffff'),
+    } as TextStyle,
+
+    // Subtitle style (from dialogue.display)
+    subtitle: {
+        fill: FILLS.solid('#ffffff'),
+        background: FILLS.transparent('#000000', 0.8),
+    } as TextStyle,
+
+    // Host style with glow (from dialogue.display)
+    host: {
+        fill: FILLS.solid('#ffffff'),
+        background: FILLS.solid('#000000'),
+        glow: TEXT_GLOWS.pulsing('#000000'),
+        fade: FADES.medium,
+    } as TextStyle,
+};
+
+/**
+ * Path/corridor styles
+ */
+export const PATH_STYLES = {
+    // Simple corridor
+    corridor: {
+        fill: FILLS.solid('#333333')
+    } as PathStyle,
+
+    // Glowing path
+    glowingPath: {
+        fill: FILLS.solid('#444444'),
+        border: BORDERS.glow('#666666', { radius: 1, intensity: 0.3 })
+    } as PathStyle,
+};
+
+// ============================================================================
+// RENDERING UTILITIES
+// ============================================================================
+
+/**
+ * Calculate fade progress based on timestamp and fade style
+ */
+export function calculateFadeProgress(fade: FadeStyle | undefined, timestamp: number | undefined): number {
+    if (!fade?.enabled || !timestamp) return 1.0;
+
+    const elapsed = Date.now() - timestamp;
+    let progress = Math.min(1, elapsed / (fade.duration ?? 800));
+
+    // Apply easing
+    switch (fade.easing) {
+        case 'smooth':
+            progress = progress * progress * (3 - 2 * progress); // Smoothstep
+            break;
+        case 'ease-in':
+            progress = progress * progress;
+            break;
+        case 'ease-out':
+            progress = 1 - (1 - progress) * (1 - progress);
+            break;
+        default:
+            // linear - no transformation
+    }
+
+    return progress;
+}
+
+/**
+ * Calculate pulsing glow intensity
+ */
+export function calculateGlowIntensity(
+    baseIntensity: number,
+    pulse: boolean,
+    flicker: boolean
+): number {
+    let intensity = baseIntensity;
+
+    if (pulse) {
+        const pulseSpeed = 0.001;
+        const pulsePhase = (Date.now() * pulseSpeed) % (Math.PI * 2);
+        const basePulse = 0.6 + Math.sin(pulsePhase) * 0.2; // 0.4 to 0.8
+        intensity *= basePulse;
+    }
+
+    if (flicker) {
+        const flickerSpeed = 0.05;
+        const time = Date.now() * flickerSpeed;
+        const flicker1 = Math.sin(time * 2.3) * 0.5 + 0.5;
+        const flicker2 = Math.sin(time * 4.7) * 0.5 + 0.5;
+        const randomNoise = Math.random();
+        const flickerPerturbation = (flicker1 * 0.08 + flicker2 * 0.05 + randomNoise * 0.07);
+        intensity += flickerPerturbation;
+    }
+
+    return Math.max(0, Math.min(1, intensity));
+}
+
+/**
+ * Parse hex color to RGB
+ */
+export function hexToRgb(hex: string): { r: number; g: number; b: number } {
+    const cleaned = hex.replace('#', '');
+    return {
+        r: parseInt(cleaned.substring(0, 2), 16),
+        g: parseInt(cleaned.substring(2, 4), 16),
+        b: parseInt(cleaned.substring(4, 6), 16)
+    };
+}
+
+/**
+ * Render a styled rectangle (for notes, patterns, images, etc.)
+ */
+export function renderStyledRect(
+    context: BaseRenderContext,
+    bounds: CellBounds,
+    style: RectStyle
+): void {
+    const { ctx, charWidth, charHeight, timestamp } = context;
+
+    // Calculate screen coordinates
+    const screenX = bounds.x * charWidth;
+    const screenY = bounds.y * charHeight;
+    const screenWidth = bounds.width * charWidth;
+    const screenHeight = bounds.height * charHeight;
+
+    // Calculate fade
+    const fadeProgress = calculateFadeProgress(style.fade, timestamp);
+
+    ctx.save();
+    ctx.globalAlpha = fadeProgress;
+
+    // Render glow border first (if applicable)
+    if (style.border.type === 'glow' && style.border.color) {
+        renderGlowBorder(context, bounds, style.border);
+    }
+
+    // Render fill
+    if (style.fill.type === 'solid' && style.fill.color) {
+        const alpha = style.fill.alpha ?? 1.0;
+        ctx.fillStyle = style.fill.color;
+        ctx.globalAlpha = fadeProgress * alpha;
+        ctx.fillRect(screenX, screenY, screenWidth, screenHeight);
+        ctx.globalAlpha = fadeProgress;
+    }
+
+    // Render solid border (if applicable)
+    if (style.border.type === 'solid' && style.border.color && style.border.thickness) {
+        const thickness = (style.border.thickness * charWidth);
+        ctx.strokeStyle = style.border.color;
+        ctx.lineWidth = thickness;
+        ctx.strokeRect(
+            screenX + thickness / 2,
+            screenY + thickness / 2,
+            screenWidth - thickness,
+            screenHeight - thickness
+        );
+    }
+
+    ctx.restore();
+}
+
+/**
+ * Render glow border around a rectangle
+ */
+function renderGlowBorder(
+    context: BaseRenderContext,
+    bounds: CellBounds,
+    border: BorderStyle
+): void {
+    const { ctx, charWidth, charHeight } = context;
+    const { color, glowRadius = 2, glowIntensity = 0.6, pulse = true, flicker = true, cardinalExtension = 1 } = border;
+
+    if (!color) return;
+
+    // Calculate dynamic intensity
+    const intensity = calculateGlowIntensity(glowIntensity, pulse, flicker);
+
+    // Parse color
+    const rgb = hexToRgb(color);
+
+    // Glow alphas (2 layers)
+    const glowAlphas = [
+        0.6 * intensity,
+        0.3 * intensity
+    ];
+
+    const minCol = bounds.x;
+    const maxCol = bounds.x + bounds.width - 1;
+    const minRow = bounds.y;
+    const maxRow = bounds.y + bounds.height - 1;
+
+    const maxRadius = glowRadius + cardinalExtension;
+
+    // Render glow cells
+    for (let row = minRow - maxRadius; row <= maxRow + maxRadius; row++) {
+        for (let col = minCol - maxRadius; col <= maxCol + maxRadius; col++) {
+            // Skip interior
+            if (col >= minCol && col <= maxCol && row >= minRow && row <= maxRow) continue;
+
+            // Calculate distance to bounding box
+            const distX = Math.max(0, Math.max(minCol - col, col - maxCol));
+            const distY = Math.max(0, Math.max(minRow - row, row - maxRow));
+            const distance = Math.max(distX, distY); // Chebyshev distance
+
+            if (distance === 0 || distance > maxRadius) continue;
+
+            // Check if on cardinal direction
+            const isCardinal = (distX === 0 || distY === 0);
+            const effectiveRadius = isCardinal ? maxRadius : glowRadius;
+
+            if (distance > effectiveRadius) continue;
+
+            // Calculate alpha
+            let alpha;
+            if (distance <= glowRadius) {
+                alpha = glowAlphas[distance - 1];
+            } else {
+                // Extended glow (only on cardinals)
+                alpha = glowAlphas[glowRadius - 1] * 0.3;
+            }
+            if (!alpha) continue;
+
+            const screenX = col * charWidth;
+            const screenY = row * charHeight;
+
+            ctx.fillStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+            ctx.fillRect(screenX, screenY, charWidth, charHeight);
+        }
+    }
+}
+
+// ============================================================================
+// STYLE REGISTRY
+// ============================================================================
+
+/**
+ * Global registry of named styles that can be referenced by objects
+ */
+export interface StyleRegistry {
+    rects: Record<string, RectStyle>;
+    texts: Record<string, TextStyle>;
+    paths: Record<string, PathStyle>;
+}
+
+export const DEFAULT_STYLE_REGISTRY: StyleRegistry = {
+    rects: RECT_STYLES,
+    texts: TEXT_STYLES,
+    paths: PATH_STYLES,
+};
+
+/**
+ * Get a rect style by name
+ */
+export function getRectStyle(name: string, registry: StyleRegistry = DEFAULT_STYLE_REGISTRY): RectStyle {
+    return registry.rects[name] || RECT_STYLES.note;
+}
+
+/**
+ * Get a text style by name
+ */
+export function getTextStyle(name: string, registry: StyleRegistry = DEFAULT_STYLE_REGISTRY): TextStyle {
+    return registry.texts[name] || TEXT_STYLES.plain;
+}
+
+/**
+ * Get a path style by name
+ */
+export function getPathStyle(name: string, registry: StyleRegistry = DEFAULT_STYLE_REGISTRY): PathStyle {
+    return registry.paths[name] || PATH_STYLES.corridor;
+}
