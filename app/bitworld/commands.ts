@@ -114,6 +114,8 @@ interface UseCommandSystemProps {
     monogramSystem?: { // Monogram system for controlling face masks
         updateOption: <K extends keyof any>(key: K, value: any) => void;
     };
+    selectedNoteKey?: string | null; // Currently selected note
+    selectedPatternKey?: string | null; // Currently selected pattern
 }
 
 // --- Command System Constants ---
@@ -213,7 +215,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllLabels, getAllBounds, availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, monogramSystem }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllLabels, getAllBounds, availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, monogramSystem, selectedNoteKey, selectedPatternKey }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const previousBackgroundStateRef = useRef<{
@@ -3223,10 +3225,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 return null;
             }
 
-            // Get the selected note key from commandData (passed via execution context)
-            const selectedNoteKey = commandData?.selectedNoteKey;
-            const selectedPatternKey = commandData?.selectedPatternKey;
-
+            // Check if a note or pattern is selected
             if (!selectedNoteKey && !selectedPatternKey) {
                 setDialogueWithRevert("Select a note or pattern first, then use /style [stylename]", setDialogueText);
                 setCommandState({
