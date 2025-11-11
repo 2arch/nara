@@ -4640,8 +4640,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 return {
                                     x: noteData.startX,
                                     y: noteData.startY,
-                                    width: noteData.endX - noteData.startX,
-                                    height: noteData.endY - noteData.startY
+                                    width: noteData.endX - noteData.startX + 1,
+                                    height: noteData.endY - noteData.startY + 1
                                 };
                             } catch (e) {
                                 return null;
@@ -6560,16 +6560,80 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             } else if (resizeState.type === 'note' && resizeState.key) {
                 try {
                     const noteData = JSON.parse(engine.worldData[resizeState.key] as string);
-                    engine.setWorldData(prev => ({
-                        ...prev,
-                        [resizeState.key!]: JSON.stringify({
-                            ...noteData,
-                            startX: newBounds.startX,
-                            startY: newBounds.startY,
-                            endX: newBounds.endX,
-                            endY: newBounds.endY
-                        })
-                    }));
+
+                    // Update the note
+                    const updatedNoteData = {
+                        ...noteData,
+                        startX: newBounds.startX,
+                        startY: newBounds.startY,
+                        endX: newBounds.endX,
+                        endY: newBounds.endY
+                    };
+
+                    // If this note is part of a pattern, recalculate pattern boundary
+                    if (noteData.patternKey) {
+                        try {
+                            const patternData = JSON.parse(engine.worldData[noteData.patternKey] as string);
+                            const noteKeys = patternData.noteKeys || [];
+
+                            // Calculate boundary from all notes in pattern
+                            const corridorPadding = 3;
+                            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+                            for (const noteKey of noteKeys) {
+                                try {
+                                    // Use updated data for the note being resized, otherwise fetch from worldData
+                                    const currentNoteData = noteKey === resizeState.key
+                                        ? updatedNoteData
+                                        : JSON.parse(engine.worldData[noteKey] as string);
+
+                                    const noteMinX = currentNoteData.startX;
+                                    const noteMinY = currentNoteData.startY;
+                                    const noteMaxX = currentNoteData.endX;
+                                    const noteMaxY = currentNoteData.endY;
+                                    const noteCenterX = (noteMinX + noteMaxX) / 2;
+                                    const noteCenterY = (noteMinY + noteMaxY) / 2;
+
+                                    minX = Math.min(minX, noteMinX, noteCenterX - corridorPadding);
+                                    minY = Math.min(minY, noteMinY, noteCenterY - corridorPadding);
+                                    maxX = Math.max(maxX, noteMaxX, noteCenterX + corridorPadding);
+                                    maxY = Math.max(maxY, noteMaxY, noteCenterY + corridorPadding);
+                                } catch (e) {
+                                    // Skip invalid notes
+                                }
+                            }
+
+                            const actualWidth = maxX - minX;
+                            const actualHeight = maxY - minY;
+                            const actualCenterX = minX + actualWidth / 2;
+                            const actualCenterY = minY + actualHeight / 2;
+
+                            // Update both note and pattern
+                            engine.setWorldData(prev => ({
+                                ...prev,
+                                [resizeState.key!]: JSON.stringify(updatedNoteData),
+                                [noteData.patternKey]: JSON.stringify({
+                                    ...patternData,
+                                    centerX: actualCenterX,
+                                    centerY: actualCenterY,
+                                    width: actualWidth,
+                                    height: actualHeight
+                                })
+                            }));
+                        } catch (e) {
+                            // Pattern data invalid, just update note
+                            engine.setWorldData(prev => ({
+                                ...prev,
+                                [resizeState.key!]: JSON.stringify(updatedNoteData)
+                            }));
+                        }
+                    } else {
+                        // Note not part of pattern, just update note
+                        engine.setWorldData(prev => ({
+                            ...prev,
+                            [resizeState.key!]: JSON.stringify(updatedNoteData)
+                        }));
+                    }
                 } catch (e) {
                     // Invalid note data
                 }
@@ -6708,8 +6772,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     const noteData = JSON.parse(engine.worldData[noteKey] as string);
 
                                     // Get note center relative to old pattern center
-                                    const noteWidth = noteData.endX - noteData.startX;
-                                    const noteHeight = noteData.endY - noteData.startY;
+                                    const noteWidth = noteData.endX - noteData.startX + 1;
+                                    const noteHeight = noteData.endY - noteData.startY + 1;
                                     const noteCenterX = noteData.startX + noteWidth / 2;
                                     const noteCenterY = noteData.startY + noteHeight / 2;
 
@@ -7582,16 +7646,80 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             } else if (resizeState.type === 'note' && resizeState.key) {
                 try {
                     const noteData = JSON.parse(engine.worldData[resizeState.key] as string);
-                    engine.setWorldData(prev => ({
-                        ...prev,
-                        [resizeState.key!]: JSON.stringify({
-                            ...noteData,
-                            startX: newBounds.startX,
-                            startY: newBounds.startY,
-                            endX: newBounds.endX,
-                            endY: newBounds.endY
-                        })
-                    }));
+
+                    // Update the note
+                    const updatedNoteData = {
+                        ...noteData,
+                        startX: newBounds.startX,
+                        startY: newBounds.startY,
+                        endX: newBounds.endX,
+                        endY: newBounds.endY
+                    };
+
+                    // If this note is part of a pattern, recalculate pattern boundary
+                    if (noteData.patternKey) {
+                        try {
+                            const patternData = JSON.parse(engine.worldData[noteData.patternKey] as string);
+                            const noteKeys = patternData.noteKeys || [];
+
+                            // Calculate boundary from all notes in pattern
+                            const corridorPadding = 3;
+                            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+                            for (const noteKey of noteKeys) {
+                                try {
+                                    // Use updated data for the note being resized, otherwise fetch from worldData
+                                    const currentNoteData = noteKey === resizeState.key
+                                        ? updatedNoteData
+                                        : JSON.parse(engine.worldData[noteKey] as string);
+
+                                    const noteMinX = currentNoteData.startX;
+                                    const noteMinY = currentNoteData.startY;
+                                    const noteMaxX = currentNoteData.endX;
+                                    const noteMaxY = currentNoteData.endY;
+                                    const noteCenterX = (noteMinX + noteMaxX) / 2;
+                                    const noteCenterY = (noteMinY + noteMaxY) / 2;
+
+                                    minX = Math.min(minX, noteMinX, noteCenterX - corridorPadding);
+                                    minY = Math.min(minY, noteMinY, noteCenterY - corridorPadding);
+                                    maxX = Math.max(maxX, noteMaxX, noteCenterX + corridorPadding);
+                                    maxY = Math.max(maxY, noteMaxY, noteCenterY + corridorPadding);
+                                } catch (e) {
+                                    // Skip invalid notes
+                                }
+                            }
+
+                            const actualWidth = maxX - minX;
+                            const actualHeight = maxY - minY;
+                            const actualCenterX = minX + actualWidth / 2;
+                            const actualCenterY = minY + actualHeight / 2;
+
+                            // Update both note and pattern
+                            engine.setWorldData(prev => ({
+                                ...prev,
+                                [resizeState.key!]: JSON.stringify(updatedNoteData),
+                                [noteData.patternKey]: JSON.stringify({
+                                    ...patternData,
+                                    centerX: actualCenterX,
+                                    centerY: actualCenterY,
+                                    width: actualWidth,
+                                    height: actualHeight
+                                })
+                            }));
+                        } catch (e) {
+                            // Pattern data invalid, just update note
+                            engine.setWorldData(prev => ({
+                                ...prev,
+                                [resizeState.key!]: JSON.stringify(updatedNoteData)
+                            }));
+                        }
+                    } else {
+                        // Note not part of pattern, just update note
+                        engine.setWorldData(prev => ({
+                            ...prev,
+                            [resizeState.key!]: JSON.stringify(updatedNoteData)
+                        }));
+                    }
                 } catch (e) {
                     // Invalid note data
                 }
@@ -7730,8 +7858,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     const noteData = JSON.parse(engine.worldData[noteKey] as string);
 
                                     // Get note center relative to old pattern center
-                                    const noteWidth = noteData.endX - noteData.startX;
-                                    const noteHeight = noteData.endY - noteData.startY;
+                                    const noteWidth = noteData.endX - noteData.startX + 1;
+                                    const noteHeight = noteData.endY - noteData.startY + 1;
                                     const noteCenterX = noteData.startX + noteWidth / 2;
                                     const noteCenterY = noteData.startY + noteHeight / 2;
 
