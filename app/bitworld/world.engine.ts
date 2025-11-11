@@ -557,8 +557,10 @@ function generatePatternFromId(patternId: string, centerPos: Point = { x: 0, y: 
         const noteData = {
             startX: room.x,
             startY: room.y,
-            endX: room.x + room.width,
-            endY: room.y + room.height,
+            // Notes use inclusive coordinates, so endX should be the last cell included
+            // room.width is a span, so room.x + room.width would be one past the end
+            endX: room.x + room.width - 1,
+            endY: room.y + room.height - 1,
             timestamp: numericSeed,
             patternKey: patternKey  // Reference back to parent pattern
         };
@@ -566,22 +568,24 @@ function generatePatternFromId(patternId: string, centerPos: Point = { x: 0, y: 
         noteObjects[noteKey] = JSON.stringify(noteData);
     }
 
-    // Calculate actual bounding box from rooms
+    // Calculate actual bounding box from generated notes
     const corridorPadding = 3;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
-    for (const room of rooms) {
-        const roomMinX = room.x;
-        const roomMinY = room.y;
-        const roomMaxX = room.x + room.width;
-        const roomMaxY = room.y + room.height;
-        const centerX = room.x + Math.floor(room.width / 2);
-        const centerY = room.y + Math.floor(room.height / 2);
+    for (const noteKey of noteKeys) {
+        const currentNoteData = JSON.parse(noteObjects[noteKey]);
+        const noteMinX = currentNoteData.startX;
+        const noteMinY = currentNoteData.startY;
+        // endX/endY are inclusive, add 1 to get exclusive boundary
+        const noteMaxX = currentNoteData.endX + 1;
+        const noteMaxY = currentNoteData.endY + 1;
+        const noteCenterX = (noteMinX + noteMaxX) / 2;
+        const noteCenterY = (noteMinY + noteMaxY) / 2;
 
-        minX = Math.min(minX, roomMinX, centerX - corridorPadding);
-        minY = Math.min(minY, roomMinY, centerY - corridorPadding);
-        maxX = Math.max(maxX, roomMaxX, centerX + corridorPadding);
-        maxY = Math.max(maxY, roomMaxY, centerY + corridorPadding);
+        minX = Math.min(minX, noteMinX, noteCenterX - corridorPadding);
+        minY = Math.min(minY, noteMinY, noteCenterY - corridorPadding);
+        maxX = Math.max(maxX, noteMaxX, noteCenterX + corridorPadding);
+        maxY = Math.max(maxY, noteMaxY, noteCenterY + corridorPadding);
     }
 
     const actualWidth = maxX - minX;
