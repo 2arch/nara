@@ -6752,9 +6752,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const oldCenterX = patternData.centerX;
                         const oldCenterY = patternData.centerY;
 
-                        // Calculate new dimensions from resize bounds
-                        const newWidth = newBounds.endX - newBounds.startX;
-                        const newHeight = newBounds.endY - newBounds.startY;
+                        // Calculate new dimensions from resize bounds (inclusive coordinates)
+                        const newWidth = newBounds.endX - newBounds.startX + 1;
+                        const newHeight = newBounds.endY - newBounds.startY + 1;
                         const newCenterX = newBounds.startX + newWidth / 2;
                         const newCenterY = newBounds.startY + newHeight / 2;
 
@@ -7894,9 +7894,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const oldCenterX = patternData.centerX;
                         const oldCenterY = patternData.centerY;
 
-                        // Calculate new dimensions from resize bounds
-                        const newWidth = newBounds.endX - newBounds.startX;
-                        const newHeight = newBounds.endY - newBounds.startY;
+                        // Calculate new dimensions from resize bounds (inclusive coordinates)
+                        const newWidth = newBounds.endX - newBounds.startX + 1;
+                        const newHeight = newBounds.endY - newBounds.startY + 1;
                         const newCenterX = newBounds.startX + newWidth / 2;
                         const newCenterY = newBounds.startY + newHeight / 2;
 
