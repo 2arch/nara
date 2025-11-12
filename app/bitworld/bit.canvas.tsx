@@ -2550,11 +2550,19 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         // === Render Monogram Patterns ===
         if (monogramEnabled) {
-            // Extract label positions for road mode
+            // Extract label positions for road mode (use wider bounds for monogram generation)
             const labels: Array<{x: number, y: number, text: string, color: string}> = [];
 
-            // Check worldData for permanent labels
-            for (const key in engine.worldData) {
+            // Query visible labels using spatial index (with extra padding for monogram patterns)
+            const monogramPadding = 20; // Extra padding for monogram generation
+            const visibleLabels = engine.queryVisibleEntities(
+                startWorldX - monogramPadding,
+                startWorldY - monogramPadding,
+                endWorldX + monogramPadding,
+                endWorldY + monogramPadding
+            );
+
+            for (const key of visibleLabels) {
                 if (key.startsWith('label_')) {
                     const coordsStr = key.substring('label_'.length);
                     const [xStr, yStr] = coordsStr.split(',');
@@ -2717,14 +2725,22 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         // === Unified Label Rendering with Viewport Culling ===
-        for (const key in engine.worldData) {
+        // Query visible labels using spatial index
+        const visibleLabelsForRendering = engine.queryVisibleEntities(
+            startWorldX - 5,
+            startWorldY - 5,
+            endWorldX + 5,
+            endWorldY + 5
+        );
+
+        for (const key of visibleLabelsForRendering) {
             if (!key.startsWith('label_')) continue;
 
             try {
                 const labelData = JSON.parse(engine.worldData[key] as string);
                 const { type, startX, endX, startY, endY, x, y, color } = labelData;
 
-                // Viewport culling: skip if label is outside visible area  
+                // Additional bounds check for 2D labels (tasks/links that might span beyond their anchor point)
                 const labelMinX = startX ?? x;
                 const labelMaxX = endX ?? x;
                 const labelMinY = startY ?? y;
@@ -2805,7 +2821,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         // === Render Mail Send Links ===
         // Render "send" text with link-style underline at bottom-right of mail regions
-        for (const key in engine.worldData) {
+        const visibleMail = engine.queryVisibleEntities(startWorldX - 5, startWorldY - 5, endWorldX + 5, endWorldY + 5);
+        for (const key of visibleMail) {
             if (key.startsWith('mail_')) {
                 try {
                     const mailData = JSON.parse(engine.worldData[key] as string);
@@ -2852,7 +2869,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         // === Render List Content (No borders - just content + scrollbar) ===
-        for (const key in engine.worldData) {
+        const visibleLists = engine.queryVisibleEntities(startWorldX - 5, startWorldY - 5, endWorldX + 5, endWorldY + 5);
+        for (const key of visibleLists) {
             if (key.startsWith('list_')) {
                 try {
                     const listData = JSON.parse(engine.worldData[key] as string);
@@ -4373,7 +4391,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
 
         // === Render Blocks ===
-        for (const key in engine.worldData) {
+        const visibleBlocks = engine.queryVisibleEntities(startWorldX - 5, startWorldY - 5, endWorldX + 5, endWorldY + 5);
+        for (const key of visibleBlocks) {
             if (key.startsWith('block_')) {
                 const coords = key.substring('block_'.length);
                 const [xStr, yStr] = coords.split(',');
@@ -4600,7 +4619,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         // === Render Text and Mail Notes ===
         // Render all text notes and mail notes
-        for (const key in engine.worldData) {
+        const visibleNotes = engine.queryVisibleEntities(startWorldX - 5, startWorldY - 5, endWorldX + 5, endWorldY + 5);
+        for (const key of visibleNotes) {
             if (key.startsWith('note_') || key.startsWith('mail_')) {
                 const note = parseNoteFromWorldData(key, engine.worldData[key]);
                 if (note) {
@@ -4611,7 +4631,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
 
         // === Render Pattern Townscapes ===
-        for (const key in engine.worldData) {
+        const visiblePatterns = engine.queryVisibleEntities(startWorldX - 100, startWorldY - 100, endWorldX + 100, endWorldY + 100);
+        for (const key of visiblePatterns) {
             if (key.startsWith('pattern_')) {
                 try {
                     const patternData = JSON.parse(engine.worldData[key] as string);
