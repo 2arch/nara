@@ -106,7 +106,7 @@ const useMonogramSystem = (
             complexity: 1.0,
             colorShift: 0,
             enabled: false,
-            renderScheme: 'character-span', // Default to character-based rendering
+            renderScheme: 'point-based', // Default to point-based rendering for pixel-like effects
             geometryType: 'octahedron',
             interactiveTrails: true,
             trailIntensity: 1.0,

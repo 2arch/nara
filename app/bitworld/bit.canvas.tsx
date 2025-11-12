@@ -1156,7 +1156,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             complexity: 1.0,
             colorShift: 0,
             enabled: monogramConfig.enabled,
-            renderScheme: 'character-span', // Default to character-span rendering
+            renderScheme: 'point-based', // Default to point-based rendering for pixel-like effects
             geometryType: 'octahedron',
             interactiveTrails: true,
             trailIntensity: 1.0,

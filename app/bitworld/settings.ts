@@ -33,7 +33,7 @@ export const initialSettings: WorldSettings = {
         complexity: 1.0,
         colorShift: 0,
         enabled: false,
-        renderScheme: 'character-span',
+        renderScheme: 'point-based',
         geometryType: 'octahedron',
         interactiveTrails: true,
         trailIntensity: 0.5,
