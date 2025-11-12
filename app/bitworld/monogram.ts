@@ -1401,10 +1401,13 @@ const useMonogramSystem = (
         }
 
         // For NARA, Macintosh, Loading, Road, Terrain, and 3D geometry modes, use finer sampling for better quality
-        const step = (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'road') ? 1 : Math.max(1, Math.floor(3 - options.complexity * 2));
-        
-        for (let worldY = Math.floor(startWorldY); worldY <= Math.ceil(endWorldY); worldY += step) {
-            for (let worldX = Math.floor(startWorldX); worldX <= Math.ceil(endWorldX); worldX += step) {
+        const stepX = (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'road') ? 1 : Math.max(1, Math.floor(3 - options.complexity * 2));
+
+        // Y-axis must align to gridCellSpan since each monogram cell spans multiple grid cells vertically
+        const startY = Math.floor(startWorldY / gridCellSpan) * gridCellSpan;
+
+        for (let worldY = startY; worldY <= Math.ceil(endWorldY); worldY += gridCellSpan) {
+            for (let worldX = Math.floor(startWorldX); worldX <= Math.ceil(endWorldX); worldX += stepX) {
 
                 let rawValue: number;
                 let intensity: number;
