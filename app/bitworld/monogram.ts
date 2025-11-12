@@ -1172,9 +1172,9 @@ const useMonogramSystem = (
 
         const centerX = naraAnchorRef.current.x;
         const centerY = naraAnchorRef.current.y;
-        
-        // Scale text to fit viewport nicely (adjusted for larger font and movement bounds)
-        // Using 0.6 to ensure text + movement stays within comfortable bounds
+
+        // Scale text to fit viewport - use same scale for X and Y to maintain bitmap aspect ratio
+        // The text bitmap has square pixels, so we use the same scaling factor
         const scale = (viewportWidth * 0.6) / textBitmap.width;
         
         // Continuous transformation parameters
@@ -1190,9 +1190,9 @@ const useMonogramSystem = (
         
         // Optimized bitmap sampling function with continuous transformations
         const sampleTextBitmap = (screenX: number, screenY: number): number => {
-            // Transform screen coordinates relative to center - scale Y by 2 for proper aspect ratio
+            // Transform screen coordinates relative to center (pure 1:1 world coords)
             const relX = screenX - centerX;
-            const relY = (screenY - centerY) * 2;
+            const relY = screenY - centerY;
             
             // Apply continuous translation
             const transX = relX - translateX;
