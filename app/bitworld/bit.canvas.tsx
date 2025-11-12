@@ -3079,8 +3079,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         ctx.shadowBlur = 0;
                         ctx.shadowOffsetX = 0;
                         ctx.shadowOffsetY = 0;
-                        // Render character with baseline at bottom cell position
-                        renderText(ctx, char, bottomScreenPos.x, bottomScreenPos.y + verticalTextOffset);
+                        // Render character with baseline at top cell position
+                        renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
                         ctx.shadowBlur = 0;
                     }
                 }
@@ -3498,7 +3498,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         // Draw text using background color (inverse of accent)
                         if (char.trim() !== '') {
                             ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
-                            renderText(ctx, char, bottomScreenPos.x, bottomScreenPos.y + verticalTextOffset);
+                            renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
                         }
                     }
                 }
@@ -3598,7 +3598,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                         // Draw white text
                         ctx.fillStyle = '#FFFFFF';
-                        renderText(ctx, char, bottomScreenPos.x, bottomScreenPos.y + verticalTextOffset);
+                        renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
                     }
                 }
             }
@@ -3657,7 +3657,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     let commandText = '';
 
                     if (suggestionIndex >= 0 && suggestionIndex < engine.commandState.matchedCommands.length) {
-                        commandText = engine.commandState.matchedCommands[suggestionIndex];
+                        commandText = engine.commandState.matchedCommands[suggestionIndex] || '';
 
                         // Extract color from bg/text commands
                         if (commandText.startsWith('bg ')) {
@@ -3836,7 +3836,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                     // Draw text (only if not a space)
                     if (char && char.trim() !== '') {
-                        renderText(ctx, char, bottomScreenPos.x, bottomScreenPos.y + verticalTextOffset);
+                        renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
                     }
 
                     // Draw color swatch for color-related commands (only on first character of suggestion line)
@@ -3844,7 +3844,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         // Get the full command text for this line
                         const suggestionIndex = (worldY - engine.commandState.commandStartPos.y - GRID_CELL_SPAN) / GRID_CELL_SPAN;
                         if (suggestionIndex >= 0 && suggestionIndex < engine.commandState.matchedCommands.length) {
-                            const commandText = engine.commandState.matchedCommands[suggestionIndex];
+                            const commandText = engine.commandState.matchedCommands[suggestionIndex] || '';
 
 
                             let swatchColor: string | null = null;
@@ -3939,7 +3939,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                                 // Draw text in text color
                                                 ctx.fillStyle = engine.textColor;
                                                 if (line[i] && line[i].trim() !== '') {
-                                                    renderText(ctx, line[i], helpBottomScreenPos.x, helpBottomScreenPos.y + verticalTextOffset);
+                                                    renderText(ctx, line[i], helpTopScreenPos.x, helpTopScreenPos.y + verticalTextOffset);
                                                 }
                                             }
                                         }
@@ -4134,7 +4134,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                                 // Render text with background color (cutout effect)
                                 ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
-                                ctx.fillText(text[charIndex], bottomScreenPos.x, bottomScreenPos.y + verticalTextOffset);
+                                ctx.fillText(text[charIndex], topScreenPos.x, topScreenPos.y + verticalTextOffset);
                             }
                         } else {
                             // Calculate distance from viewport center to label
@@ -5512,8 +5512,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         // Don't render the character at cursor position when composing - show preview instead
                         const char = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
                         ctx.fillStyle = CURSOR_TEXT_COLOR;
-                        // Render character with baseline at bottom cell position
-                        renderText(ctx, char, cursorBottomScreenPos.x, cursorBottomScreenPos.y + verticalTextOffset);
+                        // Render character with baseline at top cell position
+                        renderText(ctx, char, cursorTopScreenPos.x, cursorTopScreenPos.y + verticalTextOffset);
                     }
 
                     // === Render IME Composition Preview (on cursor) ===
@@ -5916,9 +5916,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
             // Check if click is on a command suggestion (not the typed command line)
             if (clickedWorldY > engine.commandState.commandStartPos.y &&
-                clickedWorldY <= engine.commandState.commandStartPos.y + (engine.commandState.matchedCommands.length * GRID_CELL_SPAN)) {
+                clickedWorldY < engine.commandState.commandStartPos.y + GRID_CELL_SPAN + (engine.commandState.matchedCommands.length * GRID_CELL_SPAN)) {
 
-                const suggestionIndex = (clickedWorldY - engine.commandState.commandStartPos.y - GRID_CELL_SPAN) / GRID_CELL_SPAN;
+                const suggestionIndex = Math.floor((clickedWorldY - engine.commandState.commandStartPos.y + 1) / GRID_CELL_SPAN) - 1;
                 if (suggestionIndex >= 0 && suggestionIndex < engine.commandState.matchedCommands.length) {
                     const selectedCommand = engine.commandState.matchedCommands[suggestionIndex];
 

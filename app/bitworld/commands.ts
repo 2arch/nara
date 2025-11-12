@@ -403,18 +403,30 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
     // Utility function to match commands based on input
     const matchCommands = useCallback((input: string): string[] => {
-        let commandList = isReadOnly ? READ_ONLY_COMMANDS : AVAILABLE_COMMANDS;
-
         // Filter signin/signout based on authentication state
         const isAuthenticated = !!userUid;
+
+        // When no input, return commands in category display order
+        if (!input) {
+            const commandsInOrder: string[] = [];
+            Object.values(COMMAND_CATEGORIES).forEach(categoryCommands => {
+                categoryCommands.forEach(cmd => {
+                    if (isAuthenticated && cmd === 'signin') return;
+                    if (!isAuthenticated && cmd === 'signout') return;
+                    if (cmd === 'mail' && membershipLevel !== 'super') return;
+                    commandsInOrder.push(cmd);
+                });
+            });
+            return commandsInOrder;
+        }
+
+        let commandList = isReadOnly ? READ_ONLY_COMMANDS : AVAILABLE_COMMANDS;
         commandList = commandList.filter(cmd => {
             if (isAuthenticated && cmd === 'signin') return false; // Hide signin when authenticated
             if (!isAuthenticated && cmd === 'signout') return false; // Hide signout when not authenticated
             if (cmd === 'mail' && membershipLevel !== 'super') return false; // Hide mail unless super member
             return true;
         });
-
-        if (!input) return commandList;
         const lowerInput = input.toLowerCase().split(' ')[0];
         
         // Special handling for mode command with subcommands
@@ -1208,7 +1220,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         const isAuthenticated = !!userUid;
 
         // Draw all available commands below with category labels
-        let currentY = cursorPos.y + 1;
+        let currentY = cursorPos.y + GRID_CELL_SPAN;
         Object.entries(COMMAND_CATEGORIES).forEach(([categoryName, commands]) => {
             // Filter commands in this category based on auth state and membership
             const filteredCommands = commands.filter(cmd => {
@@ -2624,7 +2636,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
             // Draw all commands without help text (help text shown on hover)
             allCommands.forEach((command, index) => {
-                const suggestionY = commandState.commandStartPos.y + 1 + index;
+                const suggestionY = commandState.commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
 
                 // Draw command name
                 for (let i = 0; i < command.length; i++) {
@@ -3430,7 +3442,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                 // Draw autocomplete suggestions below
                 newMatchedCommands.forEach((command, index) => {
-                    const suggestionY = prev.commandStartPos.y + 1 + index;
+                    const suggestionY = prev.commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
                     for (let i = 0; i < command.length; i++) {
                         const key = `${prev.commandStartPos.x + i},${suggestionY}`;
                         newCommandData[key] = command[i];
@@ -3563,7 +3575,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                         // Draw suggestions
                         newMatchedCommands.forEach((command, index) => {
-                            const suggestionY = prev.commandStartPos.y + 1 + index;
+                            const suggestionY = prev.commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
                             for (let i = 0; i < command.length; i++) {
                                 const key = `${prev.commandStartPos.x + i},${suggestionY}`;
                                 newCommandData[key] = command[i];
@@ -3633,7 +3645,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                         // Draw autocomplete suggestions below (if any)
                         newMatchedCommands.forEach((command, index) => {
-                            const suggestionY = prev.commandStartPos.y + 1 + index;
+                            const suggestionY = prev.commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
                             for (let i = 0; i < command.length; i++) {
                                 const key = `${prev.commandStartPos.x + i},${suggestionY}`;
                                 newCommandData[key] = command[i];
@@ -3692,7 +3704,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             
             // Draw autocomplete suggestions below (if any)
             newMatchedCommands.forEach((command, index) => {
-                const suggestionY = prev.commandStartPos.y + 1 + index;
+                const suggestionY = prev.commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
                 for (let i = 0; i < command.length; i++) {
                     const key = `${prev.commandStartPos.x + i},${suggestionY}`;
                     newCommandData[key] = command[i];
@@ -3848,7 +3860,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         // Draw suggestions
         matchedCmds.forEach((command, index) => {
-            const suggestionY = cursorPos.y + 1 + index;
+            const suggestionY = cursorPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
             for (let i = 0; i < command.length; i++) {
                 const key = `${cursorPos.x + i},${suggestionY}`;
                 newCommandData[key] = command[i];
