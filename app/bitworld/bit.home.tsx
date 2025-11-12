@@ -145,7 +145,7 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         complexity: 1.0,
         colorShift: 0.5,
         enabled: true,
-        renderScheme: 'character-span',
+        renderScheme: 'point-based',
         geometryType: 'octahedron',
         interactiveTrails: true,
         trailIntensity: 0.5,
