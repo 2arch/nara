@@ -22,6 +22,9 @@ const DRAW_GRID = true;
 const GRID_LINE_WIDTH = 1;
 const CURSOR_TRAIL_FADE_MS = 200; // Time in ms for trail to fully fade
 
+// Grid system: Characters span multiple cells vertically (must match world.engine.ts)
+const GRID_CELL_SPAN = 2; // Characters occupy 2 vertically-stacked cells
+
 
 
 // --- Waypoint Arrow Constants ---
@@ -3037,10 +3040,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                 if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
                     topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
-                    // Apply text background spanning 2 cells if specified
+                    // Apply text background spanning GRID_CELL_SPAN cells if specified
                     if (charStyle && charStyle.background) {
                         ctx.fillStyle = charStyle.background;
-                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * 2);
+                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                     }
 
                     // Render text only if there's actual content
@@ -5138,16 +5141,18 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         }
 
                         // Draw a continuous rectangle for this line segment
+                        // Get top cell position (worldY - 1) to span full character height
                         const startScreenPos = engine.worldToScreen(drawStartX, worldY, currentZoom, currentOffset);
+                        const topScreenPos = engine.worldToScreen(drawStartX, worldY - 1, currentZoom, currentOffset);
                         const endScreenPos = engine.worldToScreen(drawEndX + 1, worldY, currentZoom, currentOffset);
 
                         if (startScreenPos.x < cssWidth && endScreenPos.x >= 0 &&
-                            startScreenPos.y >= -effectiveCharHeight && startScreenPos.y <= cssHeight) {
+                            topScreenPos.y >= -effectiveCharHeight && startScreenPos.y <= cssHeight) {
                             ctx.fillRect(
                                 startScreenPos.x,
-                                startScreenPos.y,
+                                topScreenPos.y,
                                 endScreenPos.x - startScreenPos.x,
-                                effectiveCharHeight
+                                effectiveCharHeight * GRID_CELL_SPAN
                             );
                         }
                     }
@@ -5156,12 +5161,14 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 // Square/block selection mode: fill all cells in the rectangular area
                 for (let worldY = minY; worldY <= maxY; worldY++) {
                     for (let worldX = minX; worldX <= maxX; worldX++) {
-                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                        // Get both bottom and top positions to span full character height
+                        const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                        const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
 
                         // Only draw if cell is visible on screen
-                        if (screenPos.x >= -effectiveCharWidth && screenPos.x <= cssWidth &&
-                            screenPos.y >= -effectiveCharHeight && screenPos.y <= cssHeight) {
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        if (bottomScreenPos.x >= -effectiveCharWidth && bottomScreenPos.x <= cssWidth &&
+                            topScreenPos.y >= -effectiveCharHeight && bottomScreenPos.y <= cssHeight) {
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                         }
                     }
                 }
@@ -5545,8 +5552,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     ctx.shadowBlur = 0;
                     ctx.shadowOffsetX = 0;
                     ctx.shadowOffsetY = 0;
-                    // Render cursor spanning 2 cells vertically (from top cell down to bottom cell)
-                    ctx.fillRect(cursorTopScreenPos.x, cursorTopScreenPos.y, effectiveCharWidth, effectiveCharHeight * 2);
+                    // Render cursor spanning GRID_CELL_SPAN cells vertically (from top cell down to bottom cell)
+                    ctx.fillRect(cursorTopScreenPos.x, cursorTopScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                     ctx.shadowBlur = 0;
 
                     const charData = engine.worldData[key];
