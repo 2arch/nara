@@ -3078,8 +3078,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         ctx.shadowBlur = 0;
                         ctx.shadowOffsetX = 0;
                         ctx.shadowOffsetY = 0;
-                        // Render character with baseline at bottom of 2-cell span
-                        renderText(ctx, char, bottomScreenPos.x, bottomScreenPos.y + effectiveCharHeight + verticalTextOffset);
+                        // Render character with baseline at bottom cell position
+                        renderText(ctx, char, bottomScreenPos.x, bottomScreenPos.y + verticalTextOffset);
                         ctx.shadowBlur = 0;
                     }
                 }
@@ -5568,8 +5568,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         // Don't render the character at cursor position when composing - show preview instead
                         const char = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
                         ctx.fillStyle = CURSOR_TEXT_COLOR;
-                        // Render character with baseline at bottom of 2-cell span
-                        renderText(ctx, char, cursorBottomScreenPos.x, cursorBottomScreenPos.y + effectiveCharHeight + verticalTextOffset);
+                        // Render character with baseline at bottom cell position
+                        renderText(ctx, char, cursorBottomScreenPos.x, cursorBottomScreenPos.y + verticalTextOffset);
                     }
 
                     // === Render IME Composition Preview (on cursor) ===
