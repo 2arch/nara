@@ -3608,7 +3608,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         if (engine.commandState.isActive) {
             // First, draw background for selected command (only if user has navigated)
             if (engine.commandState.hasNavigated) {
-                const selectedCommandY = engine.commandState.commandStartPos.y + 1 + engine.commandState.selectedIndex;
+                const selectedCommandY = engine.commandState.commandStartPos.y + GRID_CELL_SPAN + (engine.commandState.selectedIndex * GRID_CELL_SPAN);
                 const selectedCommand = engine.commandState.matchedCommands[engine.commandState.selectedIndex];
                 if (selectedCommand) {
                     const selectedBottomScreenPos = engine.worldToScreen(engine.commandState.commandStartPos.x, selectedCommandY, currentZoom, currentOffset);
@@ -3652,7 +3652,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     const isCategoryLabel = charStyle?.background === 'category-label';
 
                     // Get command text and check if it's a color command
-                    const suggestionIndex = worldY - engine.commandState.commandStartPos.y - 1;
+                    const suggestionIndex = (worldY - engine.commandState.commandStartPos.y - GRID_CELL_SPAN) / GRID_CELL_SPAN;
                     let highlightColor: string | null = null;
                     let commandText = '';
 
@@ -3790,7 +3790,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                             ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
                         }
-                    } else if (engine.commandState.isActive && engine.commandState.hasNavigated && worldY === engine.commandState.commandStartPos.y + 1 + engine.commandState.selectedIndex) {
+                    } else if (engine.commandState.isActive && engine.commandState.hasNavigated && worldY === engine.commandState.commandStartPos.y + GRID_CELL_SPAN + (engine.commandState.selectedIndex * GRID_CELL_SPAN)) {
                         // Selected suggestion - use swatch color at 80% opacity if available
                         if (highlightColor) {
                             const hex = highlightColor.replace('#', '');
@@ -3842,7 +3842,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     // Draw color swatch for color-related commands (only on first character of suggestion line)
                     if (worldX === engine.commandState.commandStartPos.x && worldY > engine.commandState.commandStartPos.y) {
                         // Get the full command text for this line
-                        const suggestionIndex = worldY - engine.commandState.commandStartPos.y - 1;
+                        const suggestionIndex = (worldY - engine.commandState.commandStartPos.y - GRID_CELL_SPAN) / GRID_CELL_SPAN;
                         if (suggestionIndex >= 0 && suggestionIndex < engine.commandState.matchedCommands.length) {
                             const commandText = engine.commandState.matchedCommands[suggestionIndex];
 
@@ -5916,9 +5916,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
             // Check if click is on a command suggestion (not the typed command line)
             if (clickedWorldY > engine.commandState.commandStartPos.y &&
-                clickedWorldY <= engine.commandState.commandStartPos.y + engine.commandState.matchedCommands.length) {
+                clickedWorldY <= engine.commandState.commandStartPos.y + (engine.commandState.matchedCommands.length * GRID_CELL_SPAN)) {
 
-                const suggestionIndex = clickedWorldY - engine.commandState.commandStartPos.y - 1;
+                const suggestionIndex = (clickedWorldY - engine.commandState.commandStartPos.y - GRID_CELL_SPAN) / GRID_CELL_SPAN;
                 if (suggestionIndex >= 0 && suggestionIndex < engine.commandState.matchedCommands.length) {
                     const selectedCommand = engine.commandState.matchedCommands[suggestionIndex];
 

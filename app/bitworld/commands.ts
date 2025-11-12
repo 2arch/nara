@@ -6,6 +6,9 @@ import { detectImageIntent } from './ai.utils';
 import type { WorldSettings } from './settings';
 import { useFaceDetection, useSmoothFaceOrientation, faceOrientationToRotation } from './face';
 
+// Grid cell span constant (characters occupy 2 vertically-stacked cells)
+const GRID_CELL_SPAN = 2;
+
 // --- Command System Types ---
 export interface CommandState {
     isActive: boolean;
@@ -1238,7 +1241,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     const cmdKey = `${cursorPos.x + i},${currentY}`;
                     newCommandData[cmdKey] = command[i];
                 }
-                currentY++;
+                currentY += GRID_CELL_SPAN;
             });
         });
 
@@ -1272,7 +1275,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             
             // Draw autocomplete suggestions below
             newMatchedCommands.forEach((command, index) => {
-                const suggestionY = prev.commandStartPos.y + 1 + index;
+                const suggestionY = prev.commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
                 for (let i = 0; i < command.length; i++) {
                     const key = `${prev.commandStartPos.x + i},${suggestionY}`;
                     newCommandData[key] = command[i];
@@ -1325,7 +1328,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             
             // Draw autocomplete suggestions below
             newMatchedCommands.forEach((command, index) => {
-                const suggestionY = prev.commandStartPos.y + 1 + index;
+                const suggestionY = prev.commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
                 for (let i = 0; i < command.length; i++) {
                     const key = `${prev.commandStartPos.x + i},${suggestionY}`;
                     newCommandData[key] = command[i];
@@ -3874,7 +3877,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
             // Draw autocomplete suggestions below
             newMatchedCommands.forEach((command, index) => {
-                const suggestionY = prev.commandStartPos.y + 1 + index;
+                const suggestionY = prev.commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
                 for (let i = 0; i < command.length; i++) {
                     const key = `${prev.commandStartPos.x + i},${suggestionY}`;
                     newCommandData[key] = command[i];
@@ -3910,7 +3913,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
             // Draw autocomplete suggestions below
             newMatchedCommands.forEach((command, index) => {
-                const suggestionY = prev.commandStartPos.y + 1 + index;
+                const suggestionY = prev.commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
                 for (let i = 0; i < command.length; i++) {
                     const key = `${prev.commandStartPos.x + i},${suggestionY}`;
                     newCommandData[key] = command[i];
