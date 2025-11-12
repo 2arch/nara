@@ -3040,9 +3040,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                 if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
                     topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
-                    // Apply text background spanning GRID_CELL_SPAN cells if specified
-                    if (charStyle && charStyle.background) {
-                        ctx.fillStyle = charStyle.background;
+                    // Apply text background: use charStyle.background if set, otherwise backgroundColor when monogram enabled
+                    const textBackground = (charStyle && charStyle.background)
+                        ? charStyle.background
+                        : (monogramSystem.options.enabled ? engine.backgroundColor : undefined);
+
+                    if (textBackground) {
+                        ctx.fillStyle = textBackground;
                         ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                     }
 
