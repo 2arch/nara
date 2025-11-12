@@ -688,10 +688,10 @@ const useMonogramSystem = (
                 x3d = temp * cosZ - y3d * sinZ;
                 y3d = temp * sinZ + y3d * cosZ;
 
-                // Perspective projection
+                // Perspective projection - equal X and Y scaling for square aspect
                 const distance = 500;
                 const projX = centerX + (x3d * distance * 0.5) / (distance + z3d);
-                const projY = centerY + (y3d * distance * 0.25) / (distance + z3d);
+                const projY = centerY + (y3d * distance * 0.5) / (distance + z3d);
 
                 return {x: projX, y: projY, z: z3d};
             });
@@ -1190,9 +1190,9 @@ const useMonogramSystem = (
         
         // Optimized bitmap sampling function with continuous transformations
         const sampleTextBitmap = (screenX: number, screenY: number): number => {
-            // Transform screen coordinates relative to center
+            // Transform screen coordinates relative to center - scale Y by 2 for proper aspect ratio
             const relX = screenX - centerX;
-            const relY = screenY - centerY;
+            const relY = (screenY - centerY) * 2;
             
             // Apply continuous translation
             const transX = relX - translateX;
