@@ -1484,9 +1484,9 @@ const useMonogramSystem = (
                         intensity
                     };
                 } else {
-                    // Fill in pattern around the calculated point if step > 1
-                    for (let dy = 0; dy < step && worldY + dy <= Math.ceil(endWorldY); dy++) {
-                        for (let dx = 0; dx < step && worldX + dx <= Math.ceil(endWorldX); dx++) {
+                    // Fill in pattern around the calculated point if stepX > 1
+                    for (let dy = 0; dy < stepX && worldY + dy <= Math.ceil(endWorldY); dy++) {
+                        for (let dx = 0; dx < stepX && worldX + dx <= Math.ceil(endWorldX); dx++) {
                             const key = `${worldX + dx},${worldY + dy}`;
                             pattern[key] = {
                                 char,
