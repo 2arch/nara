@@ -663,7 +663,19 @@ export function useWorldEngine({
 
     // === State ===
     const [worldData, setWorldData] = useState<WorldData>(initialWorldData);
-    const [cursorPos, setCursorPos] = useState<Point>(initialCursorPos);
+    const [cursorPosInternal, setCursorPosInternal] = useState<Point>(initialCursorPos);
+
+    // Wrapper to constrain cursor to even y-coordinates (characters span 2 cells)
+    const setCursorPos = useCallback((pos: Point | ((prev: Point) => Point)) => {
+        setCursorPosInternal(prevPos => {
+            const newPos = typeof pos === 'function' ? pos(prevPos) : pos;
+            // Constrain y to even numbers (round to nearest even)
+            const constrainedY = Math.round(newPos.y / 2) * 2;
+            return { x: newPos.x, y: constrainedY };
+        });
+    }, []);
+
+    const cursorPos = cursorPosInternal;
     const cursorPosRef = useRef<Point>(initialCursorPos); // Ref for synchronous cursor position access
     const [viewOffset, setViewOffset] = useState<Point>(initialCenteredOffset);
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
@@ -8106,7 +8118,7 @@ export function useWorldEngine({
                     nextCursorPos.y = cursorPos.y - 1;
                 }
             } else {
-                nextCursorPos.y -= 1;
+                nextCursorPos.y -= 2; // Move 2 cells for square grid (characters span 2 cells)
             }
             moved = true;
         } else if (key === 'ArrowDown') {
@@ -8204,11 +8216,11 @@ export function useWorldEngine({
                         nextCursorPos.y = foundBlock ? nextBlockTop : cursorPos.y + 1;
                     }
                 } else {
-                    // Not in a block, just move down by 1
-                    nextCursorPos.y = cursorPos.y + 1;
+                    // Not in a block, just move down by 2 cells (characters span 2 cells)
+                    nextCursorPos.y = cursorPos.y + 2;
                 }
             } else {
-                nextCursorPos.y += 1;
+                nextCursorPos.y += 2; // Move 2 cells for square grid (characters span 2 cells)
             }
             moved = true;
         } else if (key === 'ArrowLeft') {

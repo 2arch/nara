@@ -3030,14 +3030,19 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const charData = engine.worldData[key];
                 const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';
                 const charStyle = charData && !engine.isImageData(charData) ? engine.getCharacterStyle(charData) : undefined;
-                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-                    // Apply text background if specified (even for empty spaces)
+
+                // Characters span 2 cells: bottom cell at worldY and top cell at worldY-1
+                const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+
+                if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
+                    topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
+                    // Apply text background spanning 2 cells if specified
                     if (charStyle && charStyle.background) {
                         ctx.fillStyle = charStyle.background;
-                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * 2);
                     }
-                    
+
                     // Render text only if there's actual content
                     if (char && char.trim() !== '') {
                         // O(1) lookup for bound text color using spatial index
@@ -3066,7 +3071,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         ctx.shadowBlur = 0;
                         ctx.shadowOffsetX = 0;
                         ctx.shadowOffsetY = 0;
-                        renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
+                        // Render character spanning 2 cells (from top cell position)
+                        // Font is already sized to fill the 2-cell height properly
+                        renderText(ctx, char, topScreenPos.x, topScreenPos.y + effectiveCharHeight + verticalTextOffset);
                         ctx.shadowBlur = 0;
                     }
                 }
@@ -5514,10 +5521,14 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
             }
 
-            const cursorScreenPos = engine.worldToScreen(engine.cursorPos.x, engine.cursorPos.y, currentZoom, currentOffset);
-            if (cursorScreenPos.x >= -effectiveCharWidth && cursorScreenPos.x <= cssWidth && cursorScreenPos.y >= -effectiveCharHeight && cursorScreenPos.y <= cssHeight) {
+            // Cursor spans 2 cells: bottom cell at cursorPos.y and top cell at cursorPos.y-1
+            const cursorBottomScreenPos = engine.worldToScreen(engine.cursorPos.x, engine.cursorPos.y, currentZoom, currentOffset);
+            const cursorTopScreenPos = engine.worldToScreen(engine.cursorPos.x, engine.cursorPos.y - 1, currentZoom, currentOffset);
+
+            if (cursorBottomScreenPos.x >= -effectiveCharWidth && cursorBottomScreenPos.x <= cssWidth &&
+                cursorTopScreenPos.y >= -effectiveCharHeight && cursorBottomScreenPos.y <= cssHeight) {
                 const key = `${engine.cursorPos.x},${engine.cursorPos.y}`;
-                
+
                 // Don't render cursor if in chat mode or if there's chat/command data at this position
                 if (!engine.chatMode.isActive && !engine.chatData[key] && !engine.commandData[key]) {
                     // Determine cursor color based on engine state
@@ -5534,7 +5545,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     ctx.shadowBlur = 0;
                     ctx.shadowOffsetX = 0;
                     ctx.shadowOffsetY = 0;
-                    ctx.fillRect(cursorScreenPos.x, cursorScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                    // Render cursor spanning 2 cells vertically (from top cell down to bottom cell)
+                    ctx.fillRect(cursorTopScreenPos.x, cursorTopScreenPos.y, effectiveCharWidth, effectiveCharHeight * 2);
                     ctx.shadowBlur = 0;
 
                     const charData = engine.worldData[key];
@@ -5542,7 +5554,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         // Don't render the character at cursor position when composing - show preview instead
                         const char = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
                         ctx.fillStyle = CURSOR_TEXT_COLOR;
-                        renderText(ctx, char, cursorScreenPos.x, cursorScreenPos.y + verticalTextOffset);
+                        // Render character spanning 2 cells (from top position)
+                        renderText(ctx, char, cursorTopScreenPos.x, cursorTopScreenPos.y + effectiveCharHeight + verticalTextOffset);
                     }
 
                     // === Render IME Composition Preview (on cursor) ===
