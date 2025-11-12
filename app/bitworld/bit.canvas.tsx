@@ -3878,11 +3878,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                             if (swatchColor) {
                                 // Draw full-sized color cell to the left of the command
-                                const cellX = screenPos.x - effectiveCharWidth;
-                                const cellY = screenPos.y;
+                                const cellX = topScreenPos.x - effectiveCharWidth;
+                                const cellY = topScreenPos.y;
 
                                 ctx.fillStyle = swatchColor;
-                                ctx.fillRect(cellX, cellY, effectiveCharWidth, effectiveCharHeight);
+                                ctx.fillRect(cellX, cellY, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                             }
 
                             // In help mode, show help text on hover (styled like category labels)
@@ -3927,18 +3927,19 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                         const helpY = worldY + lineIndex;
                                         for (let i = 0; i < line.length; i++) {
                                             const helpWorldX = helpStartX + i;
-                                            const helpScreenPos = engine.worldToScreen(helpWorldX, helpY, currentZoom, currentOffset);
+                                            const helpBottomScreenPos = engine.worldToScreen(helpWorldX, helpY, currentZoom, currentOffset);
+                                            const helpTopScreenPos = engine.worldToScreen(helpWorldX, helpY - 1, currentZoom, currentOffset);
 
-                                            if (helpScreenPos.x > -effectiveCharWidth * 2 && helpScreenPos.x < cssWidth + effectiveCharWidth &&
-                                                helpScreenPos.y > -effectiveCharHeight * 2 && helpScreenPos.y < cssHeight + effectiveCharHeight) {
+                                            if (helpBottomScreenPos.x > -effectiveCharWidth * 2 && helpBottomScreenPos.x < cssWidth + effectiveCharWidth &&
+                                                helpTopScreenPos.y > -effectiveCharHeight * 2 && helpBottomScreenPos.y < cssHeight + effectiveCharHeight) {
                                                 // Draw background (90% opacity like hovered category labels)
                                                 ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
-                                                ctx.fillRect(helpScreenPos.x, helpScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                                ctx.fillRect(helpTopScreenPos.x, helpTopScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
 
                                                 // Draw text in text color
                                                 ctx.fillStyle = engine.textColor;
                                                 if (line[i] && line[i].trim() !== '') {
-                                                    renderText(ctx, line[i], helpScreenPos.x, helpScreenPos.y + verticalTextOffset);
+                                                    renderText(ctx, line[i], helpBottomScreenPos.x, helpBottomScreenPos.y + verticalTextOffset);
                                                 }
                                             }
                                         }
