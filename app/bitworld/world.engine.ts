@@ -248,38 +248,6 @@ export interface WorldEngine {
         inputPositions: Point[];
         isProcessing: boolean;
     }>>;
-    latexMode: {
-        isActive: boolean;
-        currentInput: string;
-        inputPositions: Point[];
-        startPos: Point;
-        previewImage: string | null;
-    };
-    setLatexMode: React.Dispatch<React.SetStateAction<{
-        isActive: boolean;
-        currentInput: string;
-        inputPositions: Point[];
-        startPos: Point;
-        previewImage: string | null;
-    }>>;
-    latexData: WorldData; // Rendered LaTeX input data
-    smilesMode: {
-        isActive: boolean;
-        currentInput: string;
-        inputPositions: Point[];
-        startPos: Point;
-        previewImage: string | null;
-    };
-    setSmilesMode: React.Dispatch<React.SetStateAction<{
-        isActive: boolean;
-        currentInput: string;
-        inputPositions: Point[];
-        startPos: Point;
-        previewImage: string | null;
-    }>>;
-    smilesData: WorldData; // Rendered SMILES (molecular structure) input data
-    clearLatexData: () => void;
-    clearSmilesData: () => void;
     clearChatData: () => void;
     clearLightModeData: () => void;
     // Agent system
@@ -847,34 +815,6 @@ export function useWorldEngine({
         isProcessing: false
     });
 
-    const [latexMode, setLatexMode] = useState<{
-        isActive: boolean;
-        currentInput: string;
-        inputPositions: Point[];
-        startPos: Point;
-        previewImage: string | null;
-    }>({
-        isActive: false,
-        currentInput: '',
-        inputPositions: [],
-        startPos: { x: 0, y: 0 },
-        previewImage: null
-    });
-
-    // === SMILES Mode State (for molecular structure input) ===
-    const [smilesMode, setSmilesMode] = useState<{
-        isActive: boolean;
-        currentInput: string;
-        inputPositions: Point[];
-        startPos: Point;
-        previewImage: string | null;
-    }>({
-        isActive: false,
-        currentInput: '',
-        inputPositions: [],
-        startPos: { x: 0, y: 0 },
-        previewImage: null
-    });
 
     // === Host Mode State (for onboarding) ===
     const [hostMode, setHostMode] = useState<{
@@ -886,8 +826,6 @@ export function useWorldEngine({
     });
 
     const [chatData, setChatData] = useState<WorldData>({});
-    const [latexData, setLatexData] = useState<WorldData>({});
-    const [smilesData, setSmilesData] = useState<WorldData>({});
     const [searchData, setSearchData] = useState<WorldData>({});
     const [hostData, setHostData] = useState<{ text: string; color?: string; centerPos: Point; timestamp?: number } | null>(null);
     const [clipboardItems, setClipboardItems] = useState<ClipboardItem[]>([]); // Clipboard items from Cmd+click on bounds
@@ -3411,82 +3349,6 @@ export function useWorldEngine({
             // Allow commands in read-only mode - we'll gate specific commands later
         }
 
-        // === LaTeX Mode Exit ===
-        if (key === 'Escape' && latexMode.isActive) {
-            setLatexMode({
-                isActive: false,
-                currentInput: '',
-                inputPositions: [],
-                startPos: { x: 0, y: 0 },
-                previewImage: null
-            });
-            setLatexData({});
-            setDialogueWithRevert("LaTeX mode canceled", setDialogueText);
-            return true;
-        }
-
-        // === LaTeX Mode Backspace ===
-        if (key === 'Backspace' && latexMode.isActive && latexMode.currentInput.length > 0) {
-            const lastPos = latexMode.inputPositions[latexMode.inputPositions.length - 1];
-            if (lastPos) {
-                // Remove last character from latexData
-                setLatexData(prev => {
-                    const updated = { ...prev };
-                    delete updated[`${lastPos.x},${lastPos.y}`];
-                    return updated;
-                });
-
-                // Update latexMode state
-                setLatexMode(prev => ({
-                    ...prev,
-                    currentInput: prev.currentInput.slice(0, -1),
-                    inputPositions: prev.inputPositions.slice(0, -1)
-                }));
-
-                // Move cursor back
-                setCursorPos(lastPos);
-            }
-            return true;
-        }
-
-        // === SMILES Mode Exit ===
-        if (key === 'Escape' && smilesMode.isActive) {
-            setSmilesMode({
-                isActive: false,
-                currentInput: '',
-                inputPositions: [],
-                startPos: { x: 0, y: 0 },
-                previewImage: null
-            });
-            setSmilesData({});
-            setDialogueWithRevert("SMILES mode canceled", setDialogueText);
-            return true;
-        }
-
-        // === SMILES Mode Backspace ===
-        if (key === 'Backspace' && smilesMode.isActive && smilesMode.currentInput.length > 0) {
-            const lastPos = smilesMode.inputPositions[smilesMode.inputPositions.length - 1];
-            if (lastPos) {
-                // Remove last character from smilesData
-                setSmilesData(prev => {
-                    const updated = { ...prev };
-                    delete updated[`${lastPos.x},${lastPos.y}`];
-                    return updated;
-                });
-
-                // Update smilesMode state
-                setSmilesMode(prev => ({
-                    ...prev,
-                    currentInput: prev.currentInput.slice(0, -1),
-                    inputPositions: prev.inputPositions.slice(0, -1)
-                }));
-
-                // Move cursor back
-                setCursorPos(lastPos);
-            }
-            return true;
-        }
-
         // === Chat Mode Exit ===
         // Don't allow ESC out of chat mode if in host mode (authentication) or read-only
         if (key === 'Escape' && chatMode.isActive && !hostMode.isActive && !isReadOnly) {
@@ -5393,26 +5255,6 @@ export function useWorldEngine({
 
                         setDialogueWithRevert(`Pasted clipboard item`, setDialogueText);
                     }
-                } else if (exec.command === 'latex') {
-                    // Activate LaTeX input mode
-                    setLatexMode({
-                        isActive: true,
-                        currentInput: '',
-                        inputPositions: [],
-                        startPos: exec.commandStartPos,
-                        previewImage: null
-                    });
-                    setDialogueWithRevert("LaTeX mode active - Type your equation, press Enter to render", setDialogueText);
-                } else if (exec.command === 'smiles') {
-                    // Activate SMILES input mode
-                    setSmilesMode({
-                        isActive: true,
-                        currentInput: '',
-                        inputPositions: [],
-                        startPos: exec.commandStartPos,
-                        previewImage: null
-                    });
-                    setDialogueWithRevert("SMILES mode active - Type molecule notation, press Enter to render", setDialogueText);
                 } else if (exec.command === 'cam') {
                     const newMode = exec.args[0];
                     let modeText = '';
@@ -7581,152 +7423,6 @@ export function useWorldEngine({
         }
         // --- List-specific Enter handling ---
         else if (key === 'Enter') {
-            // === LaTeX Mode: Place image on canvas ===
-            if (latexMode.isActive && latexMode.currentInput.trim()) {
-                const latexInput = latexMode.currentInput.trim();
-                const startPosition = latexMode.startPos;
-
-                // Convert LaTeX to SVG with current text color
-                (async () => {
-                    const { convertLatexToSVG } = await import('./utils.latex');
-                    const imageDataUrl = await convertLatexToSVG(latexInput, textColor);
-
-                    if (imageDataUrl) {
-                        // Create an image element to get dimensions
-                        const img = new Image();
-                        img.onload = async () => {
-                            const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
-
-                            // Calculate grid cells needed
-                            const cellsWide = Math.ceil(img.width / effectiveCharWidth);
-                            const cellsHigh = Math.ceil(img.height / effectiveCharHeight);
-
-                            // Upload to Firebase Storage and get URL
-                            const storageUrl = await uploadImageToStorage(imageDataUrl);
-
-                            // Create note data structure
-                            const noteData = {
-                                startX: startPosition.x,
-                                startY: startPosition.y,
-                                endX: startPosition.x + cellsWide - 1,
-                                endY: startPosition.y + cellsHigh - 1,
-                                timestamp: Date.now(),
-                                contentType: 'image',
-                                src: storageUrl,
-                                originalWidth: img.width,
-                                originalHeight: img.height
-                            };
-
-                            // Add to world data
-                            const noteKey = `note_${startPosition.x}_${startPosition.y}_${Date.now()}`;
-                            setWorldData(prev => {
-                                const updated = {
-                                    ...prev,
-                                    [noteKey]: JSON.stringify(noteData)
-                                };
-                                return updated;
-                            });
-
-                            setDialogueWithRevert(`LaTeX equation rendered (${cellsWide}×${cellsHigh} cells)`, setDialogueText);
-                        };
-
-                        img.onerror = (err) => {
-                            console.error('Image failed to load:', err);
-                            setDialogueWithRevert("Failed to load LaTeX image", setDialogueText);
-                        };
-
-                        img.src = imageDataUrl;
-                    } else {
-                        setDialogueWithRevert("Failed to render LaTeX equation", setDialogueText);
-                    }
-                })();
-
-                // Clear LaTeX mode immediately
-                setLatexMode({
-                    isActive: false,
-                    currentInput: '',
-                    inputPositions: [],
-                    startPos: { x: 0, y: 0 },
-                    previewImage: null
-                });
-                setLatexData({});
-
-                return true; // Prevent default Enter behavior
-            }
-
-            // === SMILES Mode: Place molecule image on canvas ===
-            if (smilesMode.isActive && smilesMode.currentInput.trim()) {
-                const smilesInput = smilesMode.currentInput.trim();
-                const startPosition = smilesMode.startPos;
-
-                // Convert SMILES to SVG with current text color
-                (async () => {
-                    const { convertSMILESToSVG } = await import('./utils.SMILES');
-                    const imageDataUrl = await convertSMILESToSVG(smilesInput, textColor);
-
-                    if (imageDataUrl) {
-                        // Create an image element to get dimensions
-                        const img = new Image();
-                        img.onload = async () => {
-                            const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
-
-                            // Calculate grid cells needed
-                            const cellsWide = Math.ceil(img.width / effectiveCharWidth);
-                            const cellsHigh = Math.ceil(img.height / effectiveCharHeight);
-
-                            // Upload to Firebase Storage and get URL
-                            const storageUrl = await uploadImageToStorage(imageDataUrl);
-
-                            // Create note data structure
-                            const noteData = {
-                                startX: startPosition.x,
-                                startY: startPosition.y,
-                                endX: startPosition.x + cellsWide - 1,
-                                endY: startPosition.y + cellsHigh - 1,
-                                timestamp: Date.now(),
-                                contentType: 'image',
-                                src: storageUrl,
-                                originalWidth: img.width,
-                                originalHeight: img.height
-                            };
-
-                            // Add to world data
-                            const noteKey = `note_${startPosition.x}_${startPosition.y}_${Date.now()}`;
-                            setWorldData(prev => {
-                                const updated = {
-                                    ...prev,
-                                    [noteKey]: JSON.stringify(noteData)
-                                };
-                                return updated;
-                            });
-
-                            setDialogueWithRevert(`Molecule rendered (${cellsWide}×${cellsHigh} cells)`, setDialogueText);
-                        };
-
-                        img.onerror = (err) => {
-                            console.error('SMILES image failed to load:', err);
-                            setDialogueWithRevert("Failed to load molecule image", setDialogueText);
-                        };
-
-                        img.src = imageDataUrl;
-                    } else {
-                        setDialogueWithRevert("Failed to render molecule - check SMILES notation", setDialogueText);
-                    }
-                })();
-
-                // Clear SMILES mode immediately
-                setSmilesMode({
-                    isActive: false,
-                    currentInput: '',
-                    inputPositions: [],
-                    startPos: { x: 0, y: 0 },
-                    previewImage: null
-                });
-                setSmilesData({});
-
-                return true; // Prevent default Enter behavior
-            }
-
             // Check if cursor is in a list first
             const listAt = findListAt(cursorPos.x, cursorPos.y);
             if (listAt) {
@@ -9539,31 +9235,7 @@ export function useWorldEngine({
             moved = true;
 
             // Check if chat mode is active first (for host mode compatibility)
-            if (latexMode.isActive) {
-                // Add to latex data instead of world data
-                setLatexData(prev => ({
-                    ...prev,
-                    [`${cursorAfterDelete.x},${cursorAfterDelete.y}`]: key
-                }));
-
-                setLatexMode(prev => ({
-                    ...prev,
-                    currentInput: prev.currentInput + key,
-                    inputPositions: [...prev.inputPositions, cursorAfterDelete]
-                }));
-            } else if (smilesMode.isActive) {
-                // Add to SMILES data instead of world data
-                setSmilesData(prev => ({
-                    ...prev,
-                    [`${cursorAfterDelete.x},${cursorAfterDelete.y}`]: key
-                }));
-
-                setSmilesMode(prev => ({
-                    ...prev,
-                    currentInput: prev.currentInput + key,
-                    inputPositions: [...prev.inputPositions, cursorAfterDelete]
-                }));
-            } else if (chatMode.isActive) {
+            if (chatMode.isActive) {
                 // Add to chat data instead of world data
                 setChatData(prev => ({
                     ...prev,
@@ -10851,14 +10523,6 @@ export function useWorldEngine({
         chatMode,
         setChatMode,
         clearChatData: () => setChatData({}),
-        latexMode,
-        setLatexMode,
-        latexData,
-        clearLatexData: () => setLatexData({}),
-        smilesMode,
-        setSmilesMode,
-        smilesData,
-        clearSmilesData: () => setSmilesData({}),
         clearLightModeData: clearLightModeData,
         hostMode,
         setHostMode,

@@ -2753,14 +2753,15 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                     // Render task highlight (only if not completed)
                     if (!completed) {
-                        for (let y = startY; y <= endY; y++) {
+                        for (let y = startY; y <= endY; y += GRID_CELL_SPAN) {
                             for (let x = startX; x <= endX; x++) {
                                 if (x >= startWorldX - 5 && x <= endWorldX + 5 && y >= startWorldY - 5 && y <= endWorldY + 5) {
-                                    const screenPos = engine.worldToScreen(x, y, currentZoom, currentOffset);
-                                    if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
-                                        screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                                    const bottomScreenPos = engine.worldToScreen(x, y, currentZoom, currentOffset);
+                                    const topScreenPos = engine.worldToScreen(x, y - 1, currentZoom, currentOffset);
+                                    if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
+                                        topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
                                         ctx.fillStyle = taskColor;
-                                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                                     }
                                 }
                             }
@@ -2769,7 +2770,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                     // Render strikethrough if completed (using engine's text color)
                     if (completed) {
-                        for (let y = startY; y <= endY; y++) {
+                        for (let y = startY; y <= endY; y += GRID_CELL_SPAN) {
                             const strikeY = y; // Center strikethrough vertically in the cell
                             if (strikeY >= startWorldY - 5 && strikeY <= endWorldY + 5) {
                                 const leftScreenPos = engine.worldToScreen(startX, strikeY, currentZoom, currentOffset);
@@ -2778,7 +2779,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 if (leftScreenPos.x < cssWidth + effectiveCharWidth && rightScreenPos.x > -effectiveCharWidth) {
                                     ctx.strokeStyle = engine.textColor;
                                     ctx.lineWidth = 2;
-                                    const strikeThrough = leftScreenPos.y + effectiveCharHeight / 2;
+                                    const strikeThrough = leftScreenPos.y;
                                     ctx.beginPath();
                                     ctx.moveTo(Math.max(0, leftScreenPos.x), strikeThrough);
                                     ctx.lineTo(Math.min(cssWidth, rightScreenPos.x), strikeThrough);
@@ -3571,71 +3572,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
-        // === Render LaTeX Data (Blue Background, White Text) ===
-        for (const key in engine.latexData) {
-            const [xStr, yStr] = key.split(',');
-            const worldX = parseInt(xStr, 10);
-            const worldY = parseInt(yStr, 10);
-
-            if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                const charData = engine.latexData[key];
-
-                // Skip image data - only process text characters
-                if (engine.isImageData(charData)) {
-                    continue;
-                }
-
-                const char = typeof charData === 'string' ? charData : charData.char;
-                const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
-                if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth && topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
-                    if (char) {
-                        // Draw blue background for LaTeX mode spanning GRID_CELL_SPAN cells
-                        ctx.fillStyle = '#4A90E2'; // Nice blue color
-                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-
-                        // Draw white text
-                        if (char.trim() !== '') {
-                            ctx.fillStyle = '#FFFFFF';
-                            renderText(ctx, char, bottomScreenPos.x, bottomScreenPos.y + verticalTextOffset);
-                        }
-                    }
-                }
-            }
-        }
-
-        // === Render SMILES Data (Green Background, White Text) ===
-        for (const key in engine.smilesData) {
-            const [xStr, yStr] = key.split(',');
-            const worldX = parseInt(xStr, 10);
-            const worldY = parseInt(yStr, 10);
-
-            if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                const charData = engine.smilesData[key];
-
-                // Skip image data - only process text characters
-                if (engine.isImageData(charData)) {
-                    continue;
-                }
-
-                const char = typeof charData === 'string' ? charData : charData.char;
-                const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
-                if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth && topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
-                    if (char) {
-                        // Draw green background for SMILES mode spanning GRID_CELL_SPAN cells
-                        ctx.fillStyle = '#50C878'; // Emerald green color
-                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-
-                        // Draw white text
-                        if (char.trim() !== '') {
-                            ctx.fillStyle = '#FFFFFF';
-                            renderText(ctx, char, bottomScreenPos.x, bottomScreenPos.y + verticalTextOffset);
-                        }
-                    }
-                }
-            }
-        }
 
         // === Render Search Data (Purple Background, White Text) ===
         for (const key in engine.searchData) {
@@ -3675,10 +3611,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const selectedCommandY = engine.commandState.commandStartPos.y + 1 + engine.commandState.selectedIndex;
                 const selectedCommand = engine.commandState.matchedCommands[engine.commandState.selectedIndex];
                 if (selectedCommand) {
-                    const selectedScreenPos = engine.worldToScreen(engine.commandState.commandStartPos.x, selectedCommandY, currentZoom, currentOffset);
-                    if (selectedScreenPos.x > -effectiveCharWidth * 2 && selectedScreenPos.x < cssWidth + effectiveCharWidth && selectedScreenPos.y > -effectiveCharHeight * 2 && selectedScreenPos.y < cssHeight + effectiveCharHeight) {
+                    const selectedBottomScreenPos = engine.worldToScreen(engine.commandState.commandStartPos.x, selectedCommandY, currentZoom, currentOffset);
+                    const selectedTopScreenPos = engine.worldToScreen(engine.commandState.commandStartPos.x, selectedCommandY - 1, currentZoom, currentOffset);
+                    if (selectedBottomScreenPos.x > -effectiveCharWidth * 2 && selectedBottomScreenPos.x < cssWidth + effectiveCharWidth && selectedTopScreenPos.y > -effectiveCharHeight * 2 && selectedBottomScreenPos.y < cssHeight + effectiveCharHeight) {
                         ctx.fillStyle = 'rgba(255, 107, 53, 0.3)'; // Highlight background
-                        ctx.fillRect(selectedScreenPos.x, selectedScreenPos.y, selectedCommand.length * effectiveCharWidth, effectiveCharHeight);
+                        ctx.fillRect(selectedTopScreenPos.x, selectedTopScreenPos.y, selectedCommand.length * effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                     }
                 }
             }
@@ -3708,8 +3645,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 
                 const char = typeof charData === 'string' ? charData : charData.char;
                 const charStyle = typeof charData === 'object' && 'style' in charData ? charData.style : undefined;
-                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+                if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth && topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
                     // Check if this is a category label (special background marker)
                     const isCategoryLabel = charStyle?.background === 'category-label';
 
@@ -3790,7 +3728,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             } else {
                                 // Normal mode - use background
                                 ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
-                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                                 ctx.fillStyle = engine.textColor;
                             }
                         } else if (isSelected) {
@@ -3801,7 +3739,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             } else {
                                 // Normal mode - use background
                                 ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.8)`;
-                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                                 ctx.fillStyle = engine.textColor;
                             }
                         } else {
@@ -3812,7 +3750,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             } else {
                                 // Normal mode - use background
                                 ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.6)`;
-                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                                 ctx.fillStyle = `rgba(${textR}, ${textG}, ${textB}, 0.6)`;
                             }
                         }
@@ -3824,7 +3762,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             ctx.fillStyle = '#FFFFFF';
                         } else {
                             ctx.fillStyle = engine.textColor;
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                             // Text uses background color
                             ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
                         }
@@ -3832,7 +3770,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         // Hovered suggestion - use swatch color if available, otherwise text color
                         if (highlightColor) {
                             ctx.fillStyle = highlightColor;
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                             // Text uses contrasting color (white or black based on luminance)
                             const hex = highlightColor.replace('#', '');
                             const r = parseInt(hex.substring(0, 2), 16);
@@ -3849,7 +3787,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             const g = parseInt(hex.substring(2, 4), 16);
                             const b = parseInt(hex.substring(4, 6), 16);
                             ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.9)`;
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                             ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
                         }
                     } else if (engine.commandState.isActive && engine.commandState.hasNavigated && worldY === engine.commandState.commandStartPos.y + 1 + engine.commandState.selectedIndex) {
@@ -3860,7 +3798,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             const g = parseInt(hex.substring(2, 4), 16);
                             const b = parseInt(hex.substring(4, 6), 16);
                             ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.8)`;
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                             const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
                             ctx.fillStyle = luminance > 0.5 ? '#000000' : '#FFFFFF';
                         } else if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
@@ -3872,7 +3810,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             const g = parseInt(hex.substring(2, 4), 16);
                             const b = parseInt(hex.substring(4, 6), 16);
                             ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.8)`;
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                             ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
                         }
                     } else {
@@ -3886,7 +3824,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             const g = parseInt(hex.substring(2, 4), 16);
                             const b = parseInt(hex.substring(4, 6), 16);
                             ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.6)`;
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                             // Text uses background color at higher opacity for readability
                             const bgHex = (engine.backgroundColor || '#FFFFFF').replace('#', '');
                             const bgR = parseInt(bgHex.substring(0, 2), 16);
@@ -3898,7 +3836,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                     // Draw text (only if not a space)
                     if (char && char.trim() !== '') {
-                        renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
+                        renderText(ctx, char, bottomScreenPos.x, bottomScreenPos.y + verticalTextOffset);
                     }
 
                     // Draw color swatch for color-related commands (only on first character of suggestion line)
@@ -4186,15 +4124,16 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             // Render each character of the label individually across cells
                             for (let charIndex = 0; charIndex < text.length; charIndex++) {
                                 const charWorldX = worldX + charIndex;
-                                const charScreenPos = engine.worldToScreen(charWorldX, worldY, currentZoom, currentOffset);
+                                const bottomScreenPos = engine.worldToScreen(charWorldX, worldY, currentZoom, currentOffset);
+                                const topScreenPos = engine.worldToScreen(charWorldX, worldY - 1, currentZoom, currentOffset);
 
-                                // Fill background with accent color
+                                // Fill background with accent color (spanning GRID_CELL_SPAN cells)
                                 ctx.fillStyle = labelColor;
-                                ctx.fillRect(charScreenPos.x, charScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
 
                                 // Render text with background color (cutout effect)
                                 ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
-                                ctx.fillText(text[charIndex], charScreenPos.x, charScreenPos.y + verticalTextOffset);
+                                ctx.fillText(text[charIndex], bottomScreenPos.x, bottomScreenPos.y + verticalTextOffset);
                             }
                         } else {
                             // Calculate distance from viewport center to label
