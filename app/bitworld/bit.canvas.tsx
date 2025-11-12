@@ -1737,9 +1737,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         }
     }, [engine.agentEnabled, engine.agentPos]);
 
-    // --- Bounds Spatial Index Cache ---
-    const boundsIndexRef = useRef<Map<string, {isFocused: boolean, textColor: string}> | null>(null);
-    const lastBoundsDataRef = useRef<string>('');
+    // --- Tasks Spatial Index Cache ---
     const tasksIndexRef = useRef<Map<string, boolean>>(new Map());
     const completedTasksIndexRef = useRef<Map<string, boolean>>(new Map());
     const lastTasksDataRef = useRef<string>('');
@@ -1780,36 +1778,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         completedTasksIndexRef.current = completedTasksIndex;
     }, [engine.worldData]);
 
-    const updateBoundsIndex = useCallback(() => {
-        // Create a spatial index of all bound top bars for O(1) lookup
-        const boundsIndex = new Map<string, {isFocused: boolean, textColor: string}>();
-
-        // Bound title text should match the background color (creating cutout effect)
-        // The bound bar accent is the inverse of background (via engine.textColor)
-        // So the text on the bound bar should be the same as the background
-        const bgColor = engine.backgroundColor || '#FFFFFF';
-        const textColor = bgColor; // Text matches background for cutout effect
-
-        for (const boundKey in engine.worldData) {
-            if (boundKey.startsWith('bound_')) {
-                try {
-                    const boundData = JSON.parse(engine.worldData[boundKey] as string);
-                    const { startX, endX, startY } = boundData;
-                    const isFocused = engine.focusedBoundKey === boundKey;
-
-                    // Index every position on the top bar
-                    for (let x = startX; x <= endX; x++) {
-                        const key = `${x},${startY}`;
-                        boundsIndex.set(key, { isFocused, textColor });
-                    }
-                } catch (e) {
-                    // Skip invalid bound data
-                }
-            }
-        }
-
-        boundsIndexRef.current = boundsIndex;
-    }, [engine.worldData, engine.focusedBoundKey, engine.backgroundColor]);
     // Helper function to find image at a specific position
     
         // Helper function to find connected text block (including spaces)
@@ -2367,14 +2335,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             height: effectiveCharHeight,
             fontSize: effectiveFontSize
         } = engine.getEffectiveCharDims(currentZoom);
-        
-        // Update bounds index if world data changed or focus changed
-        // Use cached boundKeys from engine instead of filtering on every frame
-        const currentBoundsData = JSON.stringify(engine.boundKeys) + '|' + engine.focusedBoundKey;
-        if (currentBoundsData !== lastBoundsDataRef.current) {
-            updateBoundsIndex();
-            lastBoundsDataRef.current = currentBoundsData;
-        }
 
         // Update tasks index if task data has changed (check values, not just keys)
         const taskEntries = Object.entries(engine.worldData).filter(([k]) => k.startsWith('task_'));
@@ -3087,9 +3047,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                     // Render text only if there's actual content
                     if (char && char.trim() !== '') {
-                        // O(1) lookup for bound text color using spatial index
                         const posKey = `${worldX},${worldY}`;
-                        const boundInfo = boundsIndexRef.current?.get(posKey);
 
                         // O(1) lookup for active task using spatial index
                         const isInActiveTask = tasksIndexRef.current?.get(posKey) || false;
@@ -3102,8 +3060,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         } else if (isInActiveTask) {
                             // Text within task highlight uses background color for contrast
                             ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
-                        } else if (boundInfo) {
-                            ctx.fillStyle = boundInfo.textColor;
                         } else {
                             ctx.fillStyle = (charStyle && charStyle.color) || engine.textColor;
                         }
@@ -5867,7 +5823,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, engine.faceOrientation, engine.isFaceDetectionEnabled, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, selectedNoteKey, selectedIframeKey, selectedMailKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateBoundsIndex, updateTasksIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
+    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, engine.faceOrientation, engine.isFaceDetectionEnabled, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, selectedNoteKey, selectedIframeKey, selectedMailKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateTasksIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
 
 
     // --- Drawing Loop Effect ---

@@ -198,7 +198,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'unpublish': 'Unpublish your canvas. Makes your canvas private again. It will no longer be accessible at the public URL.',
     'share': 'Get a shareable link to your canvas. Copy this link to share your canvas with others. If published, they can view it; if private, you control access.',
     'spawn': 'Set your spawn point. This is where you\'ll start when you open this canvas. Type /spawn to set it to your current position.',
-    'monogram': 'Control monogram patterns. /monogram to toggle on/off. /monogram pixel for point-based rendering (high-resolution). /monogram text for character-span rendering (aligned with text). /monogram [mode] to switch pattern modes: clear, perlin, road, geometry3d, face3d, nara.',
+    'monogram': 'Control monogram patterns. /monogram to toggle on/off. /monogram pixel for point-based rendering (high-resolution). /monogram text for character-span rendering (aligned with text). /monogram mode to switch pattern modes: clear, perlin, road, geometry3d, face3d, nara.',
     'signin': 'Sign in to your Nara account. Required for saving work, publishing canvases, and accessing AI features.',
     'signout': 'Sign out of your Nara account. You\'ll return to read-only mode.',
     'account': 'Manage your account settings. Use /account reset to reset your password.',
