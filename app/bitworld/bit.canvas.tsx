@@ -1161,6 +1161,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             complexity: 1.0,
             colorShift: 0,
             enabled: monogramConfig.enabled,
+            renderScheme: 'character-span', // Default to character-span rendering
             geometryType: 'octahedron',
             interactiveTrails: true,
             trailIntensity: 1.0,
@@ -2646,34 +2647,66 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 startWorldX, startWorldY, endWorldX, endWorldY, engine.textColor, labels, GRID_CELL_SPAN
             );
             
-            for (const key in monogramPattern) {
-                const [xStr, yStr] = key.split(',');
-                const worldX = parseInt(xStr, 10);
-                const worldY = parseInt(yStr, 10);
-                
-                if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                    const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                    const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
-                    if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
-                        topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
+            // Render based on scheme
+            if (monogramSystem.options.renderScheme === 'character-span') {
+                // Character-span rendering: monogram cells span GRID_CELL_SPAN vertically
+                for (const key in monogramPattern) {
+                    const [xStr, yStr] = key.split(',');
+                    const worldX = parseInt(xStr, 10);
+                    const worldY = parseInt(yStr, 10);
 
-                        const cell = monogramPattern[key];
+                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                        const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                        const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+                        if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
+                            topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
 
-                        // Only render if there's no regular text at this position
-                        const textKey = `${worldX},${worldY}`;
-                        const charData = engine.worldData[textKey];
-                        const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';
-                        if ((!char || char.trim() === '') && !engine.commandData[textKey]) {
-                            // Use IBM Plex Mono for monogram to ensure block characters render correctly
-                            ctx.font = `${effectiveFontSize}px IBM Plex Mono`;
+                            const cell = monogramPattern[key];
 
-                            // Set color and render character
-                            ctx.fillStyle = cell.color;
-                            // No transparency for monogram patterns - render at full opacity
-                            ctx.fillText(cell.char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
+                            // Only render if there's no regular text at this position
+                            const textKey = `${worldX},${worldY}`;
+                            const charData = engine.worldData[textKey];
+                            const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';
+                            if ((!char || char.trim() === '') && !engine.commandData[textKey]) {
+                                // Use IBM Plex Mono for monogram to ensure block characters render correctly
+                                ctx.font = `${effectiveFontSize}px IBM Plex Mono`;
 
-                            // Restore original font
-                            ctx.font = `${effectiveFontSize}px ${fontFamily}`;
+                                // Set color and render character
+                                ctx.fillStyle = cell.color;
+                                // No transparency for monogram patterns - render at full opacity
+                                ctx.fillText(cell.char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
+
+                                // Restore original font
+                                ctx.font = `${effectiveFontSize}px ${fontFamily}`;
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Point-based rendering: each monogram cell is at base cell resolution
+                for (const key in monogramPattern) {
+                    const [xStr, yStr] = key.split(',');
+                    const worldX = parseInt(xStr, 10);
+                    const worldY = parseInt(yStr, 10);
+
+                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                        if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                            screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+
+                            const cell = monogramPattern[key];
+
+                            // Only render if there's no regular text at this position
+                            const textKey = `${worldX},${worldY}`;
+                            const charData = engine.worldData[textKey];
+                            const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';
+                            if ((!char || char.trim() === '') && !engine.commandData[textKey]) {
+                                // Point-based: render at single cell position
+                                ctx.font = `${effectiveFontSize}px IBM Plex Mono`;
+                                ctx.fillStyle = cell.color;
+                                ctx.fillText(cell.char, screenPos.x, screenPos.y + verticalTextOffset);
+                                ctx.font = `${effectiveFontSize}px ${fontFamily}`;
+                            }
                         }
                     }
                 }
