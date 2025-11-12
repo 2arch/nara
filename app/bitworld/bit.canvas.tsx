@@ -2550,11 +2550,19 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         // === Render Monogram Patterns ===
         if (monogramEnabled) {
-            // Extract label positions for road mode
+            // Extract label positions for road mode (use wider bounds for monogram generation)
             const labels: Array<{x: number, y: number, text: string, color: string}> = [];
 
-            // Check worldData for permanent labels
-            for (const key in engine.worldData) {
+            // Query visible labels using spatial index (with extra padding for monogram patterns)
+            const monogramPadding = 20; // Extra padding for monogram generation
+            const visibleLabels = engine.queryVisibleEntities(
+                startWorldX - monogramPadding,
+                startWorldY - monogramPadding,
+                endWorldX + monogramPadding,
+                endWorldY + monogramPadding
+            );
+
+            for (const key of visibleLabels) {
                 if (key.startsWith('label_')) {
                     const coordsStr = key.substring('label_'.length);
                     const [xStr, yStr] = coordsStr.split(',');
@@ -2638,10 +2646,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';
                             if ((!char || char.trim() === '') && !engine.commandData[textKey]) {
                                 // Point-based: render as filled rectangle (pixel-like)
-                                // Use GRID_CELL_SPAN height to match character height
                                 ctx.fillStyle = cell.color;
                                 ctx.globalAlpha = cell.intensity; // Use intensity for alpha blending
-                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
                                 ctx.globalAlpha = 1.0; // Reset alpha
                             }
                         }
@@ -2677,8 +2684,12 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     opacity = Math.max(0, 1 - fadeProgress);
                 }
 
-                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                // Calculate screen positions for character span
+                const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+
+                if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
+                    topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
                     if (char) {
                         // Apply text background: use charData.style.background if set, otherwise currentTextStyle.background,
                         // or backgroundColor when monogram is ACTUALLY enabled (to block out monogram pattern)
@@ -2690,7 +2701,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 ctx.globalAlpha = opacity;
                             }
                             ctx.fillStyle = textBackground;
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            // Use GRID_CELL_SPAN height to match character height
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                             if (opacity < 1.0) {
                                 ctx.globalAlpha = 1.0;
                             }
@@ -2702,7 +2714,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 ctx.globalAlpha = opacity;
                             }
                             ctx.fillStyle = color; // Use character's color or default
-                            renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
+                            renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
                             if (opacity < 1.0) {
                                 ctx.globalAlpha = 1.0; // Reset alpha
                             }
@@ -2989,9 +3001,16 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         };
 
         ctx.fillStyle = engine.textColor;
-        for (const key in engine.worldData) {
+
+        // Query visible entities using spatial index
+        const visibleKeys = engine.queryVisibleEntities(startWorldX - 5, startWorldY - 5, endWorldX + 5, endWorldY + 5);
+
+        for (const key of visibleKeys) {
             // Skip block, label, bound, glitched, and image data - we render those separately
             if (key.startsWith('block_') || key.startsWith('label_') || key.startsWith('image_')) continue;
+
+            // Only process character data (keys matching "x,y" pattern)
+            if (!key.match(/^-?\d+,-?\d+$/)) continue;
 
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
@@ -3006,51 +3025,50 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
             }
 
-            if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                const charData = engine.worldData[key];
-                const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';
-                const charStyle = charData && !engine.isImageData(charData) ? engine.getCharacterStyle(charData) : undefined;
+            // Entity is already in viewport (from spatial index query)
+            const charData = engine.worldData[key];
+            const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';
+            const charStyle = charData && !engine.isImageData(charData) ? engine.getCharacterStyle(charData) : undefined;
 
-                // Characters span 2 cells: bottom cell at worldY and top cell at worldY-1
-                const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+            // Characters span 2 cells: bottom cell at worldY and top cell at worldY-1
+            const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+            const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
 
-                if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
-                    topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
-                    // Apply text background spanning GRID_CELL_SPAN cells if specified
-                    if (charStyle && charStyle.background) {
-                        ctx.fillStyle = charStyle.background;
-                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+            if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
+                topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
+                // Apply text background spanning GRID_CELL_SPAN cells if specified
+                if (charStyle && charStyle.background) {
+                    ctx.fillStyle = charStyle.background;
+                    ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                }
+
+                // Render text only if there's actual content
+                if (char && char.trim() !== '') {
+                    const posKey = `${worldX},${worldY}`;
+
+                    // O(1) lookup for active task using spatial index
+                    const isInActiveTask = tasksIndexRef.current?.get(posKey) || false;
+                    const isInCompletedTask = completedTasksIndexRef.current?.get(posKey) || false;
+
+                    // Apply text color based on context
+                    if (isInCompletedTask) {
+                        // Text within completed task uses text color
+                        ctx.fillStyle = engine.textColor;
+                    } else if (isInActiveTask) {
+                        // Text within task highlight uses background color for contrast
+                        ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                    } else {
+                        ctx.fillStyle = (charStyle && charStyle.color) || engine.textColor;
                     }
 
-                    // Render text only if there's actual content
-                    if (char && char.trim() !== '') {
-                        const posKey = `${worldX},${worldY}`;
-
-                        // O(1) lookup for active task using spatial index
-                        const isInActiveTask = tasksIndexRef.current?.get(posKey) || false;
-                        const isInCompletedTask = completedTasksIndexRef.current?.get(posKey) || false;
-
-                        // Apply text color based on context
-                        if (isInCompletedTask) {
-                            // Text within completed task uses text color
-                            ctx.fillStyle = engine.textColor;
-                        } else if (isInActiveTask) {
-                            // Text within task highlight uses background color for contrast
-                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
-                        } else {
-                            ctx.fillStyle = (charStyle && charStyle.color) || engine.textColor;
-                        }
-
-                        // Add subtle text shadow
-                        ctx.shadowColor = ctx.fillStyle as string;
-                        ctx.shadowBlur = 0;
-                        ctx.shadowOffsetX = 0;
-                        ctx.shadowOffsetY = 0;
-                        // Render character with baseline at top cell position
-                        renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
-                        ctx.shadowBlur = 0;
-                    }
+                    // Add subtle text shadow
+                    ctx.shadowColor = ctx.fillStyle as string;
+                    ctx.shadowBlur = 0;
+                    ctx.shadowOffsetX = 0;
+                    ctx.shadowOffsetY = 0;
+                    // Render character with baseline at top cell position
+                    renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
+                    ctx.shadowBlur = 0;
                 }
             }
         }
