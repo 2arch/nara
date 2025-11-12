@@ -2152,7 +2152,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         // Only show preview if different from current cursor position
         if (worldPos.x === engine.cursorPos.x && worldPos.y === engine.cursorPos.y && !worldPos.subY) return;
 
-        const screenPos = engine.worldToScreen(worldPos.x, worldPos.y, currentZoom, currentOffset);
+        const bottomScreenPos = engine.worldToScreen(worldPos.x, worldPos.y, currentZoom, currentOffset);
+        const topScreenPos = engine.worldToScreen(worldPos.x, worldPos.y - 1, currentZoom, currentOffset);
+        const screenPos = bottomScreenPos; // Keep for backward compatibility in some checks
 
         // Check if we're in a clipboard-flashed bound
         const flashingBoundKey = isInClipboardFlashBound(worldPos);
@@ -2176,8 +2178,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         })();
 
         // Adjust height and Y position for glitched cells
-        const previewHeight = isGlitched ? effectiveCharHeight / 2 : effectiveCharHeight;
-        const adjustedScreenY = screenPos.y + (subY * effectiveCharHeight);
+        const previewHeight = isGlitched ? effectiveCharHeight / 2 : effectiveCharHeight * GRID_CELL_SPAN;
+        const adjustedScreenY = isGlitched ? (screenPos.y + (subY * effectiveCharHeight)) : topScreenPos.y;
 
         // Only draw if visible on screen
         if (screenPos.x < -effectiveCharWidth || screenPos.x > cssWidth ||
