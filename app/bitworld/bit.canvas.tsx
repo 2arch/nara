@@ -1,9 +1,9 @@
 // components/BitCanvas.tsx
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { WorldData, Point, WorldEngine, PanStartInfo } from './world.engine'; // Adjust path as needed
+import type { WorldData, Point, WorldEngine, PanStartInfo, StyledCharacter } from './world.engine'; // Adjust path as needed
 import { useDialogue, useDebugDialogue } from './dialogue';
-import { useMonogramSystem } from './monogram';
+import { useMonogramGPU } from './monogram.gpu';
 import { useControllerSystem, createMonogramController, createCameraController, createGridController, createTapeController, createCommandController } from './controllers';
 import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchicalFrames, HierarchicalFrame, HierarchyLevel, findTextBlockForSelection } from './bit.blocks';
 import { COLOR_MAP, COMMAND_CATEGORIES, COMMAND_HELP } from './commands';
@@ -1119,28 +1119,33 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const { debugText } = useDebugDialogue(engine);
     
     // Determine monogram state based on host mode context
-    const getMonogramConfig = () => {
+    const getMonogramConfig = (): { mode: 'clear' | 'perlin', enabled: boolean } => {
+        // Helper to sanitize mode to only valid values
+        const sanitizeMode = (mode: string | undefined): 'clear' | 'perlin' => {
+            return mode === 'perlin' ? 'perlin' : 'clear';
+        };
+
         if (!hostModeEnabled) {
             // Not in host mode - use user settings
             return {
-                mode: engine.settings.monogramMode || 'clear',
+                mode: sanitizeMode(engine.settings.monogramMode),
                 enabled: engine.settings.monogramEnabled || false
             };
         }
 
-        // In host mode - check if we're starting with intro flow (NARA banner)
+        // In host mode - check if we're starting with intro flow (would be NARA, now disabled)
         if (initialHostFlow === 'intro') {
-            return { mode: 'nara' as const, enabled: true };
+            return { mode: 'perlin', enabled: true }; // Changed from 'nara' to 'perlin'
         }
 
         // In host mode - check hostMonogramMode prop
         if (hostMonogramMode === 'perlin') {
-            return { mode: 'perlin' as const, enabled: true };
+            return { mode: 'perlin', enabled: true };
         } else if (hostMonogramMode === 'off') {
-            return { mode: 'clear' as const, enabled: false };
+            return { mode: 'clear', enabled: false };
         } else { // 'user-settings'
             return {
-                mode: engine.settings.monogramMode || 'clear',
+                mode: sanitizeMode(engine.settings.monogramMode),
                 enabled: engine.settings.monogramEnabled || false
             };
         }
@@ -1148,30 +1153,23 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
     const monogramConfig = getMonogramConfig();
     
-    // Monogram system for psychedelic patterns - load from settings and sync changes
-    const monogramSystem = useMonogramSystem(
+    // Monogram system for psychedelic patterns - load from settings and sync changes (GPU-optimized)
+    const monogramSystem = useMonogramGPU(
         {
             mode: monogramConfig.mode,
             speed: 0.5,
             complexity: 1.0,
             colorShift: 0,
             enabled: monogramConfig.enabled,
-            renderScheme: 'point-based', // Default to point-based rendering for pixel-like effects
-            geometryType: 'octahedron',
             interactiveTrails: true,
             trailIntensity: 1.0,
-            trailFadeMs: 2000,
-            maskName: 'macintosh'
+            trailFadeMs: 2000
         },
         (options) => {
-            // Save monogram mode, enabled state, and renderScheme to settings when changed
+            // Save monogram mode and enabled state to settings when changed
             engine.updateSettings({
                 monogramMode: options.mode,
-                monogramEnabled: options.enabled,
-                monogramOptions: {
-                    ...engine.settings.monogramOptions,
-                    renderScheme: options.renderScheme
-                }
+                monogramEnabled: options.enabled
             });
         }
     );
@@ -1179,20 +1177,20 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Sync monogram state from Firebase settings when they load
     useEffect(() => {
         if (!hostModeEnabled && engine.settings.monogramMode !== undefined && engine.settings.monogramEnabled !== undefined) {
-            const savedRenderScheme = engine.settings.monogramOptions?.renderScheme;
+            // Sanitize mode to only allow 'clear' or 'perlin'
+            const sanitizedMode = engine.settings.monogramMode === 'perlin' ? 'perlin' : 'clear';
+
             // Only update if different from current state
-            if (monogramSystem.options.mode !== engine.settings.monogramMode ||
-                monogramSystem.options.enabled !== engine.settings.monogramEnabled ||
-                (savedRenderScheme && monogramSystem.options.renderScheme !== savedRenderScheme)) {
+            if (monogramSystem.options.mode !== sanitizedMode ||
+                monogramSystem.options.enabled !== engine.settings.monogramEnabled) {
                 monogramSystem.setOptions(prev => ({
                     ...prev,
-                    mode: engine.settings.monogramMode || prev.mode,
-                    enabled: engine.settings.monogramEnabled ?? prev.enabled,
-                    renderScheme: savedRenderScheme || prev.renderScheme
+                    mode: sanitizedMode,
+                    enabled: engine.settings.monogramEnabled ?? prev.enabled
                 }));
             }
         }
-    }, [engine.settings.monogramMode, engine.settings.monogramEnabled, engine.settings.monogramOptions?.renderScheme, hostModeEnabled]);
+    }, [engine.settings.monogramMode, engine.settings.monogramEnabled, hostModeEnabled]);
 
     // Helper function to generate talking mouth animation
     const generateTalkingMouth = useCallback((elapsed: number): number => {
@@ -1240,72 +1238,54 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         const isAITalking = dialogueTimestamp && dialogueTextContent;
         const aiTalkElapsed = isAITalking ? Date.now() - dialogueTimestamp : 0;
 
-        if (engine.isFaceDetectionEnabled && engine.faceOrientation) {
-            // Face tracking is active - use real tracking data
-            // But if AI is talking and NOT tracked, add talking mouth
-            if (isAITalking && !engine.faceOrientation.isTracked) {
-                const talkingMouth = generateTalkingMouth(aiTalkElapsed);
-                monogramSystem.setExternalRotation({
-                    ...engine.faceOrientation,
-                    mouthOpen: talkingMouth,
-                    isTracked: false
-                });
-            } else {
-                monogramSystem.setExternalRotation(engine.faceOrientation);
-            }
-        } else if (isAITalking) {
-            // No face tracking, but AI is talking - create autonomous talking face
-            const talkingMouth = generateTalkingMouth(aiTalkElapsed);
-            monogramSystem.setExternalRotation({
-                rotX: 0,
-                rotY: 0,
-                rotZ: 0,
-                mouthOpen: talkingMouth,
-                leftEyeBlink: 0,
-                rightEyeBlink: 0,
-                isTracked: false
-            });
-        } else {
-            // No face tracking and no AI talking
-            monogramSystem.setExternalRotation(undefined);
-        }
-    }, [engine.isFaceDetectionEnabled, engine.faceOrientation, engine.dialogueText, engine.dialogueTimestamp, engine.hostData, aiTalkingTick, generateTalkingMouth]);
+        // Face tracking removed - only Perlin patterns remain
+        // if (engine.isFaceDetectionEnabled && engine.faceOrientation) {
+        //     // Face tracking is active - use real tracking data
+        //     // But if AI is talking and NOT tracked, add talking mouth
+        //     if (isAITalking && !engine.faceOrientation.isTracked) {
+        //         const talkingMouth = generateTalkingMouth(aiTalkElapsed);
+        //         monogramSystem.setExternalRotation({
+        //             ...engine.faceOrientation,
+        //             mouthOpen: talkingMouth,
+        //             isTracked: false
+        //         });
+        //     } else {
+        //         monogramSystem.setExternalRotation(engine.faceOrientation);
+        //     }
+        // } else if (isAITalking) {
+        //     // No face tracking, but AI is talking - create autonomous talking face
+        //     const talkingMouth = generateTalkingMouth(aiTalkElapsed);
+        //     monogramSystem.setExternalRotation({
+        //         rotX: 0,
+        //         rotY: 0,
+        //         rotZ: 0,
+        //         mouthOpen: talkingMouth,
+        //         leftEyeBlink: 0,
+        //         rightEyeBlink: 0,
+        //         isTracked: false
+        //     });
+        // } else {
+        //     // No face tracking and no AI talking
+        //     monogramSystem.setExternalRotation(undefined);
+        // }
+    }, [engine.isFaceDetectionEnabled, engine.faceOrientation, engine.dialogueText, engine.dialogueTimestamp, engine.hostData, aiTalkingTick]);
 
-    // Monogram command handler
+    // Monogram command handler (simplified - only Perlin supported)
     const handleMonogramCommand = useCallback((args: string[]) => {
         if (args.length === 0) {
             // Toggle monogram on/off (keeps current mode)
             const newEnabled = !monogramSystem.options.enabled;
             monogramSystem.updateOption('enabled', newEnabled);
-        } else if (args[0] === 'clear') {
-            // Set to clear mode (only trails, no background pattern)
+        } else if (args[0] === 'clear' || args[0] === 'off') {
+            // Set to clear mode (disabled)
             monogramSystem.updateOption('mode', 'clear');
-            monogramSystem.updateOption('enabled', true);
-        } else if (args[0] === 'perlin') {
+            monogramSystem.updateOption('enabled', false);
+        } else if (args[0] === 'perlin' || args[0] === 'on') {
             // Set to perlin mode (flowing noise pattern)
             monogramSystem.updateOption('mode', 'perlin');
             monogramSystem.updateOption('enabled', true);
-        } else if (args[0] === 'path' || args[0] === 'road') {
-            // Set to road mode (paths connecting labels)
-            monogramSystem.updateOption('mode', 'road');
-            monogramSystem.updateOption('enabled', true);
-        } else if (args[0] === 'geometry3d' || args[0] === '3d') {
-            // Set to geometry3d mode (3D wireframe shapes)
-            monogramSystem.updateOption('mode', 'geometry3d');
-            monogramSystem.updateOption('enabled', true);
-        } else if (args[0] === 'face3d' || args[0] === 'face') {
-            // Set to face3d mode (face-controlled 3D geometry)
-            monogramSystem.updateOption('mode', 'face3d');
-            monogramSystem.updateOption('enabled', true);
-            // Optionally set face mask if provided: /monogram face3d macintosh
-            if (args.length > 1) {
-                monogramSystem.updateOption('maskName', args[1]);
-            }
-        } else if (args[0] === 'nara') {
-            // Set to nara mode (signature NARA pattern)
-            monogramSystem.updateOption('mode', 'nara');
-            monogramSystem.updateOption('enabled', true);
         }
+        // All other modes (road, 3d, face, nara) removed - only Perlin remains
     }, [monogramSystem]);
 
     // Register monogram command handler with engine
@@ -2588,46 +2568,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
 
             const monogramPattern = monogramSystem.generateMonogramPattern(
-                startWorldX, startWorldY, endWorldX, endWorldY, engine.textColor, labels, GRID_CELL_SPAN
+                startWorldX, startWorldY, endWorldX, endWorldY, engine.textColor
             );
-            
-            // Render based on scheme
-            if (monogramSystem.options.renderScheme === 'character-span') {
-                // Character-span rendering: monogram cells span GRID_CELL_SPAN vertically
-                for (const key in monogramPattern) {
-                    const [xStr, yStr] = key.split(',');
-                    const worldX = parseInt(xStr, 10);
-                    const worldY = parseInt(yStr, 10);
 
-                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                        const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                        const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
-                        if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
-                            topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
-
-                            const cell = monogramPattern[key];
-
-                            // Only render if there's no regular text at this position
-                            const textKey = `${worldX},${worldY}`;
-                            const charData = engine.worldData[textKey];
-                            const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';
-                            if ((!char || char.trim() === '') && !engine.commandData[textKey]) {
-                                // Use IBM Plex Mono for monogram to ensure block characters render correctly
-                                ctx.font = `${effectiveFontSize}px IBM Plex Mono`;
-
-                                // Set color and render character
-                                ctx.fillStyle = cell.color;
-                                // No transparency for monogram patterns - render at full opacity
-                                ctx.fillText(cell.char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
-
-                                // Restore original font
-                                ctx.font = `${effectiveFontSize}px ${fontFamily}`;
-                            }
-                        }
-                    }
-                }
-            } else {
-                // Point-based rendering: each monogram cell is at base cell resolution
+            // Point-based rendering: each monogram cell is at base cell resolution (1x1 pixels)
                 for (const key in monogramPattern) {
                     const [xStr, yStr] = key.split(',');
                     const worldX = parseInt(xStr, 10);
@@ -2643,7 +2587,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             // Only render if there's no regular text at this position
                             const textKey = `${worldX},${worldY}`;
                             const charData = engine.worldData[textKey];
-                            const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';
+                            const char = (charData && !engine.isImageData(charData)) ? engine.getCharacter(charData as string | StyledCharacter) : '';
                             if ((!char || char.trim() === '') && !engine.commandData[textKey]) {
                                 // Point-based: render as filled rectangle (pixel-like)
                                 ctx.fillStyle = cell.color;
@@ -2654,7 +2598,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         }
                     }
                 }
-            }
         }
 
         // === Render Air Mode Data (Ephemeral Text) ===

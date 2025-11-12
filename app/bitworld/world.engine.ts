@@ -478,7 +478,7 @@ function generatePatternFromId(patternId: string, centerPos: Point = { x: 0, y: 
             return;
         }
         const visualWidth = node.width * 1;
-        const visualHeight = node.height * 2;
+        const visualHeight = node.height * 1;
         const splitHorizontal = visualHeight > visualWidth ? true : (visualWidth > visualHeight ? false : rng(rngOffset + depth) > 0.5);
         if (splitHorizontal && node.height >= 20) {
             const splitY = node.y + Math.floor(node.height / 2) + Math.floor(rng(rngOffset + depth + 1) * 6) - 3;
