@@ -137,10 +137,6 @@ function parseNoteFromWorldData(key: string, value: any): Note | null {
             baseNote.contentType = 'iframe';
         } else if (key.startsWith('mail_')) {
             baseNote.contentType = 'mail';
-        } else if (key.startsWith('bound_')) {
-            baseNote.contentType = 'bound';
-        } else if (key.startsWith('glitched_')) {
-            baseNote.contentType = 'glitch';
         } else if (key.startsWith('list_')) {
             baseNote.contentType = 'list';
         } else {
@@ -222,7 +218,6 @@ function findNoteAtPosition(
         // Check all region-spanning note types
         if (key.startsWith('note_') || key.startsWith('image_') ||
             key.startsWith('iframe_') || key.startsWith('mail_') ||
-            key.startsWith('bound_') || key.startsWith('glitched_') ||
             key.startsWith('list_')) {
 
             const note = parseNoteFromWorldData(key, worldData[key]);
@@ -2132,17 +2127,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         const subY = worldPos.subY !== undefined ? worldPos.subY : 0;
         const hasSubY = worldPos.subY !== undefined;
         const isGlitched = hasSubY || (() => {
-            for (const key in engine.worldData) {
-                if (key.startsWith('glitched_')) {
-                    try {
-                        const glitchData = JSON.parse(engine.worldData[key] as string);
-                        if (worldPos.x >= glitchData.startX && worldPos.x <= glitchData.endX &&
-                            worldPos.y >= glitchData.startY && worldPos.y <= glitchData.endY) {
-                            return true;
-                        }
-                    } catch (e) {}
-                }
-            }
             return false;
         })();
 
@@ -2549,7 +2533,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
         // === Render Monogram Patterns ===
         if (monogramEnabled) {
-            // Extract label positions for road mode (from both worldData and lightModeData)
+            // Extract label positions for road mode
             const labels: Array<{x: number, y: number, text: string, color: string}> = [];
 
             // Check worldData for permanent labels
@@ -2565,31 +2549,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         const charString = engine.getCharacter(charData);
                         try {
                             const labelData = JSON.parse(charString);
-                            labels.push({
-                                x: worldX,
-                                y: worldY,
-                                text: labelData.text || '',
-                                color: labelData.color || engine.textColor
-                            });
-                        } catch (e) {
-                            // Skip invalid label data
-                        }
-                    }
-                }
-            }
-
-            // Also check lightModeData for ephemeral labels (from /map command)
-            for (const key in engine.lightModeData) {
-                if (key.startsWith('label_')) {
-                    const coordsStr = key.substring('label_'.length);
-                    const [xStr, yStr] = coordsStr.split(',');
-                    const worldX = parseInt(xStr, 10);
-                    const worldY = parseInt(yStr, 10);
-
-                    const charData = engine.lightModeData[key];
-                    if (typeof charData === 'string') {
-                        try {
-                            const labelData = JSON.parse(charData);
                             labels.push({
                                 x: worldX,
                                 y: worldY,
@@ -2661,11 +2620,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             const charData = engine.worldData[textKey];
                             const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';
                             if ((!char || char.trim() === '') && !engine.commandData[textKey]) {
-                                // Point-based: render at single cell position
-                                ctx.font = `${effectiveFontSize}px IBM Plex Mono`;
+                                // Point-based: render as filled rectangle (pixel-like)
                                 ctx.fillStyle = cell.color;
-                                ctx.fillText(cell.char, screenPos.x, screenPos.y + verticalTextOffset);
-                                ctx.font = `${effectiveFontSize}px ${fontFamily}`;
+                                ctx.globalAlpha = cell.intensity; // Use intensity for alpha blending
+                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                ctx.globalAlpha = 1.0; // Reset alpha
                             }
                         }
                     }
@@ -3013,7 +2972,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         ctx.fillStyle = engine.textColor;
         for (const key in engine.worldData) {
             // Skip block, label, bound, glitched, and image data - we render those separately
-            if (key.startsWith('block_') || key.startsWith('label_') || key.startsWith('bound_') || key.startsWith('glitched_') || key.startsWith('image_')) continue;
+            if (key.startsWith('block_') || key.startsWith('label_') || key.startsWith('image_')) continue;
 
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
