@@ -318,9 +318,10 @@ const useMonogramSystem = (
         const complexity = options.complexity;
         const scale = 1.2 * complexity;
 
-        // Normalized coordinates (1:1 cells provide natural square aspect ratio)
+        // Normalized coordinates - scale Y by 0.5 to stretch pattern vertically
+        // (smaller Y coordinate = zoomed in = features appear larger)
         const nx = x * 0.02;
-        const ny = y * 0.02;
+        const ny = (y * 0.5) * 0.02;
         
         // Create flowing distortion using layered noise
         const flow1 = perlinNoise(nx * scale + time * 2, ny * scale + time);
@@ -553,11 +554,17 @@ const useMonogramSystem = (
             const len = Math.sqrt(dx * dx + dy * dy);
 
             if (len > 0) {
-                // Calculate distance with 1:1 cell aspect ratio
-                const t = Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / (len * len)));
+                // Scale Y by 0.5 to stretch pattern vertically
+                const scaledY = y * 0.5;
+                const scaledY1 = y1 * 0.5;
+                const scaledY2 = y2 * 0.5;
+                const scaledDy = scaledY2 - scaledY1;
+                const scaledLen = Math.sqrt(dx * dx + scaledDy * scaledDy);
+
+                const t = Math.max(0, Math.min(1, ((x - x1) * dx + (scaledY - scaledY1) * scaledDy) / (scaledLen * scaledLen)));
                 const projX = x1 + t * dx;
                 const projY = y1 + t * dy;
-                const distance = Math.sqrt((x - projX) ** 2 + (y - projY) ** 2);
+                const distance = Math.sqrt((x - projX) ** 2 + ((y * 0.5) - (projY * 0.5)) ** 2);
                 
                 if (distance < minDistance) {
                     minDistance = distance;
@@ -1336,13 +1343,19 @@ const useMonogramSystem = (
             const segmentLength = Math.sqrt(dx * dx + dy * dy);
 
             if (segmentLength > 0) {
-                // Project point onto line segment (1:1 cell aspect ratio)
-                const t = Math.max(0, Math.min(1, ((x - currentPos.x) * dx + (y - currentPos.y) * dy) / (segmentLength * segmentLength)));
+                // Project point onto line segment - scale Y by 0.5 to stretch pattern
+                const scaledY = y * 0.5;
+                const scaledCurrentPosY = currentPos.y * 0.5;
+                const scaledNextPosY = nextPos.y * 0.5;
+                const scaledDy = scaledNextPosY - scaledCurrentPosY;
+                const scaledSegmentLength = Math.sqrt(dx * dx + scaledDy * scaledDy);
+
+                const t = Math.max(0, Math.min(1, ((x - currentPos.x) * dx + (scaledY - scaledCurrentPosY) * scaledDy) / (scaledSegmentLength * scaledSegmentLength)));
                 const projX = currentPos.x + t * dx;
                 const projY = currentPos.y + t * dy;
 
                 // Distance from current position to line segment
-                const distance = Math.sqrt((x - projX) ** 2 + (y - projY) ** 2);
+                const distance = Math.sqrt((x - projX) ** 2 + ((y * 0.5) - (projY * 0.5)) ** 2);
                 
                 // Trail width decreases with age (comet tail effect)
                 const ageFactor = 1 - (age / options.trailFadeMs);
