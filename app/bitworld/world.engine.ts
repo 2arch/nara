@@ -375,6 +375,9 @@ export interface WorldEngine {
         isTracked?: boolean; // True if from MediaPipe tracking, false if autonomous
     };
     setFaceDetectionEnabled: (enabled: boolean) => void;
+    // Spatial indexing for efficient viewport-based rendering
+    spatialIndex: React.MutableRefObject<Map<string, Set<string>>>;
+    queryVisibleEntities: (startWorldX: number, startWorldY: number, endWorldX: number, endWorldY: number) => Set<string>;
 }
 
 // --- Hook Input ---
@@ -635,6 +638,100 @@ export function useWorldEngine({
 
     // === State ===
     const [worldData, setWorldData] = useState<WorldData>(initialWorldData);
+
+    // === Spatial Index for Viewport-Based Rendering ===
+    const CHUNK_SIZE = 32; // 32x32 cells per chunk
+    const spatialIndexRef = useRef<Map<string, Set<string>>>(new Map());
+
+    // Helper: Convert world coordinates to chunk coordinates
+    const worldToChunk = useCallback((worldX: number, worldY: number): string => {
+        const chunkX = Math.floor(worldX / CHUNK_SIZE);
+        const chunkY = Math.floor(worldY / CHUNK_SIZE);
+        return `${chunkX},${chunkY}`;
+    }, []);
+
+    // Helper: Extract coordinates from entity key
+    const extractCoordinates = useCallback((key: string, data: string | StyledCharacter | ImageData): Point | null => {
+        // Character data: "x,y"
+        if (key.match(/^-?\d+,-?\d+$/)) {
+            const [xStr, yStr] = key.split(',');
+            return { x: parseInt(xStr, 10), y: parseInt(yStr, 10) };
+        }
+
+        // Label data: "label_x,y_timestamp"
+        if (key.startsWith('label_')) {
+            const coordsStr = key.substring('label_'.length);
+            const [xStr, yStr] = coordsStr.split(',');
+            const x = parseInt(xStr, 10);
+            const y = parseInt(yStr, 10);
+            if (!isNaN(x) && !isNaN(y)) {
+                return { x, y };
+            }
+        }
+
+        // Image data: stored in value
+        if (typeof data === 'object' && 'type' in data && data.type === 'image') {
+            return { x: data.startX, y: data.startY };
+        }
+
+        // Note/List/Mail data with coordinates in value - try to parse
+        if (key.startsWith('note_') || key.startsWith('list_') || key.startsWith('mail_')) {
+            try {
+                const parsed = JSON.parse(data as string);
+                if (parsed.startX !== undefined && parsed.startY !== undefined) {
+                    return { x: parsed.startX, y: parsed.startY };
+                }
+                if (parsed.x !== undefined && parsed.y !== undefined) {
+                    return { x: parsed.x, y: parsed.y };
+                }
+            } catch (e) {
+                // Skip invalid JSON
+            }
+        }
+
+        return null;
+    }, []);
+
+    // Query: Get all entity keys visible in viewport
+    const queryVisibleEntities = useCallback((startWorldX: number, startWorldY: number, endWorldX: number, endWorldY: number): Set<string> => {
+        const result = new Set<string>();
+
+        const startChunkX = Math.floor(startWorldX / CHUNK_SIZE);
+        const endChunkX = Math.floor(endWorldX / CHUNK_SIZE);
+        const startChunkY = Math.floor(startWorldY / CHUNK_SIZE);
+        const endChunkY = Math.floor(endWorldY / CHUNK_SIZE);
+
+        for (let cy = startChunkY; cy <= endChunkY; cy++) {
+            for (let cx = startChunkX; cx <= endChunkX; cx++) {
+                const chunkKey = `${cx},${cy}`;
+                const entityKeys = spatialIndexRef.current.get(chunkKey);
+                if (entityKeys) {
+                    entityKeys.forEach(key => result.add(key));
+                }
+            }
+        }
+
+        return result;
+    }, []);
+
+    // Build spatial index when worldData changes
+    useEffect(() => {
+        const newIndex = new Map<string, Set<string>>();
+
+        for (const key in worldData) {
+            const coords = extractCoordinates(key, worldData[key]);
+            if (coords) {
+                const chunkKey = worldToChunk(coords.x, coords.y);
+                if (!newIndex.has(chunkKey)) {
+                    newIndex.set(chunkKey, new Set());
+                }
+                newIndex.get(chunkKey)!.add(key);
+            }
+        }
+
+        spatialIndexRef.current = newIndex;
+    }, [worldData, extractCoordinates, worldToChunk]);
+
     const [cursorPosInternal, setCursorPosInternal] = useState<Point>(initialCursorPos);
 
     // Wrapper to constrain cursor to even y-coordinates (characters span 2 cells)
@@ -10161,5 +10258,8 @@ export function useWorldEngine({
         isFaceDetectionEnabled,
         faceOrientation,
         setFaceDetectionEnabled,
+        // Spatial indexing
+        spatialIndex: spatialIndexRef,
+        queryVisibleEntities,
     };
 }
