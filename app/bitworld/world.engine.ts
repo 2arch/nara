@@ -80,6 +80,10 @@ const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 5.0;
 const ZOOM_SENSITIVITY = 0.002;
 
+// Grid system: Characters span multiple cells vertically
+// This determines vertical movement increment and coordinate alignment
+const GRID_CELL_SPAN = 2; // Characters occupy 2 vertically-stacked cells (default scale=1)
+
 // --- Block Management Constants ---
 const BLOCK_PREFIX = 'block_';// Circle packing constants
 const MIN_BLOCK_DISTANCE = 6;  // Minimum cells between blocks
@@ -669,8 +673,8 @@ export function useWorldEngine({
     const setCursorPos = useCallback((pos: Point | ((prev: Point) => Point)) => {
         setCursorPosInternal(prevPos => {
             const newPos = typeof pos === 'function' ? pos(prevPos) : pos;
-            // Constrain y to even numbers (round to nearest even)
-            const constrainedY = Math.round(newPos.y / 2) * 2;
+            // Constrain y to grid-aligned positions
+            const constrainedY = Math.round(newPos.y / GRID_CELL_SPAN) * GRID_CELL_SPAN;
             return { x: newPos.x, y: constrainedY };
         });
     }, []);
@@ -1075,7 +1079,9 @@ export function useWorldEngine({
         if (effectiveCharWidth === 0 || effectiveCharHeight === 0) return currentOffset;
         const worldX = screenX / effectiveCharWidth + currentOffset.x;
         const worldY = screenY / effectiveCharHeight + currentOffset.y;
-        return { x: Math.floor(worldX), y: Math.floor(worldY) };
+        // Round y to nearest grid-aligned position (characters span GRID_CELL_SPAN cells)
+        const roundedY = Math.round(worldY / GRID_CELL_SPAN) * GRID_CELL_SPAN;
+        return { x: Math.floor(worldX), y: roundedY };
     }, [getEffectiveCharDims]);
 
     // === Viewport Center Calculation ===
@@ -7774,7 +7780,7 @@ export function useWorldEngine({
                             // Move cursor to start of next line
                             if (viewportRow < listData.visibleHeight - 1) {
                                 // Next line is visible, just move cursor down
-                                setCursorPos({ x: listData.startX, y: cursorPos.y + 1 });
+                                setCursorPos({ x: listData.startX, y: cursorPos.y + GRID_CELL_SPAN });
                             } else {
                                 // Next line would be off screen, need to scroll down
                                 const maxScroll = Math.max(0, totalLines - listData.visibleHeight);
@@ -8009,7 +8015,7 @@ export function useWorldEngine({
             
             logger.debug('Final targetIndent after viewport check:', targetIndent);
 
-            nextCursorPos.y = cursorPos.y + 1;
+            nextCursorPos.y = cursorPos.y + GRID_CELL_SPAN; // Move down by grid cell span
             // Failsafe: if targetIndent is NaN, undefined, or null, use previous cursor X position
             if (targetIndent !== undefined && targetIndent !== null && !isNaN(targetIndent)) {
                 nextCursorPos.x = targetIndent;
@@ -8118,7 +8124,7 @@ export function useWorldEngine({
                     nextCursorPos.y = cursorPos.y - 1;
                 }
             } else {
-                nextCursorPos.y -= 2; // Move 2 cells for square grid (characters span 2 cells)
+                nextCursorPos.y -= GRID_CELL_SPAN; // Move up by grid cell span
             }
             moved = true;
         } else if (key === 'ArrowDown') {
@@ -8217,10 +8223,10 @@ export function useWorldEngine({
                     }
                 } else {
                     // Not in a block, just move down by 2 cells (characters span 2 cells)
-                    nextCursorPos.y = cursorPos.y + 2;
+                    nextCursorPos.y = cursorPos.y + GRID_CELL_SPAN;
                 }
             } else {
-                nextCursorPos.y += 2; // Move 2 cells for square grid (characters span 2 cells)
+                nextCursorPos.y += GRID_CELL_SPAN; // Move down by grid cell span
             }
             moved = true;
         } else if (key === 'ArrowLeft') {
