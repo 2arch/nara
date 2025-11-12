@@ -1049,7 +1049,7 @@ export function useWorldEngine({
         }
         // Simple scaling - adjust as needed
         const effectiveWidth = Math.max(1, Math.round(BASE_CHAR_WIDTH * zoom));
-        const effectiveHeight = Math.max(1, Math.round(effectiveWidth * 2.0)); // Perfect 1:2 ratio (width:height)
+        const effectiveHeight = Math.max(1, Math.round(effectiveWidth * 1.0)); // Perfect 1:1 ratio (square cells)
         const effectiveFontSize = Math.max(1, Math.round(effectiveWidth * 1.5));
 
         const dims = { width: effectiveWidth, height: effectiveHeight, fontSize: effectiveFontSize };
