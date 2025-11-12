@@ -2643,7 +2643,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
 
             const monogramPattern = monogramSystem.generateMonogramPattern(
-                startWorldX, startWorldY, endWorldX, endWorldY, engine.textColor, labels
+                startWorldX, startWorldY, endWorldX, endWorldY, engine.textColor, labels, GRID_CELL_SPAN
             );
             
             for (const key in monogramPattern) {

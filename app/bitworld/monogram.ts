@@ -306,13 +306,13 @@ const useMonogramSystem = (
     }, []);
 
     // Pure Perlin noise flow (no text, just beautiful flowing patterns)
-    const calculatePerlin = useCallback((x: number, y: number, time: number): number => {
+    const calculatePerlin = useCallback((x: number, y: number, time: number, gridCellSpan: number = 2): number => {
         const complexity = options.complexity;
         const scale = 1.2 * complexity;
 
-        // Normalized coordinates (y scaled by 0.5 for 1:1 grid aspect ratio)
+        // Normalized coordinates (y scaled by 1/gridCellSpan for square grid aspect ratio)
         const nx = x * 0.02;
-        const ny = (y * 0.5) * 0.02;
+        const ny = (y / gridCellSpan) * 0.02;
         
         // Create flowing distortion using layered noise
         const flow1 = perlinNoise(nx * scale + time * 2, ny * scale + time);
@@ -459,7 +459,7 @@ const useMonogramSystem = (
     }, []);
     
     // Universal 3D geometry renderer - works with ANY geometry data structure
-    const calculate3DGeometry = useCallback((x: number, y: number, time: number, viewportBounds?: {
+    const calculate3DGeometry = useCallback((x: number, y: number, time: number, gridCellSpan: number, viewportBounds?: {
         startX: number,
         startY: number,
         endX: number,
@@ -543,16 +543,16 @@ const useMonogramSystem = (
             const len = Math.sqrt(dx * dx + dy * dy);
             
             if (len > 0) {
-                // Scale y by 0.5 for 1:1 grid aspect ratio
-                const scaledY = y * 0.5;
-                const scaledY1 = y1 * 0.5;
-                const scaledY2 = y2 * 0.5;
+                // Scale y by 1/gridCellSpan for square grid aspect ratio
+                const scaledY = y / gridCellSpan;
+                const scaledY1 = y1 / gridCellSpan;
+                const scaledY2 = y2 / gridCellSpan;
                 const scaledDy = scaledY2 - scaledY1;
                 const scaledLen = Math.sqrt(dx * dx + scaledDy * scaledDy);
                 const t = Math.max(0, Math.min(1, ((x - x1) * dx + (scaledY - scaledY1) * scaledDy) / (scaledLen * scaledLen)));
                 const projX = x1 + t * dx;
                 const projY = y1 + t * dy;
-                const distance = Math.sqrt((x - projX) ** 2 + ((y * 0.5) - (projY * 0.5)) ** 2);
+                const distance = Math.sqrt((x - projX) ** 2 + ((y / gridCellSpan) - (projY / gridCellSpan)) ** 2);
                 
                 if (distance < minDistance) {
                     minDistance = distance;
@@ -579,7 +579,7 @@ const useMonogramSystem = (
     }, [options.complexity, options.speed, options.geometryType, options.customGeometry, generateGeometry]);
 
     // Face-controlled 3D face - Macintosh-style face that rotates with head tracking
-    const calculateFace3D = useCallback((x: number, y: number, time: number, viewportBounds?: {
+    const calculateFace3D = useCallback((x: number, y: number, time: number, gridCellSpan: number, viewportBounds?: {
         startX: number,
         startY: number,
         endX: number,
@@ -968,7 +968,7 @@ const useMonogramSystem = (
     // Loading text - static centered display with progress bar
 
     // Road mode - Single line with NARA-style noise distortion for wavy/loopy effect
-    const calculateRoad = useCallback((x: number, y: number, time: number, labels: LabelPosition[]): number => {
+    const calculateRoad = useCallback((x: number, y: number, time: number, gridCellSpan: number, labels: LabelPosition[]): number => {
         if (!labels || labels.length < 2) return 0;
 
         const complexity = options.complexity;
@@ -1130,7 +1130,7 @@ const useMonogramSystem = (
     // Terrain mode - Topographic visualization creating distance field contours around labels
 
     // NARA text stretch distortion effect
-    const calculateNara = useCallback((x: number, y: number, time: number, viewportBounds?: {
+    const calculateNara = useCallback((x: number, y: number, time: number, gridCellSpan: number, viewportBounds?: {
         startX: number,
         startY: number,
         endX: number,
@@ -1293,7 +1293,7 @@ const useMonogramSystem = (
 
 
     // Main pattern calculation function
-    const calculatePattern = useCallback((x: number, y: number, time: number, mode: MonogramMode, viewportBounds?: {
+    const calculatePattern = useCallback((x: number, y: number, time: number, mode: MonogramMode, gridCellSpan: number, viewportBounds?: {
         startX: number,
         startY: number,
         endX: number,
@@ -1301,17 +1301,17 @@ const useMonogramSystem = (
     }, labels?: LabelPosition[]): number => {
         switch (mode) {
             case 'clear': return 0; // No background pattern, only trails
-            case 'perlin': return calculatePerlin(x, y, time);
-            case 'nara': return calculateNara(x, y, time, viewportBounds);
-            case 'geometry3d': return calculate3DGeometry(x, y, time, viewportBounds);
-            case 'face3d': return calculateFace3D(x, y, time, viewportBounds);
-            case 'road': return calculateRoad(x, y, time, labels || []);
-            default: return calculatePerlin(x, y, time);
+            case 'perlin': return calculatePerlin(x, y, time, gridCellSpan);
+            case 'nara': return calculateNara(x, y, time, gridCellSpan, viewportBounds);
+            case 'geometry3d': return calculate3DGeometry(x, y, time, gridCellSpan, viewportBounds);
+            case 'face3d': return calculateFace3D(x, y, time, gridCellSpan, viewportBounds);
+            case 'road': return calculateRoad(x, y, time, gridCellSpan, labels || []);
+            default: return calculatePerlin(x, y, time, gridCellSpan);
         }
     }, [calculatePerlin, calculateNara, calculate3DGeometry, calculateFace3D, calculateRoad]);
 
     // Calculate comet trail effect at a specific position
-    const calculateTrailEffect = useCallback((x: number, y: number): number => {
+    const calculateTrailEffect = useCallback((x: number, y: number, gridCellSpan: number): number => {
         if (!options.interactiveTrails || mouseTrail.length < 2) return 0;
 
         const now = Date.now();
@@ -1331,10 +1331,10 @@ const useMonogramSystem = (
             const segmentLength = Math.sqrt(dx * dx + dy * dy);
             
             if (segmentLength > 0) {
-                // Project point onto line segment (scale y by 0.5 for 1:1 grid aspect ratio)
-                const scaledY = y * 0.5;
-                const scaledCurrentPosY = currentPos.y * 0.5;
-                const scaledNextPosY = nextPos.y * 0.5;
+                // Project point onto line segment (scale y by 1/gridCellSpan for square grid aspect ratio)
+                const scaledY = y / gridCellSpan;
+                const scaledCurrentPosY = currentPos.y / gridCellSpan;
+                const scaledNextPosY = nextPos.y / gridCellSpan;
                 const scaledDy = scaledNextPosY - scaledCurrentPosY;
                 const scaledSegmentLength = Math.sqrt(dx * dx + scaledDy * scaledDy);
                 const t = Math.max(0, Math.min(1, ((x - currentPos.x) * dx + (scaledY - scaledCurrentPosY) * scaledDy) / (scaledSegmentLength * scaledSegmentLength)));
@@ -1342,7 +1342,7 @@ const useMonogramSystem = (
                 const projY = currentPos.y + t * dy;
 
                 // Distance from current position to line segment
-                const distance = Math.sqrt((x - projX) ** 2 + ((y * 0.5) - (projY * 0.5)) ** 2);
+                const distance = Math.sqrt((x - projX) ** 2 + ((y / gridCellSpan) - (projY / gridCellSpan)) ** 2);
                 
                 // Trail width decreases with age (comet tail effect)
                 const ageFactor = 1 - (age / options.trailFadeMs);
@@ -1375,7 +1375,8 @@ const useMonogramSystem = (
         endWorldX: number,
         endWorldY: number,
         textColor?: string,
-        labels?: LabelPosition[]
+        labels?: LabelPosition[],
+        gridCellSpan: number = 2
     ): MonogramPattern => {
         if (!options.enabled) return {};
 
@@ -1418,9 +1419,9 @@ const useMonogramSystem = (
                 // Calculate new mode intensity
                 let newIntensity: number;
                 if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'road') {
-                    newIntensity = calculatePattern(worldX, worldY, time, options.mode, viewportBounds, labels);
+                    newIntensity = calculatePattern(worldX, worldY, time, options.mode, gridCellSpan, viewportBounds, labels);
                 } else {
-                    newIntensity = Math.abs(calculatePattern(worldX, worldY, time, options.mode));
+                    newIntensity = Math.abs(calculatePattern(worldX, worldY, time, options.mode, gridCellSpan));
                 }
 
                 // If transitioning, blend with old mode
@@ -1429,9 +1430,9 @@ const useMonogramSystem = (
                     const oldMode = transitionFromModeRef.current;
 
                     if (oldMode === 'nara' || oldMode === 'geometry3d' || oldMode === 'face3d' || oldMode === 'road') {
-                        oldIntensity = calculatePattern(worldX, worldY, time, oldMode, viewportBounds, labels);
+                        oldIntensity = calculatePattern(worldX, worldY, time, oldMode, gridCellSpan, viewportBounds, labels);
                     } else {
-                        oldIntensity = Math.abs(calculatePattern(worldX, worldY, time, oldMode));
+                        oldIntensity = Math.abs(calculatePattern(worldX, worldY, time, oldMode, gridCellSpan));
                     }
 
                     // Blend between old and new based on transition progress
@@ -1441,9 +1442,9 @@ const useMonogramSystem = (
                     intensity = newIntensity;
                     rawValue = intensity;
                 }
-                
+
                 // Calculate and blend trail effect
-                const trailEffect = calculateTrailEffect(worldX, worldY);
+                const trailEffect = calculateTrailEffect(worldX, worldY, gridCellSpan);
                 intensity = Math.max(intensity, trailEffect);
                 
                 // Skip very low intensity cells for performance (adjusted for trail effects)
