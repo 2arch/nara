@@ -1164,10 +1164,14 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             maskName: 'macintosh'
         },
         (options) => {
-            // Save monogram mode and enabled state to settings when changed
+            // Save monogram mode, enabled state, and renderScheme to settings when changed
             engine.updateSettings({
                 monogramMode: options.mode,
-                monogramEnabled: options.enabled
+                monogramEnabled: options.enabled,
+                monogramOptions: {
+                    ...engine.settings.monogramOptions,
+                    renderScheme: options.renderScheme
+                }
             });
         }
     );
@@ -1175,17 +1179,20 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Sync monogram state from Firebase settings when they load
     useEffect(() => {
         if (!hostModeEnabled && engine.settings.monogramMode !== undefined && engine.settings.monogramEnabled !== undefined) {
+            const savedRenderScheme = engine.settings.monogramOptions?.renderScheme;
             // Only update if different from current state
             if (monogramSystem.options.mode !== engine.settings.monogramMode ||
-                monogramSystem.options.enabled !== engine.settings.monogramEnabled) {
+                monogramSystem.options.enabled !== engine.settings.monogramEnabled ||
+                (savedRenderScheme && monogramSystem.options.renderScheme !== savedRenderScheme)) {
                 monogramSystem.setOptions(prev => ({
                     ...prev,
                     mode: engine.settings.monogramMode || prev.mode,
-                    enabled: engine.settings.monogramEnabled ?? prev.enabled
+                    enabled: engine.settings.monogramEnabled ?? prev.enabled,
+                    renderScheme: savedRenderScheme || prev.renderScheme
                 }));
             }
         }
-    }, [engine.settings.monogramMode, engine.settings.monogramEnabled, hostModeEnabled]);
+    }, [engine.settings.monogramMode, engine.settings.monogramEnabled, engine.settings.monogramOptions?.renderScheme, hostModeEnabled]);
 
     // Helper function to generate talking mouth animation
     const generateTalkingMouth = useCallback((elapsed: number): number => {
@@ -2631,9 +2638,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';
                             if ((!char || char.trim() === '') && !engine.commandData[textKey]) {
                                 // Point-based: render as filled rectangle (pixel-like)
+                                // Use GRID_CELL_SPAN height to match character height
                                 ctx.fillStyle = cell.color;
                                 ctx.globalAlpha = cell.intensity; // Use intensity for alpha blending
-                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                                 ctx.globalAlpha = 1.0; // Reset alpha
                             }
                         }
