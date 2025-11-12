@@ -1742,29 +1742,31 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         const tasksIndex = new Map<string, boolean>();
         const completedTasksIndex = new Map<string, boolean>();
 
-        for (const taskKey in engine.worldData) {
-            if (taskKey.startsWith('task_')) {
+        for (const labelKey in engine.worldData) {
+            if (labelKey.startsWith('label_')) {
                 try {
-                    const taskData = JSON.parse(engine.worldData[taskKey] as string);
-                    if (!taskData.completed) {
-                        // Index every position within active task bounds
-                        for (let y = taskData.startY; y <= taskData.endY; y++) {
-                            for (let x = taskData.startX; x <= taskData.endX; x++) {
-                                const key = `${x},${y}`;
-                                tasksIndex.set(key, true);
+                    const labelData = JSON.parse(engine.worldData[labelKey] as string);
+                    if (labelData.type === 'task') {
+                        if (!labelData.completed) {
+                            // Index every position within active task bounds
+                            for (let y = labelData.startY; y <= labelData.endY; y++) {
+                                for (let x = labelData.startX; x <= labelData.endX; x++) {
+                                    const key = `${x},${y}`;
+                                    tasksIndex.set(key, true);
+                                }
                             }
-                        }
-                    } else {
-                        // Index every position within completed task bounds
-                        for (let y = taskData.startY; y <= taskData.endY; y++) {
-                            for (let x = taskData.startX; x <= taskData.endX; x++) {
-                                const key = `${x},${y}`;
-                                completedTasksIndex.set(key, true);
+                        } else {
+                            // Index every position within completed task bounds
+                            for (let y = labelData.startY; y <= labelData.endY; y++) {
+                                for (let x = labelData.startX; x <= labelData.endX; x++) {
+                                    const key = `${x},${y}`;
+                                    completedTasksIndex.set(key, true);
+                                }
                             }
                         }
                     }
                 } catch (e) {
-                    // Skip invalid task data
+                    // Skip invalid label data
                 }
             }
         }
@@ -2321,7 +2323,15 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
         } = engine.getEffectiveCharDims(currentZoom);
 
         // Update tasks index if task data has changed (check values, not just keys)
-        const taskEntries = Object.entries(engine.worldData).filter(([k]) => k.startsWith('task_'));
+        const taskEntries = Object.entries(engine.worldData).filter(([k, v]) => {
+            if (!k.startsWith('label_')) return false;
+            try {
+                const data = JSON.parse(v as string);
+                return data.type === 'task';
+            } catch (e) {
+                return false;
+            }
+        });
         const currentTasksData = JSON.stringify(taskEntries);
         if (currentTasksData !== lastTasksDataRef.current) {
             updateTasksIndex();
@@ -2694,21 +2704,35 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             }
         }
 
-        // === Render Task Highlights ===
+        // === Unified Label Rendering with Viewport Culling ===
         for (const key in engine.worldData) {
-            if (key.startsWith('task_')) {
-                try {
-                    const taskData = JSON.parse(engine.worldData[key] as string);
-                    const { startX, endX, startY, endY, color, completed } = taskData;
+            if (!key.startsWith('label_')) continue;
 
-                    // Use provided color or default to textColor (full opacity)
-                    const taskColor = color || engine.textColor;
+            try {
+                const labelData = JSON.parse(engine.worldData[key] as string);
+                const { type, startX, endX, startY, endY, x, y, color } = labelData;
 
-                    // Render task highlight (only if not completed)
-                    if (!completed) {
-                        for (let y = startY; y <= endY; y += GRID_CELL_SPAN) {
-                            for (let x = startX; x <= endX; x++) {
-                                if (x >= startWorldX - 5 && x <= endWorldX + 5 && y >= startWorldY - 5 && y <= endWorldY + 5) {
+                // Viewport culling: skip if label is outside visible area  
+                const labelMinX = startX ?? x;
+                const labelMaxX = endX ?? x;
+                const labelMinY = startY ?? y;
+                const labelMaxY = endY ?? y;
+
+                if (labelMaxX < startWorldX - 5 || labelMinX > endWorldX + 5 ||
+                    labelMaxY < startWorldY - 5 || labelMinY > endWorldY + 5) {
+                    continue; // Skip labels outside viewport
+                }
+
+                // Type-based rendering
+                switch (type) {
+                    case 'task': {
+                        const taskColor = color || engine.textColor;
+                        const { completed } = labelData;
+
+                        if (!completed) {
+                            // Render task highlight
+                            for (let y = startY; y <= endY; y += GRID_CELL_SPAN) {
+                                for (let x = startX; x <= endX; x++) {
                                     const bottomScreenPos = engine.worldToScreen(x, y, currentZoom, currentOffset);
                                     const topScreenPos = engine.worldToScreen(x, y - 1, currentZoom, currentOffset);
                                     if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
@@ -2718,48 +2742,30 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                     }
                                 }
                             }
-                        }
-                    }
-
-                    // Render strikethrough if completed (using engine's text color)
-                    if (completed) {
-                        for (let y = startY; y <= endY; y += GRID_CELL_SPAN) {
-                            const strikeY = y; // Center strikethrough vertically in the cell
-                            if (strikeY >= startWorldY - 5 && strikeY <= endWorldY + 5) {
-                                const leftScreenPos = engine.worldToScreen(startX, strikeY, currentZoom, currentOffset);
-                                const rightScreenPos = engine.worldToScreen(endX + 1, strikeY, currentZoom, currentOffset);
+                        } else {
+                            // Render strikethrough if completed
+                            for (let y = startY; y <= endY; y += GRID_CELL_SPAN) {
+                                const leftScreenPos = engine.worldToScreen(startX, y, currentZoom, currentOffset);
+                                const rightScreenPos = engine.worldToScreen(endX + 1, y, currentZoom, currentOffset);
 
                                 if (leftScreenPos.x < cssWidth + effectiveCharWidth && rightScreenPos.x > -effectiveCharWidth) {
                                     ctx.strokeStyle = engine.textColor;
                                     ctx.lineWidth = 2;
-                                    const strikeThrough = leftScreenPos.y;
                                     ctx.beginPath();
-                                    ctx.moveTo(Math.max(0, leftScreenPos.x), strikeThrough);
-                                    ctx.lineTo(Math.min(cssWidth, rightScreenPos.x), strikeThrough);
+                                    ctx.moveTo(Math.max(0, leftScreenPos.x), leftScreenPos.y);
+                                    ctx.lineTo(Math.min(cssWidth, rightScreenPos.x), leftScreenPos.y);
                                     ctx.stroke();
                                 }
                             }
                         }
+                        break;
                     }
-                } catch (e) {
-                    // Skip invalid task data
-                }
-            }
-        }
 
-        // === Render Links (underline) ===
-        for (const key in engine.worldData) {
-            if (key.startsWith('link_')) {
-                try {
-                    const linkData = JSON.parse(engine.worldData[key] as string);
-                    const { startX, endX, startY, endY, color } = linkData;
+                    case 'link': {
+                        const linkColor = color || engine.textColor;
 
-                    // Use provided color or default to textColor
-                    const linkColor = color || engine.textColor;
-
-                    // Render underline for each row of the link
-                    for (let y = startY; y <= endY; y++) {
-                        if (y >= startWorldY - 5 && y <= endWorldY + 5) {
+                        // Render underline for each row
+                        for (let y = startY; y <= endY; y++) {
                             const leftScreenPos = engine.worldToScreen(startX, y, currentZoom, currentOffset);
                             const rightScreenPos = engine.worldToScreen(endX + 1, y, currentZoom, currentOffset);
 
@@ -2773,10 +2779,15 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 ctx.stroke();
                             }
                         }
+                        break;
                     }
-                } catch (e) {
-                    // Skip invalid link data
+
+                    case 'landmark':
+                        // Landmarks rendered separately in waypoint arrow section
+                        break;
                 }
+            } catch (e) {
+                // Skip invalid label data
             }
         }
 
@@ -4970,7 +4981,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                                 break;
                             }
                         } catch (e) {}
-                    } else if (key.startsWith('task_')) {
+                    } else if (key.startsWith('label_')) {
+                        const labelData = JSON.parse(engine.worldData[key] as string);
+                        if (labelData.type !== 'task') continue;
                         try {
                             const taskData = JSON.parse(engine.worldData[key] as string);
                             // Check for actual 2D overlap (both X and Y)
@@ -6490,7 +6503,9 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     } catch (e) {
                         // Skip invalid link data
                     }
-                } else if (key.startsWith('task_')) {
+                } else if (key.startsWith('label_')) {
+                    const labelData = JSON.parse(engine.worldData[key] as string);
+                    if (labelData.type !== 'task') continue;
                     try {
                         const taskData = JSON.parse(engine.worldData[key] as string);
                         if (baseX >= taskData.startX && baseX <= taskData.endX &&
