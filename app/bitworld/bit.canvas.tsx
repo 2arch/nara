@@ -383,12 +383,13 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
         const mailColor = 'rgba(255, 193, 7, 0.15)';
         ctx.fillStyle = mailColor;
 
-        for (let worldY = startY; worldY <= endY; worldY++) {
+        for (let worldY = startY; worldY <= endY; worldY += GRID_CELL_SPAN) {
             for (let worldX = startX; worldX <= endX; worldX++) {
-                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                if (screenPos.x >= -effectiveCharWidth && screenPos.x <= cssWidth &&
-                    screenPos.y >= -effectiveCharHeight && screenPos.y <= cssHeight) {
-                    ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+                if (bottomScreenPos.x >= -effectiveCharWidth && bottomScreenPos.x <= cssWidth &&
+                    topScreenPos.y >= -effectiveCharHeight && bottomScreenPos.y <= cssHeight) {
+                    ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                 }
             }
         }
@@ -2226,12 +2227,13 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             ctx.fillStyle = overlayColor;
 
             for (const blockPos of textBlock) {
-                const blockScreenPos = engine.worldToScreen(blockPos.x, blockPos.y, currentZoom, currentOffset);
+                const blockBottomScreenPos = engine.worldToScreen(blockPos.x, blockPos.y, currentZoom, currentOffset);
+                const blockTopScreenPos = engine.worldToScreen(blockPos.x, blockPos.y - 1, currentZoom, currentOffset);
 
                 // Only draw if visible on screen
-                if (blockScreenPos.x >= -effectiveCharWidth && blockScreenPos.x <= cssWidth &&
-                    blockScreenPos.y >= -effectiveCharHeight && blockScreenPos.y <= cssHeight) {
-                    ctx.fillRect(blockScreenPos.x, blockScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                if (blockBottomScreenPos.x >= -effectiveCharWidth && blockBottomScreenPos.x <= cssWidth &&
+                    blockTopScreenPos.y >= -effectiveCharHeight && blockBottomScreenPos.y <= cssHeight) {
+                    ctx.fillRect(blockTopScreenPos.x, blockTopScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                 }
             }
             
@@ -5105,7 +5107,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const blockMinX = textBlock ? textBlock.minX : minX;
                 const blockMaxX = textBlock ? textBlock.maxX : maxX;
 
-                for (let worldY = minY; worldY <= maxY; worldY++) {
+                for (let worldY = minY; worldY <= maxY; worldY += GRID_CELL_SPAN) {
                     const isFirstLine = worldY === Math.floor(start.y);
                     const isLastLine = worldY === Math.floor(end.y);
 
@@ -5159,7 +5161,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 }
             } else {
                 // Square/block selection mode: fill all cells in the rectangular area
-                for (let worldY = minY; worldY <= maxY; worldY++) {
+                for (let worldY = minY; worldY <= maxY; worldY += GRID_CELL_SPAN) {
                     for (let worldX = minX; worldX <= maxX; worldX++) {
                         // Get both bottom and top positions to span full character height
                         const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
