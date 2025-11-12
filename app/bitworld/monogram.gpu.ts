@@ -587,17 +587,24 @@ const useMonogramGPU = (
                 lastBoundsRef.current.endY !== endWorldY;
 
             if (boundsChanged && !isComputingRef.current) {
-                // Trigger async GPU compute
+                // Trigger async GPU compute (don't await - it runs in background)
                 computePatternGPU(startWorldX, startWorldY, endWorldX, endWorldY, accentColor);
             }
 
-            // Return cached pattern if available
-            if (patternCacheRef.current && Object.keys(patternCacheRef.current).length > 0) {
+            // Return cached pattern if available and bounds match
+            if (patternCacheRef.current &&
+                lastBoundsRef.current &&
+                lastBoundsRef.current.startX === startWorldX &&
+                lastBoundsRef.current.startY === startWorldY &&
+                lastBoundsRef.current.endX === endWorldX &&
+                lastBoundsRef.current.endY === endWorldY &&
+                Object.keys(patternCacheRef.current).length > 0) {
                 return patternCacheRef.current;
             }
+            // If cache not available yet, fall through to CPU
         }
 
-        // CPU fallback (or first frame before GPU completes)
+        // CPU fallback (used on first frame, unsupported browsers, or while GPU computes)
         const pattern: MonogramPattern = {};
         for (let worldY = Math.floor(startWorldY); worldY <= Math.ceil(endWorldY); worldY++) {
             for (let worldX = Math.floor(startWorldX); worldX <= Math.ceil(endWorldX); worldX++) {
