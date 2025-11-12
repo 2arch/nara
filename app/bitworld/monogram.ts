@@ -1459,14 +1459,14 @@ const useMonogramSystem = (
                 intensity = Math.max(intensity, trailEffect);
 
                 // Skip very low intensity cells for performance
-                // For point-based rendering, use minimal threshold to preserve smooth gradients
+                // For point-based rendering, no threshold - render all intensities for perfectly smooth gradients
                 // For character-based, use higher threshold since discrete characters need visibility
                 let minThreshold: number;
                 if (trailEffect > 0) {
                     minThreshold = 0.05;
                 } else if (options.renderScheme === 'point-based') {
-                    // Point-based: very low threshold for smooth gradients
-                    minThreshold = 0.02;
+                    // Point-based: NO threshold - render even 0.001 intensity for perfect smoothness
+                    minThreshold = 0;
                 } else {
                     // Character-span: higher threshold for visible characters
                     minThreshold = (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'road') ? 0.15 : 0.1;
