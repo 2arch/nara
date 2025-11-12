@@ -2652,10 +2652,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 const worldY = parseInt(yStr, 10);
                 
                 if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                    if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && 
-                        screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-                        
+                    const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                    const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+                    if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
+                        topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
+
                         const cell = monogramPattern[key];
 
                         // Only render if there's no regular text at this position
@@ -2669,7 +2670,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                             // Set color and render character
                             ctx.fillStyle = cell.color;
                             // No transparency for monogram patterns - render at full opacity
-                            ctx.fillText(cell.char, screenPos.x, screenPos.y + verticalTextOffset);
+                            ctx.fillText(cell.char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
 
                             // Restore original font
                             ctx.font = `${effectiveFontSize}px ${fontFamily}`;
