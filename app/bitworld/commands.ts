@@ -114,8 +114,11 @@ interface UseCommandSystemProps {
     triggerTutorialFlow?: () => void;
     onCommandExecuted?: (command: string, args: string[]) => void;
     cancelComposition?: () => void; // Callback to cancel IME composition
-    monogramSystem?: { // Monogram system for controlling face masks
+    monogramSystem?: { // Monogram system for controlling patterns and render schemes
         updateOption: <K extends keyof any>(key: K, value: any) => void;
+        options?: {
+            enabled?: boolean;
+        };
     };
     selectedNoteKey?: string | null; // Currently selected note
     selectedPatternKey?: string | null; // Currently selected pattern
@@ -195,7 +198,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'unpublish': 'Unpublish your canvas. Makes your canvas private again. It will no longer be accessible at the public URL.',
     'share': 'Get a shareable link to your canvas. Copy this link to share your canvas with others. If published, they can view it; if private, you control access.',
     'spawn': 'Set your spawn point. This is where you\'ll start when you open this canvas. Type /spawn to set it to your current position.',
-    'monogram': 'Add your monogram to the canvas. Places your personal identifier at the current cursor position.',
+    'monogram': 'Control monogram patterns. /monogram to toggle on/off. /monogram pixel for point-based rendering (high-resolution). /monogram text for character-span rendering (aligned with text). /monogram [mode] to switch pattern modes: clear, perlin, road, geometry3d, face3d, nara.',
     'signin': 'Sign in to your Nara account. Required for saving work, publishing canvases, and accessing AI features.',
     'signout': 'Sign out of your Nara account. You\'ll return to read-only mode.',
     'account': 'Manage your account settings. Use /account reset to reset your password.',
@@ -683,6 +686,19 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     .map(camera => `cam ${camera}`);
             }
             return CAMERA_COMMANDS.map(camera => `cam ${camera}`);
+        }
+
+        if (lowerInput === 'monogram') {
+            const parts = input.toLowerCase().split(' ');
+            const MONOGRAM_OPTIONS = ['pixel', 'text', 'off', 'clear', 'perlin', 'road', 'geometry3d', 'face3d', 'nara'];
+            if (parts.length > 1) {
+                // Show monogram options that match the input
+                const monogramInput = parts[1];
+                return MONOGRAM_OPTIONS
+                    .filter(option => option.startsWith(monogramInput))
+                    .map(option => `monogram ${option}`);
+            }
+            return MONOGRAM_OPTIONS.map(option => `monogram ${option}`);
         }
 
         if (lowerInput === 'upload') {
@@ -2748,6 +2764,42 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         // Handle monogram command
         if (commandToExecute.startsWith('monogram')) {
             const args = inputParts.slice(1);
+
+            // Handle render scheme switching
+            if (args.length > 0 && monogramSystem) {
+                const option = args[0].toLowerCase();
+
+                if (option === 'pixel') {
+                    // Switch to point-based rendering
+                    monogramSystem.updateOption('renderScheme', 'point-based');
+                    setDialogueWithRevert('Monogram: point-based rendering (pixel mode)', setDialogueText);
+                } else if (option === 'text') {
+                    // Switch to character-span rendering
+                    monogramSystem.updateOption('renderScheme', 'character-span');
+                    setDialogueWithRevert('Monogram: character-span rendering (text mode)', setDialogueText);
+                } else if (['clear', 'perlin', 'road', 'geometry3d', 'face3d', 'nara'].includes(option)) {
+                    // Switch monogram mode
+                    monogramSystem.updateOption('mode', option as any);
+                    monogramSystem.updateOption('enabled', true);
+                    setDialogueWithRevert(`Monogram mode: ${option}`, setDialogueText);
+                } else if (option === 'off') {
+                    // Turn off monogram
+                    monogramSystem.updateOption('enabled', false);
+                    setDialogueWithRevert('Monogram disabled', setDialogueText);
+                } else {
+                    // Toggle monogram on/off
+                    const currentEnabled = monogramSystem.options?.enabled ?? false;
+                    monogramSystem.updateOption('enabled', !currentEnabled);
+                    setDialogueWithRevert(`Monogram ${!currentEnabled ? 'enabled' : 'disabled'}`, setDialogueText);
+                }
+            } else {
+                // No args - toggle monogram on/off
+                if (monogramSystem) {
+                    const currentEnabled = monogramSystem.options?.enabled ?? false;
+                    monogramSystem.updateOption('enabled', !currentEnabled);
+                    setDialogueWithRevert(`Monogram ${!currentEnabled ? 'enabled' : 'disabled'}`, setDialogueText);
+                }
+            }
 
             // Clear command mode
             setCommandState({

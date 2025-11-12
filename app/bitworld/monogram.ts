@@ -13,6 +13,11 @@ interface MonogramTrailPosition {
 // --- Monogram Pattern Types ---
 export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'geometry3d' | 'face3d' | 'road';
 
+// Rendering scheme for monogram patterns
+export type MonogramRenderScheme =
+    | 'character-span'  // Align to GRID_CELL_SPAN boundaries, render as spanning characters
+    | 'point-based';    // Render at base cell resolution for pixel-like effects
+
 // Label position interface for road mode
 export interface LabelPosition {
     x: number;
@@ -62,6 +67,8 @@ export interface MonogramOptions {
     complexity: number; // Pattern complexity (0.1 - 2.0)
     colorShift: number; // Color phase shift (0 - 6.28)
     enabled: boolean;
+    // Rendering scheme
+    renderScheme: MonogramRenderScheme; // How to render patterns (character-span vs point-based)
     // 3D geometry options
     geometryType: GeometryType;
     customGeometry?: Geometry3D; // For loading custom 3D files
@@ -99,6 +106,7 @@ const useMonogramSystem = (
             complexity: 1.0,
             colorShift: 0,
             enabled: false,
+            renderScheme: 'character-span', // Default to character-based rendering
             geometryType: 'octahedron',
             interactiveTrails: true,
             trailIntensity: 1.0,
@@ -310,9 +318,9 @@ const useMonogramSystem = (
         const complexity = options.complexity;
         const scale = 1.2 * complexity;
 
-        // Normalized coordinates (y scaled by 1/gridCellSpan for square grid aspect ratio)
+        // Normalized coordinates (1:1 cells provide natural square aspect ratio)
         const nx = x * 0.02;
-        const ny = (y / gridCellSpan) * 0.02;
+        const ny = y * 0.02;
         
         // Create flowing distortion using layered noise
         const flow1 = perlinNoise(nx * scale + time * 2, ny * scale + time);
@@ -541,18 +549,13 @@ const useMonogramSystem = (
             const dx = x2 - x1;
             const dy = y2 - y1;
             const len = Math.sqrt(dx * dx + dy * dy);
-            
+
             if (len > 0) {
-                // Scale y by 1/gridCellSpan for square grid aspect ratio
-                const scaledY = y / gridCellSpan;
-                const scaledY1 = y1 / gridCellSpan;
-                const scaledY2 = y2 / gridCellSpan;
-                const scaledDy = scaledY2 - scaledY1;
-                const scaledLen = Math.sqrt(dx * dx + scaledDy * scaledDy);
-                const t = Math.max(0, Math.min(1, ((x - x1) * dx + (scaledY - scaledY1) * scaledDy) / (scaledLen * scaledLen)));
+                // Calculate distance with 1:1 cell aspect ratio
+                const t = Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / (len * len)));
                 const projX = x1 + t * dx;
                 const projY = y1 + t * dy;
-                const distance = Math.sqrt((x - projX) ** 2 + ((y / gridCellSpan) - (projY / gridCellSpan)) ** 2);
+                const distance = Math.sqrt((x - projX) ** 2 + (y - projY) ** 2);
                 
                 if (distance < minDistance) {
                     minDistance = distance;
@@ -1329,20 +1332,15 @@ const useMonogramSystem = (
             const dx = nextPos.x - currentPos.x;
             const dy = nextPos.y - currentPos.y;
             const segmentLength = Math.sqrt(dx * dx + dy * dy);
-            
+
             if (segmentLength > 0) {
-                // Project point onto line segment (scale y by 1/gridCellSpan for square grid aspect ratio)
-                const scaledY = y / gridCellSpan;
-                const scaledCurrentPosY = currentPos.y / gridCellSpan;
-                const scaledNextPosY = nextPos.y / gridCellSpan;
-                const scaledDy = scaledNextPosY - scaledCurrentPosY;
-                const scaledSegmentLength = Math.sqrt(dx * dx + scaledDy * scaledDy);
-                const t = Math.max(0, Math.min(1, ((x - currentPos.x) * dx + (scaledY - scaledCurrentPosY) * scaledDy) / (scaledSegmentLength * scaledSegmentLength)));
+                // Project point onto line segment (1:1 cell aspect ratio)
+                const t = Math.max(0, Math.min(1, ((x - currentPos.x) * dx + (y - currentPos.y) * dy) / (segmentLength * segmentLength)));
                 const projX = currentPos.x + t * dx;
                 const projY = currentPos.y + t * dy;
 
                 // Distance from current position to line segment
-                const distance = Math.sqrt((x - projX) ** 2 + ((y / gridCellSpan) - (projY / gridCellSpan)) ** 2);
+                const distance = Math.sqrt((x - projX) ** 2 + (y - projY) ** 2);
                 
                 // Trail width decreases with age (comet tail effect)
                 const ageFactor = 1 - (age / options.trailFadeMs);
@@ -1403,10 +1401,20 @@ const useMonogramSystem = (
         // For NARA, Macintosh, Loading, Road, Terrain, and 3D geometry modes, use finer sampling for better quality
         const stepX = (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'road') ? 1 : Math.max(1, Math.floor(3 - options.complexity * 2));
 
-        // Y-axis must align to gridCellSpan since each monogram cell spans multiple grid cells vertically
-        const startY = Math.floor(startWorldY / gridCellSpan) * gridCellSpan;
+        // Y-axis alignment depends on render scheme
+        let startY: number;
+        let stepY: number;
+        if (options.renderScheme === 'character-span') {
+            // Character-span: align to gridCellSpan boundaries (y = 0, 2, 4, 6, ...)
+            startY = Math.floor(startWorldY / gridCellSpan) * gridCellSpan;
+            stepY = gridCellSpan;
+        } else {
+            // Point-based: render at every base cell (y = 0, 1, 2, 3, ...)
+            startY = Math.floor(startWorldY);
+            stepY = 1;
+        }
 
-        for (let worldY = startY; worldY <= Math.ceil(endWorldY); worldY += gridCellSpan) {
+        for (let worldY = startY; worldY <= Math.ceil(endWorldY); worldY += stepY) {
             for (let worldX = Math.floor(startWorldX); worldX <= Math.ceil(endWorldX); worldX += stepX) {
 
                 let rawValue: number;
@@ -1475,8 +1483,13 @@ const useMonogramSystem = (
                     color = getColorFromPalette(colorValue, options.mode, accentColor);
                 }
 
-                // For NARA, Macintosh, Loading, Road, Terrain, and geometry3d modes, only set the exact position to avoid grid artifacts
-                if (options.mode === 'nara' || options.mode === 'geometry3d' || options.mode === 'face3d' || options.mode === 'road') {
+                // For point-based, NARA, geometry3d, face3d, and road modes, only set exact position
+                // For character-span with other modes, fill if stepX > 1
+                if (options.renderScheme === 'point-based' ||
+                    options.mode === 'nara' ||
+                    options.mode === 'geometry3d' ||
+                    options.mode === 'face3d' ||
+                    options.mode === 'road') {
                     const key = `${worldX},${worldY}`;
                     pattern[key] = {
                         char,
@@ -1484,8 +1497,8 @@ const useMonogramSystem = (
                         intensity
                     };
                 } else {
-                    // Fill in pattern around the calculated point if stepX > 1
-                    for (let dy = 0; dy < stepX && worldY + dy <= Math.ceil(endWorldY); dy++) {
+                    // Fill in pattern around the calculated point if stepX > 1 (character-span mode only)
+                    for (let dy = 0; dy < stepX && worldY + dy <= Math.ceil(endWorldY); dy += stepY) {
                         for (let dx = 0; dx < stepX && worldX + dx <= Math.ceil(endWorldX); dx++) {
                             const key = `${worldX + dx},${worldY + dy}`;
                             pattern[key] = {
