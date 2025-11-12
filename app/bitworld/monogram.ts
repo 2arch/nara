@@ -329,17 +329,19 @@ const useMonogramSystem = (
         // Combine flows for complex movement
         const dx = nx + flow1 * 0.3 + flow2 * 0.1;
         const dy = ny + flow2 * 0.3 - flow1 * 0.1;
-        
+
         // Sample noise at distorted position for intensity
-        const intensity1 = perlinNoise(dx * 5, dy * 5);
-        const intensity2 = perlinNoise(dx * 8 + time, dy * 8);
-        
+        // Use lower frequencies for smoother, more continuous gradients
+        const intensity1 = perlinNoise(dx * 2, dy * 2);  // Reduced from 5x to 2x
+        const intensity2 = perlinNoise(dx * 3 + time, dy * 3);  // Reduced from 8x to 3x
+
         // Combine intensities and normalize
         const rawIntensity = (intensity1 + intensity2 + 2) / 4;
-        
+
         // Add some temporal variation for more organic movement
-        const temporalWave = Math.sin(time * 0.5 + nx * 3 + ny * 2) * 0.1 + 0.9;
-        
+        // Reduced amplitude for smoother transitions
+        const temporalWave = Math.sin(time * 0.5 + nx * 2 + ny * 1.5) * 0.05 + 0.95;
+
         return Math.max(0, Math.min(1, rawIntensity * temporalWave));
     }, [options.complexity, perlinNoise]);
 
