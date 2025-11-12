@@ -4552,9 +4552,12 @@ export function useWorldEngine({
                                     }
                                 }
 
-                                // Create task data
-                                const taskKey = `task_${normalized.startX},${normalized.startY}_${Date.now()}`;
-                                const taskData: any = {
+                                // Create task data using unified label schema
+                                const labelKey = `label_${normalized.startX},${normalized.startY}_${Date.now()}`;
+                                const labelData: any = {
+                                    type: 'task',
+                                    x: normalized.startX,
+                                    y: normalized.startY,
                                     startX: normalized.startX,
                                     endX: normalized.endX,
                                     startY: normalized.startY,
@@ -4565,13 +4568,13 @@ export function useWorldEngine({
 
                                 // Only save color if explicitly provided
                                 if (hexColor) {
-                                    taskData.color = hexColor;
+                                    labelData.color = hexColor;
                                 }
 
                                 // Store task in worldData
                                 setWorldData(prev => ({
                                     ...prev,
-                                    [taskKey]: JSON.stringify(taskData)
+                                    [labelKey]: JSON.stringify(labelData)
                                 }));
 
                                 const width = normalized.endX - normalized.startX + 1;
@@ -4604,9 +4607,12 @@ export function useWorldEngine({
                                     validUrl = 'https://' + url;
                                 }
 
-                                // Create link data
-                                const linkKey = `link_${normalized.startX},${normalized.startY}_${Date.now()}`;
-                                const linkData: any = {
+                                // Create link data using unified label schema
+                                const labelKey = `label_${normalized.startX},${normalized.startY}_${Date.now()}`;
+                                const labelData: any = {
+                                    type: 'link',
+                                    x: normalized.startX,
+                                    y: normalized.startY,
                                     startX: normalized.startX,
                                     endX: normalized.endX,
                                     startY: normalized.startY,
@@ -4620,14 +4626,14 @@ export function useWorldEngine({
                                     const colorArg = exec.args[1];
                                     const hexColor = (COLOR_MAP[colorArg.toLowerCase()] || colorArg).toUpperCase();
                                     if (/^#[0-9A-F]{6}$/i.test(hexColor)) {
-                                        linkData.color = hexColor;
+                                        labelData.color = hexColor;
                                     }
                                 }
 
                                 // Store link in worldData
                                 setWorldData(prev => ({
                                     ...prev,
-                                    [linkKey]: JSON.stringify(linkData)
+                                    [labelKey]: JSON.stringify(labelData)
                                 }));
 
                                 const width = normalized.endX - normalized.startX + 1;
@@ -5266,359 +5272,6 @@ export function useWorldEngine({
                             modeText = 'Camera default mode: cursor will stay in view';
                     }
                     setDialogueWithRevert(modeText, setDialogueText);
-                } else if (exec.command === 'bound') {
-                    
-                    // Create bounded region entry spanning the selected area
-                    let selection = getNormalizedSelection();
-                    
-                    // Check for single-cell selection on existing bound
-                    let isOnExistingBound = false;
-                    if (selection && selection.startX === selection.endX && selection.startY === selection.endY) {
-                        const cursorX = selection.startX;
-                        const cursorY = selection.startY;
-                        
-                        // Check if this single cell is on an existing bound
-                        for (const key in worldData) {
-                            if (key.startsWith('bound_')) {
-                                try {
-                                    const boundData = JSON.parse(worldData[key] as string);
-                                    
-                                    const withinBounds = (cursorX >= boundData.startX && cursorX <= boundData.endX &&
-                                                         cursorY >= boundData.startY && cursorY <= boundData.endY) ||
-                                                        (boundData.endY < cursorY && 
-                                                         cursorX >= boundData.startX && cursorX <= boundData.endX &&
-                                                         (boundData.maxY === null || boundData.maxY === undefined || cursorY <= boundData.maxY));
-                                    
-                                    if (withinBounds) {
-                                        isOnExistingBound = true;
-                                        break;
-                                    }
-                                } catch (e) {
-                                    // Skip invalid bound data
-                                }
-                            }
-                        }
-                        
-                        if (isOnExistingBound) {
-                            // Clear selection to trigger update mode
-                            setSelectionStart(null);
-                            setSelectionEnd(null);
-                            selection = null;
-                        }
-                    }
-                    
-                    if (selection) {
-                        // Multi-cell selection - proceed with creation (unless it's single cell not on a bound)
-                        if (selection.startX === selection.endX && selection.startY === selection.endY && !isOnExistingBound) {
-                            // Single cell not on existing bound - reject
-                            setDialogueWithRevert(`Cannot create bound from single cell. Select at least 2 cells.`, setDialogueText);
-                            setSelectionStart(null);
-                            setSelectionEnd(null);
-                            return true;
-                        }
-                        
-                        // Check if selection fully encloses existing bounds OR includes their top bars
-                        const enclosedBounds: Array<{key: string, data: any}> = [];
-                        
-                        for (const key in worldData) {
-                            if (key.startsWith('bound_')) {
-                                try {
-                                    const boundData = JSON.parse(worldData[key] as string);
-                                    
-                                    // Check if this bound is fully enclosed by the selection
-                                    const fullyEncloses = selection.startX <= boundData.startX && 
-                                        selection.endX >= boundData.endX &&
-                                        selection.startY <= boundData.startY && 
-                                        selection.endY >= boundData.endY;
-                                    
-                                    // Special case: For infinite bounds, check if selection includes the top bar
-                                    const isInfiniteBound = boundData.maxY === null || boundData.maxY === undefined;
-                                    const includesTopBar = isInfiniteBound &&
-                                        selection.startX <= boundData.startX && 
-                                        selection.endX >= boundData.endX &&
-                                        selection.startY <= boundData.startY && 
-                                        selection.endY >= boundData.startY; // Just needs to include the top row
-                                    
-                                    // Also check if selection partially overlaps with the bound's top bar
-                                    const partiallyIncludesTopBar = boundData.startY >= selection.startY && 
-                                        boundData.startY <= selection.endY &&
-                                        ((boundData.startX >= selection.startX && boundData.startX <= selection.endX) ||
-                                         (boundData.endX >= selection.startX && boundData.endX <= selection.endX) ||
-                                         (selection.startX >= boundData.startX && selection.startX <= boundData.endX));
-                                    
-                                    if (fullyEncloses || includesTopBar || partiallyIncludesTopBar) {
-                                        enclosedBounds.push({key, data: boundData});
-                                    }
-                                } catch (e) {
-                                    // Skip invalid bound data
-                                }
-                            }
-                        }
-                        
-                        // Parse arguments: color (optional) and height (optional)
-                        let color = '#B0B0B0'; // Default heather gray background
-                        let height: number | null = null; // null means infinite
-                        
-                        if (exec.args.length > 0) {
-                            // First arg could be color or height
-                            const firstArg = exec.args[0];
-                            const parsedHeight = parseInt(firstArg, 10);
-                            
-                            if (!isNaN(parsedHeight)) {
-                                // First arg is a number, treat as height
-                                height = parsedHeight;
-                                // Check if there's a color as second arg
-                                if (exec.args.length > 1) {
-                                    color = exec.args[1];
-                                }
-                            } else {
-                                // First arg is color
-                                color = firstArg;
-                                // Check if there's a height as second arg
-                                if (exec.args.length > 1) {
-                                    const secondHeight = parseInt(exec.args[1], 10);
-                                    if (!isNaN(secondHeight)) {
-                                        height = secondHeight;
-                                    }
-                                }
-                            }
-                        }
-                        
-                        logger.debug('Using color:', color);
-                        logger.debug('Using height:', height);
-                        
-                        // Calculate maxY based on height
-                        // Height represents total rows from startY, not additional rows from endY
-                        const maxY = height !== null ? selection.startY + height - 1 : null;
-                        
-                        // If we found enclosed bounds, merge them into one
-                        if (enclosedBounds.length > 0) {
-                            
-                            // Remove all old bounds
-                            const newWorldData = { ...worldData };
-                            for (const {key} of enclosedBounds) {
-                                delete newWorldData[key];
-                            }
-                            
-                            // Extract title from topbar (characters on startY row within bound)
-                            let title = '';
-                            for (let x = selection.startX; x <= selection.endX; x++) {
-                                const key = `${x},${selection.startY}`;
-                                const charData = newWorldData[key];
-                                if (charData && !isImageData(charData)) {
-                                    const char = getCharacter(charData);
-                                    if (char && char.trim()) {
-                                        title += char;
-                                    }
-                                }
-                            }
-                            title = title.trim();
-
-                            // Create merged bound with new dimensions
-                            const noteData = {
-                                startX: selection.startX,
-                                startY: selection.startY,
-                                endX: selection.endX,
-                                endY: selection.endY,
-                                timestamp: Date.now(),
-                                contentType: 'bound',
-                                color: color, // Use new color
-                                title: title || undefined, // Only include title if non-empty
-                                ...(maxY !== undefined && maxY !== null && { maxY })
-                            };
-                            const noteKey = `note_${selection.startX}_${selection.startY}_${Date.now()}`;
-
-                            newWorldData[noteKey] = JSON.stringify(noteData);
-                            setWorldData(newWorldData);
-                            logger.debug('Created merged bound:', noteData);
-                            
-                            const mergeMsg = enclosedBounds.length > 1 ? 
-                                `Merged ${enclosedBounds.length} bounds` : 
-                                'Updated existing bound';
-                            const heightMsg = height !== null ? ` (height: ${height} rows)` : ' (infinite height)';
-                            setDialogueWithRevert(`${mergeMsg}${heightMsg}`, setDialogueText);
-                        } else {
-                            // Extract title from topbar (characters on startY row within bound)
-                            let title = '';
-                            for (let x = selection.startX; x <= selection.endX; x++) {
-                                const key = `${x},${selection.startY}`;
-                                const charData = worldData[key];
-                                if (charData && !isImageData(charData)) {
-                                    const char = getCharacter(charData);
-                                    if (char && char.trim()) {
-                                        title += char;
-                                    }
-                                }
-                            }
-                            title = title.trim();
-
-                            // Store bounded region as a single entry like labels
-                            const noteData = {
-                                startX: selection.startX,
-                                startY: selection.startY,
-                                endX: selection.endX,
-                                endY: selection.endY,
-                                timestamp: Date.now(),
-                                contentType: 'bound',
-                                color: color,
-                                title: title || undefined, // Only include title if non-empty
-                                ...(maxY !== undefined && maxY !== null && { maxY })
-                            };
-                            const noteKey = `note_${selection.startX}_${selection.startY}_${Date.now()}`;
-                            logger.debug('noteKey:', noteKey);
-                            logger.debug('noteData:', noteData);
-
-                            let newWorldData = { ...worldData };
-                            newWorldData[noteKey] = JSON.stringify(noteData);
-                            
-                            logger.debug('Setting worldData with new bound region');
-                            setWorldData(newWorldData);
-                            
-                            const heightMsg = height !== null ? ` (height: ${height} rows)` : ' (infinite height)';
-                            setDialogueWithRevert(`Bounded region created${heightMsg}`, setDialogueText);
-                        }
-                        
-                        // Clear the selection after creating/updating the bound
-                        logger.debug('Clearing selection');
-                        setSelectionStart(null);
-                        setSelectionEnd(null);
-                    } else {
-                        // No selection - check if cursor is in an existing bound to update it
-                        logger.debug('No selection found - checking for existing bound at cursor');
-                        const cursorX = cursorPos.x;
-                        const cursorY = cursorPos.y;
-                        let foundBoundKey: string | null = null;
-                        let foundBoundData: any = null;
-                        
-                        // Look through all bound_ entries to find one that contains the cursor
-                        for (const key in worldData) {
-                            if (key.startsWith('bound_')) {
-                                try {
-                                    const boundData = JSON.parse(worldData[key] as string);
-                                    
-                                    // Check if cursor is within the bounds of this region (considering maxY)
-                                    const withinOriginalBounds = cursorX >= boundData.startX && cursorX <= boundData.endX &&
-                                                               cursorY >= boundData.startY && cursorY <= boundData.endY;
-                                    
-                                    // Also check if cursor is in the column constraint area
-                                    const withinColumnConstraint = boundData.endY < cursorY && 
-                                                                  cursorX >= boundData.startX && cursorX <= boundData.endX &&
-                                                                  (boundData.maxY === null || boundData.maxY === undefined || cursorY <= boundData.maxY);
-                                    
-                                    if (withinOriginalBounds || withinColumnConstraint) {
-                                        foundBoundKey = key;
-                                        foundBoundData = boundData;
-                                        break;
-                                    }
-                                } catch (e) {
-                                    // Skip invalid bound data
-                                }
-                            }
-                        }
-                        
-                        if (foundBoundKey && foundBoundData) {
-                            // Update existing bound
-                            logger.debug('Found existing bound to update:', foundBoundKey, foundBoundData);
-                            
-                            // Parse arguments for update
-                            let newColor = foundBoundData.color; // Keep existing color by default
-                            let newHeight: number | null = null; // null means keep existing
-                            
-                            if (exec.args.length > 0) {
-                                // First arg could be color or height
-                                const firstArg = exec.args[0];
-                                const parsedHeight = parseInt(firstArg, 10);
-                                
-                                if (!isNaN(parsedHeight)) {
-                                    // First arg is a number, treat as height
-                                    newHeight = parsedHeight;
-                                    // Check if there's a color as second arg
-                                    if (exec.args.length > 1) {
-                                        newColor = exec.args[1];
-                                    }
-                                } else {
-                                    // First arg is color
-                                    newColor = firstArg;
-                                    // Check if there's a height as second arg
-                                    if (exec.args.length > 1) {
-                                        const secondHeight = parseInt(exec.args[1], 10);
-                                        if (!isNaN(secondHeight)) {
-                                            newHeight = secondHeight;
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // Calculate new maxY if height changed
-                            const newMaxY = newHeight !== null ? foundBoundData.startY + newHeight - 1 : foundBoundData.maxY;
-                            
-                            // Update the bound data
-                            const updatedBoundData = {
-                                ...foundBoundData,
-                                color: newColor,
-                                maxY: newMaxY
-                            };
-                            
-                            let newWorldData = { ...worldData };
-                            newWorldData[foundBoundKey] = JSON.stringify(updatedBoundData);
-                            setWorldData(newWorldData);
-                            
-                            const heightMsg = newHeight !== null ? ` (new height: ${newHeight} rows)` : '';
-                            setDialogueWithRevert(`Bounded region updated - color: ${newColor}${heightMsg}`, setDialogueText);
-                        } else {
-                            logger.debug('No bound found at cursor position');
-                            setDialogueWithRevert(`No region selected and no bound at cursor. Select an area first, then use /bound`, setDialogueText);
-                        }
-                    }
-                } else if (exec.command === 'unbound') {
-                    // Find and remove any bound that contains the cursor position
-                    const cursorX = cursorPos.x;
-                    const cursorY = cursorPos.y;
-                    let foundBound = false;
-                    let newWorldData = { ...worldData };
-                    
-                    logger.debug('Unbound command - cursor position:', cursorX, cursorY);
-                    logger.debug('Looking for bounds in worldData...');
-                    
-                    // Look through all bound_ entries to find one that contains the cursor
-                    for (const key in worldData) {
-                        if (key.startsWith('bound_')) {
-                            try {
-                                const boundData = JSON.parse(worldData[key] as string);
-                                logger.debug('Checking bound:', key, boundData);
-                                
-                                // Check if cursor is within the bounds of this region (considering maxY)
-                                const withinOriginalBounds = cursorX >= boundData.startX && cursorX <= boundData.endX &&
-                                                           cursorY >= boundData.startY && cursorY <= boundData.endY;
-                                
-                                // Also check if cursor is in the column constraint area (below the bound but within maxY)
-                                const withinColumnConstraint = boundData.endY < cursorY && 
-                                                              cursorX >= boundData.startX && cursorX <= boundData.endX &&
-                                                              (boundData.maxY === null || boundData.maxY === undefined || cursorY <= boundData.maxY);
-                                
-                                logger.debug('Within original bounds:', withinOriginalBounds);
-                                logger.debug('Within column constraint:', withinColumnConstraint);
-                                
-                                if (withinOriginalBounds || withinColumnConstraint) {
-                                    // Remove this bound
-                                    delete newWorldData[key];
-                                    foundBound = true;
-                                    logger.debug('Removing bound:', key, boundData);
-                                }
-                            } catch (e) {
-                                logger.error('Error parsing bound data:', key, e);
-                                // Skip invalid bound data
-                            }
-                        }
-                    }
-                    
-                    if (foundBound) {
-                        setWorldData(newWorldData);
-                        setDialogueWithRevert(`Bounded region removed`, setDialogueText);
-                    } else {
-                        logger.debug('No bound found at cursor position');
-                        setDialogueWithRevert(`No bounded region found at cursor position`, setDialogueText);
-                    }
                 } else if (exec.command === 'list') {
                     logger.debug('List command execution:', exec);
 
@@ -5739,55 +5392,6 @@ export function useWorldEngine({
                     } else {
                         setDialogueWithRevert(`No list found at cursor position`, setDialogueText);
                     }
-                } else if (exec.command === 'glitch') {
-                    // Create glitched region with 1:1 square cells by subdividing each cell vertically
-                    const selection = getNormalizedSelection();
-
-                    if (!selection) {
-                        setDialogueWithRevert(`Select a region to glitch (minimum 1x2)`, setDialogueText);
-                        return true;
-                    }
-
-                    const width = selection.endX - selection.startX + 1;
-                    const height = selection.endY - selection.startY + 1;
-
-                    // Validate minimum size (at least 1x2 - one row, two columns)
-                    if (width < 2 && height < 2) {
-                        setDialogueWithRevert(`Glitch region must be at least 1x2 (one row, two columns)`, setDialogueText);
-                        setSelectionStart(null);
-                        setSelectionEnd(null);
-                        return true;
-                    }
-
-                    const newWorldData = { ...worldData };
-
-                    // Remove any existing text in the selected region
-                    for (let y = selection.startY; y <= selection.endY; y++) {
-                        for (let x = selection.startX; x <= selection.endX; x++) {
-                            const key = `${x},${y}`;
-                            delete newWorldData[key];
-                        }
-                    }
-
-                    // Create glitch metadata entry to mark this region as glitched
-                    const noteData = {
-                        startX: selection.startX,
-                        startY: selection.startY,
-                        endX: selection.endX,
-                        endY: selection.endY,
-                        timestamp: Date.now(),
-                        contentType: 'glitch'
-                    };
-                    const noteKey = `note_${selection.startX},${selection.startY}_${Date.now()}`;
-                    newWorldData[noteKey] = JSON.stringify(noteData);
-
-                    setWorldData(newWorldData);
-
-                    // Clear selection
-                    setSelectionStart(null);
-                    setSelectionEnd(null);
-
-                    setDialogueWithRevert(`Region glitched (${width}x${height} → ${width}x${height*2} square cells)`, setDialogueText);
                 } else if (exec.command === 'upload') {
                     // Determine target note and bounds for upload
                     // Priority: 1) cursor inside note region, 2) exact selection match, 3) use selection
@@ -6735,58 +6339,6 @@ export function useWorldEngine({
                         }).catch(() => {
                             setDialogueWithRevert(`Could not summarize text`, setDialogueText);
                         });
-                    } else if (exec.command === 'bound') {
-                        
-                        // Create bounded region entry spanning the selected area
-                        const selection = getNormalizedSelection();
-                        
-                        if (selection) {
-                            const color = exec.args.length > 0 ? exec.args[0] : '#FFFF00'; // Default yellow background
-
-                            // Extract title from topbar (characters on startY row within bound)
-                            let title = '';
-                            for (let x = selection.startX; x <= selection.endX; x++) {
-                                const key = `${x},${selection.startY}`;
-                                const charData = worldData[key];
-                                if (charData && !isImageData(charData)) {
-                                    const char = getCharacter(charData);
-                                    if (char && char.trim()) {
-                                        title += char;
-                                    }
-                                }
-                            }
-                            title = title.trim();
-
-                            // Store bounded region as a single entry like labels
-                            const noteData = {
-                                startX: selection.startX,
-                                startY: selection.startY,
-                                endX: selection.endX,
-                                endY: selection.endY,
-                                timestamp: Date.now(),
-                                contentType: 'bound',
-                                color: color,
-                                title: title || undefined // Only include title if non-empty
-                            };
-                            const noteKey = `note_${selection.startX}_${selection.startY}_${Date.now()}`;
-                            logger.debug('noteKey:', noteKey);
-                            logger.debug('noteData:', noteData);
-
-                            let newWorldData = { ...worldData };
-                            newWorldData[noteKey] = JSON.stringify(noteData);
-                            
-                            logger.debug('Setting worldData with new bound region');
-                            setWorldData(newWorldData);
-                            setDialogueWithRevert(`Bounded region created`, setDialogueText);
-                            
-                            // Clear the selection after creating the bound
-                            logger.debug('Clearing selection');
-                            setSelectionStart(null);
-                            setSelectionEnd(null);
-                        } else {
-                            logger.debug('No selection found!');
-                            setDialogueWithRevert(`No region selected. Select an area first by clicking and dragging, then use /bound`, setDialogueText);
-                        }
                     } else if (exec.command === 'list') {
                         // Create scrollable list from selection
                         const selection = getNormalizedSelection();
