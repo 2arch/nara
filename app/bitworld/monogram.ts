@@ -532,10 +532,10 @@ const useMonogramSystem = (
             x3d = temp * cosZ - y3d * sinZ;
             y3d = temp * sinZ + y3d * cosZ;
             
-            // Simple perspective projection with aspect ratio correction
+            // Simple perspective projection - equal X and Y scaling for square aspect
             const distance = 500;
             const projX = centerX + (x3d * distance * 0.5) / (distance + z3d);
-            const projY = centerY + (y3d * distance * 0.25) / (distance + z3d);
+            const projY = centerY + (y3d * distance * 0.5) / (distance + z3d);
             
             return [projX, projY, z3d];
         });
@@ -554,7 +554,7 @@ const useMonogramSystem = (
             const len = Math.sqrt(dx * dx + dy * dy);
 
             if (len > 0) {
-                // Scale Y by 0.5 to stretch pattern vertically
+                // Scale Y by 0.5 for vertical stretching in distance calc
                 const scaledY = y * 0.5;
                 const scaledY1 = y1 * 0.5;
                 const scaledY2 = y2 * 0.5;
