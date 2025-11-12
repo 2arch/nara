@@ -1004,8 +1004,7 @@ export function useWorldEngine({
         // Simple scaling - adjust as needed
         const effectiveWidth = Math.max(1, Math.round(BASE_CHAR_WIDTH * zoom));
         const effectiveHeight = Math.max(1, Math.round(effectiveWidth * 1.0)); // Perfect 1:1 ratio (square cells)
-        // Font size matches the 2-cell span height for perfect grid alignment
-        const effectiveFontSize = Math.max(1, Math.round(effectiveWidth * GRID_CELL_SPAN));
+        const effectiveFontSize = Math.max(1, Math.round(effectiveWidth * 1.5));
 
         const dims = { width: effectiveWidth, height: effectiveHeight, fontSize: effectiveFontSize };
         charSizeCacheRef.current[zoom] = dims;
