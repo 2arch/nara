@@ -3078,9 +3078,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         ctx.shadowBlur = 0;
                         ctx.shadowOffsetX = 0;
                         ctx.shadowOffsetY = 0;
-                        // Render character spanning 2 cells (from top cell position)
-                        // Font is already sized to fill the 2-cell height properly
-                        renderText(ctx, char, topScreenPos.x, topScreenPos.y + effectiveCharHeight + verticalTextOffset);
+                        // Render character with baseline at bottom of 2-cell span
+                        renderText(ctx, char, bottomScreenPos.x, bottomScreenPos.y + effectiveCharHeight + verticalTextOffset);
                         ctx.shadowBlur = 0;
                     }
                 }
@@ -5510,24 +5509,28 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 // Calculate opacity based on age (1.0 to 0.0)
                 const opacity = 1 - (age / CURSOR_TRAIL_FADE_MS);
                 
-                const trailScreenPos = engine.worldToScreen(
-                    trailPos.x, trailPos.y, 
+                const trailBottomScreenPos = engine.worldToScreen(
+                    trailPos.x, trailPos.y,
                     currentZoom, currentOffset
                 );
-                
+                const trailTopScreenPos = engine.worldToScreen(
+                    trailPos.x, trailPos.y - 1,
+                    currentZoom, currentOffset
+                );
+
                 // Only draw if visible on screen
-                if (trailScreenPos.x >= -effectiveCharWidth && 
-                    trailScreenPos.x <= cssWidth && 
-                    trailScreenPos.y >= -effectiveCharHeight && 
-                    trailScreenPos.y <= cssHeight) {
-                    
-                    // Draw faded cursor rectangle using text accent color
+                if (trailBottomScreenPos.x >= -effectiveCharWidth &&
+                    trailBottomScreenPos.x <= cssWidth &&
+                    trailTopScreenPos.y >= -effectiveCharHeight &&
+                    trailBottomScreenPos.y <= cssHeight) {
+
+                    // Draw faded cursor rectangle spanning GRID_CELL_SPAN cells
                     ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, ${opacity})`;
                     ctx.fillRect(
-                        trailScreenPos.x,
-                        trailScreenPos.y,
+                        trailTopScreenPos.x,
+                        trailTopScreenPos.y,
                         effectiveCharWidth,
-                        effectiveCharHeight
+                        effectiveCharHeight * GRID_CELL_SPAN
                     );
                 }
             }
@@ -5565,8 +5568,8 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                         // Don't render the character at cursor position when composing - show preview instead
                         const char = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
                         ctx.fillStyle = CURSOR_TEXT_COLOR;
-                        // Render character spanning 2 cells (from top position)
-                        renderText(ctx, char, cursorTopScreenPos.x, cursorTopScreenPos.y + effectiveCharHeight + verticalTextOffset);
+                        // Render character with baseline at bottom of 2-cell span
+                        renderText(ctx, char, cursorBottomScreenPos.x, cursorBottomScreenPos.y + effectiveCharHeight + verticalTextOffset);
                     }
 
                     // === Render IME Composition Preview (on cursor) ===
