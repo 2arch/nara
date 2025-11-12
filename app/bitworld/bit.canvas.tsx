@@ -3486,17 +3486,18 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                     char = '•';
                 }
 
-                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+                if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth && topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
                     if (char) {
-                        // Draw background using accent color (engine.textColor)
+                        // Draw background spanning GRID_CELL_SPAN cells using accent color (engine.textColor)
                         ctx.fillStyle = engine.textColor;
-                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
 
                         // Draw text using background color (inverse of accent)
                         if (char.trim() !== '') {
                             ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
-                            renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
+                            renderText(ctx, char, bottomScreenPos.x, bottomScreenPos.y + verticalTextOffset);
                         }
                     }
                 }
