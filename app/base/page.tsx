@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { useWorldEngine } from '../bitworld/world.engine';
 import { BitCanvas } from '../bitworld/bit.canvas';
+import { useMonogram } from '../bitworld/monogram';
 import { auth, database, getUserProfile } from '../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { ref, set, serverTimestamp, get } from 'firebase/database';
@@ -132,6 +133,9 @@ function BasePageContent() {
     return () => unsubscribe();
   }, []);
 
+  // Monogram system - create once and pass to both engine and canvas
+  const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0, mode: 'perlin' });
+
   // World Engine - using 'public' userUid so it saves to /worlds/public/base/data
   const engine = useWorldEngine({
     worldId: 'base',
@@ -141,7 +145,8 @@ function BasePageContent() {
     initialViewOffset,
     initialZoomLevel,
     initialPatternId,
-    isReadOnly: !user // Read-only if not authenticated
+    isReadOnly: !user, // Read-only if not authenticated
+    monogramSystem: monogram // Pass monogram to engine for command system
   });
 
   // Handle authentication success for pan-triggered signup
@@ -179,6 +184,7 @@ function BasePageContent() {
         dialogueEnabled={true}
         fontFamily={engine.fontFamily}
         hostModeEnabled={!user} // Enable host mode when not authenticated
+        monogram={monogram} // Pass monogram for rendering
         onAuthSuccess={handleAuthSuccess}
         onPanDistanceChange={setPanDistance}
         isPublicWorld={true} // Enable public world sign-up flow
