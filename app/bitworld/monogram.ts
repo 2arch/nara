@@ -79,7 +79,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let worldX = params.chunkWorldX + f32(localX);
     let worldY = params.chunkWorldY + f32(localY);
 
-    let scale = 0.02 * params.complexity;
+    let scale = 0.15 * params.complexity;  // Increased from 0.02 to 0.15 (7.5x larger)
     let time = params.time;
 
     let nx = worldX * scale;
