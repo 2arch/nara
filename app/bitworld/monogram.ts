@@ -11,10 +11,30 @@ export interface MonogramOptions {
     complexity: number;
 }
 
-// WebGPU Compute Shader - Generates 32x32 chunk of Perlin noise
-const CHUNK_PERLIN_SHADER = `
-@group(0) @binding(0) var<storage, read_write> output: array<f32>;
-@group(0) @binding(1) var<uniform> params: ChunkParams;
+// WebGPU Render Pipeline Shaders - Generates 32x32 chunk via fragment shader
+const VERTEX_SHADER = `
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) texCoord: vec2<f32>,
+}
+
+@vertex
+fn main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+    var output: VertexOutput;
+
+    // Generate full-screen quad from vertex index
+    let x = f32((vertexIndex & 1u) << 1u) - 1.0;
+    let y = f32((vertexIndex & 2u)) - 1.0;
+
+    output.position = vec4<f32>(x, y, 0.0, 1.0);
+    output.texCoord = vec2<f32>((x + 1.0) * 0.5, (1.0 - y) * 0.5);
+
+    return output;
+}
+`;
+
+const FRAGMENT_SHADER = `
+@group(0) @binding(0) var<uniform> params: ChunkParams;
 
 struct ChunkParams {
     chunkWorldX: f32,
@@ -22,6 +42,7 @@ struct ChunkParams {
     chunkSize: f32,
     time: f32,
     complexity: f32,
+    padding: f32,
 }
 
 fn fade(t: f32) -> f32 {
@@ -67,20 +88,14 @@ fn perlin(worldX: f32, worldY: f32) -> f32 {
     return lerp(v, x1, x2);
 }
 
-@compute @workgroup_size(8, 8)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let localX = global_id.x;
-    let localY = global_id.y;
-    let chunkSize = u32(params.chunkSize);
+@fragment
+fn main(@location(0) texCoord: vec2<f32>) -> @location(0) vec4<f32> {
+    // Convert texture coordinate to world coordinate
+    let chunkSize = params.chunkSize;
+    let worldX = params.chunkWorldX + texCoord.x * chunkSize;
+    let worldY = params.chunkWorldY + texCoord.y * chunkSize;
 
-    if (localX >= chunkSize || localY >= chunkSize) {
-        return;
-    }
-
-    let worldX = params.chunkWorldX + f32(localX);
-    let worldY = params.chunkWorldY + f32(localY);
-
-    let scale = 0.15 * params.complexity;  // Increased from 0.02 to 0.15 (7.5x larger)
+    let scale = 0.15 * params.complexity;
     let time = params.time;
 
     let nx = worldX * scale;
@@ -99,15 +114,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let temporalWave = sin(time * 0.5 + nx * 2.0 + ny * 1.5) * 0.05 + 0.95;
     let finalIntensity = clamp(rawIntensity * temporalWave, 0.0, 1.0);
 
-    let index = localY * chunkSize + localX;
-    output[index] = finalIntensity;
+    // Output as grayscale color (R channel will be read as intensity)
+    return vec4<f32>(finalIntensity, finalIntensity, finalIntensity, 1.0);
 }
 `;
 
 class MonogramSystem {
     private chunks: Map<string, Float32Array> = new Map();
     private device: GPUDevice | null = null;
-    private pipeline: GPUComputePipeline | null = null;
+    private pipeline: GPURenderPipeline | null = null;
     private paramsBuffer: GPUBuffer | null = null;
     private isInitialized = false;
 
@@ -136,15 +151,29 @@ class MonogramSystem {
 
             this.device = await adapter.requestDevice();
 
-            const shaderModule = this.device.createShaderModule({
-                code: CHUNK_PERLIN_SHADER
+            const vertexModule = this.device.createShaderModule({
+                code: VERTEX_SHADER
             });
 
-            this.pipeline = this.device.createComputePipeline({
+            const fragmentModule = this.device.createShaderModule({
+                code: FRAGMENT_SHADER
+            });
+
+            this.pipeline = this.device.createRenderPipeline({
                 layout: 'auto',
-                compute: {
-                    module: shaderModule,
+                vertex: {
+                    module: vertexModule,
                     entryPoint: 'main'
+                },
+                fragment: {
+                    module: fragmentModule,
+                    entryPoint: 'main',
+                    targets: [{
+                        format: 'rgba8unorm'
+                    }]
+                },
+                primitive: {
+                    topology: 'triangle-strip'
                 }
             });
 
@@ -154,7 +183,7 @@ class MonogramSystem {
             });
 
             this.isInitialized = true;
-            console.log('[Monogram] WebGPU initialized');
+            console.log('[Monogram] WebGPU Render Pipeline initialized');
             return true;
         } catch (error) {
             console.error('[Monogram] WebGPU init failed:', error);
@@ -181,64 +210,89 @@ class MonogramSystem {
             throw new Error('[Monogram] Not initialized');
         }
 
-        console.log(`[Monogram] Computing chunk at world (${chunkWorldX}, ${chunkWorldY})`);
+        console.log(`[Monogram] Rendering chunk at world (${chunkWorldX}, ${chunkWorldY})`);
 
         const device = this.device;
-        const bufferSize = this.CHUNK_SIZE * this.CHUNK_SIZE * 4;
 
-        const outputBuffer = device.createBuffer({
-            size: bufferSize,
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
+        // Create texture as render target
+        const texture = device.createTexture({
+            size: [this.CHUNK_SIZE, this.CHUNK_SIZE],
+            format: 'rgba8unorm',
+            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
         });
+
+        // Create buffer to read texture data
+        const bytesPerPixel = 4; // RGBA
+        const bytesPerRow = this.CHUNK_SIZE * bytesPerPixel;
+        const bufferSize = bytesPerRow * this.CHUNK_SIZE;
 
         const stagingBuffer = device.createBuffer({
             size: bufferSize,
             usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
         });
 
+        // Update uniform params
         const paramsData = new Float32Array([
             chunkWorldX,
             chunkWorldY,
             this.CHUNK_SIZE,
             this.time,
             this.options.complexity,
-            0
+            0 // padding
         ]);
         device.queue.writeBuffer(this.paramsBuffer, 0, paramsData);
 
         const bindGroup = device.createBindGroup({
             layout: this.pipeline.getBindGroupLayout(0),
             entries: [
-                { binding: 0, resource: { buffer: outputBuffer } },
-                { binding: 1, resource: { buffer: this.paramsBuffer } }
+                { binding: 0, resource: { buffer: this.paramsBuffer } }
             ]
         });
 
+        // Render pass
         const commandEncoder = device.createCommandEncoder();
-        const computePass = commandEncoder.beginComputePass();
-        computePass.setPipeline(this.pipeline);
-        computePass.setBindGroup(0, bindGroup);
-        computePass.dispatchWorkgroups(
-            Math.ceil(this.CHUNK_SIZE / 8),
-            Math.ceil(this.CHUNK_SIZE / 8)
-        );
-        computePass.end();
+        const renderPass = commandEncoder.beginRenderPass({
+            colorAttachments: [{
+                view: texture.createView(),
+                loadOp: 'clear',
+                clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                storeOp: 'store'
+            }]
+        });
 
-        commandEncoder.copyBufferToBuffer(outputBuffer, 0, stagingBuffer, 0, bufferSize);
+        renderPass.setPipeline(this.pipeline);
+        renderPass.setBindGroup(0, bindGroup);
+        renderPass.draw(4); // Draw full-screen quad (triangle strip)
+        renderPass.end();
+
+        // Copy texture to buffer
+        commandEncoder.copyTextureToBuffer(
+            { texture },
+            { buffer: stagingBuffer, bytesPerRow },
+            [this.CHUNK_SIZE, this.CHUNK_SIZE]
+        );
+
         device.queue.submit([commandEncoder.finish()]);
 
+        // Read pixels from buffer
         await stagingBuffer.mapAsync(GPUMapMode.READ);
-        const result = new Float32Array(stagingBuffer.getMappedRange());
-        const intensities = new Float32Array(result);
+        const pixels = new Uint8Array(stagingBuffer.getMappedRange());
+
+        // Extract R channel as intensity values (0-1)
+        const intensities = new Float32Array(this.CHUNK_SIZE * this.CHUNK_SIZE);
+        for (let i = 0; i < intensities.length; i++) {
+            intensities[i] = pixels[i * 4] / 255; // R channel
+        }
+
         stagingBuffer.unmap();
 
-        outputBuffer.destroy();
+        texture.destroy();
         stagingBuffer.destroy();
 
         // Log sample of computed values
         const sample = Array.from(intensities.slice(0, 10));
         const nonZero = intensities.filter(v => v > 0).length;
-        console.log(`[Monogram] Chunk computed: ${nonZero}/${intensities.length} non-zero values, sample:`, sample);
+        console.log(`[Monogram] Chunk rendered: ${nonZero}/${intensities.length} non-zero values, sample:`, sample);
 
         return intensities;
     }
