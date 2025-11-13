@@ -313,12 +313,12 @@ class MonogramSystem {
     updateTime(deltaTime: number) {
         this.time += deltaTime * this.options.speed;
 
-        // Invalidate chunks MUCH less frequently for animation
-        // Every ~5 time units instead of 0.1 (50x less aggressive)
-        if (Math.floor(this.time / 5) > Math.floor((this.time - deltaTime * this.options.speed) / 5)) {
-            this.chunks.clear();
-            this.chunkAccessTime.clear();
-        }
+        // DISABLED: Chunk invalidation for animation
+        // Static pattern until we fix the async loading race condition
+        // if (Math.floor(this.time / 5) > Math.floor((this.time - deltaTime * this.options.speed) / 5)) {
+        //     this.chunks.clear();
+        //     this.chunkAccessTime.clear();
+        // }
     }
 
     setOptions(options: Partial<MonogramOptions>) {
