@@ -100,24 +100,61 @@ export default function UserHome() {
   useEffect(() => {
     if (!monogram.isInitialized) return;
 
-    const characterPositions: Array<{ x: number, y: number }> = [];
+    const artifacts: Array<{ x: number, y: number, width: number }> = [];
 
-    // Scan worldData for all single characters (not images, notes, etc.)
+    // Scan worldData for all artifacts
     Object.keys(engine.worldData).forEach(key => {
       const data = engine.worldData[key];
-      // Only include simple text characters (single character strings)
-      if (typeof data === 'string' && data.length === 1 && !engine.isImageData(data)) {
+
+      // 1. Labels (label_{x},{y})
+      if (key.startsWith('label_')) {
+        const coordsStr = key.substring('label_'.length);
+        const [xStr, yStr] = coordsStr.split(',');
+        const x = parseInt(xStr);
+        const y = parseInt(yStr);
+        if (!isNaN(x) && !isNaN(y)) {
+          try {
+            const labelData = JSON.parse(data as string);
+            const width = labelData.text ? labelData.text.length : 1;
+            artifacts.push({ x, y, width });
+          } catch (e) {
+            // Skip malformed labels
+          }
+        }
+      }
+
+      // 2. Notes (unified note_ keys with contentType)
+      // All region-spanning objects (images, mail, lists, bounds, etc.) use note_ keys
+      else if (key.startsWith('note_')) {
+        try {
+          const noteData = JSON.parse(data as string);
+          if (noteData.startX !== undefined && noteData.endX !== undefined &&
+              noteData.startY !== undefined) {
+            const width = noteData.endX - noteData.startX + 1;
+            artifacts.push({
+              x: noteData.startX,
+              y: noteData.startY,
+              width
+            });
+          }
+        } catch (e) {
+          // Skip malformed notes
+        }
+      }
+
+      // 3. Single characters (simple text, not in labels/notes)
+      else if (typeof data === 'string' && data.length === 1 && !engine.isImageData(data)) {
         const [xStr, yStr] = key.split(',');
         const x = parseInt(xStr);
         const y = parseInt(yStr);
         if (!isNaN(x) && !isNaN(y)) {
-          characterPositions.push({ x, y });
+          artifacts.push({ x, y, width: 1 });
         }
       }
     });
 
-    // Sync character positions to monogram for red glow effect
-    monogram.syncCharacterGlows(characterPositions, 1.0);
+    // Sync all artifacts to GPU for uniform glow effect
+    monogram.syncArtifacts(artifacts);
   }, [engine.worldData, monogram.isInitialized, monogram, engine]);
 
   // Simple cursor blink effect
