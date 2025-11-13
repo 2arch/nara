@@ -1112,19 +1112,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Monogram system (ephemeral GPU-accelerated background)
     const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0 });
 
-    // Debug logs for monogram
-    const [debugLogs, setDebugLogs] = useState<string[]>([]);
-    const addDebugLog = useCallback((log: string) => {
-        setDebugLogs(prev => [...prev.slice(-50), `[${new Date().toLocaleTimeString()}] ${log}`]); // Keep last 50 logs
-    }, []);
-
-    // Log when monogram initializes
-    useEffect(() => {
-        if (monogram.isInitialized) {
-            addDebugLog('WebGPU monogram system initialized successfully');
-        }
-    }, [monogram.isInitialized, addDebugLog]);
-
     // Preload monogram chunks when viewport changes
     useEffect(() => {
         if (!monogram.isInitialized) return;
@@ -1140,10 +1127,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         const x2 = Math.ceil(endWorldX) + 5;
         const y2 = Math.ceil(endWorldY) + 5;
 
-        addDebugLog(`Preloading viewport: x=${x1}-${x2}, y=${y1}-${y2}`);
-
         monogram.preloadViewport(x1, y1, x2, y2);
-    }, [engine.viewOffset.x, engine.viewOffset.y, engine.zoomLevel, canvasSize, monogram.isInitialized, addDebugLog]);
+    }, [engine.viewOffset.x, engine.viewOffset.y, engine.zoomLevel, canvasSize, monogram.isInitialized]);
 
     // Continuously preload chunks for smooth animation even when static (60fps!)
     useEffect(() => {
@@ -2488,12 +2473,6 @@ Camera & Viewport Controls:
                         }
                     }
                 }
-            }
-
-            // Log viewport and render stats (throttled to avoid spam)
-            if (Math.random() < 0.01) { // Log ~1% of frames
-                addDebugLog(`Viewport: x=${xStart}-${xEnd} y=${yStart}-${yEnd} | Sampled: ${sampleCount} | Rendered: ${renderedCount}`);
-                addDebugLog(`  Skipped: hasContent=${skippedHasContent} | lowIntensity=${skippedLowIntensity} | outOfBounds=${skippedOutOfBounds} | zeroIntensity=${zeroIntensityCount}`);
             }
         }
 
@@ -8733,84 +8712,6 @@ Camera & Viewport Controls:
                     }}
                 />
             )}
-
-            {/* Monogram Debug Overlay */}
-            <div
-                style={{
-                    position: 'absolute',
-                    bottom: '10px',
-                    left: '10px',
-                    maxWidth: '500px',
-                    maxHeight: '300px',
-                    backgroundColor: 'rgba(0, 0, 0, 0.9)',
-                    color: '#00ff00',
-                    padding: '12px',
-                    borderRadius: '8px',
-                    fontSize: '11px',
-                    fontFamily: 'monospace',
-                    zIndex: 10000,
-                    pointerEvents: 'auto',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px',
-                    border: '1px solid rgba(0, 255, 0, 0.3)'
-                }}
-            >
-                <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    borderBottom: '1px solid rgba(0, 255, 0, 0.3)',
-                    paddingBottom: '8px',
-                    marginBottom: '4px'
-                }}>
-                    <span style={{ fontWeight: 'bold', color: '#00ff00' }}>MONOGRAM DEBUG</span>
-                    <button
-                        onClick={() => {
-                            navigator.clipboard.writeText(debugLogs.join('\n'));
-                            alert('Logs copied to clipboard!');
-                        }}
-                        style={{
-                            background: 'rgba(0, 255, 0, 0.2)',
-                            border: '1px solid #00ff00',
-                            color: '#00ff00',
-                            padding: '4px 8px',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontSize: '10px',
-                            fontFamily: 'monospace'
-                        }}
-                    >
-                        COPY LOGS
-                    </button>
-                </div>
-                <div style={{
-                    fontSize: '10px',
-                    color: '#00ff00',
-                    opacity: 0.8
-                }}>
-                    Initialized: {monogram.isInitialized ? 'YES' : 'NO'} | Enabled: {monogram.options.enabled ? 'YES' : 'NO'}
-                </div>
-                <div
-                    style={{
-                        overflowY: 'auto',
-                        maxHeight: '200px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '2px'
-                    }}
-                >
-                    {debugLogs.length === 0 ? (
-                        <div style={{ opacity: 0.5, fontStyle: 'italic' }}>No logs yet...</div>
-                    ) : (
-                        debugLogs.map((log, i) => (
-                            <div key={i} style={{ whiteSpace: 'nowrap' }}>
-                                {log}
-                            </div>
-                        ))
-                    )}
-                </div>
-            </div>
         </>
     );
 }
