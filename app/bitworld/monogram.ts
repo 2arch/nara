@@ -407,6 +407,21 @@ class MonogramSystem {
         this.updateCharacterGlowBuffer();
     }
 
+    syncCharacterGlows(positions: Array<{ x: number, y: number }>, strength: number = 1.0) {
+        if (!this.isInitialized || !this.device) return;
+
+        // Replace all glows with the new set
+        this.characterGlows = positions.slice(0, this.MAX_CHARACTER_GLOWS).map(pos => ({
+            x: pos.x,
+            y: pos.y,
+            strength,
+            timestamp: this.time // All characters get current timestamp for consistent glow
+        }));
+
+        // Update GPU buffer
+        this.updateCharacterGlowBuffer();
+    }
+
     private updateCharacterGlowBuffer() {
         if (!this.device || !this.characterGlowBuffer) return;
 
@@ -526,6 +541,10 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         systemRef.current?.addCharacterGlow(worldX, worldY, strength);
     }, []);
 
+    const syncCharacterGlows = useCallback((positions: Array<{ x: number, y: number }>, strength: number = 1.0) => {
+        systemRef.current?.syncCharacterGlows(positions, strength);
+    }, []);
+
     const clearCharacterGlows = useCallback(() => {
         systemRef.current?.clearCharacterGlows();
     }, []);
@@ -537,6 +556,7 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         preloadViewport,
         sampleAt,
         addCharacterGlow,
+        syncCharacterGlows,
         clearCharacterGlows,
         isInitialized
     };

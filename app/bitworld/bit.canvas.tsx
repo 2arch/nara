@@ -2424,7 +2424,6 @@ Camera & Viewport Controls:
         if (monogram.options.enabled) {
             let renderedCount = 0;
             let sampleCount = 0;
-            let skippedHasContent = 0;
             let skippedLowIntensity = 0;
             let skippedOutOfBounds = 0;
             let zeroIntensityCount = 0;
@@ -2436,43 +2435,46 @@ Camera & Viewport Controls:
             for (let worldY = yStart; worldY <= yEnd; worldY++) {
                 for (let worldX = xStart; worldX <= xEnd; worldX++) {
                     sampleCount++;
-                    // Skip cells with any content (text, labels, notes, etc.)
                     const textKey = `${worldX},${worldY}`;
-                    const hasContent = engine.worldData[textKey] || engine.lightModeData[textKey];
+                    const data = engine.worldData[textKey];
+                    const hasCharacter = data && typeof data === 'string' && data.length === 1 && !engine.isImageData(data);
 
-                    if (hasContent) {
-                        skippedHasContent++;
+                    // Sample intensity from GPU-computed chunk
+                    const intensity = monogram.sampleAt(worldX, worldY);
+
+                    if (intensity === 0) {
+                        zeroIntensityCount++;
+                    }
+
+                    if (intensity <= 0.05) { // Small threshold to skip near-zero values
+                        skippedLowIntensity++;
                     } else {
-                        // Sample intensity from GPU-computed chunk
-                        const intensity = monogram.sampleAt(worldX, worldY);
+                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
 
-                        if (intensity === 0) {
-                            zeroIntensityCount++;
-                        }
+                        // Bounds check
+                        if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                            screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
 
-                        if (intensity <= 0.05) { // Small threshold to skip near-zero values
-                            skippedLowIntensity++;
-                        } else {
-                            const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-
-                            // Bounds check
-                            if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
-                                screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-
-                                renderedCount++;
-                                // Render as filled rectangle with intensity-based alpha
-                                ctx.fillStyle = engine.textColor;
-                                ctx.globalAlpha = intensity * 0.5; // Increased from 0.2 for debugging
-                                ctx.fillRect(
-                                    screenPos.x,
-                                    screenPos.y,
-                                    effectiveCharWidth,
-                                    effectiveCharHeight
-                                );
-                                ctx.globalAlpha = 1.0; // Reset alpha
+                            renderedCount++;
+                            // Render character glows as soft red, perlin noise as textColor
+                            if (hasCharacter) {
+                                // Soft red glow for characters
+                                ctx.fillStyle = '#ff6666'; // Soft red
+                                ctx.globalAlpha = intensity * 0.6;
                             } else {
-                                skippedOutOfBounds++;
+                                // Normal perlin noise pattern
+                                ctx.fillStyle = engine.textColor;
+                                ctx.globalAlpha = intensity * 0.5;
                             }
+                            ctx.fillRect(
+                                screenPos.x,
+                                screenPos.y,
+                                effectiveCharWidth,
+                                effectiveCharHeight
+                            );
+                            ctx.globalAlpha = 1.0; // Reset alpha
+                        } else {
+                            skippedOutOfBounds++;
                         }
                     }
                 }
