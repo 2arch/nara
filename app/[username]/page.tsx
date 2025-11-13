@@ -92,11 +92,32 @@ export default function UserHome() {
   const engine = useWorldEngine({
     worldId: 'home',
     userUid: targetUserUid, // Use the target user's UID, not the authenticated user's UID
-    username: username,
-    onCharacterPlaced: (x, y, char) => {
-      monogram.addCharacterGlow(x, y, 1.0);
-    }
+    username: username
   });
+
+  // Sync all character positions to monogram system whenever worldData changes
+  useEffect(() => {
+    if (!monogram.isInitialized) return;
+
+    const characterPositions: Array<{ x: number, y: number }> = [];
+
+    // Scan worldData for all single characters (not images, notes, etc.)
+    Object.keys(engine.worldData).forEach(key => {
+      const data = engine.worldData[key];
+      // Only include simple text characters (single character strings)
+      if (typeof data === 'string' && data.length === 1 && !engine.isImageData(data)) {
+        const [xStr, yStr] = key.split(',');
+        const x = parseInt(xStr);
+        const y = parseInt(yStr);
+        if (!isNaN(x) && !isNaN(y)) {
+          characterPositions.push({ x, y });
+        }
+      }
+    });
+
+    // Sync character positions to monogram for red glow effect
+    monogram.syncCharacterGlows(characterPositions, 1.0);
+  }, [engine.worldData, monogram.isInitialized, monogram, engine]);
 
   // Simple cursor blink effect
   useEffect(() => {
