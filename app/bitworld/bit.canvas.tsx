@@ -10,6 +10,7 @@ import { useHostDialogue } from './host.dialogue';
 import { setDialogueWithRevert } from './ai';
 import { CanvasRecorder } from './tape';
 import { renderStyledRect, getRectStyle, type CellBounds, type BaseRenderContext } from './styles';
+import { useMonogram } from './monogram';
 
 // --- Constants --- (Copied and relevant ones kept)
 const GRID_COLOR = '#F2F2F233';
@@ -1104,9 +1105,30 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
     // Dialogue system
     const { renderDialogue, renderDebugDialogue, renderNavDialogue, handleNavClick } = useDialogue();
-    
+
     // Debug dialogue system
     const { debugText } = useDebugDialogue(engine);
+
+    // Monogram system (ephemeral GPU-accelerated background)
+    const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0 });
+
+    // Preload monogram chunks when viewport changes
+    useEffect(() => {
+        if (!monogram.isInitialized) return;
+
+        const effectiveCharDims = engine.getEffectiveCharDims(engine.zoomLevel);
+        const startWorldX = engine.viewOffset.x;
+        const startWorldY = engine.viewOffset.y;
+        const endWorldX = startWorldX + (canvasSize.width / effectiveCharDims.width);
+        const endWorldY = startWorldY + (canvasSize.height / effectiveCharDims.height);
+
+        monogram.preloadViewport(
+            Math.floor(startWorldX) - 5,
+            Math.floor(startWorldY) - 5,
+            Math.ceil(endWorldX) + 5,
+            Math.ceil(endWorldY) + 5
+        );
+    }, [engine.viewOffset.x, engine.viewOffset.y, engine.zoomLevel, canvasSize, monogram.isInitialized]);
 
     // Helper function to generate talking mouth animation
     const generateTalkingMouth = useCallback((elapsed: number): number => {
@@ -2365,6 +2387,42 @@ Camera & Viewport Controls:
                 }
             }
             ctx.stroke();
+        }
+
+        // === Render Monogram Background (GPU-Accelerated Bitmap) ===
+        if (monogram.options.enabled) {
+            for (let worldY = Math.floor(startWorldY); worldY <= Math.ceil(endWorldY); worldY++) {
+                for (let worldX = Math.floor(startWorldX); worldX <= Math.ceil(endWorldX); worldX++) {
+                    // Skip cells with any content (text, labels, notes, etc.)
+                    const textKey = `${worldX},${worldY}`;
+                    const hasContent = engine.worldData[textKey] || engine.lightModeData[textKey];
+
+                    if (!hasContent) {
+                        // Sample intensity from GPU-computed chunk
+                        const intensity = monogram.sampleAt(worldX, worldY);
+
+                        if (intensity > 0.05) { // Small threshold to skip near-zero values
+                            const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+
+                            // Bounds check
+                            if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                                screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+
+                                // Render as filled rectangle with intensity-based alpha
+                                ctx.fillStyle = engine.textColor;
+                                ctx.globalAlpha = intensity * 0.2; // Subtle background effect
+                                ctx.fillRect(
+                                    screenPos.x,
+                                    screenPos.y,
+                                    effectiveCharWidth,
+                                    effectiveCharHeight
+                                );
+                                ctx.globalAlpha = 1.0; // Reset alpha
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // === Render Air Mode Data (Ephemeral Text) ===
