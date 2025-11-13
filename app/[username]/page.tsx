@@ -6,6 +6,7 @@ import { BitCanvas } from '../bitworld/bit.canvas';
 import Grid3DBackground from '../bitworld/canvas.grid3d';
 import { auth, getUidByUsername, getUserProfile } from '../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
+import { useMonogram } from '../bitworld/monogram';
 
 export default function UserHome() {
   const [cursorAlternate, setCursorAlternate] = useState(false);
@@ -84,11 +85,17 @@ export default function UserHome() {
 
     checkTutorialStatus();
   }, [user, targetUserUid, tutorialChecked]);
-  
+
+  // Initialize monogram system
+  const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0 });
+
   const engine = useWorldEngine({
     worldId: 'home',
     userUid: targetUserUid, // Use the target user's UID, not the authenticated user's UID
-    username: username
+    username: username,
+    onCharacterPlaced: (x, y, char) => {
+      monogram.addCharacterGlow(x, y, 1.0);
+    }
   });
 
   // Simple cursor blink effect
@@ -131,6 +138,7 @@ export default function UserHome() {
         hostModeEnabled={shouldShowTutorial}
         initialHostFlow={shouldShowTutorial ? 'tutorial' : undefined}
         onTutorialComplete={handleTutorialComplete}
+        monogram={monogram}
       />
     </div>
   );

@@ -394,6 +394,7 @@ interface UseWorldEngineProps {
     initialPatternId?: string; // Pattern ID from URL for deterministic pattern generation
     isReadOnly?: boolean; // Read-only mode (observer/viewer)
     skipInitialBackground?: boolean; // Skip applying initialBackgroundColor (let host flow control it)
+    onCharacterPlaced?: (x: number, y: number, char: string) => void; // Callback for character placement
 }
 
 
@@ -592,6 +593,7 @@ export function useWorldEngine({
     initialPatternId,    // Pattern ID from URL for deterministic generation
     isReadOnly = false,  // Read-only mode (default to writeable)
     skipInitialBackground = false, // Skip applying initialBackgroundColor
+    onCharacterPlaced,   // Callback for character placement
 }: UseWorldEngineProps): WorldEngine {
     // === Router ===
     const router = useRouter();
@@ -9808,7 +9810,10 @@ export function useWorldEngine({
         const newWorldData = { ...worldData };
         newWorldData[key] = char;
         setWorldData(newWorldData);
-    }, [worldData]);
+
+        // Notify callback if provided
+        onCharacterPlaced?.(x, y, char);
+    }, [worldData, onCharacterPlaced]);
 
     const batchMoveCharacters = useCallback((moves: Array<{fromX: number, fromY: number, toX: number, toY: number, char: string}>): void => {
         const newWorldData = { ...worldData };

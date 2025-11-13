@@ -464,9 +464,10 @@ interface BitCanvasProps {
     onPanDistanceChange?: (distance: number) => void; // Callback for pan distance tracking
     hostDimBackground?: boolean; // Whether to dim background when host dialogue appears
     isPublicWorld?: boolean; // Whether this is a public world (affects sign-up flow)
+    monogram?: ReturnType<typeof useMonogram>; // Monogram system for visual effects
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, onTutorialComplete, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true, isPublicWorld = false }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, onTutorialComplete, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true, isPublicWorld = false, monogram: externalMonogram }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -1110,7 +1111,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const { debugText } = useDebugDialogue(engine);
 
     // Monogram system (ephemeral GPU-accelerated background)
-    const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0 });
+    // Use external monogram if provided, otherwise create internal one
+    const internalMonogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0 });
+    const monogram = externalMonogram || internalMonogram;
 
     // Preload monogram chunks when viewport changes
     useEffect(() => {
