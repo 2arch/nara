@@ -13,10 +13,10 @@ export interface MonogramOptions {
 }
 
 export interface ArtifactGlow {
-    x: number;           // World X coordinate (start position)
-    y: number;           // World Y coordinate
-    width: number;       // Width in cells (1 for single chars, N for labels/notes)
-    timestamp: number;   // When it was placed (for fade effects)
+    startX: number;      // World X start coordinate
+    startY: number;      // World Y start coordinate
+    endX: number;        // World X end coordinate
+    endY: number;        // World Y end coordinate
 }
 
 // WebGPU Compute Shader - Generates 32x32 chunk of Perlin noise
@@ -84,19 +84,17 @@ fn calculateArtifactGlow(worldX: f32, worldY: f32, time: f32) -> f32 {
 
     for (var i = 0u; i < glowCount; i++) {
         let artifact = artifacts[i];
-        let artifactX = artifact.x;
-        let artifactY = artifact.y;
-        let artifactWidth = artifact.z;
-        let timestamp = artifact.w;
+        let startX = artifact.x;
+        let startY = artifact.y;
+        let endX = artifact.z;
+        let endY = artifact.w;
 
-        // Artifacts occupy a width x 2 cell rectangle:
-        // - Horizontally: artifactX to artifactX + artifactWidth
-        // - Vertically: artifactY-1 to artifactY (spans upward for isometric rendering)
-        // Calculate distance from this pixel to the nearest point on the rectangle
-        let rectLeft = artifactX;
-        let rectRight = artifactX + artifactWidth;
-        let rectTop = artifactY - 1.0;
-        let rectBottom = artifactY;
+        // Artifacts occupy their full rectangular bounds
+        // For isometric rendering, characters span upward (startY-1 to endY)
+        let rectLeft = startX;
+        let rectRight = endX;
+        let rectTop = startY - 1.0;  // Isometric: span upward
+        let rectBottom = endY;
 
         // Clamp current position to rectangle bounds to find nearest point
         let nearestX = clamp(worldX, rectLeft, rectRight);
@@ -109,19 +107,14 @@ fn calculateArtifactGlow(worldX: f32, worldY: f32, time: f32) -> f32 {
 
         // Glow parameters
         let glowRadius = 8.0;  // How far the glow extends
-        let fadeTime = 10.0;   // How long before glow fades completely (in time units)
         let strength = 1.0;    // Uniform strength for all artifacts
-
-        // Time-based fade (newer glows are brighter)
-        let age = time - timestamp;
-        let timeFade = clamp(1.0 - (age / fadeTime), 0.0, 1.0);
 
         // Distance-based falloff (inverse square with smoothing)
         let distFade = clamp(1.0 - (dist / glowRadius), 0.0, 1.0);
         let smoothFade = distFade * distFade * (3.0 - 2.0 * distFade); // Smoothstep
 
-        // Combine strength, distance fade, and time fade
-        let glowContribution = strength * smoothFade * timeFade * 0.4;
+        // Combine strength and distance fade
+        let glowContribution = strength * smoothFade * 0.4;
         totalGlow += glowContribution;
     }
 
@@ -400,24 +393,13 @@ class MonogramSystem {
         this.time += deltaTime * this.options.speed;
         // Smooth animation: time flows continuously
         // Chunks recompute on-demand with current time (no invalidation needed)
-
-        // Auto-fade old artifacts
-        this.artifacts = this.artifacts.filter(artifact => {
-            const age = this.time - artifact.timestamp;
-            return age < 10.0;  // Remove artifacts older than 10 time units
-        });
     }
 
-    syncArtifacts(artifacts: Array<{ x: number, y: number, width: number }>) {
+    syncArtifacts(artifacts: Array<{ startX: number, startY: number, endX: number, endY: number }>) {
         if (!this.isInitialized || !this.device) return;
 
         // Replace all artifacts with the new set
-        this.artifacts = artifacts.slice(0, this.MAX_ARTIFACTS).map(artifact => ({
-            x: artifact.x,
-            y: artifact.y,
-            width: artifact.width,
-            timestamp: this.time // All artifacts get current timestamp for consistent glow
-        }));
+        this.artifacts = artifacts.slice(0, this.MAX_ARTIFACTS);
 
         // Update GPU buffer
         this.updateArtifactBuffer();
@@ -426,15 +408,15 @@ class MonogramSystem {
     private updateArtifactBuffer() {
         if (!this.device || !this.artifactBuffer) return;
 
-        // Create Float32Array with artifact data (vec4 per artifact: x, y, width, timestamp)
+        // Create Float32Array with artifact data (vec4 per artifact: startX, startY, endX, endY)
         const data = new Float32Array(this.MAX_ARTIFACTS * 4);
 
         for (let i = 0; i < this.artifacts.length; i++) {
             const artifact = this.artifacts[i];
-            data[i * 4] = artifact.x;
-            data[i * 4 + 1] = artifact.y;
-            data[i * 4 + 2] = artifact.width;
-            data[i * 4 + 3] = artifact.timestamp;
+            data[i * 4] = artifact.startX;
+            data[i * 4 + 1] = artifact.startY;
+            data[i * 4 + 2] = artifact.endX;
+            data[i * 4 + 3] = artifact.endY;
         }
 
         this.device.queue.writeBuffer(this.artifactBuffer, 0, data);
@@ -539,7 +521,7 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         setOptions(prev => ({ ...prev, enabled: !prev.enabled }));
     }, []);
 
-    const syncArtifacts = useCallback((artifacts: Array<{ x: number, y: number, width: number }>) => {
+    const syncArtifacts = useCallback((artifacts: Array<{ startX: number, startY: number, endX: number, endY: number }>) => {
         systemRef.current?.syncArtifacts(artifacts);
     }, []);
 

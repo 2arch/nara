@@ -100,7 +100,7 @@ export default function UserHome() {
   useEffect(() => {
     if (!monogram.isInitialized) return;
 
-    const artifacts: Array<{ x: number, y: number, width: number }> = [];
+    const artifacts: Array<{ startX: number, startY: number, endX: number, endY: number }> = [];
 
     // Scan worldData for all artifacts
     Object.keys(engine.worldData).forEach(key => {
@@ -116,7 +116,12 @@ export default function UserHome() {
           try {
             const labelData = JSON.parse(data as string);
             const width = labelData.text ? labelData.text.length : 1;
-            artifacts.push({ x, y, width });
+            artifacts.push({
+              startX: x,
+              startY: y,
+              endX: x + width,
+              endY: y
+            });
           } catch (e) {
             // Skip malformed labels
           }
@@ -129,12 +134,12 @@ export default function UserHome() {
         try {
           const noteData = JSON.parse(data as string);
           if (noteData.startX !== undefined && noteData.endX !== undefined &&
-              noteData.startY !== undefined) {
-            const width = noteData.endX - noteData.startX + 1;
+              noteData.startY !== undefined && noteData.endY !== undefined) {
             artifacts.push({
-              x: noteData.startX,
-              y: noteData.startY,
-              width
+              startX: noteData.startX,
+              startY: noteData.startY,
+              endX: noteData.endX,
+              endY: noteData.endY
             });
           }
         } catch (e) {
@@ -148,7 +153,12 @@ export default function UserHome() {
         const x = parseInt(xStr);
         const y = parseInt(yStr);
         if (!isNaN(x) && !isNaN(y)) {
-          artifacts.push({ x, y, width: 1 });
+          artifacts.push({
+            startX: x,
+            startY: y,
+            endX: x + 1,
+            endY: y
+          });
         }
       }
     });
