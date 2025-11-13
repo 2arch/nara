@@ -306,9 +306,9 @@ class MonogramSystem {
     updateTime(deltaTime: number) {
         this.time += deltaTime * this.options.speed;
 
-        // Invalidate chunks periodically for animation
-        // Every ~0.1 time units, clear cache to force recompute with new time
-        if (Math.floor(this.time * 10) > Math.floor((this.time - deltaTime * this.options.speed) * 10)) {
+        // Invalidate chunks MUCH less frequently for animation
+        // Every ~5 time units instead of 0.1 (50x less aggressive)
+        if (Math.floor(this.time / 5) > Math.floor((this.time - deltaTime * this.options.speed) / 5)) {
             this.chunks.clear();
             this.chunkAccessTime.clear();
         }
