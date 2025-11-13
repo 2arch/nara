@@ -1145,6 +1145,28 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         monogram.preloadViewport(x1, y1, x2, y2);
     }, [engine.viewOffset.x, engine.viewOffset.y, engine.zoomLevel, canvasSize, monogram.isInitialized, addDebugLog]);
 
+    // Continuously preload chunks for smooth animation even when static
+    useEffect(() => {
+        if (!monogram.isInitialized || !monogram.options.enabled) return;
+
+        const refreshInterval = setInterval(() => {
+            const effectiveCharDims = engine.getEffectiveCharDims(engine.zoomLevel);
+            const startWorldX = engine.viewOffset.x;
+            const startWorldY = engine.viewOffset.y;
+            const endWorldX = startWorldX + (canvasSize.width / effectiveCharDims.width);
+            const endWorldY = startWorldY + (canvasSize.height / effectiveCharDims.height);
+
+            monogram.preloadViewport(
+                Math.floor(startWorldX) - 5,
+                Math.floor(startWorldY) - 5,
+                Math.ceil(endWorldX) + 5,
+                Math.ceil(endWorldY) + 5
+            );
+        }, 100); // Refresh every 100ms for smooth 10fps animation updates
+
+        return () => clearInterval(refreshInterval);
+    }, [engine.viewOffset.x, engine.viewOffset.y, engine.zoomLevel, canvasSize, monogram.isInitialized, monogram.options.enabled]);
+
     // Helper function to generate talking mouth animation
     const generateTalkingMouth = useCallback((elapsed: number): number => {
         // Varying mouth open/close pattern (not just sine wave - more natural)
