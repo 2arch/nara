@@ -2523,18 +2523,21 @@ Camera & Viewport Controls:
                     topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
                     if (char) {
                         // Apply text background: use charData.style.background if set, otherwise currentTextStyle.background
-                        const textBackground = (typeof charData === 'object' && charData.style?.background)
-                            ? charData.style.background
-                            : engine.currentTextStyle.background;
-                        if (textBackground) {
-                            if (opacity < 1.0) {
-                                ctx.globalAlpha = opacity;
-                            }
-                            ctx.fillStyle = textBackground;
-                            // Use GRID_CELL_SPAN height to match character height
-                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-                            if (opacity < 1.0) {
-                                ctx.globalAlpha = 1.0;
+                        // Skip text backgrounds when monogram is enabled (monogram provides the glow layer)
+                        if (!monogram.options.enabled) {
+                            const textBackground = (typeof charData === 'object' && charData.style?.background)
+                                ? charData.style.background
+                                : engine.currentTextStyle.background;
+                            if (textBackground) {
+                                if (opacity < 1.0) {
+                                    ctx.globalAlpha = opacity;
+                                }
+                                ctx.fillStyle = textBackground;
+                                // Use GRID_CELL_SPAN height to match character height
+                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                                if (opacity < 1.0) {
+                                    ctx.globalAlpha = 1.0;
+                                }
                             }
                         }
 
@@ -2871,13 +2874,16 @@ Camera & Viewport Controls:
                 if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
                     topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
                     // Apply text background: use charStyle.background if set
-                    const textBackground = (charStyle && charStyle.background)
-                        ? charStyle.background
-                        : undefined;
+                    // Skip text backgrounds when monogram is enabled (monogram provides the glow layer)
+                    if (!monogram.options.enabled) {
+                        const textBackground = (charStyle && charStyle.background)
+                            ? charStyle.background
+                            : undefined;
 
-                    if (textBackground) {
-                        ctx.fillStyle = textBackground;
-                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                        if (textBackground) {
+                            ctx.fillStyle = textBackground;
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                        }
                     }
 
                     // Render text only if there's actual content
