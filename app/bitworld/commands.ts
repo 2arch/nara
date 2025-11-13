@@ -114,10 +114,13 @@ interface UseCommandSystemProps {
     triggerTutorialFlow?: () => void;
     onCommandExecuted?: (command: string, args: string[]) => void;
     cancelComposition?: () => void; // Callback to cancel IME composition
-    monogramSystem?: { // Monogram system for controlling patterns and render schemes
-        updateOption: <K extends keyof any>(key: K, value: any) => void;
+    monogramSystem?: { // WebGPU infinite terrain monogram system
+        setOptions: (updater: (prev: any) => any) => void;
+        toggleEnabled: () => void;
         options?: {
             enabled?: boolean;
+            speed?: number;
+            complexity?: number;
         };
     };
     selectedNoteKey?: string | null; // Currently selected note
@@ -198,7 +201,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'unpublish': 'Unpublish your canvas. Makes your canvas private again. It will no longer be accessible at the public URL.',
     'share': 'Get a shareable link to your canvas. Copy this link to share your canvas with others. If published, they can view it; if private, you control access.',
     'spawn': 'Set your spawn point. This is where you\'ll start when you open this canvas. Type /spawn to set it to your current position.',
-    'monogram': 'Control monogram patterns. /monogram to toggle on/off. /monogram pixel for point-based rendering (high-resolution). /monogram text for character-span rendering (aligned with text). /monogram mode to switch pattern modes: clear, perlin, road, geometry3d, face3d, nara.',
+    'monogram': 'Control WebGPU infinite terrain background. /monogram to toggle on/off, /monogram on to enable, /monogram off to disable. Use Ctrl+/- to adjust speed, Ctrl+[/] to adjust complexity.',
     'signin': 'Sign in to your Nara account. Required for saving work, publishing canvases, and accessing AI features.',
     'signout': 'Sign out of your Nara account. You\'ll return to read-only mode.',
     'account': 'Manage your account settings. Use /account reset to reset your password.',
@@ -690,7 +693,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (lowerInput === 'monogram') {
             const parts = input.toLowerCase().split(' ');
-            const MONOGRAM_OPTIONS = ['pixel', 'text', 'off', 'clear', 'perlin', 'road', 'geometry3d', 'face3d', 'nara'];
+            const MONOGRAM_OPTIONS = ['on', 'off'];
             if (parts.length > 1) {
                 // Show monogram options that match the input
                 const monogramInput = parts[1];
@@ -1517,21 +1520,17 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 // Show webcam feed as background (clears backgroundColor so stream shows through)
                 switchBackgroundMode('stream');
 
-                // Automatically activate face3d monogram with selected mask
+                // Note: WebGPU monogram is independent of face tracking
+                // Face tracking data is used by face3d rendering in bit.canvas.tsx
                 if (updateSettings && settings) {
                     updateSettings({
-                        monogramMode: 'face3d',
-                        monogramEnabled: true,
-                        monogramOptions: {
-                            ...settings.monogramOptions,
-                            maskName: maskName
-                        }
+                        monogramEnabled: true
                     });
                 }
 
-                // Also update the monogram system directly if available
+                // Enable monogram if available
                 if (monogramSystem) {
-                    monogramSystem.updateOption('maskName', maskName);
+                    monogramSystem.setOptions(prev => ({ ...prev, enabled: true }));
                 }
 
                 setDialogueWithRevert(`Face-piloted geometry active (${maskName} face). Turn your head to pilot the face!`, setDialogueText);
@@ -2761,43 +2760,33 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             return { command: 'pending_selection', args: [commandToExecute], commandStartPos: commandState.commandStartPos };
         }
 
-        // Handle monogram command
+        // Handle monogram command (WebGPU infinite terrain)
         if (commandToExecute.startsWith('monogram')) {
             const args = inputParts.slice(1);
 
-            // Handle render scheme switching
             if (args.length > 0 && monogramSystem) {
                 const option = args[0].toLowerCase();
 
-                if (option === 'pixel') {
-                    // Switch to point-based rendering
-                    monogramSystem.updateOption('renderScheme', 'point-based');
-                    setDialogueWithRevert('Monogram: point-based rendering (pixel mode)', setDialogueText);
-                } else if (option === 'text') {
-                    // Switch to character-span rendering
-                    monogramSystem.updateOption('renderScheme', 'character-span');
-                    setDialogueWithRevert('Monogram: character-span rendering (text mode)', setDialogueText);
-                } else if (['clear', 'perlin', 'road', 'geometry3d', 'face3d', 'nara'].includes(option)) {
-                    // Switch monogram mode
-                    monogramSystem.updateOption('mode', option as any);
-                    monogramSystem.updateOption('enabled', true);
-                    setDialogueWithRevert(`Monogram mode: ${option}`, setDialogueText);
+                if (option === 'on') {
+                    // Enable monogram
+                    monogramSystem.setOptions(prev => ({ ...prev, enabled: true }));
+                    setDialogueWithRevert('WebGPU monogram enabled', setDialogueText);
                 } else if (option === 'off') {
-                    // Turn off monogram
-                    monogramSystem.updateOption('enabled', false);
-                    setDialogueWithRevert('Monogram disabled', setDialogueText);
+                    // Disable monogram
+                    monogramSystem.setOptions(prev => ({ ...prev, enabled: false }));
+                    setDialogueWithRevert('WebGPU monogram disabled', setDialogueText);
                 } else {
-                    // Toggle monogram on/off
-                    const currentEnabled = monogramSystem.options?.enabled ?? false;
-                    monogramSystem.updateOption('enabled', !currentEnabled);
-                    setDialogueWithRevert(`Monogram ${!currentEnabled ? 'enabled' : 'disabled'}`, setDialogueText);
+                    // Unknown option - toggle instead
+                    monogramSystem.toggleEnabled();
+                    const newState = monogramSystem.options?.enabled ?? false;
+                    setDialogueWithRevert(`WebGPU monogram ${newState ? 'enabled' : 'disabled'}`, setDialogueText);
                 }
             } else {
                 // No args - toggle monogram on/off
                 if (monogramSystem) {
-                    const currentEnabled = monogramSystem.options?.enabled ?? false;
-                    monogramSystem.updateOption('enabled', !currentEnabled);
-                    setDialogueWithRevert(`Monogram ${!currentEnabled ? 'enabled' : 'disabled'}`, setDialogueText);
+                    monogramSystem.toggleEnabled();
+                    const newState = monogramSystem.options?.enabled ?? false;
+                    setDialogueWithRevert(`WebGPU monogram ${newState ? 'enabled' : 'disabled'}`, setDialogueText);
                 }
             }
 
