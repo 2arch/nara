@@ -314,12 +314,14 @@ class MonogramSystem {
     updateTime(deltaTime: number) {
         this.time += deltaTime * this.options.speed;
 
-        // DISABLED: Chunk invalidation for animation
-        // Static pattern until we fix the async loading race condition
-        // if (Math.floor(this.time / 5) > Math.floor((this.time - deltaTime * this.options.speed) / 5)) {
-        //     this.chunks.clear();
-        //     this.chunkAccessTime.clear();
-        // }
+        // Re-enabled: Chunk invalidation for animation
+        // Invalidate every 10 time units for smooth flowing animation (~1 second real time)
+        const invalidateInterval = 10.0; // Time units between animation updates
+        if (Math.floor(this.time / invalidateInterval) > Math.floor((this.time - deltaTime * this.options.speed) / invalidateInterval)) {
+            this.chunks.clear();
+            this.chunkAccessTime.clear();
+            console.log('[Monogram] Invalidating chunks for animation at time', this.time.toFixed(2));
+        }
     }
 
     setOptions(options: Partial<MonogramOptions>) {
