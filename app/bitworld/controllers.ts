@@ -110,55 +110,48 @@ export function useControllerSystem(): ControllerSystem {
     };
 }
 
-// --- Monogram Controller ---
+// --- Monogram Controller (WebGPU Infinite Terrain) ---
 export function createMonogramController(monogramSystem: any): ControllerGroup {
     return {
         name: 'monogram',
-        description: 'Psychedelic Pattern Controls',
+        description: 'Infinite Terrain Pattern Controls',
         enabled: true,
         bindings: [
             {
                 key: 'm',
                 ctrlOrMeta: true,
-                description: 'Cycle pattern mode (off/mode1/mode2/...)',
-                action: () => monogramSystem.cycleMode()
+                description: 'Toggle monogram on/off',
+                action: () => monogramSystem.toggleEnabled()
             },
             {
                 key: '=',
                 ctrlOrMeta: true,
                 description: 'Increase animation speed',
-                action: () => monogramSystem.updateOption('speed', (speed: number) => Math.min(3.0, speed + 0.2))
+                action: () => monogramSystem.setOptions((prev: any) => ({ ...prev, speed: Math.min(3.0, prev.speed + 0.2) }))
             },
             {
                 key: '+',
                 ctrlOrMeta: true,
                 description: 'Increase animation speed',
-                action: () => monogramSystem.updateOption('speed', (speed: number) => Math.min(3.0, speed + 0.2))
+                action: () => monogramSystem.setOptions((prev: any) => ({ ...prev, speed: Math.min(3.0, prev.speed + 0.2) }))
             },
             {
                 key: '-',
                 ctrlOrMeta: true,
                 description: 'Decrease animation speed',
-                action: () => monogramSystem.updateOption('speed', (speed: number) => Math.max(0.1, speed - 0.2))
+                action: () => monogramSystem.setOptions((prev: any) => ({ ...prev, speed: Math.max(0.1, prev.speed - 0.2) }))
             },
             {
                 key: ']',
                 ctrlOrMeta: true,
                 description: 'Increase complexity',
-                action: () => monogramSystem.updateOption('complexity', (complexity: number) => Math.min(2.0, complexity + 0.2))
+                action: () => monogramSystem.setOptions((prev: any) => ({ ...prev, complexity: Math.min(3.0, prev.complexity + 0.2) }))
             },
             {
                 key: '[',
                 ctrlOrMeta: true,
                 description: 'Decrease complexity',
-                action: () => monogramSystem.updateOption('complexity', (complexity: number) => Math.max(0.1, complexity - 0.2))
-            },
-            {
-                key: 'r',
-                ctrlOrMeta: true,
-                shift: true,
-                description: 'Randomize color shift',
-                action: () => monogramSystem.updateOption('colorShift', Math.random() * Math.PI * 2)
+                action: () => monogramSystem.setOptions((prev: any) => ({ ...prev, complexity: Math.max(0.1, prev.complexity - 0.2) }))
             }
         ]
     };
