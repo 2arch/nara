@@ -142,22 +142,37 @@ class MonogramSystem {
 
     async initialize(): Promise<boolean> {
         if (this.isInitialized || !navigator.gpu) {
+            console.warn('[Monogram] Already initialized or WebGPU not available');
             return this.isInitialized;
         }
 
         try {
             const adapter = await navigator.gpu.requestAdapter();
-            if (!adapter) return false;
+            if (!adapter) {
+                console.error('[Monogram] No GPU adapter found');
+                return false;
+            }
 
             this.device = await adapter.requestDevice();
+            console.log('[Monogram] GPU device acquired');
 
             const vertexModule = this.device.createShaderModule({
                 code: VERTEX_SHADER
             });
+            const vertexCompilationInfo = await vertexModule.getCompilationInfo();
+            if (vertexCompilationInfo.messages.length > 0) {
+                console.warn('[Monogram] Vertex shader messages:', vertexCompilationInfo.messages);
+            }
+            console.log('[Monogram] Vertex shader compiled');
 
             const fragmentModule = this.device.createShaderModule({
                 code: FRAGMENT_SHADER
             });
+            const fragmentCompilationInfo = await fragmentModule.getCompilationInfo();
+            if (fragmentCompilationInfo.messages.length > 0) {
+                console.warn('[Monogram] Fragment shader messages:', fragmentCompilationInfo.messages);
+            }
+            console.log('[Monogram] Fragment shader compiled');
 
             this.pipeline = this.device.createRenderPipeline({
                 layout: 'auto',
@@ -176,6 +191,7 @@ class MonogramSystem {
                     topology: 'triangle-strip'
                 }
             });
+            console.log('[Monogram] Render pipeline created');
 
             this.paramsBuffer = this.device.createBuffer({
                 size: 6 * 4,
@@ -183,10 +199,10 @@ class MonogramSystem {
             });
 
             this.isInitialized = true;
-            console.log('[Monogram] WebGPU Render Pipeline initialized');
+            console.log('[Monogram] ✅ WebGPU Render Pipeline initialized successfully');
             return true;
         } catch (error) {
-            console.error('[Monogram] WebGPU init failed:', error);
+            console.error('[Monogram] ❌ WebGPU init failed:', error);
             return false;
         }
     }
@@ -289,10 +305,21 @@ class MonogramSystem {
         texture.destroy();
         stagingBuffer.destroy();
 
-        // Log sample of computed values
+        // Log sample of computed values with detailed RGBA info
         const sample = Array.from(intensities.slice(0, 10));
+        const pixelSample = Array.from(pixels.slice(0, 40)); // First 10 pixels RGBA
         const nonZero = intensities.filter(v => v > 0).length;
-        console.log(`[Monogram] Chunk rendered: ${nonZero}/${intensities.length} non-zero values, sample:`, sample);
+        const min = Math.min(...intensities);
+        const max = Math.max(...intensities);
+        const avg = intensities.reduce((a, b) => a + b, 0) / intensities.length;
+
+        console.log(`[Monogram] Chunk rendered at (${chunkWorldX}, ${chunkWorldY}):`, {
+            nonZero: `${nonZero}/${intensities.length}`,
+            range: `${min.toFixed(3)} - ${max.toFixed(3)}`,
+            average: avg.toFixed(3),
+            intensitySample: sample.map(v => v.toFixed(3)),
+            rawRGBASample: pixelSample
+        });
 
         return intensities;
     }
