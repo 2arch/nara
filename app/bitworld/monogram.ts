@@ -177,6 +177,8 @@ class MonogramSystem {
             throw new Error('[Monogram] Not initialized');
         }
 
+        console.log(`[Monogram] Computing chunk at world (${chunkWorldX}, ${chunkWorldY})`);
+
         const device = this.device;
         const bufferSize = this.CHUNK_SIZE * this.CHUNK_SIZE * 4;
 
@@ -228,6 +230,11 @@ class MonogramSystem {
 
         outputBuffer.destroy();
         stagingBuffer.destroy();
+
+        // Log sample of computed values
+        const sample = Array.from(intensities.slice(0, 10));
+        const nonZero = intensities.filter(v => v > 0).length;
+        console.log(`[Monogram] Chunk computed: ${nonZero}/${intensities.length} non-zero values, sample:`, sample);
 
         return intensities;
     }
