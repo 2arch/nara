@@ -4,6 +4,7 @@ import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { useWorldEngine } from '../../bitworld/world.engine';
 import { BitCanvas } from '../../bitworld/bit.canvas';
+import { useMonogram } from '../../bitworld/monogram';
 import { auth, getUidByUsername } from '../../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 
@@ -111,6 +112,9 @@ function UserStateContent() {
   // Detect if current user is the owner
   const isOwner = user && targetUserUid && user.uid === targetUserUid;
 
+  // Monogram system - create once and pass to both engine and canvas
+  const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0, mode: 'perlin' });
+
   const engine = useWorldEngine({
     worldId: stateName,
     // initialBackgroundColor: '#000',
@@ -120,7 +124,8 @@ function UserStateContent() {
     initialViewOffset: initialViewOffset,
     initialZoomLevel: initialZoomLevel,
     initialPatternId: initialPatternId,
-    isReadOnly: !isOwner // Pass read-only flag
+    isReadOnly: !isOwner, // Pass read-only flag
+    monogramSystem: monogram // Pass monogram to engine for command system
   });
 
   // Handle authentication success for pan-triggered signup
@@ -163,6 +168,7 @@ function UserStateContent() {
         hostModeEnabled={!isOwner}
         onAuthSuccess={handleAuthSuccess}
         onPanDistanceChange={setPanDistance}
+        monogram={monogram}
       />
 
       {/* Pan distance indicator removed - no longer shown in read-only mode */}

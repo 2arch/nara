@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { useWorldEngine } from '../bitworld/world.engine';
 import { BitCanvas } from '../bitworld/bit.canvas';
+import { useMonogram } from '../bitworld/monogram';
 import { auth, database, getUserProfile } from '../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { ref, set, serverTimestamp, get } from 'firebase/database';
@@ -126,6 +127,9 @@ function BdayPageContent() {
   }, []);
 
   // World Engine - using 'public' userUid so it saves to /worlds/public/bday/data
+  // Monogram system - create once and pass to both engine and canvas
+  const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0, mode: 'perlin' });
+
   const engine = useWorldEngine({
     worldId: 'bday',
     userUid: 'public', // 'public' userUid groups all public collaborative spaces
@@ -135,7 +139,8 @@ function BdayPageContent() {
     initialZoomLevel,
     initialBackgroundColor: '#10B981', // Shamrock green for birthday vibes
     initialTextColor: '#D4FF00', // Spring yellow-green text
-    isReadOnly: !user // Read-only if not authenticated
+    isReadOnly: !user, // Read-only if not authenticated
+    monogramSystem: monogram // Pass monogram to engine for command system
   });
 
   // Handle authentication success for pan-triggered signup
@@ -176,6 +181,7 @@ function BdayPageContent() {
         onAuthSuccess={handleAuthSuccess}
         onPanDistanceChange={setPanDistance}
         isPublicWorld={true} // Enable public world sign-up flow
+        monogram={monogram}
       />
     </div>
   );

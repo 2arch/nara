@@ -87,12 +87,13 @@ export default function UserHome() {
   }, [user, targetUserUid, tutorialChecked]);
 
   // Initialize monogram system
-  const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0 });
+  const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0, mode: 'perlin' });
 
   const engine = useWorldEngine({
     worldId: 'home',
     userUid: targetUserUid, // Use the target user's UID, not the authenticated user's UID
-    username: username
+    username: username,
+    monogramSystem: monogram // Pass monogram to engine for command system
   });
 
   // Sync all character positions to monogram system whenever worldData changes
