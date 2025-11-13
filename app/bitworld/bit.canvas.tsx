@@ -4492,6 +4492,7 @@ Camera & Viewport Controls:
 
                     // Create a grid to mark filled cells
                     const gridCells = new Set<string>();
+                    const corridorCells = new Set<string>(); // Track corridors separately
 
                     // Add all room cells to grid
                     for (const room of roomsFromNotes) {
@@ -4509,44 +4510,51 @@ Camera & Viewport Controls:
                         const endX = room2.x + Math.floor(room2.width / 2);
                         const endY = room2.y + Math.floor(room2.height / 2);
 
-                        // Wider corridors to match larger room scale
                         // 3 cells wide for both directions (1:1 aspect ratio for 1x1 cell regime)
-                        const corridorWidth = 3; // horizontal thickness
-                        const corridorHeight = 3; // vertical thickness
+                        const corridorWidth = 3;
+                        const corridorHeight = 3;
 
                         // L-shaped corridor - randomly choose horizontal-first or vertical-first
                         if (random(rngSeed) > 0.5) {
-                            // Horizontal segment first (3 cells wide)
+                            // Horizontal segment first
                             const minX = Math.min(startX, endX);
                             const maxX = Math.max(startX, endX);
                             for (let x = minX; x <= maxX; x++) {
                                 for (let w = 0; w < corridorWidth; w++) {
-                                    gridCells.add(`${x},${startY + w - Math.floor(corridorWidth / 2)}`);
+                                    const cellKey = `${x},${startY + w - Math.floor(corridorWidth / 2)}`;
+                                    gridCells.add(cellKey);
+                                    corridorCells.add(cellKey); // Mark as corridor
                                 }
                             }
-                            // Vertical segment (2 cells tall visually matches horizontal 3-wide)
+                            // Vertical segment
                             const minY = Math.min(startY, endY);
                             const maxY = Math.max(startY, endY);
                             for (let y = minY; y <= maxY; y++) {
                                 for (let h = 0; h < corridorHeight; h++) {
-                                    gridCells.add(`${endX + h - Math.floor(corridorHeight / 2)},${y}`);
+                                    const cellKey = `${endX + h - Math.floor(corridorHeight / 2)},${y}`;
+                                    gridCells.add(cellKey);
+                                    corridorCells.add(cellKey); // Mark as corridor
                                 }
                             }
                         } else {
-                            // Vertical segment first (2 cells tall)
+                            // Vertical segment first
                             const minY = Math.min(startY, endY);
                             const maxY = Math.max(startY, endY);
                             for (let y = minY; y <= maxY; y++) {
                                 for (let h = 0; h < corridorHeight; h++) {
-                                    gridCells.add(`${startX + h - Math.floor(corridorHeight / 2)},${y}`);
+                                    const cellKey = `${startX + h - Math.floor(corridorHeight / 2)},${y}`;
+                                    gridCells.add(cellKey);
+                                    corridorCells.add(cellKey); // Mark as corridor
                                 }
                             }
-                            // Horizontal segment (3 cells wide)
+                            // Horizontal segment
                             const minX = Math.min(startX, endX);
                             const maxX = Math.max(startX, endX);
                             for (let x = minX; x <= maxX; x++) {
                                 for (let w = 0; w < corridorWidth; w++) {
-                                    gridCells.add(`${x},${endY + w - Math.floor(corridorWidth / 2)}`);
+                                    const cellKey = `${x},${endY + w - Math.floor(corridorWidth / 2)}`;
+                                    gridCells.add(cellKey);
+                                    corridorCells.add(cellKey); // Mark as corridor
                                 }
                             }
                         }
@@ -4676,17 +4684,35 @@ Camera & Viewport Controls:
                     }
 
                     // Draw the unified shape with a single outer border
-                    // Fill all cells
-                    const defaultFillColor = `rgba(${hexToRgb(engine.textColor)}, 0.15)`;
+                    // Default pattern styling (independent of styles.ts)
+                    const defaultRoomFillColor = `rgba(${hexToRgb(engine.textColor)}, 0.25)`;
+                    const defaultCorridorFillColor = `rgba(${hexToRgb(engine.textColor)}, 0.12)`;
+
+                    // Use style overrides if present
                     const fillColor = patternStyle?.fill.type === 'solid' && patternStyle.fill.color
                         ? patternStyle.fill.color
-                        : defaultFillColor;
-                    const fillAlpha = patternStyle?.fill.alpha ?? (patternStyle?.fill.type === 'solid' ? 1.0 : 0.15);
+                        : null;
+                    const fillAlpha = patternStyle?.fill.alpha ?? (patternStyle?.fill.type === 'solid' ? 1.0 : null);
 
                     if (patternStyle?.fill.type !== 'none') {
-                        ctx.globalAlpha = fillAlpha;
-                        ctx.fillStyle = fillColor;
+                        // Render rooms with distinct styling
+                        ctx.globalAlpha = fillAlpha ?? 0.25;
+                        ctx.fillStyle = fillColor ?? defaultRoomFillColor;
                         for (const cellKey of gridCells) {
+                            if (!corridorCells.has(cellKey)) { // Only render room cells
+                                const [x, y] = cellKey.split(',').map(Number);
+                                const topLeft = engine.worldToScreen(x, y, currentZoom, currentOffset);
+                                const bottomRight = engine.worldToScreen(x + 1, y + 1, currentZoom, currentOffset);
+                                const w = bottomRight.x - topLeft.x;
+                                const h = bottomRight.y - topLeft.y;
+                                ctx.fillRect(topLeft.x, topLeft.y, w, h);
+                            }
+                        }
+
+                        // Render corridors with lighter styling
+                        ctx.globalAlpha = fillAlpha ? fillAlpha * 0.5 : 0.12;
+                        ctx.fillStyle = fillColor ?? defaultCorridorFillColor;
+                        for (const cellKey of corridorCells) {
                             const [x, y] = cellKey.split(',').map(Number);
                             const topLeft = engine.worldToScreen(x, y, currentZoom, currentOffset);
                             const bottomRight = engine.worldToScreen(x + 1, y + 1, currentZoom, currentOffset);
@@ -4694,12 +4720,14 @@ Camera & Viewport Controls:
                             const h = bottomRight.y - topLeft.y;
                             ctx.fillRect(topLeft.x, topLeft.y, w, h);
                         }
+
                         ctx.globalAlpha = 1.0;
                     }
 
                     // Draw outer border only if not glow (glow already rendered above)
+                    // Default border is more opaque for better visibility
                     if (!patternStyle || patternStyle.border.type !== 'glow') {
-                        const defaultBorderColor = `rgba(${hexToRgb(engine.textColor)}, 0.6)`;
+                        const defaultBorderColor = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
                         const borderColor = patternStyle?.border.type === 'solid' && patternStyle.border.color
                             ? patternStyle.border.color
                             : defaultBorderColor;

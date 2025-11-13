@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWorldEngine } from './bitworld/world.engine';
 import { BitCanvas } from './bitworld/bit.canvas';
+import { useMonogram } from './bitworld/monogram';
 import { auth } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { getUsernameByUid, completeSignInWithEmailLink } from './firebase';
@@ -55,12 +56,16 @@ export default function Home() {
   const introConfig = selectIntro();
   const resolvedIntro = resolveIntroConfig(introConfig);
 
+  // Monogram system - create once and pass to both engine and canvas
+  const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0, mode: 'perlin' });
+
   const engine = useWorldEngine({
     worldId: null, // Always null for home page (anonymous users)
     initialBackgroundColor: resolvedIntro.backgroundColor,
     userUid: null, // Always null for home page
     initialZoomLevel: 1.6, // Zoomed in for host mode onboarding
-    skipInitialBackground: !isVerifyingEmail // Skip initial bg when intro flow is active
+    skipInitialBackground: !isVerifyingEmail, // Skip initial bg when intro flow is active
+    monogramSystem: monogram // Pass monogram to engine for command system
   });
 
   const handleAuthSuccess = useCallback((username: string) => {
@@ -93,6 +98,7 @@ export default function Home() {
         fontFamily={engine.fontFamily}
         isVerifyingEmail={isVerifyingEmail}
         hostTextColor={resolvedIntro.hostTextColor}
+        monogram={monogram}
         hostBackgroundColor={resolvedIntro.backgroundColor}
         hostDimBackground={false}
       />

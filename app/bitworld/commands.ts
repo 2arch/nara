@@ -2880,7 +2880,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                 // Generate rooms using BSP
                 const width = 120;
-                const height = 60;
+                const height = 120;
                 const timestamp = Date.now();
                 const seed = timestamp;
                 const random = (n: number) => {
@@ -2902,7 +2902,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     if (depth >= maxDepth) {
                         const margin = 2;
                         if (node.width < margin * 2 + 3 || node.height < margin * 2 + 3) return;
-                        const roomWidth = Math.floor(rng(rngOffset) * 12) + 28;
+                        const roomWidth = Math.floor(rng(rngOffset) * 6) + 14;
                         const roomHeight = Math.floor(rng(rngOffset + 1) * 6) + 10;
                         const roomX = node.x + margin + Math.floor(rng(rngOffset + 2) * Math.max(0, node.width - roomWidth - margin * 2));
                         const roomY = node.y + margin + Math.floor(rng(rngOffset + 3) * Math.max(0, node.height - roomHeight - margin * 2));
@@ -2916,15 +2916,15 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         const splitY = node.y + Math.floor(node.height / 2) + Math.floor(rng(rngOffset + depth + 1) * 6) - 3;
                         node.leftChild = { x: node.x, y: node.y, width: node.width, height: splitY - node.y };
                         node.rightChild = { x: node.x, y: splitY, width: node.width, height: node.y + node.height - splitY };
-                    } else if (!splitHorizontal && node.width >= 40) {
+                    } else if (!splitHorizontal && node.width >= 20) {
                         const splitX = node.x + Math.floor(node.width / 2) + Math.floor(rng(rngOffset + depth + 2) * 8) - 4;
                         node.leftChild = { x: node.x, y: node.y, width: splitX - node.x, height: node.height };
                         node.rightChild = { x: splitX, y: node.y, width: node.x + node.width - splitX, height: node.height };
                     } else {
                         const margin = 2;
-                        const roomWidth = Math.max(28, Math.min(node.width - margin * 2, 40));
+                        const roomWidth = Math.max(14, Math.min(node.width - margin * 2, 20));
                         const roomHeight = Math.max(10, Math.min(node.height - margin * 2, 16));
-                        if (roomWidth >= 28 && roomHeight >= 10) {
+                        if (roomWidth >= 14 && roomHeight >= 10) {
                             node.room = { x: node.x + margin, y: node.y + margin, width: roomWidth, height: roomHeight };
                         }
                         return;
