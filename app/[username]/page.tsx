@@ -126,7 +126,6 @@ export default function UserHome() {
         engine={engine}
         cursorColorAlternate={cursorAlternate}
         className="w-full h-full"
-        monogramEnabled={true}
         dialogueEnabled={true}
         fontFamily={engine.fontFamily}
         hostModeEnabled={shouldShowTutorial}

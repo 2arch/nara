@@ -86,7 +86,6 @@ export default function Home() {
         engine={engine}
         cursorColorAlternate={cursorAlternate}
         className="w-full h-full"
-        monogramEnabled={true}
         dialogueEnabled={false}
         hostModeEnabled={true}
         initialHostFlow={initialFlow}
@@ -96,7 +95,6 @@ export default function Home() {
         hostTextColor={resolvedIntro.hostTextColor}
         hostBackgroundColor={resolvedIntro.backgroundColor}
         hostDimBackground={false}
-        hostMonogramMode="off"
       />
     </div>
   );

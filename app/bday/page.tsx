@@ -170,14 +170,12 @@ function BdayPageContent() {
         engine={engine}
         cursorColorAlternate={cursorAlternate}
         className="w-full h-full"
-        monogramEnabled={true}
         dialogueEnabled={true}
         fontFamily={engine.fontFamily}
         hostModeEnabled={!user} // Enable host mode when not authenticated
         onAuthSuccess={handleAuthSuccess}
         onPanDistanceChange={setPanDistance}
         isPublicWorld={true} // Enable public world sign-up flow
-        hostMonogramMode="user-settings" // Use user's monogram settings in public world sign-up
       />
     </div>
   );

@@ -1,10 +1,8 @@
 // app/bitworld/settings.ts
 import { useState, useCallback } from 'react';
-import type { MonogramOptions } from './monogram';
 
 export interface WorldSettings {
     isDebugVisible: boolean;
-    monogramOptions: MonogramOptions;
     labelProximityThreshold: number;
     textColor?: string;
     backgroundColor?: string;
@@ -18,28 +16,12 @@ export interface WorldSettings {
         x: number;
         y: number;
     };
-    // Persisted monogram state
-    monogramMode?: import('./monogram').MonogramMode;
-    monogramEnabled?: boolean;
     // Autocomplete
     isAutocompleteEnabled?: boolean;
 }
 
 export const initialSettings: WorldSettings = {
     isDebugVisible: false,
-    monogramOptions: {
-        mode: 'perlin',
-        speed: 0.5, // Slower default speed
-        complexity: 1.0,
-        colorShift: 0,
-        enabled: false,
-        renderScheme: 'point-based',
-        geometryType: 'octahedron',
-        interactiveTrails: true,
-        trailIntensity: 0.5,
-        trailFadeMs: 500,
-        maskName: 'macintosh'
-    },
     labelProximityThreshold: 999999,
     isAutocompleteEnabled: false, // Autocomplete disabled by default
 };
