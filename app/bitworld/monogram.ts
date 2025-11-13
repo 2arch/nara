@@ -118,6 +118,9 @@ class MonogramSystem {
     private time = 0;
     private options: MonogramOptions;
 
+    // Track last viewport for auto-reload on invalidation
+    private lastViewport: { startX: number, startY: number, endX: number, endY: number } | null = null;
+
     constructor(options: MonogramOptions) {
         this.options = options;
     }
@@ -274,6 +277,9 @@ class MonogramSystem {
     async preloadViewport(startWorldX: number, startWorldY: number, endWorldX: number, endWorldY: number): Promise<void> {
         if (!this.isInitialized || !this.options.enabled) return;
 
+        // Store viewport for auto-reload on animation invalidation
+        this.lastViewport = { startX: startWorldX, startY: startWorldY, endX: endWorldX, endY: endWorldY };
+
         const startChunkX = Math.floor(startWorldX / this.CHUNK_SIZE);
         const endChunkX = Math.floor(endWorldX / this.CHUNK_SIZE);
         const startChunkY = Math.floor(startWorldY / this.CHUNK_SIZE);
@@ -321,6 +327,16 @@ class MonogramSystem {
             this.chunks.clear();
             this.chunkAccessTime.clear();
             console.log('[Monogram] Invalidating chunks for animation at time', this.time.toFixed(2));
+
+            // Immediately reload the last known viewport to avoid flashing
+            if (this.lastViewport) {
+                this.preloadViewport(
+                    this.lastViewport.startX,
+                    this.lastViewport.startY,
+                    this.lastViewport.endX,
+                    this.lastViewport.endY
+                );
+            }
         }
     }
 
