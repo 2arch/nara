@@ -2458,20 +2458,26 @@ Camera & Viewport Controls:
                             renderedCount++;
                             // Render character glows as soft red, perlin noise as textColor
                             if (hasCharacter) {
-                                // Soft red glow for characters
+                                // Soft red glow for characters - must respect GRID_CELL_SPAN height
                                 ctx.fillStyle = '#ff6666'; // Soft red
                                 ctx.globalAlpha = intensity * 0.6;
+                                ctx.fillRect(
+                                    screenPos.x,
+                                    screenPos.y,
+                                    effectiveCharWidth,
+                                    effectiveCharHeight * GRID_CELL_SPAN  // 2 cells tall
+                                );
                             } else {
-                                // Normal perlin noise pattern
+                                // Normal perlin noise pattern - single cell
                                 ctx.fillStyle = engine.textColor;
                                 ctx.globalAlpha = intensity * 0.5;
+                                ctx.fillRect(
+                                    screenPos.x,
+                                    screenPos.y,
+                                    effectiveCharWidth,
+                                    effectiveCharHeight
+                                );
                             }
-                            ctx.fillRect(
-                                screenPos.x,
-                                screenPos.y,
-                                effectiveCharWidth,
-                                effectiveCharHeight
-                            );
                             ctx.globalAlpha = 1.0; // Reset alpha
                         } else {
                             skippedOutOfBounds++;
