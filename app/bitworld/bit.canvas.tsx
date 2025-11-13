@@ -3425,8 +3425,8 @@ Camera & Viewport Controls:
 
         // === Render Command Data ===
         if (engine.commandState.isActive) {
-            // First, draw background for selected command (only if user has navigated, skip when monogram is enabled)
-            if (engine.commandState.hasNavigated && !monogram.options.enabled) {
+            // First, draw background for selected command (only if user has navigated)
+            if (engine.commandState.hasNavigated) {
                 const selectedCommandY = engine.commandState.commandStartPos.y + GRID_CELL_SPAN + (engine.commandState.selectedIndex * GRID_CELL_SPAN);
                 const selectedCommand = engine.commandState.matchedCommands[engine.commandState.selectedIndex];
                 if (selectedCommand) {
@@ -3439,9 +3439,6 @@ Camera & Viewport Controls:
                 }
             }
         }
-        
-        // Helper: should we draw backgrounds in command menu?
-        const drawCommandBackgrounds = !monogram.options.enabled;
 
         for (const key in engine.commandData) {
             const [xStr, yStr] = key.split(',');
@@ -3544,9 +3541,9 @@ Camera & Viewport Controls:
 
                         if (isHovered) {
                             // Hovered category label
-                            if (useStreamMode || monogram.options.enabled) {
-                                // Stream mode or monogram - no background, just white text
-                                ctx.fillStyle = monogram.options.enabled ? engine.textColor : '#FFFFFF';
+                            if (useStreamMode) {
+                                // Stream mode - no background, just white text
+                                ctx.fillStyle = '#FFFFFF';
                             } else {
                                 // Normal mode - use background
                                 ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
@@ -3555,9 +3552,9 @@ Camera & Viewport Controls:
                             }
                         } else if (isSelected) {
                             // Selected category label
-                            if (useStreamMode || monogram.options.enabled) {
-                                // Stream mode or monogram - no background, just white text
-                                ctx.fillStyle = monogram.options.enabled ? engine.textColor : '#FFFFFF';
+                            if (useStreamMode) {
+                                // Stream mode - no background, just white text
+                                ctx.fillStyle = '#FFFFFF';
                             } else {
                                 // Normal mode - use background
                                 ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.8)`;
@@ -3566,9 +3563,9 @@ Camera & Viewport Controls:
                             }
                         } else {
                             // Other category labels
-                            if (useStreamMode || monogram.options.enabled) {
-                                // Stream mode or monogram - no background, text with opacity
-                                ctx.fillStyle = monogram.options.enabled ? engine.textColor : 'rgba(255, 255, 255, 0.6)';
+                            if (useStreamMode) {
+                                // Stream mode - no background, just white text with opacity
+                                ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
                             } else {
                                 // Normal mode - use background
                                 ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.6)`;
@@ -3582,18 +3579,15 @@ Camera & Viewport Controls:
                         if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
                             // No background - just white text
                             ctx.fillStyle = '#FFFFFF';
-                        } else if (drawCommandBackgrounds) {
+                        } else {
                             ctx.fillStyle = engine.textColor;
                             ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                             // Text uses background color
                             ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
-                        } else {
-                            // Monogram mode - just use text color
-                            ctx.fillStyle = engine.textColor;
                         }
                     } else if (isHovered) {
                         // Hovered suggestion - use swatch color if available, otherwise text color
-                        if (highlightColor && drawCommandBackgrounds) {
+                        if (highlightColor) {
                             ctx.fillStyle = highlightColor;
                             ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                             // Text uses contrasting color (white or black based on luminance)
@@ -3606,7 +3600,7 @@ Camera & Viewport Controls:
                         } else if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
                             // Stream mode - no background, just white text
                             ctx.fillStyle = '#FFFFFF';
-                        } else if (drawCommandBackgrounds) {
+                        } else {
                             const hex = engine.textColor.replace('#', '');
                             const r = parseInt(hex.substring(0, 2), 16);
                             const g = parseInt(hex.substring(2, 4), 16);
@@ -3614,13 +3608,10 @@ Camera & Viewport Controls:
                             ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.9)`;
                             ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                             ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
-                        } else {
-                            // Monogram mode
-                            ctx.fillStyle = engine.textColor;
                         }
                     } else if (engine.commandState.isActive && engine.commandState.hasNavigated && worldY === engine.commandState.commandStartPos.y + GRID_CELL_SPAN + (engine.commandState.selectedIndex * GRID_CELL_SPAN)) {
                         // Selected suggestion - use swatch color at 80% opacity if available
-                        if (highlightColor && drawCommandBackgrounds) {
+                        if (highlightColor) {
                             const hex = highlightColor.replace('#', '');
                             const r = parseInt(hex.substring(0, 2), 16);
                             const g = parseInt(hex.substring(2, 4), 16);
@@ -3632,7 +3623,7 @@ Camera & Viewport Controls:
                         } else if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
                             // Stream mode - no background, just white text
                             ctx.fillStyle = '#FFFFFF';
-                        } else if (drawCommandBackgrounds) {
+                        } else {
                             const hex = engine.textColor.replace('#', '');
                             const r = parseInt(hex.substring(0, 2), 16);
                             const g = parseInt(hex.substring(2, 4), 16);
@@ -3640,16 +3631,13 @@ Camera & Viewport Controls:
                             ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.8)`;
                             ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                             ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
-                        } else {
-                            // Monogram mode
-                            ctx.fillStyle = engine.textColor;
                         }
                     } else {
                         // Other suggestions - use text color at 60% opacity
                         if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
                             // Stream mode - no background, just white text with opacity
                             ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-                        } else if (drawCommandBackgrounds) {
+                        } else {
                             const hex = engine.textColor.replace('#', '');
                             const r = parseInt(hex.substring(0, 2), 16);
                             const g = parseInt(hex.substring(2, 4), 16);
@@ -3662,9 +3650,6 @@ Camera & Viewport Controls:
                             const bgG = parseInt(bgHex.substring(2, 4), 16);
                             const bgB = parseInt(bgHex.substring(4, 6), 16);
                             ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
-                        } else {
-                            // Monogram mode
-                            ctx.fillStyle = engine.textColor;
                         }
                     }
 
