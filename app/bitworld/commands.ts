@@ -114,15 +114,6 @@ interface UseCommandSystemProps {
     triggerTutorialFlow?: () => void;
     onCommandExecuted?: (command: string, args: string[]) => void;
     cancelComposition?: () => void; // Callback to cancel IME composition
-    monogramSystem?: { // WebGPU infinite terrain monogram system
-        setOptions: (updater: (prev: any) => any) => void;
-        toggleEnabled: () => void;
-        options?: {
-            enabled?: boolean;
-            speed?: number;
-            complexity?: number;
-        };
-    };
     selectedNoteKey?: string | null; // Currently selected note
     selectedPatternKey?: string | null; // Currently selected pattern
 }
@@ -144,7 +135,7 @@ const AVAILABLE_COMMANDS = [
     // State Management
     'state', 'random', 'clear', 'replay',
     // Sharing & Publishing
-    'publish', 'unpublish', 'share', 'spawn', 'monogram',
+    'publish', 'unpublish', 'share', 'spawn',
     // Account
     'signin', 'signout', 'account', 'upgrade',
     // Debug
@@ -158,7 +149,7 @@ export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'special': ['mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help'],
     'style': ['bg', 'text', 'font', 'style'],
     'state': ['state', 'random', 'clear', 'replay'],
-    'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
+    'share': ['publish', 'unpublish', 'share', 'spawn'],
     'account': ['signin', 'signout', 'account', 'upgrade'],
     'debug': ['debug']
 };
@@ -181,7 +172,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'link': 'Create a clickable link from selected text. Select text, then type /link [url]. Click the underlined link to open the URL in a new tab. URLs are auto-detected when pasted.',
     'clip': 'Save selected text to your clipboard. Select text, then type /clip to capture it. Access your clips later to paste them anywhere on the canvas.',
     'upload': 'Upload an image to your canvas. Type /upload, then select an image file. The image will be placed at your current cursor position and saved to your canvas.',
-    'paint': 'Enter paint mode to draw filled regions on the canvas. Drag to draw a continuous stroke, double-click/double-tap to fill the enclosed area. Press ESC to exit. Regions define zones for monogram patterns.',
+    'paint': 'Enter paint mode to draw filled regions on the canvas. Drag to draw a continuous stroke, double-click/double-tap to fill the enclosed area. Press ESC to exit.',
     'mode': 'Switch canvas modes. /mode default for standard writing, /mode air for ephemeral text that doesn\'t save, /mode chat to talk with AI, /mode note for focused note-taking.',
     'note': 'Quick shortcut to enter note mode. This creates a focused writing space perfect for drafting ideas before placing them on your main canvas.',
     'mail': '[SUPER ONLY] Create an email region. Select a rectangular area, type /mail. Row 1 = recipient email, Row 2 = subject line, Row 3+ = message body. Click the send button to deliver the email.',
@@ -201,7 +192,6 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'unpublish': 'Unpublish your canvas. Makes your canvas private again. It will no longer be accessible at the public URL.',
     'share': 'Get a shareable link to your canvas. Copy this link to share your canvas with others. If published, they can view it; if private, you control access.',
     'spawn': 'Set your spawn point. This is where you\'ll start when you open this canvas. Type /spawn to set it to your current position.',
-    'monogram': 'Control WebGPU infinite terrain background. /monogram to toggle on/off, /monogram on to enable, /monogram off to disable. Use Ctrl+/- to adjust speed, Ctrl+[/] to adjust complexity.',
     'signin': 'Sign in to your Nara account. Required for saving work, publishing canvases, and accessing AI features.',
     'signout': 'Sign out of your Nara account. You\'ll return to read-only mode.',
     'account': 'Manage your account settings. Use /account reset to reset your password.',
@@ -224,7 +214,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllLabels, getAllBounds, availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, monogramSystem, selectedNoteKey, selectedPatternKey }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllLabels, getAllBounds, availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const previousBackgroundStateRef = useRef<{
@@ -689,19 +679,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     .map(camera => `cam ${camera}`);
             }
             return CAMERA_COMMANDS.map(camera => `cam ${camera}`);
-        }
-
-        if (lowerInput === 'monogram') {
-            const parts = input.toLowerCase().split(' ');
-            const MONOGRAM_OPTIONS = ['on', 'off'];
-            if (parts.length > 1) {
-                // Show monogram options that match the input
-                const monogramInput = parts[1];
-                return MONOGRAM_OPTIONS
-                    .filter(option => option.startsWith(monogramInput))
-                    .map(option => `monogram ${option}`);
-            }
-            return MONOGRAM_OPTIONS.map(option => `monogram ${option}`);
         }
 
         if (lowerInput === 'upload') {
@@ -1519,19 +1496,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                 // Show webcam feed as background (clears backgroundColor so stream shows through)
                 switchBackgroundMode('stream');
-
-                // Note: WebGPU monogram is independent of face tracking
-                // Face tracking data is used by face3d rendering in bit.canvas.tsx
-                if (updateSettings && settings) {
-                    updateSettings({
-                        monogramEnabled: true
-                    });
-                }
-
-                // Enable monogram if available
-                if (monogramSystem) {
-                    monogramSystem.setOptions(prev => ({ ...prev, enabled: true }));
-                }
 
                 setDialogueWithRevert(`Face-piloted geometry active (${maskName} face). Turn your head to pilot the face!`, setDialogueText);
             } catch (error) {
@@ -2758,51 +2722,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             });
             
             return { command: 'pending_selection', args: [commandToExecute], commandStartPos: commandState.commandStartPos };
-        }
-
-        // Handle monogram command (WebGPU infinite terrain)
-        if (commandToExecute.startsWith('monogram')) {
-            const args = inputParts.slice(1);
-
-            if (args.length > 0 && monogramSystem) {
-                const option = args[0].toLowerCase();
-
-                if (option === 'on') {
-                    // Enable monogram
-                    monogramSystem.setOptions(prev => ({ ...prev, enabled: true }));
-                    setDialogueWithRevert('WebGPU monogram enabled', setDialogueText);
-                } else if (option === 'off') {
-                    // Disable monogram
-                    monogramSystem.setOptions(prev => ({ ...prev, enabled: false }));
-                    setDialogueWithRevert('WebGPU monogram disabled', setDialogueText);
-                } else {
-                    // Unknown option - toggle instead
-                    monogramSystem.toggleEnabled();
-                    const newState = monogramSystem.options?.enabled ?? false;
-                    setDialogueWithRevert(`WebGPU monogram ${newState ? 'enabled' : 'disabled'}`, setDialogueText);
-                }
-            } else {
-                // No args - toggle monogram on/off
-                if (monogramSystem) {
-                    monogramSystem.toggleEnabled();
-                    const newState = monogramSystem.options?.enabled ?? false;
-                    setDialogueWithRevert(`WebGPU monogram ${newState ? 'enabled' : 'disabled'}`, setDialogueText);
-                }
-            }
-
-            // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
-
-            return { command: 'monogram', args, commandStartPos: commandState.commandStartPos };
         }
 
         // Handle share command - always publishes with region coordinates

@@ -1,7 +1,6 @@
 // components/BitHomeCanvas.tsx
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import type { WorldEngine } from './world.engine';
-import { useMonogramSystem } from './monogram';
 import { signUpUser, signInUser, checkUsernameAvailability, getUsernameByUid } from '../firebase';
 import { logger } from './logger';
 
@@ -13,22 +12,21 @@ interface BitHomeCanvasProps {
     engine: WorldEngine;
     cursorColorAlternate: boolean;
     className?: string;
-    monogramEnabled?: boolean;
     showForm?: boolean;
     isSignup?: boolean;
     taglineText?: { title: string; subtitle: string };
-    navButtons?: { 
-        onLoginClick?: () => void; 
+    navButtons?: {
+        onLoginClick?: () => void;
         onSignupClick?: () => void;
         onVisitClick?: () => void;
-        isAuthenticated?: boolean; 
+        isAuthenticated?: boolean;
     };
     onBackClick?: () => void;
     onAuthSuccess?: (username: string) => void;
     fontFamily?: string;
 }
 
-export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogramEnabled = false, showForm = false, isSignup = false, taglineText, navButtons, onBackClick, onAuthSuccess, fontFamily = 'IBM Plex Mono' }: BitHomeCanvasProps) {
+export function BitHomeCanvas({ engine, cursorColorAlternate, className, showForm = false, isSignup = false, taglineText, navButtons, onBackClick, onAuthSuccess, fontFamily = 'IBM Plex Mono' }: BitHomeCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -137,22 +135,7 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
             setIsSubmitting(false);
         }
     }, [formState]);
-    
-    // === Monogram System (Hard-coded 'nara' pattern) ===
-    const monogramSystem = useMonogramSystem({
-        mode: 'nara',
-        speed: 0.5,
-        complexity: 1.0,
-        colorShift: 0.5,
-        enabled: true,
-        renderScheme: 'point-based',
-        geometryType: 'octahedron',
-        interactiveTrails: true,
-        trailIntensity: 0.5,
-        trailFadeMs: 500,
-        maskName: 'macintosh',
-    });
-    
+
     // === Form Layout Calculation (Dialogue.tsx pattern) ===
     const calculateFormLayout = useCallback((canvasWidth: number, canvasHeight: number) => {
         const charHeight = 16; // Fixed font size like dialogue
@@ -981,37 +964,6 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         const endWorldX = startWorldX + (cssWidth / effectiveCharWidth);
         const endWorldY = startWorldY + (cssHeight / effectiveCharHeight);
 
-        // === Render Monogram Patterns ===
-        if (monogramEnabled) {
-            const monogramPattern = monogramSystem.generateMonogramPattern(
-                startWorldX, startWorldY, endWorldX, endWorldY
-            );
-            
-            for (const key in monogramPattern) {
-                const [xStr, yStr] = key.split(',');
-                const worldX = parseInt(xStr, 10);
-                const worldY = parseInt(yStr, 10);
-                
-                if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                    if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth && 
-                        screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-                        
-                        const cell = monogramPattern[key];
-                        
-                        // Only render if there's no regular text at this position
-                        const textKey = `${worldX},${worldY}`;
-                        const charData = engine.worldData[textKey];
-                        const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';
-                        if (!char || char.trim() === '') {
-                            ctx.fillStyle = cell.color;
-                            ctx.fillText(cell.char, screenPos.x, screenPos.y + verticalTextOffset);
-                        }
-                    }
-                }
-            }
-        }
-
         // === Render Basic Text ===
         ctx.fillStyle = engine.textColor;
         for (const key in engine.worldData) {
@@ -1052,7 +1004,7 @@ export function BitHomeCanvas({ engine, cursorColorAlternate, className, monogra
         }
 
         ctx.restore();
-    }, [engine, canvasSize, monogramSystem, monogramEnabled, showForm, renderForm, taglineText, renderTagline, navButtons, renderNavButtons]);
+    }, [engine, canvasSize, showForm, renderForm, taglineText, renderTagline, navButtons, renderNavButtons]);
 
     // === Drawing Loop ===
     useEffect(() => {

@@ -277,8 +277,6 @@ export interface WorldEngine {
         queryText?: string;
     }) => { width: number; height: number };
     setWorldData: React.Dispatch<React.SetStateAction<WorldData>>;
-    // Monogram command callback
-    setMonogramCommandHandler: (handler: (args: string[]) => void) => void;
     // Host dialogue flow callback
     setHostDialogueHandler: (handler: () => void) => void;
     // Upgrade flow callback
@@ -394,7 +392,6 @@ interface UseWorldEngineProps {
     enableCommands?: boolean; // Enable/disable command system (default: true)
     initialStateName?: string | null; // Initial state name from URL
     initialPatternId?: string; // Pattern ID from URL for deterministic pattern generation
-    onMonogramCommand?: (args: string[]) => void; // Callback for monogram commands
     isReadOnly?: boolean; // Read-only mode (observer/viewer)
     skipInitialBackground?: boolean; // Skip applying initialBackgroundColor (let host flow control it)
 }
@@ -593,7 +590,6 @@ export function useWorldEngine({
     username,            // Username for routing
     initialStateName = null, // Initial state name from URL
     initialPatternId,    // Pattern ID from URL for deterministic generation
-    onMonogramCommand,   // Callback for monogram commands
     isReadOnly = false,  // Read-only mode (default to writeable)
     skipInitialBackground = false, // Skip applying initialBackgroundColor
 }: UseWorldEngineProps): WorldEngine {
@@ -785,9 +781,6 @@ export function useWorldEngine({
     // Double ESC detection for AI interruption
     const lastEscTimeRef = useRef<number | null>(null);
     const [lastEnterX, setLastEnterX] = useState<number | null>(null); // Track X position from last Enter
-
-    // Monogram command handler ref
-    const monogramCommandHandlerRef = useRef<((args: string[]) => void) | null>(null);
 
     // Host dialogue handler ref
     const hostDialogueHandlerRef = useRef<(() => void) | null>(null);
@@ -4827,13 +4820,6 @@ export function useWorldEngine({
                     } else {
                         console.log('[/margin] No selection exists');
                         setDialogueWithRevert("Make a selection first", setDialogueText);
-                    }
-                } else if (exec.command === 'monogram') {
-                    // Handle monogram via callback
-                    if (monogramCommandHandlerRef.current) {
-                        monogramCommandHandlerRef.current(exec.args);
-                    } else {
-                        setDialogueWithRevert("Monogram control not available", setDialogueText);
                     }
                 } else if (exec.command === 'signin') {
                     // Trigger sign in flow via callback
@@ -10180,9 +10166,6 @@ export function useWorldEngine({
         clipboardItems, // Clipboard items from Cmd+click on bounds
         addInstantAIResponse,
         setWorldData,
-        setMonogramCommandHandler: (handler: (args: string[]) => void) => {
-            monogramCommandHandlerRef.current = handler;
-        },
         setHostDialogueHandler: (handler: () => void) => {
             hostDialogueHandlerRef.current = handler;
         },

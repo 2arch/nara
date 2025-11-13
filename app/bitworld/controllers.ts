@@ -110,53 +110,6 @@ export function useControllerSystem(): ControllerSystem {
     };
 }
 
-// --- Monogram Controller (WebGPU Infinite Terrain) ---
-export function createMonogramController(monogramSystem: any): ControllerGroup {
-    return {
-        name: 'monogram',
-        description: 'Infinite Terrain Pattern Controls',
-        enabled: true,
-        bindings: [
-            {
-                key: 'm',
-                ctrlOrMeta: true,
-                description: 'Toggle monogram on/off',
-                action: () => monogramSystem.toggleEnabled()
-            },
-            {
-                key: '=',
-                ctrlOrMeta: true,
-                description: 'Increase animation speed',
-                action: () => monogramSystem.setOptions((prev: any) => ({ ...prev, speed: Math.min(3.0, prev.speed + 0.2) }))
-            },
-            {
-                key: '+',
-                ctrlOrMeta: true,
-                description: 'Increase animation speed',
-                action: () => monogramSystem.setOptions((prev: any) => ({ ...prev, speed: Math.min(3.0, prev.speed + 0.2) }))
-            },
-            {
-                key: '-',
-                ctrlOrMeta: true,
-                description: 'Decrease animation speed',
-                action: () => monogramSystem.setOptions((prev: any) => ({ ...prev, speed: Math.max(0.1, prev.speed - 0.2) }))
-            },
-            {
-                key: ']',
-                ctrlOrMeta: true,
-                description: 'Increase complexity',
-                action: () => monogramSystem.setOptions((prev: any) => ({ ...prev, complexity: Math.min(3.0, prev.complexity + 0.2) }))
-            },
-            {
-                key: '[',
-                ctrlOrMeta: true,
-                description: 'Decrease complexity',
-                action: () => monogramSystem.setOptions((prev: any) => ({ ...prev, complexity: Math.max(0.1, prev.complexity - 0.2) }))
-            }
-        ]
-    };
-}
-
 // --- Example: Debug Controller ---
 export function createDebugController(debugSystem: any): ControllerGroup {
     return {

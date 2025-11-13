@@ -773,69 +773,10 @@ export function useDialogue() {
         return false;
     }, []);
 
-    const calculateMonogramLayout = useCallback((canvasWidth: number, canvasHeight: number, charWidth: number, charHeight: number, monogramText: string): DialogueLayout => {
-        const availableWidthChars = Math.floor(canvasWidth / charWidth);
-        const availableHeightChars = Math.floor(canvasHeight / charHeight);
-        
-        const lines = monogramText.split('\n');
-        const dialogueHeight = lines.length;
-        const maxWidthChars = Math.max(...lines.map(l => l.length));
-
-        return {
-            lines,
-            startRow: availableHeightChars - dialogueHeight - 1, // Positioned at the bottom
-            startCol: availableWidthChars - maxWidthChars - DEBUG_MARGIN_CHARS, // Right-aligned
-            maxWidthChars,
-            dialogueHeight
-        };
-    }, []);
-
-    const renderMonogramControls = useCallback((props: DialogueProps & { monogramText: string }) => {
-        const { canvasWidth, canvasHeight, ctx, monogramText } = props;
-        
-        // Use fixed dimensions for monogram text
-        const charHeight = DEBUG_FONT_SIZE;
-        const charWidth = DEBUG_FONT_SIZE * CHAR_WIDTH_RATIO;
-        const verticalTextOffset = (charHeight - DEBUG_FONT_SIZE) / 2 + (DEBUG_FONT_SIZE * 0.1);
-
-        const monogramLayout = calculateMonogramLayout(canvasWidth, canvasHeight, charWidth, charHeight, monogramText);
-        
-        ctx.save();
-        ctx.font = `${DEBUG_FONT_SIZE}px "${FONT_FAMILY}"`;
-        ctx.textBaseline = 'top';
-        ctx.textAlign = 'right'; // Set text alignment to right
-
-        // Draw background - need to adjust for right-aligned text
-        ctx.fillStyle = DIALOGUE_BACKGROUND_COLOR;
-        for (let lineIndex = 0; lineIndex < monogramLayout.lines.length; lineIndex++) {
-            const rowIndex = monogramLayout.startRow + lineIndex;
-            const line = monogramLayout.lines[lineIndex];
-            const screenX = (monogramLayout.startCol + monogramLayout.maxWidthChars) * charWidth; // Right edge
-            const screenY = rowIndex * charHeight;
-            const lineWidth = line.length * charWidth;
-            // Draw background from right edge leftward
-            ctx.fillRect(screenX - lineWidth, screenY, lineWidth, charHeight);
-        }
-        
-        // Draw text (right-aligned)
-        ctx.fillStyle = DIALOGUE_TEXT_COLOR;
-        for (let lineIndex = 0; lineIndex < monogramLayout.lines.length; lineIndex++) {
-            const rowIndex = monogramLayout.startRow + lineIndex;
-            const line = monogramLayout.lines[lineIndex];
-            const screenX = (monogramLayout.startCol + monogramLayout.maxWidthChars) * charWidth; // Right edge
-            const screenY = rowIndex * charHeight;
-            ctx.fillText(line, screenX, screenY + verticalTextOffset);
-        }
-        
-        ctx.textAlign = 'left'; // Reset text alignment
-        ctx.restore();
-    }, [calculateMonogramLayout]);
-
     return {
         renderDialogue,
         renderDebugDialogue,
         renderNavDialogue,
-        renderMonogramControls,
         handleNavClick,
     };
 }

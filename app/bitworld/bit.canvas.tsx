@@ -3,8 +3,7 @@ import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { WorldData, Point, WorldEngine, PanStartInfo, StyledCharacter } from './world.engine'; // Adjust path as needed
 import { useDialogue, useDebugDialogue } from './dialogue';
-import { useMonogramWebGPU } from './monogram.webgpu';
-import { useControllerSystem, createMonogramController, createCameraController, createGridController, createTapeController, createCommandController } from './controllers';
+import { useControllerSystem, createCameraController, createGridController, createTapeController, createCommandController } from './controllers';
 import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchicalFrames, HierarchicalFrame, HierarchyLevel, findTextBlockForSelection } from './bit.blocks';
 import { COLOR_MAP, COMMAND_CATEGORIES, COMMAND_HELP } from './commands';
 import { useHostDialogue } from './host.dialogue';
@@ -452,7 +451,6 @@ interface BitCanvasProps {
     cursorColorAlternate: boolean;
     className?: string;
     showCursor?: boolean;
-    monogramEnabled?: boolean;
     dialogueEnabled?: boolean;
     fontFamily?: string; // Font family for text rendering
     hostModeEnabled?: boolean; // Enable host dialogue mode for onboarding
@@ -465,10 +463,9 @@ interface BitCanvasProps {
     onPanDistanceChange?: (distance: number) => void; // Callback for pan distance tracking
     hostDimBackground?: boolean; // Whether to dim background when host dialogue appears
     isPublicWorld?: boolean; // Whether this is a public world (affects sign-up flow)
-    hostMonogramMode?: 'perlin' | 'user-settings' | 'off'; // Monogram mode during host flow
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, monogramEnabled = false, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, onTutorialComplete, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true, isPublicWorld = false, hostMonogramMode = 'perlin' }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, onTutorialComplete, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true, isPublicWorld = false }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -760,17 +757,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         setWorldData: engine.setWorldData,
         hostBackgroundColor: hostBackgroundColor,
         isPublicWorld: isPublicWorld,
-        setMonogramMode: (mode: string) => {
-            console.log('[BitCanvas] setMonogramMode called with:', mode);
-            console.log('[BitCanvas] Current monogram options before update:', monogramSystem.options);
-            // WebGPU version only supports enable/disable
-            if (mode === 'perlin' || mode === 'on') {
-                monogramSystem.setOptions(prev => ({ ...prev, enabled: true }));
-            } else {
-                monogramSystem.setOptions(prev => ({ ...prev, enabled: false }));
-            }
-            console.log('[BitCanvas] Monogram options after update:', monogramSystem.options);
-        },
         setBackgroundColor: (color: string) => {
             console.log('[BitCanvas] setBackgroundColor called with:', color);
             console.log('[BitCanvas] Current engine backgroundColor:', engine.settings.backgroundColor);
@@ -1117,58 +1103,10 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     }, [engine.worldData, engine.isImageData]);
 
     // Dialogue system
-    const { renderDialogue, renderDebugDialogue, renderNavDialogue, renderMonogramControls, handleNavClick } = useDialogue();
+    const { renderDialogue, renderDebugDialogue, renderNavDialogue, handleNavClick } = useDialogue();
     
     // Debug dialogue system
     const { debugText } = useDebugDialogue(engine);
-    
-    // Determine monogram state based on host mode context
-    const getMonogramConfig = (): { enabled: boolean } => {
-        if (!hostModeEnabled) {
-            // Not in host mode - use user settings
-            return {
-                enabled: engine.settings.monogramEnabled || false
-            };
-        }
-
-        // In host mode - check if we're starting with intro flow
-        if (initialHostFlow === 'intro') {
-            return { enabled: true };
-        }
-
-        // In host mode - check hostMonogramMode prop
-        if (hostMonogramMode === 'perlin') {
-            return { enabled: true };
-        } else if (hostMonogramMode === 'off') {
-            return { enabled: false };
-        } else { // 'user-settings'
-            return {
-                enabled: engine.settings.monogramEnabled || false
-            };
-        }
-    };
-
-    const monogramConfig = getMonogramConfig();
-    
-    // Monogram system for infinite procedural terrain (WebGPU-accelerated)
-    const monogramSystem = useMonogramWebGPU({
-        enabled: monogramConfig.enabled,
-        speed: 0.5,
-        complexity: 1.0
-    });
-
-    // Sync monogram state from Firebase settings when they load
-    useEffect(() => {
-        if (!hostModeEnabled && engine.settings.monogramEnabled !== undefined) {
-            // Only update if different from current state
-            if (monogramSystem.options.enabled !== engine.settings.monogramEnabled) {
-                monogramSystem.setOptions(prev => ({
-                    ...prev,
-                    enabled: engine.settings.monogramEnabled ?? prev.enabled
-                }));
-            }
-        }
-    }, [engine.settings.monogramEnabled, hostModeEnabled]);
 
     // Helper function to generate talking mouth animation
     const generateTalkingMouth = useCallback((elapsed: number): number => {
@@ -1208,61 +1146,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         return () => clearInterval(interval);
     }, [engine.dialogueText, engine.dialogueTimestamp, engine.hostData]);
 
-    // Sync face orientation to monogram rotation with AI talking animation
-    useEffect(() => {
-        // Check if AI is currently "talking" (displaying a response via dialogueText or hostData)
-        const dialogueTimestamp = engine.dialogueTimestamp || engine.hostData?.timestamp;
-        const dialogueTextContent = engine.dialogueText || engine.hostData?.text;
-        const isAITalking = dialogueTimestamp && dialogueTextContent;
-        const aiTalkElapsed = isAITalking ? Date.now() - dialogueTimestamp : 0;
-
-        // Face tracking removed - only Perlin patterns remain
-        // if (engine.isFaceDetectionEnabled && engine.faceOrientation) {
-        //     // Face tracking is active - use real tracking data
-        //     // But if AI is talking and NOT tracked, add talking mouth
-        //     if (isAITalking && !engine.faceOrientation.isTracked) {
-        //         const talkingMouth = generateTalkingMouth(aiTalkElapsed);
-        //         monogramSystem.setExternalRotation({
-        //             ...engine.faceOrientation,
-        //             mouthOpen: talkingMouth,
-        //             isTracked: false
-        //         });
-        //     } else {
-        //         monogramSystem.setExternalRotation(engine.faceOrientation);
-        //     }
-        // } else if (isAITalking) {
-        //     // No face tracking, but AI is talking - create autonomous talking face
-        //     const talkingMouth = generateTalkingMouth(aiTalkElapsed);
-        //     monogramSystem.setExternalRotation({
-        //         rotX: 0,
-        //         rotY: 0,
-        //         rotZ: 0,
-        //         mouthOpen: talkingMouth,
-        //         leftEyeBlink: 0,
-        //         rightEyeBlink: 0,
-        //         isTracked: false
-        //     });
-        // } else {
-        //     // No face tracking and no AI talking
-        //     monogramSystem.setExternalRotation(undefined);
-        // }
-    }, [engine.isFaceDetectionEnabled, engine.faceOrientation, engine.dialogueText, engine.dialogueTimestamp, engine.hostData, aiTalkingTick]);
-
-    // Monogram command handler (WebGPU infinite terrain)
-    const handleMonogramCommand = useCallback((args: string[]) => {
-        if (args.length === 0 || args[0] === 'on' || args[0] === 'perlin') {
-            // Toggle or enable monogram
-            monogramSystem.toggleEnabled();
-        } else if (args[0] === 'off' || args[0] === 'clear') {
-            // Disable monogram
-            monogramSystem.setOptions(prev => ({ ...prev, enabled: false }));
-        }
-    }, [monogramSystem]);
-
-    // Register monogram command handler with engine
-    useEffect(() => {
-        engine.setMonogramCommandHandler(handleMonogramCommand);
-    }, [engine, handleMonogramCommand]);
 
     // Host dialogue flow handler
     const handleHostDialogueFlow = useCallback(() => {
@@ -1549,7 +1432,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     
 
     useEffect(() => {
-        registerGroup(createMonogramController(monogramSystem));
         registerGroup(createCameraController(engine));
         registerGroup(createGridController({ cycleGridMode: engine.cycleGridMode }));
         registerGroup(createTapeController(toggleRecording));
@@ -1563,25 +1445,11 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         }));
     }, [registerGroup, engine.cycleGridMode, toggleRecording, engine.commandSystem, engine.cursorPos]);
     
-    // Enhanced debug text without monogram info - only calculate if debug is visible
+    // Enhanced debug text - only calculate if debug is visible
     const enhancedDebugText = engine.settings.isDebugVisible ? `${debugText}
 Camera & Viewport Controls:
   Home: Return to origin
   Ctrl+H: Reset zoom level` : '';
-    
-    // Monogram controls text - only show if debug is visible
-    const monogramControlsText = engine.settings.isDebugVisible ? `Monogram Controls:
-  Ctrl+M: Toggle monogram on/off
-  Ctrl+N: Cycle pattern mode
-  Ctrl+=: Increase animation speed
-  Ctrl++: Increase animation speed
-  Ctrl+-: Decrease animation speed
-  Ctrl+]: Increase complexity
-  Ctrl+[: Decrease complexity
-  Ctrl+Shift+R: Randomize color shift
-  
-Monogram: ${monogramSystem.options.enabled ? 'ON' : 'OFF'} | WebGPU: ${monogramSystem.isInitialized ? 'Ready' : 'Loading'}
-Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem.options.complexity.toFixed(1)}` : '';
     
 
 
@@ -2499,58 +2367,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             ctx.stroke();
         }
 
-        // === Render Monogram Patterns (WebGPU Infinite Terrain) ===
-        if (monogramEnabled && monogramSystem.options.enabled) {
-            // Sample the infinite procedural terrain at viewport grid cells
-            monogramSystem.sampleTerrain(
-                startWorldX,
-                startWorldY,
-                endWorldX,
-                endWorldY
-            ).then(intensities => {
-                if (!intensities) return;
-
-                // Map intensities to block characters
-                const blockChars = [' ', '░', '▒', '▓', '█'];
-                const gridWidth = Math.ceil(endWorldX - startWorldX) + 1;
-
-                // Render sampled terrain as ASCII blocks
-                for (let gy = 0; gy <= endWorldY - startWorldY; gy++) {
-                    for (let gx = 0; gx <= endWorldX - startWorldX; gx++) {
-                        const worldX = Math.floor(startWorldX) + gx;
-                        const worldY = Math.floor(startWorldY) + gy;
-                        const index = gy * gridWidth + gx;
-                        const intensity = intensities[index];
-
-                        // Only render if there's no regular text at this position
-                        const textKey = `${worldX},${worldY}`;
-                        const charData = engine.worldData[textKey];
-                        const char = (charData && !engine.isImageData(charData)) ? engine.getCharacter(charData as string | StyledCharacter) : '';
-
-                        if ((!char || char.trim() === '') && !engine.commandData[textKey]) {
-                            const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                            if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
-                                screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-
-                                // Map intensity to block character
-                                const charIndex = Math.floor(intensity * (blockChars.length - 1));
-                                const blockChar = blockChars[Math.min(charIndex, blockChars.length - 1)];
-
-                                if (blockChar !== ' ') {
-                                    ctx.fillStyle = engine.textColor;
-                                    ctx.globalAlpha = intensity * 0.3; // Subtle background pattern
-                                    ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                                    ctx.globalAlpha = 1.0;
-                                }
-                            }
-                        }
-                    }
-                }
-            }).catch(err => {
-                console.error('WebGPU terrain sampling failed:', err);
-            });
-        }
-
         // === Render Air Mode Data (Ephemeral Text) ===
         // Render each ephemeral character individually at its exact grid position
         for (const key in engine.lightModeData) {
@@ -2585,11 +2401,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
                     topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
                     if (char) {
-                        // Apply text background: use charData.style.background if set, otherwise currentTextStyle.background,
-                        // or backgroundColor when monogram is ACTUALLY enabled (to block out monogram pattern)
+                        // Apply text background: use charData.style.background if set, otherwise currentTextStyle.background
                         const textBackground = (typeof charData === 'object' && charData.style?.background)
                             ? charData.style.background
-                            : (engine.currentTextStyle.background || (monogramSystem.options.enabled ? engine.backgroundColor : undefined));
+                            : engine.currentTextStyle.background;
                         if (textBackground) {
                             if (opacity < 1.0) {
                                 ctx.globalAlpha = opacity;
@@ -2934,10 +2749,10 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
 
                 if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
                     topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
-                    // Apply text background: use charStyle.background if set, otherwise backgroundColor when monogram enabled
+                    // Apply text background: use charStyle.background if set
                     const textBackground = (charStyle && charStyle.background)
                         ? charStyle.background
-                        : (monogramSystem.options.enabled ? engine.backgroundColor : undefined);
+                        : undefined;
 
                     if (textBackground) {
                         ctx.fillStyle = textBackground;
@@ -3007,7 +2822,7 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
             // Text fade-in (happens on each new message)
             const textElapsed = engine.hostData.timestamp ? Date.now() - engine.hostData.timestamp : fadeDuration;
             let fadeProgress = Math.min(1, textElapsed / fadeDuration);
-            // Smooth easing (ease-in-out) - same as monogram
+            // Smooth easing (ease-in-out)
             fadeProgress = fadeProgress * fadeProgress * (3 - 2 * fadeProgress);
 
             const hostText = engine.hostData.text;
@@ -5715,19 +5530,11 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 ctx,
                 debugText: enhancedDebugText
             });
-            
-            // === Render Monogram Controls ===
-            renderMonogramControls({
-                canvasWidth: cssWidth,
-                canvasHeight: cssHeight,
-                ctx,
-                monogramText: monogramControlsText
-            });
         }
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, engine.faceOrientation, engine.isFaceDetectionEnabled, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, selectedNoteKey, selectedIframeKey, selectedMailKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, renderMonogramControls, enhancedDebugText, monogramControlsText, monogramSystem, showCursor, monogramEnabled, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateTasksIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
+    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, engine.faceOrientation, engine.isFaceDetectionEnabled, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, selectedNoteKey, selectedIframeKey, selectedMailKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, enhancedDebugText, showCursor, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateTasksIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
 
 
     // --- Drawing Loop Effect ---
@@ -6413,8 +6220,6 @@ Speed: ${monogramSystem.options.speed.toFixed(1)} | Complexity: ${monogramSystem
                 snappedWorldPos.subY = fractionalY >= 0.5 ? 0.5 : 0;
             }
             setMouseWorldPos(snappedWorldPos);
-
-            // WebGPU monogram doesn't need mouse position updates
 
             // Check if hovering over a link or task and update cursor
             let isOverLink = false;
