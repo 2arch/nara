@@ -12,10 +12,10 @@ export interface MonogramOptions {
     mode: 'clear' | 'perlin'; // clear = only character glows, perlin = perlin noise + glows
 }
 
-export interface CharacterGlow {
-    x: number;           // World X coordinate
+export interface ArtifactGlow {
+    x: number;           // World X coordinate (start position)
     y: number;           // World Y coordinate
-    strength: number;    // Glow strength (0-1)
+    width: number;       // Width in cells (1 for single chars, N for labels/notes)
     timestamp: number;   // When it was placed (for fade effects)
 }
 
@@ -23,7 +23,7 @@ export interface CharacterGlow {
 const CHUNK_PERLIN_SHADER = `
 @group(0) @binding(0) var<storage, read_write> output: array<f32>;
 @group(0) @binding(1) var<uniform> params: ChunkParams;
-@group(0) @binding(2) var<storage, read> characterGlows: array<vec4<f32>>;
+@group(0) @binding(2) var<storage, read> artifacts: array<vec4<f32>>;
 
 struct ChunkParams {
     chunkWorldX: f32,
@@ -78,25 +78,25 @@ fn perlin(worldX: f32, worldY: f32) -> f32 {
     return lerp(v, x1, x2);
 }
 
-fn calculateCharacterGlow(worldX: f32, worldY: f32, time: f32) -> f32 {
+fn calculateArtifactGlow(worldX: f32, worldY: f32, time: f32) -> f32 {
     let glowCount = u32(params.glowCount);
     var totalGlow = 0.0;
 
     for (var i = 0u; i < glowCount; i++) {
-        let glow = characterGlows[i];
-        let glowX = glow.x;
-        let glowY = glow.y;
-        let strength = glow.z;
-        let timestamp = glow.w;
+        let artifact = artifacts[i];
+        let artifactX = artifact.x;
+        let artifactY = artifact.y;
+        let artifactWidth = artifact.z;
+        let timestamp = artifact.w;
 
-        // Characters occupy a 1x2 cell rectangle:
-        // - Horizontally: glowX to glowX+1
-        // - Vertically: glowY-1 to glowY (characters span upward)
-        // Calculate distance from this pixel to the nearest point on the 1x2 rectangle
-        let rectLeft = glowX;
-        let rectRight = glowX + 1.0;
-        let rectTop = glowY - 1.0;
-        let rectBottom = glowY;
+        // Artifacts occupy a width x 2 cell rectangle:
+        // - Horizontally: artifactX to artifactX + artifactWidth
+        // - Vertically: artifactY-1 to artifactY (spans upward for isometric rendering)
+        // Calculate distance from this pixel to the nearest point on the rectangle
+        let rectLeft = artifactX;
+        let rectRight = artifactX + artifactWidth;
+        let rectTop = artifactY - 1.0;
+        let rectBottom = artifactY;
 
         // Clamp current position to rectangle bounds to find nearest point
         let nearestX = clamp(worldX, rectLeft, rectRight);
@@ -110,6 +110,7 @@ fn calculateCharacterGlow(worldX: f32, worldY: f32, time: f32) -> f32 {
         // Glow parameters
         let glowRadius = 8.0;  // How far the glow extends
         let fadeTime = 10.0;   // How long before glow fades completely (in time units)
+        let strength = 1.0;    // Uniform strength for all artifacts
 
         // Time-based fade (newer glows are brighter)
         let age = time - timestamp;
@@ -164,8 +165,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         baseIntensity = rawIntensity * temporalWave;
     }
 
-    // Add character glow effect (GPU-computed, respects 1x2 cell character geometry)
-    let glowContribution = calculateCharacterGlow(worldX, worldY, params.time);
+    // Add artifact glow effect (GPU-computed, respects width x 2 cell geometry for all artifacts)
+    let glowContribution = calculateArtifactGlow(worldX, worldY, params.time);
     let finalIntensity = clamp(baseIntensity + glowContribution, 0.0, 1.0);
 
     let index = localY * chunkSize + localX;
@@ -178,17 +179,17 @@ class MonogramSystem {
     private device: GPUDevice | null = null;
     private pipeline: GPUComputePipeline | null = null;
     private paramsBuffer: GPUBuffer | null = null;
-    private characterGlowBuffer: GPUBuffer | null = null;
+    private artifactBuffer: GPUBuffer | null = null;
     private isInitialized = false;
 
     private readonly CHUNK_SIZE = 32;
     private readonly MAX_CHUNKS = 200;
-    private readonly MAX_CHARACTER_GLOWS = 200;
+    private readonly MAX_ARTIFACTS = 1000;  // Increased to accommodate many labels/notes
     private chunkAccessTime: Map<string, number> = new Map();
 
     private time = 0;
     private options: MonogramOptions;
-    private characterGlows: CharacterGlow[] = [];
+    private artifacts: ArtifactGlow[] = [];
 
     // Track last viewport for auto-reload on invalidation
     private lastViewport: { startX: number, startY: number, endX: number, endY: number } | null = null;
@@ -225,9 +226,9 @@ class MonogramSystem {
                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
             });
 
-            // Create character glow buffer (vec4<f32> per glow: x, y, strength, timestamp)
-            this.characterGlowBuffer = this.device.createBuffer({
-                size: this.MAX_CHARACTER_GLOWS * 4 * 4,  // 200 glows * 4 floats * 4 bytes
+            // Create artifact buffer (vec4<f32> per artifact: x, y, width, timestamp)
+            this.artifactBuffer = this.device.createBuffer({
+                size: this.MAX_ARTIFACTS * 4 * 4,  // 200 artifacts * 4 floats * 4 bytes
                 usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
             });
 
@@ -280,7 +281,7 @@ class MonogramSystem {
             this.CHUNK_SIZE,
             this.time,
             this.options.complexity,
-            this.characterGlows.length,  // glowCount
+            this.artifacts.length,  // artifact count
             this.options.mode === 'perlin' ? 1.0 : 0.0  // mode (0.0 = clear, 1.0 = perlin)
         ]);
         device.queue.writeBuffer(this.paramsBuffer, 0, paramsData);
@@ -290,7 +291,7 @@ class MonogramSystem {
             entries: [
                 { binding: 0, resource: { buffer: outputBuffer } },
                 { binding: 1, resource: { buffer: this.paramsBuffer } },
-                { binding: 2, resource: { buffer: this.characterGlowBuffer! } }
+                { binding: 2, resource: { buffer: this.artifactBuffer! } }
             ]
         });
 
@@ -400,69 +401,48 @@ class MonogramSystem {
         // Smooth animation: time flows continuously
         // Chunks recompute on-demand with current time (no invalidation needed)
 
-        // Auto-fade old character glows
-        this.characterGlows = this.characterGlows.filter(glow => {
-            const age = this.time - glow.timestamp;
-            return age < 10.0;  // Remove glows older than 10 time units
+        // Auto-fade old artifacts
+        this.artifacts = this.artifacts.filter(artifact => {
+            const age = this.time - artifact.timestamp;
+            return age < 10.0;  // Remove artifacts older than 10 time units
         });
     }
 
-    addCharacterGlow(worldX: number, worldY: number, strength: number = 1.0) {
+    syncArtifacts(artifacts: Array<{ x: number, y: number, width: number }>) {
         if (!this.isInitialized || !this.device) return;
 
-        const newGlow: CharacterGlow = {
-            x: worldX,
-            y: worldY,
-            strength,
-            timestamp: this.time
-        };
-
-        this.characterGlows.push(newGlow);
-
-        // Limit to MAX_CHARACTER_GLOWS (remove oldest if needed)
-        if (this.characterGlows.length > this.MAX_CHARACTER_GLOWS) {
-            this.characterGlows.shift();
-        }
-
-        // Update GPU buffer
-        this.updateCharacterGlowBuffer();
-    }
-
-    syncCharacterGlows(positions: Array<{ x: number, y: number }>, strength: number = 1.0) {
-        if (!this.isInitialized || !this.device) return;
-
-        // Replace all glows with the new set
-        this.characterGlows = positions.slice(0, this.MAX_CHARACTER_GLOWS).map(pos => ({
-            x: pos.x,
-            y: pos.y,
-            strength,
-            timestamp: this.time // All characters get current timestamp for consistent glow
+        // Replace all artifacts with the new set
+        this.artifacts = artifacts.slice(0, this.MAX_ARTIFACTS).map(artifact => ({
+            x: artifact.x,
+            y: artifact.y,
+            width: artifact.width,
+            timestamp: this.time // All artifacts get current timestamp for consistent glow
         }));
 
         // Update GPU buffer
-        this.updateCharacterGlowBuffer();
+        this.updateArtifactBuffer();
     }
 
-    private updateCharacterGlowBuffer() {
-        if (!this.device || !this.characterGlowBuffer) return;
+    private updateArtifactBuffer() {
+        if (!this.device || !this.artifactBuffer) return;
 
-        // Create Float32Array with character glow data (vec4 per glow: x, y, strength, timestamp)
-        const data = new Float32Array(this.MAX_CHARACTER_GLOWS * 4);
+        // Create Float32Array with artifact data (vec4 per artifact: x, y, width, timestamp)
+        const data = new Float32Array(this.MAX_ARTIFACTS * 4);
 
-        for (let i = 0; i < this.characterGlows.length; i++) {
-            const glow = this.characterGlows[i];
-            data[i * 4] = glow.x;
-            data[i * 4 + 1] = glow.y;
-            data[i * 4 + 2] = glow.strength;
-            data[i * 4 + 3] = glow.timestamp;
+        for (let i = 0; i < this.artifacts.length; i++) {
+            const artifact = this.artifacts[i];
+            data[i * 4] = artifact.x;
+            data[i * 4 + 1] = artifact.y;
+            data[i * 4 + 2] = artifact.width;
+            data[i * 4 + 3] = artifact.timestamp;
         }
 
-        this.device.queue.writeBuffer(this.characterGlowBuffer, 0, data);
+        this.device.queue.writeBuffer(this.artifactBuffer, 0, data);
     }
 
-    clearCharacterGlows() {
-        this.characterGlows = [];
-        this.updateCharacterGlowBuffer();
+    clearArtifacts() {
+        this.artifacts = [];
+        this.updateArtifactBuffer();
     }
 
     setOptions(options: Partial<MonogramOptions>) {
@@ -490,9 +470,9 @@ class MonogramSystem {
     destroy() {
         this.chunks.clear();
         this.chunkAccessTime.clear();
-        this.characterGlows = [];
+        this.artifacts = [];
         this.paramsBuffer?.destroy();
-        this.characterGlowBuffer?.destroy();
+        this.artifactBuffer?.destroy();
         this.device?.destroy();
         this.isInitialized = false;
     }
@@ -559,16 +539,12 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         setOptions(prev => ({ ...prev, enabled: !prev.enabled }));
     }, []);
 
-    const addCharacterGlow = useCallback((worldX: number, worldY: number, strength: number = 1.0) => {
-        systemRef.current?.addCharacterGlow(worldX, worldY, strength);
+    const syncArtifacts = useCallback((artifacts: Array<{ x: number, y: number, width: number }>) => {
+        systemRef.current?.syncArtifacts(artifacts);
     }, []);
 
-    const syncCharacterGlows = useCallback((positions: Array<{ x: number, y: number }>, strength: number = 1.0) => {
-        systemRef.current?.syncCharacterGlows(positions, strength);
-    }, []);
-
-    const clearCharacterGlows = useCallback(() => {
-        systemRef.current?.clearCharacterGlows();
+    const clearArtifacts = useCallback(() => {
+        systemRef.current?.clearArtifacts();
     }, []);
 
     return {
@@ -577,9 +553,8 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         toggleEnabled,
         preloadViewport,
         sampleAt,
-        addCharacterGlow,
-        syncCharacterGlows,
-        clearCharacterGlows,
+        syncArtifacts,
+        clearArtifacts,
         isInitialized
     };
 }
