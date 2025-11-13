@@ -87,9 +87,22 @@ fn calculateCharacterGlow(worldX: f32, worldY: f32, time: f32) -> f32 {
         let strength = glow.z;
         let timestamp = glow.w;
 
-        // Calculate distance from this pixel to the character
-        let dx = worldX - glowX;
-        let dy = worldY - glowY;
+        // Characters occupy a 1x2 cell rectangle:
+        // - Horizontally: glowX to glowX+1
+        // - Vertically: glowY-1 to glowY (characters span upward)
+        // Calculate distance from this pixel to the nearest point on the 1x2 rectangle
+        let rectLeft = glowX;
+        let rectRight = glowX + 1.0;
+        let rectTop = glowY - 1.0;
+        let rectBottom = glowY;
+
+        // Clamp current position to rectangle bounds to find nearest point
+        let nearestX = clamp(worldX, rectLeft, rectRight);
+        let nearestY = clamp(worldY, rectTop, rectBottom);
+
+        // Calculate distance to nearest point on rectangle
+        let dx = worldX - nearestX;
+        let dy = worldY - nearestY;
         let dist = sqrt(dx * dx + dy * dy);
 
         // Glow parameters
@@ -144,7 +157,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let temporalWave = sin(time * 0.5 + nx * 2.0 + ny * 1.5) * 0.05 + 0.95;
     let baseIntensity = rawIntensity * temporalWave;
 
-    // Add character glow effect
+    // Add character glow effect (GPU-computed, respects 1x2 cell character geometry)
     let glowContribution = calculateCharacterGlow(worldX, worldY, time);
     let finalIntensity = clamp(baseIntensity + glowContribution, 0.0, 1.0);
 

@@ -2435,11 +2435,7 @@ Camera & Viewport Controls:
             for (let worldY = yStart; worldY <= yEnd; worldY++) {
                 for (let worldX = xStart; worldX <= xEnd; worldX++) {
                     sampleCount++;
-                    const textKey = `${worldX},${worldY}`;
-                    const data = engine.worldData[textKey];
-                    const hasCharacter = data && typeof data === 'string' && data.length === 1 && !engine.isImageData(data);
-
-                    // Sample intensity from GPU-computed chunk
+                    // Sample intensity from GPU-computed chunk (already includes character glows)
                     const intensity = monogram.sampleAt(worldX, worldY);
 
                     if (intensity === 0) {
@@ -2456,29 +2452,15 @@ Camera & Viewport Controls:
                             screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
 
                             renderedCount++;
-                            // Render character glows as soft red, perlin noise as textColor
-                            if (hasCharacter) {
-                                // Soft red glow for characters - spans upward from worldY-1 to worldY
-                                const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
-                                ctx.fillStyle = '#ff6666'; // Soft red
-                                ctx.globalAlpha = intensity * 0.6;
-                                ctx.fillRect(
-                                    topScreenPos.x,
-                                    topScreenPos.y,
-                                    effectiveCharWidth,
-                                    effectiveCharHeight * GRID_CELL_SPAN  // 2 cells tall
-                                );
-                            } else {
-                                // Normal perlin noise pattern - single cell
-                                ctx.fillStyle = engine.textColor;
-                                ctx.globalAlpha = intensity * 0.5;
-                                ctx.fillRect(
-                                    screenPos.x,
-                                    screenPos.y,
-                                    effectiveCharWidth,
-                                    effectiveCharHeight
-                                );
-                            }
+                            // Render perlin noise pattern (GPU already includes character glows in intensity)
+                            ctx.fillStyle = engine.textColor;
+                            ctx.globalAlpha = intensity * 0.5;
+                            ctx.fillRect(
+                                screenPos.x,
+                                screenPos.y,
+                                effectiveCharWidth,
+                                effectiveCharHeight
+                            );
                             ctx.globalAlpha = 1.0; // Reset alpha
                         } else {
                             skippedOutOfBounds++;
