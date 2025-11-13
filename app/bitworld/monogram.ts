@@ -244,14 +244,12 @@ class MonogramSystem {
     }
 
     private async ensureChunk(chunkKey: string): Promise<Float32Array> {
-        if (this.chunks.has(chunkKey)) {
-            this.chunkAccessTime.set(chunkKey, Date.now());
-            return this.chunks.get(chunkKey)!;
-        }
-
+        // For smooth animation: always recompute chunks with current time
+        // No caching - pattern flows continuously like water
         const { x, y } = this.chunkToWorld(chunkKey);
         const intensities = await this.computeChunk(x, y);
 
+        // Store in cache for this frame only (avoids recomputing same chunk multiple times per frame)
         this.chunks.set(chunkKey, intensities);
         this.chunkAccessTime.set(chunkKey, Date.now());
 
@@ -319,25 +317,8 @@ class MonogramSystem {
 
     updateTime(deltaTime: number) {
         this.time += deltaTime * this.options.speed;
-
-        // Re-enabled: Chunk invalidation for animation
-        // Invalidate every 10 time units for smooth flowing animation (~1 second real time)
-        const invalidateInterval = 10.0; // Time units between animation updates
-        if (Math.floor(this.time / invalidateInterval) > Math.floor((this.time - deltaTime * this.options.speed) / invalidateInterval)) {
-            this.chunks.clear();
-            this.chunkAccessTime.clear();
-            console.log('[Monogram] Invalidating chunks for animation at time', this.time.toFixed(2));
-
-            // Immediately reload the last known viewport to avoid flashing
-            if (this.lastViewport) {
-                this.preloadViewport(
-                    this.lastViewport.startX,
-                    this.lastViewport.startY,
-                    this.lastViewport.endX,
-                    this.lastViewport.endY
-                );
-            }
-        }
+        // Smooth animation: time flows continuously
+        // Chunks recompute on-demand with current time (no invalidation needed)
     }
 
     setOptions(options: Partial<MonogramOptions>) {
