@@ -9,6 +9,7 @@ export interface MonogramOptions {
     enabled: boolean;
     speed: number;
     complexity: number;
+    mode: 'clear' | 'perlin'; // clear = only character glows, perlin = perlin noise + glows
 }
 
 export interface CharacterGlow {
@@ -31,6 +32,7 @@ struct ChunkParams {
     time: f32,
     complexity: f32,
     glowCount: f32,
+    mode: f32, // 0.0 = clear (glows only), 1.0 = perlin (noise + glows)
 }
 
 fn fade(t: f32) -> f32 {
@@ -138,27 +140,32 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let worldX = params.chunkWorldX + f32(localX);
     let worldY = params.chunkWorldY + f32(localY);
 
-    let scale = 0.15 * params.complexity;  // Increased from 0.02 to 0.15 (7.5x larger)
-    let time = params.time;
+    var baseIntensity = 0.0;
 
-    let nx = worldX * scale;
-    let ny = (worldY * 0.5) * scale;
+    // Only compute perlin noise if mode is 1.0 (perlin mode)
+    if (params.mode > 0.5) {
+        let scale = 0.15 * params.complexity;  // Increased from 0.02 to 0.15 (7.5x larger)
+        let time = params.time;
 
-    let flow1 = perlin(nx + time * 2.0, ny + time);
-    let flow2 = perlin(nx * 2.0 - time, ny * 2.0);
+        let nx = worldX * scale;
+        let ny = (worldY * 0.5) * scale;
 
-    let dx = nx + flow1 * 0.3 + flow2 * 0.1;
-    let dy = ny + flow2 * 0.3 - flow1 * 0.1;
+        let flow1 = perlin(nx + time * 2.0, ny + time);
+        let flow2 = perlin(nx * 2.0 - time, ny * 2.0);
 
-    let intensity1 = perlin(dx * 2.0, dy * 2.0);
-    let intensity2 = perlin(dx * 3.0 + time, dy * 3.0);
+        let dx = nx + flow1 * 0.3 + flow2 * 0.1;
+        let dy = ny + flow2 * 0.3 - flow1 * 0.1;
 
-    let rawIntensity = (intensity1 + intensity2 + 2.0) / 4.0;
-    let temporalWave = sin(time * 0.5 + nx * 2.0 + ny * 1.5) * 0.05 + 0.95;
-    let baseIntensity = rawIntensity * temporalWave;
+        let intensity1 = perlin(dx * 2.0, dy * 2.0);
+        let intensity2 = perlin(dx * 3.0 + time, dy * 3.0);
+
+        let rawIntensity = (intensity1 + intensity2 + 2.0) / 4.0;
+        let temporalWave = sin(time * 0.5 + nx * 2.0 + ny * 1.5) * 0.05 + 0.95;
+        baseIntensity = rawIntensity * temporalWave;
+    }
 
     // Add character glow effect (GPU-computed, respects 1x2 cell character geometry)
-    let glowContribution = calculateCharacterGlow(worldX, worldY, time);
+    let glowContribution = calculateCharacterGlow(worldX, worldY, params.time);
     let finalIntensity = clamp(baseIntensity + glowContribution, 0.0, 1.0);
 
     let index = localY * chunkSize + localX;
@@ -214,7 +221,7 @@ class MonogramSystem {
             });
 
             this.paramsBuffer = this.device.createBuffer({
-                size: 6 * 4,  // 6 floats: chunkWorldX, chunkWorldY, chunkSize, time, complexity, glowCount
+                size: 7 * 4,  // 7 floats: chunkWorldX, chunkWorldY, chunkSize, time, complexity, glowCount, mode
                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
             });
 
@@ -273,7 +280,8 @@ class MonogramSystem {
             this.CHUNK_SIZE,
             this.time,
             this.options.complexity,
-            this.characterGlows.length  // glowCount
+            this.characterGlows.length,  // glowCount
+            this.options.mode === 'perlin' ? 1.0 : 0.0  // mode (0.0 = clear, 1.0 = perlin)
         ]);
         device.queue.writeBuffer(this.paramsBuffer, 0, paramsData);
 
@@ -495,7 +503,8 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
     const [options, setOptions] = useState<MonogramOptions>({
         enabled: initialOptions?.enabled ?? true,
         speed: initialOptions?.speed ?? 0.5,
-        complexity: initialOptions?.complexity ?? 1.0
+        complexity: initialOptions?.complexity ?? 1.0,
+        mode: initialOptions?.mode ?? 'perlin'
     });
 
     const systemRef = useRef<MonogramSystem | null>(null);

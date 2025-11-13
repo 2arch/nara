@@ -116,6 +116,16 @@ interface UseCommandSystemProps {
     cancelComposition?: () => void; // Callback to cancel IME composition
     selectedNoteKey?: string | null; // Currently selected note
     selectedPatternKey?: string | null; // Currently selected pattern
+    monogramSystem?: { // WebGPU monogram background system
+        setOptions: (updater: ((prev: any) => any) | any) => void;
+        toggleEnabled: () => void;
+        options?: {
+            enabled?: boolean;
+            speed?: number;
+            complexity?: number;
+            mode?: 'clear' | 'perlin';
+        };
+    };
 }
 
 // --- Command System Constants ---
@@ -135,7 +145,7 @@ const AVAILABLE_COMMANDS = [
     // State Management
     'state', 'random', 'clear', 'replay',
     // Sharing & Publishing
-    'publish', 'unpublish', 'share', 'spawn',
+    'publish', 'unpublish', 'share', 'spawn', 'monogram',
     // Account
     'signin', 'signout', 'account', 'upgrade',
     // Debug
@@ -149,7 +159,7 @@ export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'special': ['mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help'],
     'style': ['bg', 'text', 'font', 'style'],
     'state': ['state', 'random', 'clear', 'replay'],
-    'share': ['publish', 'unpublish', 'share', 'spawn'],
+    'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
     'account': ['signin', 'signout', 'account', 'upgrade'],
     'debug': ['debug']
 };
@@ -192,6 +202,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'unpublish': 'Unpublish your canvas. Makes your canvas private again. It will no longer be accessible at the public URL.',
     'share': 'Get a shareable link to your canvas. Copy this link to share your canvas with others. If published, they can view it; if private, you control access.',
     'spawn': 'Set your spawn point. This is where you\'ll start when you open this canvas. Type /spawn to set it to your current position.',
+    'monogram': 'Control WebGPU background effects. /monogram to toggle on/off, /monogram clear for character glows only, /monogram perlin for perlin noise with character glows.',
     'signin': 'Sign in to your Nara account. Required for saving work, publishing canvases, and accessing AI features.',
     'signout': 'Sign out of your Nara account. You\'ll return to read-only mode.',
     'account': 'Manage your account settings. Use /account reset to reset your password.',
@@ -214,7 +225,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllLabels, getAllBounds, availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllLabels, getAllBounds, availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, monogramSystem }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const previousBackgroundStateRef = useRef<{
@@ -708,6 +719,19 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 const preview = firstLine.length > 50 ? firstLine.substring(0, 50) + '...' : firstLine;
                 return `clip ${idx} ${preview}`;
             });
+        }
+
+        if (lowerInput === 'monogram') {
+            const parts = input.toLowerCase().split(' ');
+            const MONOGRAM_OPTIONS = ['clear', 'perlin', 'on', 'off'];
+            if (parts.length > 1) {
+                // Show monogram options that match the input
+                const monogramInput = parts[1];
+                return MONOGRAM_OPTIONS
+                    .filter(option => option.startsWith(monogramInput))
+                    .map(option => `monogram ${option}`);
+            }
+            return MONOGRAM_OPTIONS.map(option => `monogram ${option}`);
         }
 
         return commandList.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
@@ -2655,6 +2679,60 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 args: [],
                 commandStartPos: commandState.commandStartPos
             };
+        }
+
+        // Handle monogram command (WebGPU background effects)
+        if (commandToExecute.startsWith('monogram')) {
+            const inputParts = commandState.input.trim().split(/\s+/);
+            const args = inputParts.slice(1);
+
+            if (args.length > 0 && monogramSystem) {
+                const option = args[0].toLowerCase();
+
+                if (option === 'on') {
+                    // Enable monogram
+                    monogramSystem.setOptions((prev: any) => ({ ...prev, enabled: true }));
+                    setDialogueWithRevert('Monogram enabled', setDialogueText);
+                } else if (option === 'off') {
+                    // Disable monogram
+                    monogramSystem.setOptions((prev: any) => ({ ...prev, enabled: false }));
+                    setDialogueWithRevert('Monogram disabled', setDialogueText);
+                } else if (option === 'clear') {
+                    // Set mode to clear (glows only)
+                    monogramSystem.setOptions((prev: any) => ({ ...prev, enabled: true, mode: 'clear' }));
+                    setDialogueWithRevert('Monogram mode: clear (character glows only)', setDialogueText);
+                } else if (option === 'perlin') {
+                    // Set mode to perlin (noise + glows)
+                    monogramSystem.setOptions((prev: any) => ({ ...prev, enabled: true, mode: 'perlin' }));
+                    setDialogueWithRevert('Monogram mode: perlin (noise + glows)', setDialogueText);
+                } else {
+                    // Unknown option - toggle instead
+                    monogramSystem.toggleEnabled();
+                    const newState = monogramSystem.options?.enabled ?? false;
+                    setDialogueWithRevert(`Monogram ${newState ? 'enabled' : 'disabled'}`, setDialogueText);
+                }
+            } else {
+                // No args - toggle monogram on/off
+                if (monogramSystem) {
+                    monogramSystem.toggleEnabled();
+                    const newState = monogramSystem.options?.enabled ?? false;
+                    setDialogueWithRevert(`Monogram ${newState ? 'enabled' : 'disabled'}`, setDialogueText);
+                }
+            }
+
+            // Clear command mode
+            setCommandState({
+                isActive: false,
+                input: '',
+                matchedCommands: [],
+                selectedIndex: 0,
+                commandStartPos: { x: 0, y: 0 },
+                originalCursorPos: { x: 0, y: 0 },
+                hasNavigated: false
+            });
+            setCommandData({});
+
+            return { command: 'monogram', args, commandStartPos: commandState.commandStartPos };
         }
 
         if (commandToExecute.startsWith('glitch')) {
