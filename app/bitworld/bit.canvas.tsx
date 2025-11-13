@@ -2408,6 +2408,10 @@ Camera & Viewport Controls:
         if (monogram.options.enabled) {
             let renderedCount = 0;
             let sampleCount = 0;
+            let skippedHasContent = 0;
+            let skippedLowIntensity = 0;
+            let skippedOutOfBounds = 0;
+            let zeroIntensityCount = 0;
             const yStart = Math.floor(startWorldY);
             const yEnd = Math.ceil(endWorldY);
             const xStart = Math.floor(startWorldX);
@@ -2420,11 +2424,19 @@ Camera & Viewport Controls:
                     const textKey = `${worldX},${worldY}`;
                     const hasContent = engine.worldData[textKey] || engine.lightModeData[textKey];
 
-                    if (!hasContent) {
+                    if (hasContent) {
+                        skippedHasContent++;
+                    } else {
                         // Sample intensity from GPU-computed chunk
                         const intensity = monogram.sampleAt(worldX, worldY);
 
-                        if (intensity > 0.05) { // Small threshold to skip near-zero values
+                        if (intensity === 0) {
+                            zeroIntensityCount++;
+                        }
+
+                        if (intensity <= 0.05) { // Small threshold to skip near-zero values
+                            skippedLowIntensity++;
+                        } else {
                             const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
 
                             // Bounds check
@@ -2434,7 +2446,7 @@ Camera & Viewport Controls:
                                 renderedCount++;
                                 // Render as filled rectangle with intensity-based alpha
                                 ctx.fillStyle = engine.textColor;
-                                ctx.globalAlpha = intensity * 0.2; // Subtle background effect
+                                ctx.globalAlpha = intensity * 0.5; // Increased from 0.2 for debugging
                                 ctx.fillRect(
                                     screenPos.x,
                                     screenPos.y,
@@ -2442,6 +2454,8 @@ Camera & Viewport Controls:
                                     effectiveCharHeight
                                 );
                                 ctx.globalAlpha = 1.0; // Reset alpha
+                            } else {
+                                skippedOutOfBounds++;
                             }
                         }
                     }
@@ -2451,6 +2465,7 @@ Camera & Viewport Controls:
             // Log viewport and render stats (throttled to avoid spam)
             if (Math.random() < 0.01) { // Log ~1% of frames
                 addDebugLog(`Viewport: x=${xStart}-${xEnd} y=${yStart}-${yEnd} | Sampled: ${sampleCount} | Rendered: ${renderedCount}`);
+                addDebugLog(`  Skipped: hasContent=${skippedHasContent} | lowIntensity=${skippedLowIntensity} | outOfBounds=${skippedOutOfBounds} | zeroIntensity=${zeroIntensityCount}`);
             }
         }
 
