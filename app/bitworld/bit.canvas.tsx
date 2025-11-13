@@ -2435,9 +2435,13 @@ Camera & Viewport Controls:
             for (let worldY = yStart; worldY <= yEnd; worldY++) {
                 for (let worldX = xStart; worldX <= xEnd; worldX++) {
                     sampleCount++;
+                    // Characters span 2 cells: check both current cell and cell below
                     const textKey = `${worldX},${worldY}`;
+                    const textKeyBelow = `${worldX},${worldY + 1}`;
                     const data = engine.worldData[textKey];
-                    const hasCharacter = data && typeof data === 'string' && data.length === 1 && !engine.isImageData(data);
+                    const dataBelow = engine.worldData[textKeyBelow];
+                    const hasCharacter = (data && typeof data === 'string' && data.length === 1 && !engine.isImageData(data)) ||
+                                        (dataBelow && typeof dataBelow === 'string' && dataBelow.length === 1 && !engine.isImageData(dataBelow));
 
                     // Sample intensity from GPU-computed chunk
                     const intensity = monogram.sampleAt(worldX, worldY);
