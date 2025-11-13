@@ -1145,11 +1145,13 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         monogram.preloadViewport(x1, y1, x2, y2);
     }, [engine.viewOffset.x, engine.viewOffset.y, engine.zoomLevel, canvasSize, monogram.isInitialized, addDebugLog]);
 
-    // Continuously preload chunks for smooth animation even when static
+    // Continuously preload chunks for smooth animation even when static (60fps!)
     useEffect(() => {
         if (!monogram.isInitialized || !monogram.options.enabled) return;
 
-        const refreshInterval = setInterval(() => {
+        let animationFrameId: number;
+
+        const refreshChunks = () => {
             const effectiveCharDims = engine.getEffectiveCharDims(engine.zoomLevel);
             const startWorldX = engine.viewOffset.x;
             const startWorldY = engine.viewOffset.y;
@@ -1162,9 +1164,13 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 Math.ceil(endWorldX) + 5,
                 Math.ceil(endWorldY) + 5
             );
-        }, 100); // Refresh every 100ms for smooth 10fps animation updates
 
-        return () => clearInterval(refreshInterval);
+            animationFrameId = requestAnimationFrame(refreshChunks);
+        };
+
+        animationFrameId = requestAnimationFrame(refreshChunks);
+
+        return () => cancelAnimationFrame(animationFrameId);
     }, [engine.viewOffset.x, engine.viewOffset.y, engine.zoomLevel, canvasSize, monogram.isInitialized, monogram.options.enabled]);
 
     // Helper function to generate talking mouth animation
