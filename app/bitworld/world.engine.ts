@@ -394,6 +394,16 @@ interface UseWorldEngineProps {
     initialPatternId?: string; // Pattern ID from URL for deterministic pattern generation
     isReadOnly?: boolean; // Read-only mode (observer/viewer)
     skipInitialBackground?: boolean; // Skip applying initialBackgroundColor (let host flow control it)
+    monogramSystem?: { // WebGPU monogram background system
+        setOptions: (updater: ((prev: any) => any) | any) => void;
+        toggleEnabled: () => void;
+        options?: {
+            enabled?: boolean;
+            speed?: number;
+            complexity?: number;
+            mode?: 'clear' | 'perlin';
+        };
+    };
 }
 
 
@@ -592,6 +602,7 @@ export function useWorldEngine({
     initialPatternId,    // Pattern ID from URL for deterministic generation
     isReadOnly = false,  // Read-only mode (default to writeable)
     skipInitialBackground = false, // Skip applying initialBackgroundColor
+    monogramSystem,      // WebGPU monogram system
 }: UseWorldEngineProps): WorldEngine {
     // === Router ===
     const router = useRouter();
@@ -1452,7 +1463,7 @@ export function useWorldEngine({
         isFaceDetectionEnabled,
         faceOrientation,
         setFaceDetectionEnabled,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllLabels, getAllBounds, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, triggerUpgradeFlow: () => {
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllLabels, getAllBounds, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
         }
