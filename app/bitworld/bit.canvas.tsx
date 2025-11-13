@@ -2458,12 +2458,13 @@ Camera & Viewport Controls:
                             renderedCount++;
                             // Render character glows as soft red, perlin noise as textColor
                             if (hasCharacter) {
-                                // Soft red glow for characters - must respect GRID_CELL_SPAN height
+                                // Soft red glow for characters - spans upward from worldY-1 to worldY
+                                const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
                                 ctx.fillStyle = '#ff6666'; // Soft red
                                 ctx.globalAlpha = intensity * 0.6;
                                 ctx.fillRect(
-                                    screenPos.x,
-                                    screenPos.y,
+                                    topScreenPos.x,
+                                    topScreenPos.y,
                                     effectiveCharWidth,
                                     effectiveCharHeight * GRID_CELL_SPAN  // 2 cells tall
                                 );
