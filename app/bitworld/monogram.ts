@@ -19,7 +19,7 @@ const CHUNK_PERLIN_SHADER = `
 struct ChunkParams {
     chunkWorldX: f32,
     chunkWorldY: f32,
-    chunkSize: u32,
+    chunkSize: f32,
     time: f32,
     complexity: f32,
 }
@@ -71,8 +71,9 @@ fn perlin(worldX: f32, worldY: f32) -> f32 {
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let localX = global_id.x;
     let localY = global_id.y;
+    let chunkSize = u32(params.chunkSize);
 
-    if (localX >= params.chunkSize || localY >= params.chunkSize) {
+    if (localX >= chunkSize || localY >= chunkSize) {
         return;
     }
 
@@ -98,7 +99,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let temporalWave = sin(time * 0.5 + nx * 2.0 + ny * 1.5) * 0.05 + 0.95;
     let finalIntensity = clamp(rawIntensity * temporalWave, 0.0, 1.0);
 
-    let index = localY * params.chunkSize + localX;
+    let index = localY * chunkSize + localX;
     output[index] = finalIntensity;
 }
 `;
