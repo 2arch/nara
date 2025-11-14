@@ -465,9 +465,10 @@ interface BitCanvasProps {
     hostDimBackground?: boolean; // Whether to dim background when host dialogue appears
     isPublicWorld?: boolean; // Whether this is a public world (affects sign-up flow)
     monogram?: ReturnType<typeof useMonogram>; // Monogram system for visual effects
+    locale?: ReturnType<typeof import('./locale').useLocale>; // Locale system for bubble interactions
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, onTutorialComplete, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true, isPublicWorld = false, monogram: externalMonogram }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, onTutorialComplete, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true, isPublicWorld = false, monogram: externalMonogram, locale: externalLocale }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -2435,8 +2436,12 @@ Camera & Viewport Controls:
             for (let worldY = yStart; worldY <= yEnd; worldY++) {
                 for (let worldX = xStart; worldX <= xEnd; worldX++) {
                     sampleCount++;
-                    // Sample intensity from GPU-computed chunk (already includes character glows)
-                    const intensity = monogram.sampleAt(worldX, worldY);
+                    // Sample intensity from monogram (Perlin) and locale (glows)
+                    const monogramIntensity = monogram.sampleAt(worldX, worldY);
+                    const localeIntensity = externalLocale ? externalLocale.sampleAt(worldX, worldY) : 0;
+
+                    // Combine intensities (max for now - could blend differently)
+                    const intensity = Math.max(monogramIntensity, localeIntensity);
 
                     if (intensity === 0) {
                         zeroIntensityCount++;
@@ -7430,11 +7435,26 @@ Camera & Viewport Controls:
                         navigator.vibrate(50);
                     }
                 }, LONG_PRESS_DURATION);
+            } else {
+                // Long press on empty space → create locale
+                longPressTimerRef.current = setTimeout(() => {
+                    if (externalLocale) {
+                        // Create locale at touch position
+                        externalLocale.createLocale(touchWorldX, touchWorldY);
+
+                        // Haptic feedback
+                        if ('vibrate' in navigator) {
+                            navigator.vibrate(50);
+                        }
+
+                        console.log(`[Locale] Created at (${touchWorldX}, ${touchWorldY})`);
+                    }
+                }, LONG_PRESS_DURATION);
             }
         }
 
         canvasRef.current?.focus();
-    }, [engine, findImageAtPosition]);
+    }, [engine, findImageAtPosition, externalLocale]);
 
     const handleTouchMove = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();

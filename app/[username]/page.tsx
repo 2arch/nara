@@ -7,6 +7,7 @@ import Grid3DBackground from '../bitworld/canvas.grid3d';
 import { auth, getUidByUsername, getUserProfile } from '../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { useMonogram } from '../bitworld/monogram';
+import { useLocale } from '../bitworld/locale';
 
 export default function UserHome() {
   const [cursorAlternate, setCursorAlternate] = useState(false);
@@ -89,6 +90,9 @@ export default function UserHome() {
   // Initialize monogram system (disabled for now - will be locale-based substrate)
   const monogram = useMonogram({ enabled: false, speed: 0.5, complexity: 1.0, mode: 'clear' });
 
+  // Initialize locale system
+  const locale = useLocale({ defaultRadius: 64, maxLocales: 10 });
+
   const engine = useWorldEngine({
     worldId: 'home',
     userUid: targetUserUid, // Use the target user's UID, not the authenticated user's UID
@@ -137,6 +141,7 @@ export default function UserHome() {
         initialHostFlow={shouldShowTutorial ? 'tutorial' : undefined}
         onTutorialComplete={handleTutorialComplete}
         monogram={monogram}
+        locale={locale}
       />
     </div>
   );
