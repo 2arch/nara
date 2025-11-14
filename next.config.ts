@@ -8,7 +8,15 @@ const nextConfig: NextConfig = {
   basePath: process.env.NEXT_EXPORT ? '' : undefined,
   experimental: {
     // Any experimental features should be carefully configured
-  }
+  },
+  webpack: (config) => {
+    // Handle .wgsl files as raw text strings
+    config.module.rules.push({
+      test: /\.wgsl$/,
+      type: 'asset/source',
+    });
+    return config;
+  },
 };
 
 export default nextConfig;
