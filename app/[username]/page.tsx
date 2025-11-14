@@ -16,7 +16,7 @@ export default function UserHome() {
   const [uidLookupLoading, setUidLookupLoading] = useState(true);
   const [shouldShowTutorial, setShouldShowTutorial] = useState(false);
   const [tutorialChecked, setTutorialChecked] = useState(false);
-  const [showDebugOverlay, setShowDebugOverlay] = useState(false);
+  const [showDebugOverlay, setShowDebugOverlay] = useState(true);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const router = useRouter();
   const params = useParams();
