@@ -398,11 +398,24 @@ class MonogramSystem {
     syncArtifacts(artifacts: Array<{ startX: number, startY: number, endX: number, endY: number }>) {
         if (!this.isInitialized || !this.device) return;
 
+        console.log('[Monogram] syncArtifacts called with', artifacts.length, 'artifacts');
+
         // Replace all artifacts with the new set
         this.artifacts = artifacts.slice(0, this.MAX_ARTIFACTS);
 
         // Update GPU buffer
         this.updateArtifactBuffer();
+
+        // Invalidate all chunks so they recompute with new artifacts
+        this.chunks.clear();
+        this.chunkAccessTime.clear();
+        console.log('[Monogram] Cleared chunk cache to apply new artifacts');
+
+        // Reload viewport if we have one cached
+        if (this.lastViewport) {
+            const vp = this.lastViewport;
+            this.preloadViewport(vp.startX, vp.startY, vp.endX, vp.endY);
+        }
     }
 
     private updateArtifactBuffer() {
@@ -418,6 +431,9 @@ class MonogramSystem {
             data[i * 4 + 2] = artifact.endX;
             data[i * 4 + 3] = artifact.endY;
         }
+
+        console.log('[Monogram] Updated artifact buffer with', this.artifacts.length, 'artifacts. Sample:',
+            this.artifacts.slice(0, 3).map(a => `(${a.startX},${a.startY})->(${a.endX},${a.endY})`));
 
         this.device.queue.writeBuffer(this.artifactBuffer, 0, data);
     }

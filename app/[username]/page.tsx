@@ -164,6 +164,7 @@ export default function UserHome() {
     });
 
     // Sync all artifacts to GPU for uniform glow effect
+    console.log('[Artifact Sync] Syncing', artifacts.length, 'artifacts:', artifacts.slice(0, 3));
     monogram.syncArtifacts(artifacts);
   }, [engine.worldData, monogram.isInitialized, monogram, engine]);
 
