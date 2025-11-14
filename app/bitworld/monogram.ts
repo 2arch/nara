@@ -9,21 +9,13 @@ export interface MonogramOptions {
     enabled: boolean;
     speed: number;
     complexity: number;
-    mode: 'clear' | 'perlin'; // clear = only character glows, perlin = perlin noise + glows
-}
-
-export interface ArtifactGlow {
-    startX: number;      // World X start coordinate
-    startY: number;      // World Y start coordinate
-    endX: number;        // World X end coordinate
-    endY: number;        // World Y end coordinate
+    mode: 'clear' | 'perlin';
 }
 
 // WebGPU Compute Shader - Generates 32x32 chunk of Perlin noise
 const CHUNK_PERLIN_SHADER = `
 @group(0) @binding(0) var<storage, read_write> output: array<f32>;
 @group(0) @binding(1) var<uniform> params: ChunkParams;
-@group(0) @binding(2) var<storage, read> artifacts: array<vec4<f32>>;
 
 struct ChunkParams {
     chunkWorldX: f32,
@@ -31,8 +23,7 @@ struct ChunkParams {
     chunkSize: f32,
     time: f32,
     complexity: f32,
-    glowCount: f32,
-    mode: f32, // 0.0 = clear (glows only), 1.0 = perlin (noise + glows)
+    mode: f32, // 0.0 = clear, 1.0 = perlin
 }
 
 fn fade(t: f32) -> f32 {
@@ -78,49 +69,6 @@ fn perlin(worldX: f32, worldY: f32) -> f32 {
     return lerp(v, x1, x2);
 }
 
-fn calculateArtifactGlow(worldX: f32, worldY: f32, time: f32) -> f32 {
-    let glowCount = u32(params.glowCount);
-    var totalGlow = 0.0;
-
-    for (var i = 0u; i < glowCount; i++) {
-        let artifact = artifacts[i];
-        let startX = artifact.x;
-        let startY = artifact.y;
-        let endX = artifact.z;
-        let endY = artifact.w;
-
-        // Artifacts occupy their full rectangular bounds
-        // For isometric rendering, characters span upward (startY-1 to endY)
-        let rectLeft = startX;
-        let rectRight = endX;
-        let rectTop = startY - 1.0;  // Isometric: span upward
-        let rectBottom = endY;
-
-        // Clamp current position to rectangle bounds to find nearest point
-        let nearestX = clamp(worldX, rectLeft, rectRight);
-        let nearestY = clamp(worldY, rectTop, rectBottom);
-
-        // Calculate distance to nearest point on rectangle
-        let dx = worldX - nearestX;
-        let dy = worldY - nearestY;
-        let dist = sqrt(dx * dx + dy * dy);
-
-        // Glow parameters
-        let glowRadius = 12.0;  // How far the glow extends
-        let strength = 3.0;     // Uniform strength for all artifacts (increased for visibility)
-
-        // Distance-based falloff (inverse square with smoothing)
-        let distFade = clamp(1.0 - (dist / glowRadius), 0.0, 1.0);
-        let smoothFade = distFade * distFade * (3.0 - 2.0 * distFade); // Smoothstep
-
-        // Combine strength and distance fade
-        let glowContribution = strength * smoothFade;  // Removed 0.4 multiplier for stronger glow
-        totalGlow += glowContribution;
-    }
-
-    return clamp(totalGlow, 0.0, 1.0);
-}
-
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let localX = global_id.x;
@@ -134,15 +82,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let worldX = params.chunkWorldX + f32(localX);
     let worldY = params.chunkWorldY + f32(localY);
 
-    var baseIntensity = 0.0;
+    var intensity = 0.0;
 
     // Only compute perlin noise if mode is 1.0 (perlin mode)
     if (params.mode > 0.5) {
-        let scale = 0.15 * params.complexity;  // Increased from 0.02 to 0.15 (7.5x larger)
+        let scale = 1.0 * params.complexity;
         let time = params.time;
 
         let nx = worldX * scale;
-        let ny = (worldY * 0.5) * scale;
+        let ny = worldY * scale;
 
         let flow1 = perlin(nx + time * 2.0, ny + time);
         let flow2 = perlin(nx * 2.0 - time, ny * 2.0);
@@ -155,15 +103,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         let rawIntensity = (intensity1 + intensity2 + 2.0) / 4.0;
         let temporalWave = sin(time * 0.5 + nx * 2.0 + ny * 1.5) * 0.05 + 0.95;
-        baseIntensity = rawIntensity * temporalWave;
+        intensity = rawIntensity * temporalWave;
     }
 
-    // Add artifact glow effect (GPU-computed, respects width x 2 cell geometry for all artifacts)
-    let glowContribution = calculateArtifactGlow(worldX, worldY, params.time);
-    let finalIntensity = clamp(baseIntensity + glowContribution, 0.0, 1.0);
-
     let index = localY * chunkSize + localX;
-    output[index] = finalIntensity;
+    output[index] = intensity;
 }
 `;
 
@@ -172,20 +116,14 @@ class MonogramSystem {
     private device: GPUDevice | null = null;
     private pipeline: GPUComputePipeline | null = null;
     private paramsBuffer: GPUBuffer | null = null;
-    private artifactBuffer: GPUBuffer | null = null;
     private isInitialized = false;
 
     private readonly CHUNK_SIZE = 32;
     private readonly MAX_CHUNKS = 200;
-    private readonly MAX_ARTIFACTS = 1000;  // Increased to accommodate many labels/notes
     private chunkAccessTime: Map<string, number> = new Map();
 
     private time = 0;
     private options: MonogramOptions;
-    private artifacts: ArtifactGlow[] = [];
-
-    // Track last viewport for auto-reload on invalidation
-    private lastViewport: { startX: number, startY: number, endX: number, endY: number } | null = null;
 
     constructor(options: MonogramOptions) {
         this.options = options;
@@ -215,14 +153,8 @@ class MonogramSystem {
             });
 
             this.paramsBuffer = this.device.createBuffer({
-                size: 7 * 4,  // 7 floats: chunkWorldX, chunkWorldY, chunkSize, time, complexity, glowCount, mode
+                size: 6 * 4,  // 6 floats: chunkWorldX, chunkWorldY, chunkSize, time, complexity, mode
                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-            });
-
-            // Create artifact buffer (vec4<f32> per artifact: x, y, width, timestamp)
-            this.artifactBuffer = this.device.createBuffer({
-                size: this.MAX_ARTIFACTS * 4 * 4,  // 200 artifacts * 4 floats * 4 bytes
-                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
             });
 
             this.isInitialized = true;
@@ -268,28 +200,21 @@ class MonogramSystem {
             usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
         });
 
-        const artifactCount = this.artifacts.length;
         const paramsData = new Float32Array([
             chunkWorldX,
             chunkWorldY,
             this.CHUNK_SIZE,
             this.time,
             this.options.complexity,
-            artifactCount,  // artifact count
             this.options.mode === 'perlin' ? 1.0 : 0.0  // mode (0.0 = clear, 1.0 = perlin)
         ]);
         device.queue.writeBuffer(this.paramsBuffer, 0, paramsData);
-
-        if (artifactCount > 0) {
-            console.log(`[Monogram] Computing chunk (${chunkWorldX},${chunkWorldY}) with ${artifactCount} artifacts`);
-        }
 
         const bindGroup = device.createBindGroup({
             layout: this.pipeline.getBindGroupLayout(0),
             entries: [
                 { binding: 0, resource: { buffer: outputBuffer } },
-                { binding: 1, resource: { buffer: this.paramsBuffer } },
-                { binding: 2, resource: { buffer: this.artifactBuffer! } }
+                { binding: 1, resource: { buffer: this.paramsBuffer } }
             ]
         });
 
@@ -354,9 +279,6 @@ class MonogramSystem {
     async preloadViewport(startWorldX: number, startWorldY: number, endWorldX: number, endWorldY: number): Promise<void> {
         if (!this.isInitialized || !this.options.enabled) return;
 
-        // Store viewport for auto-reload on animation invalidation
-        this.lastViewport = { startX: startWorldX, startY: startWorldY, endX: endWorldX, endY: endWorldY };
-
         const startChunkX = Math.floor(startWorldX / this.CHUNK_SIZE);
         const endChunkX = Math.floor(endWorldX / this.CHUNK_SIZE);
         const startChunkY = Math.floor(startWorldY / this.CHUNK_SIZE);
@@ -400,54 +322,6 @@ class MonogramSystem {
         // Chunks recompute on-demand with current time (no invalidation needed)
     }
 
-    syncArtifacts(artifacts: Array<{ startX: number, startY: number, endX: number, endY: number }>) {
-        if (!this.isInitialized || !this.device) return;
-
-        console.log('[Monogram] syncArtifacts called with', artifacts.length, 'artifacts');
-
-        // Replace all artifacts with the new set
-        this.artifacts = artifacts.slice(0, this.MAX_ARTIFACTS);
-
-        // Update GPU buffer
-        this.updateArtifactBuffer();
-
-        // Invalidate all chunks so they recompute with new artifacts
-        this.chunks.clear();
-        this.chunkAccessTime.clear();
-        console.log('[Monogram] Cleared chunk cache to apply new artifacts');
-
-        // Reload viewport if we have one cached
-        if (this.lastViewport) {
-            const vp = this.lastViewport;
-            this.preloadViewport(vp.startX, vp.startY, vp.endX, vp.endY);
-        }
-    }
-
-    private updateArtifactBuffer() {
-        if (!this.device || !this.artifactBuffer) return;
-
-        // Create Float32Array with artifact data (vec4 per artifact: startX, startY, endX, endY)
-        const data = new Float32Array(this.MAX_ARTIFACTS * 4);
-
-        for (let i = 0; i < this.artifacts.length; i++) {
-            const artifact = this.artifacts[i];
-            data[i * 4] = artifact.startX;
-            data[i * 4 + 1] = artifact.startY;
-            data[i * 4 + 2] = artifact.endX;
-            data[i * 4 + 3] = artifact.endY;
-        }
-
-        console.log('[Monogram] Updated artifact buffer with', this.artifacts.length, 'artifacts. Sample:',
-            this.artifacts.slice(0, 3).map(a => `(${a.startX},${a.startY})->(${a.endX},${a.endY})`));
-
-        this.device.queue.writeBuffer(this.artifactBuffer, 0, data);
-    }
-
-    clearArtifacts() {
-        this.artifacts = [];
-        this.updateArtifactBuffer();
-    }
-
     setOptions(options: Partial<MonogramOptions>) {
         const complexityChanged = options.complexity !== undefined && options.complexity !== this.options.complexity;
         this.options = { ...this.options, ...options };
@@ -473,9 +347,7 @@ class MonogramSystem {
     destroy() {
         this.chunks.clear();
         this.chunkAccessTime.clear();
-        this.artifacts = [];
         this.paramsBuffer?.destroy();
-        this.artifactBuffer?.destroy();
         this.device?.destroy();
         this.isInitialized = false;
     }
@@ -542,22 +414,12 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         setOptions(prev => ({ ...prev, enabled: !prev.enabled }));
     }, []);
 
-    const syncArtifacts = useCallback((artifacts: Array<{ startX: number, startY: number, endX: number, endY: number }>) => {
-        systemRef.current?.syncArtifacts(artifacts);
-    }, []);
-
-    const clearArtifacts = useCallback(() => {
-        systemRef.current?.clearArtifacts();
-    }, []);
-
     return {
         options,
         setOptions,
         toggleEnabled,
         preloadViewport,
         sampleAt,
-        syncArtifacts,
-        clearArtifacts,
         isInitialized
     };
 }
