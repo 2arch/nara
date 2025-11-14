@@ -164,7 +164,13 @@ export default function UserHome() {
     });
 
     // Sync all artifacts to GPU for uniform glow effect
-    console.log('[Artifact Sync] Syncing', artifacts.length, 'artifacts:', artifacts.slice(0, 3));
+    const worldDataKeys = Object.keys(engine.worldData).length;
+    console.log('[Artifact Sync] WorldData has', worldDataKeys, 'keys, found', artifacts.length, 'artifacts');
+    if (artifacts.length > 0) {
+      console.log('[Artifact Sync] Sample artifacts:', artifacts.slice(0, 5));
+    } else {
+      console.log('[Artifact Sync] WARNING: No artifacts found! Sample worldData keys:', Object.keys(engine.worldData).slice(0, 10));
+    }
     monogram.syncArtifacts(artifacts);
   }, [engine.worldData, monogram.isInitialized, monogram, engine]);
 

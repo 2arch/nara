@@ -106,15 +106,15 @@ fn calculateArtifactGlow(worldX: f32, worldY: f32, time: f32) -> f32 {
         let dist = sqrt(dx * dx + dy * dy);
 
         // Glow parameters
-        let glowRadius = 8.0;  // How far the glow extends
-        let strength = 1.0;    // Uniform strength for all artifacts
+        let glowRadius = 12.0;  // How far the glow extends
+        let strength = 3.0;     // Uniform strength for all artifacts (increased for visibility)
 
         // Distance-based falloff (inverse square with smoothing)
         let distFade = clamp(1.0 - (dist / glowRadius), 0.0, 1.0);
         let smoothFade = distFade * distFade * (3.0 - 2.0 * distFade); // Smoothstep
 
         // Combine strength and distance fade
-        let glowContribution = strength * smoothFade * 0.4;
+        let glowContribution = strength * smoothFade;  // Removed 0.4 multiplier for stronger glow
         totalGlow += glowContribution;
     }
 
@@ -268,16 +268,21 @@ class MonogramSystem {
             usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
         });
 
+        const artifactCount = this.artifacts.length;
         const paramsData = new Float32Array([
             chunkWorldX,
             chunkWorldY,
             this.CHUNK_SIZE,
             this.time,
             this.options.complexity,
-            this.artifacts.length,  // artifact count
+            artifactCount,  // artifact count
             this.options.mode === 'perlin' ? 1.0 : 0.0  // mode (0.0 = clear, 1.0 = perlin)
         ]);
         device.queue.writeBuffer(this.paramsBuffer, 0, paramsData);
+
+        if (artifactCount > 0) {
+            console.log(`[Monogram] Computing chunk (${chunkWorldX},${chunkWorldY}) with ${artifactCount} artifacts`);
+        }
 
         const bindGroup = device.createBindGroup({
             layout: this.pipeline.getBindGroupLayout(0),
