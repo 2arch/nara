@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useWorldEngine } from '../bitworld/world.engine';
 import { BitCanvas } from '../bitworld/bit.canvas';
@@ -16,9 +16,45 @@ export default function UserHome() {
   const [uidLookupLoading, setUidLookupLoading] = useState(true);
   const [shouldShowTutorial, setShouldShowTutorial] = useState(false);
   const [tutorialChecked, setTutorialChecked] = useState(false);
+  const [showDebugOverlay, setShowDebugOverlay] = useState(false);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const router = useRouter();
   const params = useParams();
   const username = decodeURIComponent(params.username as string).replace('@', '');
+
+  // Intercept console logs for debug overlay
+  useEffect(() => {
+    const originalLog = console.log;
+    console.log = (...args: any[]) => {
+      originalLog(...args);
+      const message = args.map(arg =>
+        typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+      ).join(' ');
+      setDebugLogs(prev => [...prev.slice(-99), `[${new Date().toLocaleTimeString()}] ${message}`]);
+    };
+    return () => {
+      console.log = originalLog;
+    };
+  }, []);
+
+  // Keyboard shortcut to toggle debug overlay (Ctrl+Shift+D)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+        e.preventDefault();
+        setShowDebugOverlay(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const copyLogsToClipboard = () => {
+    const logsText = debugLogs.join('\n');
+    navigator.clipboard.writeText(logsText).then(() => {
+      alert('Logs copied to clipboard!');
+    });
+  };
 
   // Listen for authentication state changes
   useEffect(() => {
@@ -216,6 +252,44 @@ export default function UserHome() {
         onTutorialComplete={handleTutorialComplete}
         monogram={monogram}
       />
+
+      {/* Debug Overlay - Toggle with Ctrl+Shift+D */}
+      {showDebugOverlay && (
+        <div className="fixed top-4 right-4 w-96 h-96 bg-black/90 border border-green-500 rounded-lg overflow-hidden z-50 flex flex-col">
+          <div className="flex items-center justify-between p-3 border-b border-green-500/50 bg-green-950/30">
+            <span className="text-green-400 font-mono text-sm font-bold">Debug Logs</span>
+            <div className="flex gap-2">
+              <button
+                onClick={copyLogsToClipboard}
+                className="px-3 py-1 bg-green-700 hover:bg-green-600 text-white text-xs rounded transition-colors"
+              >
+                Copy
+              </button>
+              <button
+                onClick={() => setDebugLogs([])}
+                className="px-3 py-1 bg-red-700 hover:bg-red-600 text-white text-xs rounded transition-colors"
+              >
+                Clear
+              </button>
+              <button
+                onClick={() => setShowDebugOverlay(false)}
+                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 font-mono text-xs text-green-300 space-y-1">
+            {debugLogs.length === 0 ? (
+              <div className="text-gray-500 italic">No logs yet... (Press Ctrl+Shift+D to toggle)</div>
+            ) : (
+              debugLogs.map((log, i) => (
+                <div key={i} className="whitespace-pre-wrap break-words">{log}</div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
