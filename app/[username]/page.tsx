@@ -88,7 +88,7 @@ export default function UserHome() {
   }, [user, targetUserUid, tutorialChecked]);
 
   // Initialize monogram system (enabled temporarily to see substrate)
-  const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 0.05, mode: 'perlin' });
+  const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 0.15, mode: 'perlin' });
 
   // Initialize locale system
   const locale = useLocale({ defaultRadius: 64, maxLocales: 10 });
