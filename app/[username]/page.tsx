@@ -86,8 +86,8 @@ export default function UserHome() {
     checkTutorialStatus();
   }, [user, targetUserUid, tutorialChecked]);
 
-  // Initialize monogram system
-  const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0, mode: 'perlin' });
+  // Initialize monogram system (disabled for now - will be locale-based substrate)
+  const monogram = useMonogram({ enabled: false, speed: 0.5, complexity: 1.0, mode: 'clear' });
 
   const engine = useWorldEngine({
     worldId: 'home',
