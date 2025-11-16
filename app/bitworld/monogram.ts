@@ -529,6 +529,7 @@ class MonogramSystem {
                 x: (this.lastViewport.startX + this.lastViewport.endX) / 2,
                 y: (this.lastViewport.startY + this.lastViewport.endY) / 2
             };
+            console.log(`[Monogram NARA] Anchor set to (${this.naraAnchor.x}, ${this.naraAnchor.y})`);
         }
 
         const centerX = this.naraAnchor?.x ?? 0;
@@ -539,6 +540,8 @@ class MonogramSystem {
         const textureWidth = this.naraTexture.width;
         const textureHeight = this.naraTexture.height;
         const scale = (viewportWidth * 0.6) / textureWidth;
+
+        console.log(`[Monogram NARA] Computing chunk at (${chunkWorldX}, ${chunkWorldY}), anchor: (${centerX}, ${centerY}), scale: ${scale}, texture: ${textureWidth}x${textureHeight}`);
 
         const outputBuffer = device.createBuffer({
             size: bufferSize,
@@ -591,6 +594,12 @@ class MonogramSystem {
         const result = new Float32Array(stagingBuffer.getMappedRange());
         const intensities = new Float32Array(result);
         stagingBuffer.unmap();
+
+        // Debug: Check for non-zero values
+        const nonZero = intensities.filter(v => v > 0).length;
+        const sample = Array.from(intensities.slice(0, 10));
+        const max = Math.max(...intensities);
+        console.log(`[Monogram NARA] Chunk result: ${nonZero}/${intensities.length} non-zero, max: ${max.toFixed(3)}, sample:`, sample);
 
         outputBuffer.destroy();
         stagingBuffer.destroy();
