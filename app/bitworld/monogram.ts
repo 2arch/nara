@@ -7,11 +7,23 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 
 export type MonogramMode = 'clear' | 'perlin' | 'nara';
 
+// Trail position interface for interactive monogram trails
+interface MonogramTrailPosition {
+    x: number;
+    y: number;
+    timestamp: number;
+    intensity: number;
+}
+
 export interface MonogramOptions {
     enabled: boolean;
     speed: number;
     complexity: number;
     mode: MonogramMode;
+    // Interactive trail options
+    interactiveTrails?: boolean;
+    trailIntensity?: number;
+    trailFadeMs?: number;
 }
 
 // WebGPU Compute Shader - Generates 32x32 chunk of Perlin noise
@@ -704,11 +716,18 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         enabled: initialOptions?.enabled ?? true,
         speed: initialOptions?.speed ?? 0.5,  // Single speed controller (lower = slower)
         complexity: initialOptions?.complexity ?? 1.0,
-        mode: initialOptions?.mode ?? 'perlin'
+        mode: initialOptions?.mode ?? 'perlin',
+        interactiveTrails: initialOptions?.interactiveTrails ?? true,
+        trailIntensity: initialOptions?.trailIntensity ?? 1.0,
+        trailFadeMs: initialOptions?.trailFadeMs ?? 2000
     });
 
     const systemRef = useRef<MonogramSystem | null>(null);
     const [isInitialized, setIsInitialized] = useState(false);
+
+    // Mouse trail tracking
+    const [mouseTrail, setMouseTrail] = useState<MonogramTrailPosition[]>([]);
+    const lastMousePosRef = useRef<{ x: number, y: number } | null>(null);
 
     useEffect(() => {
         const system = new MonogramSystem(options);
@@ -751,13 +770,128 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         await systemRef.current?.preloadViewport(startX, startY, endX, endY);
     }, []);
 
+    // Update mouse position for interactive trails
+    const updateMousePosition = useCallback((worldPos: { x: number, y: number }) => {
+        if (!options.interactiveTrails) return;
+
+        const currentPos = worldPos;
+
+        // Only add to trail if mouse has actually moved significantly
+        if (!lastMousePosRef.current ||
+            Math.abs(currentPos.x - lastMousePosRef.current.x) > 0.5 ||
+            Math.abs(currentPos.y - lastMousePosRef.current.y) > 0.5) {
+
+            setMouseTrail(prev => {
+                const now = Date.now();
+
+                // Add new position with calculated intensity
+                const intensity = (options.trailIntensity ?? 1.0) * (0.8 + Math.random() * 0.4);
+                const newTrail = [...prev, {
+                    x: currentPos.x,
+                    y: currentPos.y,
+                    timestamp: now,
+                    intensity
+                }];
+
+                // Remove old positions
+                const fadeMs = options.trailFadeMs ?? 2000;
+                return newTrail.filter(pos => now - pos.timestamp < fadeMs);
+            });
+
+            lastMousePosRef.current = currentPos;
+        }
+    }, [options.interactiveTrails, options.trailIntensity, options.trailFadeMs]);
+
+    // Calculate interactive trail intensity at a given position
+    const calculateInteractiveTrail = useCallback((x: number, y: number): number => {
+        if (!options.interactiveTrails || mouseTrail.length < 2) return 0;
+
+        const now = Date.now();
+        const fadeMs = options.trailFadeMs ?? 2000;
+        const complexity = options.complexity;
+        const trailIntensity = options.trailIntensity ?? 1.0;
+
+        let maxTrailIntensity = 0;
+
+        // Check each segment of the trail
+        for (let i = 0; i < mouseTrail.length - 1; i++) {
+            const currentPos = mouseTrail[i];
+            const nextPos = mouseTrail[i + 1];
+
+            const age = now - currentPos.timestamp;
+            if (age > fadeMs) continue;
+
+            // Calculate distance from point to line segment between trail positions
+            const dx = nextPos.x - currentPos.x;
+            const dy = nextPos.y - currentPos.y;
+            const segmentLength = Math.sqrt(dx * dx + dy * dy);
+
+            if (segmentLength > 0) {
+                // Project point onto line segment - scale Y by 0.5 to stretch pattern
+                const scaledY = y * 0.5;
+                const scaledCurrentPosY = currentPos.y * 0.5;
+                const scaledNextPosY = nextPos.y * 0.5;
+
+                const t = Math.max(0, Math.min(1, (
+                    (x - currentPos.x) * dx + (scaledY - scaledCurrentPosY) * (scaledNextPosY - scaledCurrentPosY)
+                ) / (dx * dx + (scaledNextPosY - scaledCurrentPosY) * (scaledNextPosY - scaledCurrentPosY))));
+
+                const projX = currentPos.x + t * dx;
+                const projY = scaledCurrentPosY + t * (scaledNextPosY - scaledCurrentPosY);
+
+                const distance = Math.sqrt((x - projX) ** 2 + (scaledY - projY) ** 2);
+
+                // Comet effect - brighter at the head (newer positions)
+                const cometProgress = 1 - (i / (mouseTrail.length - 1));
+                const cometFade = 0.3 + 0.7 * Math.pow(cometProgress, 2);
+
+                // Distance-based fade
+                const radius = 8 * complexity;
+                const distanceFade = Math.max(0, 1 - (distance / radius));
+
+                // Time-based fade
+                const pathFade = 1 - (age / fadeMs);
+
+                if (distanceFade > 0) {
+                    const intensity = distanceFade * pathFade * cometFade * trailIntensity;
+                    maxTrailIntensity = Math.max(maxTrailIntensity, intensity);
+                }
+            }
+        }
+
+        return Math.min(1, maxTrailIntensity);
+    }, [options.interactiveTrails, options.trailFadeMs, options.complexity, options.trailIntensity, mouseTrail]);
+
     const sampleAt = useCallback((worldX: number, worldY: number): number => {
-        return systemRef.current?.sampleAt(worldX, worldY) ?? 0;
-    }, []);
+        // Get GPU-computed base pattern
+        const gpuIntensity = systemRef.current?.sampleAt(worldX, worldY) ?? 0;
+
+        // Add CPU-computed trail effect
+        const trailIntensity = calculateInteractiveTrail(worldX, worldY);
+
+        // Combine: max of GPU pattern and trail
+        return Math.max(gpuIntensity, trailIntensity);
+    }, [calculateInteractiveTrail]);
 
     const toggleEnabled = useCallback(() => {
         setOptions(prev => ({ ...prev, enabled: !prev.enabled }));
     }, []);
+
+    // Clean up old trail positions periodically
+    useEffect(() => {
+        if (!options.interactiveTrails) {
+            setMouseTrail([]);
+            return;
+        }
+
+        const cleanup = setInterval(() => {
+            const now = Date.now();
+            const fadeMs = options.trailFadeMs ?? 2000;
+            setMouseTrail(prev => prev.filter(pos => now - pos.timestamp < fadeMs));
+        }, 200); // Clean up every 200ms
+
+        return () => clearInterval(cleanup);
+    }, [options.interactiveTrails, options.trailFadeMs]);
 
     return {
         options,
@@ -765,6 +899,7 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         toggleEnabled,
         preloadViewport,
         sampleAt,
-        isInitialized
+        isInitialized,
+        updateMousePosition
     };
 }
