@@ -7886,6 +7886,12 @@ Camera & Viewport Controls:
                     y: Math.floor(worldPos.y)
                 });
             }
+        } else if (touches.length === 1 && !isTouchPanningRef.current && !isTouchSelectingRef.current) {
+            // Normal touch move: track touch position directly for trails (like mouse normal mode)
+            const touchScreenX = touches[0].clientX - rect.left;
+            const touchScreenY = touches[0].clientY - rect.top;
+            const worldPos = engine.screenToWorld(touchScreenX, touchScreenY, engine.zoomLevel, engine.viewOffset);
+            monogram.updateMousePosition(worldPos);
         }
     }, [engine]);
 

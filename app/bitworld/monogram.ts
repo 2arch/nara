@@ -547,9 +547,10 @@ class MonogramSystem {
         const currentPos = { x: worldX, y: worldY };
 
         // Only add to trail if mouse has moved significantly
+        // Lower threshold (0.2) for smoother trails on touch
         if (!this.lastMousePos ||
-            Math.abs(currentPos.x - this.lastMousePos.x) > 0.5 ||
-            Math.abs(currentPos.y - this.lastMousePos.y) > 0.5) {
+            Math.abs(currentPos.x - this.lastMousePos.x) > 0.2 ||
+            Math.abs(currentPos.y - this.lastMousePos.y) > 0.2) {
 
             const now = Date.now();
             const intensity = this.options.trailIntensity ?? 1.0;
