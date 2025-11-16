@@ -404,6 +404,11 @@ class MonogramSystem {
                     textureData[i] = textBitmap.imageData.data[i * 4]; // Red channel
                 }
 
+                // Debug: Check texture data
+                const nonZeroPixels = textureData.filter(v => v > 128).length;
+                const totalPixels = textureData.length;
+                console.log(`[Monogram] NARA texture data: ${nonZeroPixels}/${totalPixels} white pixels`);
+
                 this.device.queue.writeTexture(
                     { texture: this.naraTexture },
                     textureData,
@@ -538,7 +543,17 @@ class MonogramSystem {
         const textureHeight = this.naraTexture.height;
         const scale = (viewportWidth * 0.6) / textureWidth;
 
-        console.log(`[Monogram NARA] Computing chunk at (${chunkWorldX}, ${chunkWorldY}), anchor: (${centerX}, ${centerY}), scale: ${scale}, viewport: ${viewportWidth}x${viewportHeight}`);
+        console.log(`[Monogram NARA] Computing chunk at (${chunkWorldX}, ${chunkWorldY}), anchor: (${centerX}, ${centerY}), scale: ${scale}, texture: ${textureWidth}x${textureHeight}, viewport: ${viewportWidth}x${viewportHeight}`);
+
+        // Debug: Trace sample pixel coordinate transformation
+        const sampleWorldX = chunkWorldX + 16;
+        const sampleWorldY = chunkWorldY + 16;
+        const sampleRelX = sampleWorldX - centerX;
+        const sampleRelY = sampleWorldY - centerY;
+        // Rough estimate without distortion
+        const sampleTexX = sampleRelX / scale + textureWidth / 2;
+        const sampleTexY = sampleRelY / scale + textureHeight / 2;
+        console.log(`[Monogram NARA] Sample pixel (16,16): world=(${sampleWorldX},${sampleWorldY}), rel=(${sampleRelX.toFixed(1)},${sampleRelY.toFixed(1)}), tex=(${sampleTexX.toFixed(1)},${sampleTexY.toFixed(1)}) [bounds: 0-${textureWidth}, 0-${textureHeight}]`);
 
         const outputBuffer = device.createBuffer({
             size: bufferSize,
