@@ -138,6 +138,8 @@ struct NaraParams {
     textureWidth: f32,
     textureHeight: f32,
     scale: f32,
+    viewportWidth: f32,
+    viewportHeight: f32,
 }
 
 // Reuse Perlin noise functions
@@ -201,9 +203,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let relX = worldX - params.centerX;
     let relY = worldY - params.centerY;
 
-    // 2. Apply continuous translation (sine wave movement)
-    let translateX = sin(params.time * 0.3) * 10.0;
-    let translateY = cos(params.time * 0.21) * 10.0;
+    // 2. Apply continuous translation (viewport-relative like CPU)
+    let maxTranslateX = params.viewportWidth * 0.1;
+    let maxTranslateY = params.viewportHeight * 0.1;
+    let translateX = sin(params.time * 0.3) * maxTranslateX;
+    let translateY = cos(params.time * 0.3 * 0.7) * maxTranslateY;
     let transX = relX - translateX;
     let transY = relY - translateY;
 
@@ -230,14 +234,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         transY * noiseScale2 + params.time * morphSpeed * 0.5
     );
 
-    // 4. Combine noise layers - scaled relative to texture scale
-    let morphAmount = params.scale * 15.0 * params.complexity;
+    // 4. Combine noise layers - viewport-relative like CPU
+    let minViewportDim = min(params.viewportWidth, params.viewportHeight);
+    let morphAmount = minViewportDim * 0.15 * params.complexity;
     let distortX = (noiseX1 * 0.7 + noiseX2 * 0.3) * morphAmount;
     let distortY = (noiseY1 * 0.7 + noiseY2 * 0.3) * morphAmount;
 
-    // 5. Wave distortion - also scaled
+    // 5. Wave distortion - viewport-relative like CPU
     let waveFreq = 0.02;
-    let waveAmp = params.scale * 8.0 * params.complexity;
+    let waveAmp = params.viewportHeight * 0.05 * params.complexity;
     let wavePhase = params.time * 0.8;
     let waveX = sin(transY * waveFreq + wavePhase) * waveAmp;
     let waveY = cos(transX * waveFreq * 0.7 + wavePhase * 1.3) * waveAmp * 0.5;
@@ -381,7 +386,7 @@ class MonogramSystem {
             });
 
             this.naraParamsBuffer = this.device.createBuffer({
-                size: 10 * 4,  // 10 floats: chunkWorldX, chunkWorldY, chunkSize, time, complexity, centerX, centerY, textureWidth, textureHeight, scale
+                size: 12 * 4,  // 12 floats: chunkWorldX, chunkWorldY, chunkSize, time, complexity, centerX, centerY, textureWidth, textureHeight, scale, viewportWidth, viewportHeight
                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
             });
 
@@ -538,11 +543,12 @@ class MonogramSystem {
 
         // Calculate viewport-based scale
         const viewportWidth = this.lastViewport ? (this.lastViewport.endX - this.lastViewport.startX) : 100;
+        const viewportHeight = this.lastViewport ? (this.lastViewport.endY - this.lastViewport.startY) : 100;
         const textureWidth = this.naraTexture.width;
         const textureHeight = this.naraTexture.height;
         const scale = (viewportWidth * 0.6) / textureWidth;
 
-        console.log(`[Monogram NARA] Computing chunk at (${chunkWorldX}, ${chunkWorldY}), anchor: (${centerX}, ${centerY}), scale: ${scale}, texture: ${textureWidth}x${textureHeight}`);
+        console.log(`[Monogram NARA] Computing chunk at (${chunkWorldX}, ${chunkWorldY}), anchor: (${centerX}, ${centerY}), scale: ${scale}, viewport: ${viewportWidth}x${viewportHeight}`);
 
         const outputBuffer = device.createBuffer({
             size: bufferSize,
@@ -564,7 +570,9 @@ class MonogramSystem {
             centerY,
             textureWidth,
             textureHeight,
-            scale
+            scale,
+            viewportWidth,
+            viewportHeight
         ]);
         device.queue.writeBuffer(this.naraParamsBuffer, 0, paramsData);
 
