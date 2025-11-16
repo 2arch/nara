@@ -230,14 +230,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         transY * noiseScale2 + params.time * morphSpeed * 0.5
     );
 
-    // 4. Combine noise layers
-    let morphAmount = 100.0 * params.complexity;
+    // 4. Combine noise layers - scaled relative to texture scale
+    let morphAmount = params.scale * 15.0 * params.complexity;
     let distortX = (noiseX1 * 0.7 + noiseX2 * 0.3) * morphAmount;
     let distortY = (noiseY1 * 0.7 + noiseY2 * 0.3) * morphAmount;
 
-    // 5. Wave distortion
+    // 5. Wave distortion - also scaled
     let waveFreq = 0.02;
-    let waveAmp = 50.0 * params.complexity;
+    let waveAmp = params.scale * 8.0 * params.complexity;
     let wavePhase = params.time * 0.8;
     let waveX = sin(transY * waveFreq + wavePhase) * waveAmp;
     let waveY = cos(transX * waveFreq * 0.7 + wavePhase * 1.3) * waveAmp * 0.5;
@@ -246,16 +246,35 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let finalX = transX - distortX - waveX;
     let finalY = transY - distortY - waveY;
 
-    // 7. Transform to texture coordinates
-    let texX = (finalX / params.scale + params.textureWidth / 2.0) / params.textureWidth;
-    let texY = (finalY / params.scale + params.textureHeight / 2.0) / params.textureHeight;
+    // 7. Transform to texture coordinates (pixel coordinates for textureLoad)
+    let texPixelX = finalX / params.scale + params.textureWidth / 2.0;
+    let texPixelY = finalY / params.scale + params.textureHeight / 2.0;
 
-    // DIAGNOSTIC: Output a simple test pattern to verify shader runs
-    // This should create animated concentric circles
-    let testPattern = sin(sqrt(relX * relX + relY * relY) * 0.1 - params.time) * 0.5 + 0.5;
+    // 8. Bounds check and sample
+    var brightness = 0.0;
+    if (texPixelX >= 0.0 && texPixelX < params.textureWidth &&
+        texPixelY >= 0.0 && texPixelY < params.textureHeight) {
+        // Use textureLoad for compute shaders (not textureSample)
+        let texCoord = vec2<i32>(i32(texPixelX), i32(texPixelY));
+        brightness = textureLoad(naraTexture, texCoord, 0).r;
+
+        // 9. Glow enhancement
+        if (brightness > 0.7) {
+            brightness = min(1.0, brightness * 1.3);
+        } else if (brightness > 0.4) {
+            brightness = min(1.0, brightness * 1.1);
+        }
+
+        // 10. Post-effects
+        let scanline = 0.95 + sin(params.time * 2.5 + worldY * 0.02) * 0.05;
+        let flicker = 0.95 + sin(params.time * 15.0 + worldX * 0.01) * 0.05;
+        let pulse = 0.9 + sin(params.time * 1.5) * 0.1;
+
+        brightness = brightness * scanline * flicker * pulse;
+    }
 
     let index = localY * chunkSize + localX;
-    output[index] = testPattern;
+    output[index] = max(0.0, min(1.0, brightness));
 }
 `;
 
