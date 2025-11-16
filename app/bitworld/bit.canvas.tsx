@@ -1514,6 +1514,10 @@ Camera & Viewport Controls:
     const isMiddleMouseDownRef = useRef(false);
     const intermediatePanOffsetRef = useRef<Point>(engine.viewOffset); // Track offset during pan
 
+    // Refs for trail during pan
+    const panTrailAnchorRef = useRef<Point | null>(null); // World position where pan started
+    const panStartScreenRef = useRef<Point | null>(null); // Screen position where pan started
+
     // Ref for tracking selection drag state (mouse button down)
     const isSelectingMouseDownRef = useRef(false);
     
@@ -5964,6 +5968,12 @@ Camera & Viewport Controls:
             const info = engine.handlePanStart(e.clientX, e.clientY);
             panStartInfoRef.current = info;
             intermediatePanOffsetRef.current = { ...engine.viewOffset }; // Clone to avoid reference issues
+
+            // Capture pan start positions for trail tracking
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            panStartScreenRef.current = { x, y };
+            panTrailAnchorRef.current = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
             panStartPosRef.current = { ...engine.viewOffset }; // Track starting position for distance
             setIsPanning(true);
             setPanDistance(0);
@@ -6327,12 +6337,36 @@ Camera & Viewport Controls:
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
-        // Always track mouse position for preview (when not actively dragging)
+        // Handle trail tracking
+        if (isMiddleMouseDownRef.current && panStartScreenRef.current && panTrailAnchorRef.current) {
+            // Panning: calculate trail based on screen motion
+            const screenDelta = {
+                x: x - panStartScreenRef.current.x,
+                y: y - panStartScreenRef.current.y
+            };
+
+            // Convert screen delta to world delta at current zoom
+            const worldDelta = {
+                x: screenDelta.x / engine.zoomLevel,
+                y: screenDelta.y / engine.zoomLevel
+            };
+
+            // Trail position = anchor + accumulated mouse motion in world space
+            const trailWorldPos = {
+                x: panTrailAnchorRef.current.x + worldDelta.x,
+                y: panTrailAnchorRef.current.y + worldDelta.y
+            };
+
+            monogram.updateMousePosition(trailWorldPos);
+        } else if (!isSelectingMouseDownRef.current) {
+            // Normal mode: track mouse position directly
+            const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
+            monogram.updateMousePosition(worldPos);
+        }
+
+        // Always track mouse position for preview (when not actively dragging selection)
         if (!isMiddleMouseDownRef.current && !isSelectingMouseDownRef.current) {
             const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
-
-            // Update monogram trail
-            monogram.updateMousePosition(worldPos);
 
             // Check if we're in a glitched region - if so, snap to half-cells (vertical subdivision)
             const baseX = Math.floor(worldPos.x);
@@ -6668,6 +6702,10 @@ Camera & Viewport Controls:
             engine.handlePanEnd(intermediatePanOffsetRef.current); // Commit final offset
             panStartInfoRef.current = null;
             panStartPosRef.current = null;
+
+            // Clear pan trail refs
+            panStartScreenRef.current = null;
+            panTrailAnchorRef.current = null;
             if (canvasRef.current) canvasRef.current.style.cursor = 'text';
 
             // Clear pan distance after a delay
@@ -6992,6 +7030,8 @@ Camera & Viewport Controls:
             isMiddleMouseDownRef.current = false;
             engine.handlePanEnd(intermediatePanOffsetRef.current);
             panStartInfoRef.current = null;
+            panStartScreenRef.current = null;
+            panTrailAnchorRef.current = null;
             if (canvasRef.current) canvasRef.current.style.cursor = 'text';
         }
 
