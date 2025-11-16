@@ -138,7 +138,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // Only compute perlin noise if mode is 1.0 (perlin mode)
     if (params.mode > 0.5) {
-        let scale = 0.15 * params.complexity;  // Increased from 0.02 to 0.15 (7.5x larger)
+        let scale = 0.03 * params.complexity;  // Smaller scale = more zoomed in, larger features
         let time = params.time;
 
         let nx = worldX * scale;
