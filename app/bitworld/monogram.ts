@@ -5,7 +5,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 
-export type MonogramMode = 'clear' | 'perlin';
+export type MonogramMode = 'clear' | 'perlin' | 'nara';
 
 export interface MonogramOptions {
     enabled: boolean;
@@ -108,12 +108,176 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 `;
 
+// WebGPU Compute Shader - NARA mode with texture sampling and distortion
+const CHUNK_NARA_SHADER = `
+@group(0) @binding(0) var<storage, read_write> output: array<f32>;
+@group(0) @binding(1) var<uniform> params: NaraParams;
+@group(0) @binding(2) var naraTexture: texture_2d<f32>;
+@group(0) @binding(3) var naraSampler: sampler;
+
+struct NaraParams {
+    chunkWorldX: f32,
+    chunkWorldY: f32,
+    chunkSize: f32,
+    time: f32,
+    complexity: f32,
+    centerX: f32,
+    centerY: f32,
+    textureWidth: f32,
+    textureHeight: f32,
+    scale: f32,
+}
+
+// Reuse Perlin noise functions
+fn fade(t: f32) -> f32 {
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+}
+
+fn lerp(t: f32, a: f32, b: f32) -> f32 {
+    return a + t * (b - a);
+}
+
+fn grad(hash: u32, x: f32, y: f32) -> f32 {
+    let h = hash & 3u;
+    let u = select(y, x, h < 2u);
+    let v = select(x, y, h < 2u);
+    let sign_u = select(u, -u, (h & 1u) == 0u);
+    let sign_v = select(v, -v, (h & 2u) == 0u);
+    return sign_u + sign_v;
+}
+
+fn hash(i: i32) -> u32 {
+    var x = u32(i);
+    x = ((x >> 16u) ^ x) * 0x45d9f3bu;
+    x = ((x >> 16u) ^ x) * 0x45d9f3bu;
+    x = (x >> 16u) ^ x;
+    return x & 255u;
+}
+
+fn perlin(worldX: f32, worldY: f32) -> f32 {
+    let X = i32(floor(worldX));
+    let Y = i32(floor(worldY));
+    let fx = fract(worldX);
+    let fy = fract(worldY);
+
+    let u = fade(fx);
+    let v = fade(fy);
+
+    let a = hash(X) + u32(Y);
+    let b = hash(X + 1) + u32(Y);
+
+    let x1 = lerp(u, grad(hash(i32(a)), fx, fy), grad(hash(i32(b)), fx - 1.0, fy));
+    let x2 = lerp(u, grad(hash(i32(a + 1u)), fx, fy - 1.0), grad(hash(i32(b + 1u)), fx - 1.0, fy - 1.0));
+
+    return lerp(v, x1, x2);
+}
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let localX = global_id.x;
+    let localY = global_id.y;
+    let chunkSize = u32(params.chunkSize);
+
+    if (localX >= chunkSize || localY >= chunkSize) {
+        return;
+    }
+
+    let worldX = params.chunkWorldX + f32(localX);
+    let worldY = params.chunkWorldY + f32(localY);
+
+    // 1. Translate to center-relative coordinates
+    let relX = worldX - params.centerX;
+    let relY = worldY - params.centerY;
+
+    // 2. Apply continuous translation (sine wave movement)
+    let translateX = sin(params.time * 0.3) * 10.0;
+    let translateY = cos(params.time * 0.21) * 10.0;
+    let transX = relX - translateX;
+    let transY = relY - translateY;
+
+    // 3. Multi-layer Perlin noise distortion
+    let noiseScale1 = 0.01 * params.complexity;
+    let noiseScale2 = 0.005 * params.complexity;
+    let morphSpeed = 0.5;
+
+    let noiseX1 = perlin(
+        transX * noiseScale1 + cos(params.time * morphSpeed) * 5.0,
+        transY * noiseScale1 + sin(params.time * morphSpeed) * 5.0
+    );
+    let noiseY1 = perlin(
+        transX * noiseScale1 + sin(params.time * morphSpeed * 1.3) * 5.0,
+        transY * noiseScale1 + cos(params.time * morphSpeed * 1.3) * 5.0
+    );
+
+    let noiseX2 = perlin(
+        transX * noiseScale2 + params.time * morphSpeed * 0.5,
+        transY * noiseScale2 - params.time * morphSpeed * 0.3
+    );
+    let noiseY2 = perlin(
+        transX * noiseScale2 - params.time * morphSpeed * 0.3,
+        transY * noiseScale2 + params.time * morphSpeed * 0.5
+    );
+
+    // 4. Combine noise layers
+    let morphAmount = 100.0 * params.complexity;
+    let distortX = (noiseX1 * 0.7 + noiseX2 * 0.3) * morphAmount;
+    let distortY = (noiseY1 * 0.7 + noiseY2 * 0.3) * morphAmount;
+
+    // 5. Wave distortion
+    let waveFreq = 0.02;
+    let waveAmp = 50.0 * params.complexity;
+    let wavePhase = params.time * 0.8;
+    let waveX = sin(transY * waveFreq + wavePhase) * waveAmp;
+    let waveY = cos(transX * waveFreq * 0.7 + wavePhase * 1.3) * waveAmp * 0.5;
+
+    // 6. Apply all transformations
+    let finalX = transX - distortX - waveX;
+    let finalY = transY - distortY - waveY;
+
+    // 7. Transform to texture coordinates
+    let texX = (finalX / params.scale + params.textureWidth / 2.0) / params.textureWidth;
+    let texY = (finalY / params.scale + params.textureHeight / 2.0) / params.textureHeight;
+
+    // 8. Bounds check
+    var brightness = 0.0;
+    if (texX >= 0.0 && texX <= 1.0 && texY >= 0.0 && texY <= 1.0) {
+        // 9. Sample texture
+        let texCoord = vec2<f32>(texX, texY);
+        brightness = textureSample(naraTexture, naraSampler, texCoord).r;
+
+        // 10. Glow enhancement
+        if (brightness > 0.7) {
+            brightness = min(1.0, brightness * 1.3);
+        } else if (brightness > 0.4) {
+            brightness = min(1.0, brightness * 1.1);
+        }
+
+        // 11. Post-effects
+        let scanline = 0.95 + sin(params.time * 2.5 + worldY * 0.02) * 0.05;
+        let flicker = 0.95 + sin(params.time * 15.0 + worldX * 0.01) * 0.05;
+        let pulse = 0.9 + sin(params.time * 1.5) * 0.1;
+
+        brightness = brightness * scanline * flicker * pulse;
+    }
+
+    let index = localY * chunkSize + localX;
+    output[index] = max(0.0, min(1.0, brightness));
+}
+`;
+
 class MonogramSystem {
     private chunks: Map<string, Float32Array> = new Map();
     private device: GPUDevice | null = null;
     private pipeline: GPUComputePipeline | null = null;
     private paramsBuffer: GPUBuffer | null = null;
     private isInitialized = false;
+
+    // NARA mode GPU resources
+    private naraPipeline: GPUComputePipeline | null = null;
+    private naraParamsBuffer: GPUBuffer | null = null;
+    private naraTexture: GPUTexture | null = null;
+    private naraSampler: GPUSampler | null = null;
+    private naraAnchor: { x: number, y: number } | null = null;
 
     private readonly CHUNK_SIZE = 32;
     private readonly MAX_CHUNKS = 200;
@@ -127,6 +291,39 @@ class MonogramSystem {
 
     constructor(options: MonogramOptions) {
         this.options = options;
+    }
+
+    // Generate "NARA" text bitmap using Canvas API (CPU)
+    private generateNaraTextBitmap(): { imageData: ImageData, width: number, height: number } | null {
+        if (typeof window === 'undefined' || typeof document === 'undefined') return null;
+
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return null;
+
+        const fontSize = 120;
+        const text = 'NARA';
+
+        // Measure text
+        ctx.font = `bold ${fontSize}px "Courier New", Courier, monospace`;
+        ctx.textBaseline = 'top';
+        const metrics = ctx.measureText(text);
+        const textWidth = Math.ceil(metrics.width);
+        const textHeight = fontSize * 1.2;
+
+        // Set canvas size
+        canvas.width = textWidth + 8;
+        canvas.height = textHeight + 4;
+
+        // Draw text
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.font = `bold ${fontSize}px "Courier New", Courier, monospace`;
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = 'white';
+        ctx.fillText(text, 4, 2);
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        return { imageData, width: canvas.width, height: canvas.height };
     }
 
     async initialize(): Promise<boolean> {
@@ -157,8 +354,60 @@ class MonogramSystem {
                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
             });
 
+            // Create NARA pipeline and resources
+            const naraShaderModule = this.device.createShaderModule({
+                code: CHUNK_NARA_SHADER
+            });
+
+            this.naraPipeline = this.device.createComputePipeline({
+                layout: 'auto',
+                compute: {
+                    module: naraShaderModule,
+                    entryPoint: 'main'
+                }
+            });
+
+            this.naraParamsBuffer = this.device.createBuffer({
+                size: 10 * 4,  // 10 floats: chunkWorldX, chunkWorldY, chunkSize, time, complexity, centerX, centerY, textureWidth, textureHeight, scale
+                usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+            });
+
+            // Generate and upload NARA text texture
+            const textBitmap = this.generateNaraTextBitmap();
+            if (textBitmap) {
+                // Create texture
+                this.naraTexture = this.device.createTexture({
+                    size: [textBitmap.width, textBitmap.height, 1],
+                    format: 'r8unorm',  // Single channel (red) for grayscale
+                    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+                });
+
+                // Upload bitmap data to texture (extract red channel)
+                const textureData = new Uint8Array(textBitmap.width * textBitmap.height);
+                for (let i = 0; i < textureData.length; i++) {
+                    textureData[i] = textBitmap.imageData.data[i * 4]; // Red channel
+                }
+
+                this.device.queue.writeTexture(
+                    { texture: this.naraTexture },
+                    textureData,
+                    { bytesPerRow: textBitmap.width },
+                    [textBitmap.width, textBitmap.height, 1]
+                );
+
+                // Create sampler
+                this.naraSampler = this.device.createSampler({
+                    magFilter: 'linear',
+                    minFilter: 'linear',
+                    addressModeU: 'clamp-to-edge',
+                    addressModeV: 'clamp-to-edge'
+                });
+
+                console.log(`[Monogram] NARA texture created: ${textBitmap.width}x${textBitmap.height}`);
+            }
+
             this.isInitialized = true;
-            console.log('[Monogram] WebGPU initialized');
+            console.log('[Monogram] WebGPU initialized (Perlin + NARA)');
             return true;
         } catch (error) {
             console.error('[Monogram] WebGPU init failed:', error);
@@ -181,11 +430,24 @@ class MonogramSystem {
     }
 
     private async computeChunk(chunkWorldX: number, chunkWorldY: number): Promise<Float32Array> {
-        if (!this.device || !this.pipeline || !this.paramsBuffer) {
+        if (!this.device) {
             throw new Error('[Monogram] Not initialized');
         }
 
-        console.log(`[Monogram] Computing chunk at world (${chunkWorldX}, ${chunkWorldY})`);
+        const mode = this.options.mode;
+
+        // Route to appropriate pipeline based on mode
+        if (mode === 'nara') {
+            return this.computeChunkNara(chunkWorldX, chunkWorldY);
+        } else {
+            return this.computeChunkPerlin(chunkWorldX, chunkWorldY);
+        }
+    }
+
+    private async computeChunkPerlin(chunkWorldX: number, chunkWorldY: number): Promise<Float32Array> {
+        if (!this.device || !this.pipeline || !this.paramsBuffer) {
+            throw new Error('[Monogram] Perlin pipeline not initialized');
+        }
 
         const device = this.device;
         const bufferSize = this.CHUNK_SIZE * this.CHUNK_SIZE * 4;
@@ -238,10 +500,88 @@ class MonogramSystem {
         outputBuffer.destroy();
         stagingBuffer.destroy();
 
-        // Log sample of computed values
-        const sample = Array.from(intensities.slice(0, 10));
-        const nonZero = intensities.filter(v => v > 0).length;
-        console.log(`[Monogram] Chunk computed: ${nonZero}/${intensities.length} non-zero values, sample:`, sample);
+        return intensities;
+    }
+
+    private async computeChunkNara(chunkWorldX: number, chunkWorldY: number): Promise<Float32Array> {
+        if (!this.device || !this.naraPipeline || !this.naraParamsBuffer || !this.naraTexture || !this.naraSampler) {
+            throw new Error('[Monogram] NARA pipeline not initialized');
+        }
+
+        const device = this.device;
+        const bufferSize = this.CHUNK_SIZE * this.CHUNK_SIZE * 4;
+
+        // Set anchor point on first use (center of first viewport)
+        if (!this.naraAnchor && this.lastViewport) {
+            this.naraAnchor = {
+                x: (this.lastViewport.startX + this.lastViewport.endX) / 2,
+                y: (this.lastViewport.startY + this.lastViewport.endY) / 2
+            };
+        }
+
+        const centerX = this.naraAnchor?.x ?? 0;
+        const centerY = this.naraAnchor?.y ?? 0;
+
+        // Calculate viewport-based scale
+        const viewportWidth = this.lastViewport ? (this.lastViewport.endX - this.lastViewport.startX) : 100;
+        const textureWidth = this.naraTexture.width;
+        const textureHeight = this.naraTexture.height;
+        const scale = (viewportWidth * 0.6) / textureWidth;
+
+        const outputBuffer = device.createBuffer({
+            size: bufferSize,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
+        });
+
+        const stagingBuffer = device.createBuffer({
+            size: bufferSize,
+            usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
+        });
+
+        const paramsData = new Float32Array([
+            chunkWorldX,
+            chunkWorldY,
+            this.CHUNK_SIZE,
+            this.time,
+            this.options.complexity,
+            centerX,
+            centerY,
+            textureWidth,
+            textureHeight,
+            scale
+        ]);
+        device.queue.writeBuffer(this.naraParamsBuffer, 0, paramsData);
+
+        const bindGroup = device.createBindGroup({
+            layout: this.naraPipeline.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: { buffer: outputBuffer } },
+                { binding: 1, resource: { buffer: this.naraParamsBuffer } },
+                { binding: 2, resource: this.naraTexture.createView() },
+                { binding: 3, resource: this.naraSampler }
+            ]
+        });
+
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.naraPipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(
+            Math.ceil(this.CHUNK_SIZE / 8),
+            Math.ceil(this.CHUNK_SIZE / 8)
+        );
+        computePass.end();
+
+        commandEncoder.copyBufferToBuffer(outputBuffer, 0, stagingBuffer, 0, bufferSize);
+        device.queue.submit([commandEncoder.finish()]);
+
+        await stagingBuffer.mapAsync(GPUMapMode.READ);
+        const result = new Float32Array(stagingBuffer.getMappedRange());
+        const intensities = new Float32Array(result);
+        stagingBuffer.unmap();
+
+        outputBuffer.destroy();
+        stagingBuffer.destroy();
 
         return intensities;
     }

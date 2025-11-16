@@ -401,7 +401,7 @@ interface UseWorldEngineProps {
             enabled?: boolean;
             speed?: number;
             complexity?: number;
-            mode?: 'clear' | 'perlin';
+            mode?: 'clear' | 'perlin' | 'nara';
         };
     };
 }
