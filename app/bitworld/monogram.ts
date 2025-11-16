@@ -539,7 +539,10 @@ class MonogramSystem {
     }
 
     updateMousePosition(worldX: number, worldY: number) {
-        if (!this.options.interactiveTrails) return;
+        if (!this.options.interactiveTrails) {
+            console.log('[Monogram Trail] Interactive trails disabled');
+            return;
+        }
 
         const currentPos = { x: worldX, y: worldY };
 
@@ -560,7 +563,9 @@ class MonogramSystem {
 
             // Remove old positions
             const trailFadeMs = this.options.trailFadeMs ?? 2000;
+            const beforeFilter = this.mouseTrail.length;
             this.mouseTrail = this.mouseTrail.filter(pos => now - pos.timestamp < trailFadeMs);
+            const afterFilter = this.mouseTrail.length;
 
             // Limit trail length
             if (this.mouseTrail.length > this.MAX_TRAIL_POSITIONS) {
@@ -569,27 +574,38 @@ class MonogramSystem {
 
             this.lastMousePos = currentPos;
 
+            console.log(`[Monogram Trail] Mouse at (${worldX.toFixed(1)}, ${worldY.toFixed(1)}), trail length: ${this.mouseTrail.length} (filtered ${beforeFilter - afterFilter}), intensity: ${intensity}`);
+
             // Upload trail data to GPU
             this.uploadTrailData();
         }
     }
 
     private uploadTrailData() {
-        if (!this.device || !this.trailBuffer) return;
+        if (!this.device || !this.trailBuffer) {
+            console.log('[Monogram Trail] Cannot upload - device or buffer not initialized');
+            return;
+        }
 
-        // Pack trail data: [x, y, timestamp, intensity] for each position
+        // Pack trail data: [x, y, age, intensity] for each position
         const trailData = new Float32Array(this.MAX_TRAIL_POSITIONS * 4);
         const now = Date.now();
 
         for (let i = 0; i < this.mouseTrail.length; i++) {
             const pos = this.mouseTrail[i];
+            const age = now - pos.timestamp;
             trailData[i * 4 + 0] = pos.x;
             trailData[i * 4 + 1] = pos.y;
-            trailData[i * 4 + 2] = now - pos.timestamp; // Age in ms
+            trailData[i * 4 + 2] = age; // Age in ms
             trailData[i * 4 + 3] = pos.intensity;
         }
 
         this.device.queue.writeBuffer(this.trailBuffer, 0, trailData);
+
+        if (this.mouseTrail.length > 0) {
+            const sample = this.mouseTrail[this.mouseTrail.length - 1];
+            console.log(`[Monogram Trail] Uploaded ${this.mouseTrail.length} positions. Latest: (${sample.x.toFixed(1)}, ${sample.y.toFixed(1)}), age: ${now - sample.timestamp}ms`);
+        }
     }
 
     private async computeChunk(chunkWorldX: number, chunkWorldY: number): Promise<Float32Array> {
@@ -732,13 +748,20 @@ class MonogramSystem {
         device.queue.writeBuffer(this.naraParamsBuffer, 0, paramsData);
 
         // Upload trail params
+        const trailCount = this.mouseTrail.length;
+        const trailFadeMs = this.options.trailFadeMs ?? 2000;
+        const trailIntensity = this.options.trailIntensity ?? 1.0;
         const trailParamsData = new Float32Array([
-            this.mouseTrail.length,                      // trailCount (u32 but stored as f32)
-            this.options.trailFadeMs ?? 2000,            // trailFadeMs
-            this.options.trailIntensity ?? 1.0,          // trailIntensity
-            this.options.complexity                       // complexity
+            trailCount,                                  // trailCount (u32 but stored as f32)
+            trailFadeMs,                                 // trailFadeMs
+            trailIntensity,                              // trailIntensity
+            this.options.complexity                      // complexity
         ]);
         device.queue.writeBuffer(this.trailParamsBuffer!, 0, trailParamsData);
+
+        if (trailCount > 0) {
+            console.log(`[Monogram NARA Trail] Params: count=${trailCount}, fadeMs=${trailFadeMs}, intensity=${trailIntensity}, complexity=${this.options.complexity}`);
+        }
 
         const bindGroup = device.createBindGroup({
             layout: this.naraPipeline.getBindGroupLayout(0),
