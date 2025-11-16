@@ -80,8 +80,8 @@ fn perlin(worldX: f32, worldY: f32) -> f32 {
 
 fn calculateArtifactGlow(worldX: f32, worldY: f32, time: f32) -> f32 {
     // Add worm-like wiggle effect to the glow boundary
-    let wiggleFreq = 0.8;  // Wiggle speed
-    let wiggleAmp = 0.4;   // Wiggle amplitude
+    let wiggleFreq = 0.5;  // Wiggle speed
+    let wiggleAmp = 0.15;  // Wiggle amplitude (small to keep glow visible)
     let wiggleX = sin(time * wiggleFreq + worldY * 0.5) * wiggleAmp;
     let wiggleY = cos(time * wiggleFreq + worldX * 0.5) * wiggleAmp;
 
