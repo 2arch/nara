@@ -125,6 +125,8 @@ const CHUNK_NARA_SHADER = `
 @group(0) @binding(0) var<storage, read_write> output: array<f32>;
 @group(0) @binding(1) var<uniform> params: NaraParams;
 @group(0) @binding(2) var naraTexture: texture_2d<f32>;
+@group(0) @binding(3) var<storage, read> trailData: array<vec4<f32>>; // x, y, age, intensity
+@group(0) @binding(4) var<uniform> trailParams: TrailParams;
 
 struct NaraParams {
     chunkWorldX: f32,
@@ -139,6 +141,13 @@ struct NaraParams {
     scale: f32,
     viewportWidth: f32,
     viewportHeight: f32,
+}
+
+struct TrailParams {
+    trailCount: u32,
+    trailFadeMs: f32,
+    trailIntensity: f32,
+    complexity: f32,
 }
 
 // Reuse Perlin noise functions
@@ -183,6 +192,70 @@ fn perlin(worldX: f32, worldY: f32) -> f32 {
     let x2 = lerp(u, grad(hash(i32(a + 1u)), fx, fy - 1.0), grad(hash(i32(b + 1u)), fx - 1.0, fy - 1.0));
 
     return lerp(v, x1, x2);
+}
+
+// Calculate trail effect for a world position
+fn calculateTrailEffect(worldX: f32, worldY: f32) -> f32 {
+    if (trailParams.trailCount == 0u) {
+        return 0.0;
+    }
+
+    var maxTrailIntensity = 0.0;
+
+    // Iterate through trail segments
+    for (var i = 0u; i < trailParams.trailCount - 1u; i++) {
+        let currentPos = trailData[i];
+        let nextPos = trailData[i + 1u];
+
+        let age = currentPos.z; // Age in ms
+        if (age > trailParams.trailFadeMs) {
+            continue;
+        }
+
+        // Calculate distance from point to line segment
+        let dx = nextPos.x - currentPos.x;
+        let dy = nextPos.y - currentPos.y;
+        let segmentLength = sqrt(dx * dx + dy * dy);
+
+        if (segmentLength > 0.0) {
+            // Scale Y by 0.5 for vertical stretching
+            let scaledY = worldY * 0.5;
+            let scaledCurrentY = currentPos.y * 0.5;
+            let scaledNextY = nextPos.y * 0.5;
+            let scaledDy = scaledNextY - scaledCurrentY;
+            let scaledSegmentLength = sqrt(dx * dx + scaledDy * scaledDy);
+
+            let t = clamp(
+                ((worldX - currentPos.x) * dx + (scaledY - scaledCurrentY) * scaledDy) / (scaledSegmentLength * scaledSegmentLength),
+                0.0,
+                1.0
+            );
+            let projX = currentPos.x + t * dx;
+            let projY = currentPos.y + t * dy;
+            let distance = sqrt((worldX - projX) * (worldX - projX) + ((worldY * 0.5) - (projY * 0.5)) * ((worldY * 0.5) - (projY * 0.5)));
+
+            // Trail width decreases with age (comet effect)
+            let ageFactor = 1.0 - (age / trailParams.trailFadeMs);
+            let trailWidth = 1.5 + trailParams.complexity * 1.5 * ageFactor;
+
+            if (distance <= trailWidth) {
+                // Calculate fade based on distance and age
+                let distanceFade = 1.0 - (distance / trailWidth);
+                let pathFade = ageFactor;
+
+                // Position along trail (0 = oldest, 1 = newest)
+                let positionFactor = f32(i) / max(1.0, f32(trailParams.trailCount - 1u));
+
+                // Comet intensity: brighter at head, dimmer at tail
+                let cometFade = 0.3 + 0.7 * positionFactor;
+
+                let trailIntensity = distanceFade * pathFade * cometFade * trailParams.trailIntensity;
+                maxTrailIntensity = max(maxTrailIntensity, trailIntensity);
+            }
+        }
+    }
+
+    return min(1.0, maxTrailIntensity);
 }
 
 @compute @workgroup_size(8, 8)
@@ -277,6 +350,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         brightness = brightness * scanline * flicker * pulse;
     }
 
+    // 11. Add trail effect
+    let trailEffect = calculateTrailEffect(worldX, worldY);
+    brightness = max(brightness, trailEffect);
+
     let index = localY * chunkSize + localX;
     output[index] = max(0.0, min(1.0, brightness));
 }
@@ -294,6 +371,13 @@ class MonogramSystem {
     private naraParamsBuffer: GPUBuffer | null = null;
     private naraTexture: GPUTexture | null = null;
     private naraAnchor: { x: number, y: number } | null = null;
+
+    // Trail tracking
+    private mouseTrail: MonogramTrailPosition[] = [];
+    private lastMousePos: { x: number, y: number } | null = null;
+    private trailBuffer: GPUBuffer | null = null;
+    private trailParamsBuffer: GPUBuffer | null = null;
+    private readonly MAX_TRAIL_POSITIONS = 100;
 
     private readonly CHUNK_SIZE = 32;
     private readonly MAX_CHUNKS = 200;
@@ -419,8 +503,20 @@ class MonogramSystem {
                 console.log(`[Monogram] NARA texture created: ${textBitmap.width}x${textBitmap.height}`);
             }
 
+            // Create trail buffer (4 floats per position: x, y, age, intensity)
+            this.trailBuffer = this.device.createBuffer({
+                size: this.MAX_TRAIL_POSITIONS * 4 * 4, // 4 floats * 4 bytes each
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+            });
+
+            // Create trail params buffer (trailCount, trailFadeMs, trailIntensity, complexity)
+            this.trailParamsBuffer = this.device.createBuffer({
+                size: 4 * 4, // 4 floats * 4 bytes each
+                usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+            });
+
             this.isInitialized = true;
-            console.log('[Monogram] WebGPU initialized (Perlin + NARA)');
+            console.log('[Monogram] WebGPU initialized (Perlin + NARA + Trails)');
             return true;
         } catch (error) {
             console.error('[Monogram] WebGPU init failed:', error);
@@ -440,6 +536,60 @@ class MonogramSystem {
             x: cx * this.CHUNK_SIZE,
             y: cy * this.CHUNK_SIZE
         };
+    }
+
+    updateMousePosition(worldX: number, worldY: number) {
+        if (!this.options.interactiveTrails) return;
+
+        const currentPos = { x: worldX, y: worldY };
+
+        // Only add to trail if mouse has moved significantly
+        if (!this.lastMousePos ||
+            Math.abs(currentPos.x - this.lastMousePos.x) > 0.5 ||
+            Math.abs(currentPos.y - this.lastMousePos.y) > 0.5) {
+
+            const now = Date.now();
+            const intensity = this.options.trailIntensity ?? 1.0;
+
+            this.mouseTrail.push({
+                x: worldX,
+                y: worldY,
+                timestamp: now,
+                intensity
+            });
+
+            // Remove old positions
+            const trailFadeMs = this.options.trailFadeMs ?? 2000;
+            this.mouseTrail = this.mouseTrail.filter(pos => now - pos.timestamp < trailFadeMs);
+
+            // Limit trail length
+            if (this.mouseTrail.length > this.MAX_TRAIL_POSITIONS) {
+                this.mouseTrail = this.mouseTrail.slice(-this.MAX_TRAIL_POSITIONS);
+            }
+
+            this.lastMousePos = currentPos;
+
+            // Upload trail data to GPU
+            this.uploadTrailData();
+        }
+    }
+
+    private uploadTrailData() {
+        if (!this.device || !this.trailBuffer) return;
+
+        // Pack trail data: [x, y, timestamp, intensity] for each position
+        const trailData = new Float32Array(this.MAX_TRAIL_POSITIONS * 4);
+        const now = Date.now();
+
+        for (let i = 0; i < this.mouseTrail.length; i++) {
+            const pos = this.mouseTrail[i];
+            trailData[i * 4 + 0] = pos.x;
+            trailData[i * 4 + 1] = pos.y;
+            trailData[i * 4 + 2] = now - pos.timestamp; // Age in ms
+            trailData[i * 4 + 3] = pos.intensity;
+        }
+
+        this.device.queue.writeBuffer(this.trailBuffer, 0, trailData);
     }
 
     private async computeChunk(chunkWorldX: number, chunkWorldY: number): Promise<Float32Array> {
@@ -581,12 +731,23 @@ class MonogramSystem {
         ]);
         device.queue.writeBuffer(this.naraParamsBuffer, 0, paramsData);
 
+        // Upload trail params
+        const trailParamsData = new Float32Array([
+            this.mouseTrail.length,                      // trailCount (u32 but stored as f32)
+            this.options.trailFadeMs ?? 2000,            // trailFadeMs
+            this.options.trailIntensity ?? 1.0,          // trailIntensity
+            this.options.complexity                       // complexity
+        ]);
+        device.queue.writeBuffer(this.trailParamsBuffer!, 0, trailParamsData);
+
         const bindGroup = device.createBindGroup({
             layout: this.naraPipeline.getBindGroupLayout(0),
             entries: [
                 { binding: 0, resource: { buffer: outputBuffer } },
                 { binding: 1, resource: { buffer: this.naraParamsBuffer } },
-                { binding: 2, resource: this.naraTexture.createView() }
+                { binding: 2, resource: this.naraTexture.createView() },
+                { binding: 3, resource: { buffer: this.trailBuffer! } },
+                { binding: 4, resource: { buffer: this.trailParamsBuffer! } }
             ]
         });
 
