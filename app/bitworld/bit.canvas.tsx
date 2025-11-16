@@ -6331,6 +6331,9 @@ Camera & Viewport Controls:
         if (!isMiddleMouseDownRef.current && !isSelectingMouseDownRef.current) {
             const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
 
+            // Update monogram trail
+            monogram.updateMousePosition(worldPos.x, worldPos.y);
+
             // Check if we're in a glitched region - if so, snap to half-cells (vertical subdivision)
             const baseX = Math.floor(worldPos.x);
             const baseY = Math.floor(worldPos.y);
