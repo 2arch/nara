@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWorldEngine } from '../bitworld/world.engine';
 import { BitCanvas } from '../bitworld/bit.canvas';
-import { useMonogram } from '../bitworld/monogram';
+import { useMonogram } from '../bitworld/monogram.gpu';
 import { auth } from '../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { getUsernameByUid, completeSignInWithEmailLink } from '../firebase';

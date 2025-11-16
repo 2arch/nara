@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useWorldEngine } from './bitworld/world.engine';
 import { BitCanvas } from './bitworld/bit.canvas';
-import { useMonogram } from './bitworld/monogram';
+import { useMonogram } from './bitworld/monogram.gpu';
 
 export default function TestEnvironment() {
   const [cursorAlternate, setCursorAlternate] = useState(false);
