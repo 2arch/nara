@@ -1600,3 +1600,4 @@ const useMonogramSystem = (
 };
 
 export { useMonogramSystem };
+export { useMonogramSystem as useMonogram }; // Alias for compatibility

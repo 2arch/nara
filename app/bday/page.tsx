@@ -128,7 +128,7 @@ function BdayPageContent() {
 
   // World Engine - using 'public' userUid so it saves to /worlds/public/bday/data
   // Monogram system - create once and pass to both engine and canvas
-  const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0, mode: 'perlin' });
+  const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0 });
 
   const engine = useWorldEngine({
     worldId: 'bday',

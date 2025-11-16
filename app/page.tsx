@@ -12,8 +12,7 @@ export default function TestEnvironment() {
   const monogram = useMonogram({
     enabled: true,
     speed: 0.5,
-    complexity: 1.0,
-    mode: 'perlin'
+    complexity: 1.0
   });
 
   // World engine - NO auth, NO user context

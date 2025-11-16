@@ -134,7 +134,7 @@ function BasePageContent() {
   }, []);
 
   // Monogram system - create once and pass to both engine and canvas
-  const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0, mode: 'perlin' });
+  const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0 });
 
   // World Engine - using 'public' userUid so it saves to /worlds/public/base/data
   const engine = useWorldEngine({
