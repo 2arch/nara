@@ -582,6 +582,17 @@ class MonogramSystem {
         }
     }
 
+    clearTrail() {
+        this.mouseTrail = [];
+        this.lastMousePos = null;
+        console.log('[Monogram Trail] Trail cleared');
+
+        // Upload empty trail to GPU
+        if (this.device && this.trailBuffer) {
+            this.uploadTrailData();
+        }
+    }
+
     private uploadTrailData() {
         if (!this.device || !this.trailBuffer) {
             console.log('[Monogram Trail] Cannot upload - device or buffer not initialized');
@@ -1009,6 +1020,14 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         }
     }, [options.interactiveTrails, options.trailIntensity, options.trailFadeMs]);
 
+    // Clear trail (useful when transitioning between interaction modes)
+    const clearTrail = useCallback(() => {
+        setMouseTrail([]);
+        lastMousePosRef.current = null;
+        systemRef.current?.clearTrail();
+        console.log('[Monogram Hook] Trail cleared');
+    }, []);
+
     // Calculate interactive trail intensity at a given position
     const calculateInteractiveTrail = useCallback((x: number, y: number): number => {
         if (!options.interactiveTrails || mouseTrail.length < 2) return 0;
@@ -1107,6 +1126,7 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         preloadViewport,
         sampleAt,
         isInitialized,
-        updateMousePosition
+        updateMousePosition,
+        clearTrail
     };
 }

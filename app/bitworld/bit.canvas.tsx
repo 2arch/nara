@@ -5973,6 +5973,9 @@ Camera & Viewport Controls:
             panStartInfoRef.current = info;
             intermediatePanOffsetRef.current = { ...engine.viewOffset }; // Clone to avoid reference issues
 
+            // Clear trail to prevent discontinuity when entering pan mode
+            monogram.clearTrail();
+
             // Capture pan start positions for trail tracking
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
@@ -7099,6 +7102,9 @@ Camera & Viewport Controls:
             const info = engine.handlePanStart(centerClientX, centerClientY);
             panStartInfoRef.current = info;
 
+            // Clear trail to prevent discontinuity when entering pan mode
+            monogram.clearTrail();
+
             // Capture touch start positions for trail tracking
             const centerScreenX = centerClientX - rect.left;
             const centerScreenY = centerClientY - rect.top;
@@ -7344,6 +7350,9 @@ Camera & Viewport Controls:
                 isTouchPanningRef.current = true;
                 const info = engine.handlePanStart(touches[0].clientX, touches[0].clientY);
                 panStartInfoRef.current = info;
+
+                // Clear trail to prevent discontinuity when entering pan mode
+                monogram.clearTrail();
 
                 // Capture touch start positions for trail tracking
                 const touchScreenX = touches[0].clientX - rect.left;
