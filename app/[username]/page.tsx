@@ -6,7 +6,7 @@ import { BitCanvas } from '../bitworld/bit.canvas';
 import Grid3DBackground from '../bitworld/canvas.grid3d';
 import { auth, getUidByUsername, getUserProfile } from '../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { useMonogram } from '../bitworld/monogram';
+import { useMonogram } from '../bitworld/monogram.gpu';
 
 export default function UserHome() {
   const [cursorAlternate, setCursorAlternate] = useState(false);
