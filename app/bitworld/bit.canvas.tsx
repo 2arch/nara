@@ -10,7 +10,7 @@ import { useHostDialogue } from './host.dialogue';
 import { setDialogueWithRevert } from './ai';
 import { CanvasRecorder } from './tape';
 import { renderStyledRect, getRectStyle, type CellBounds, type BaseRenderContext } from './styles';
-import { useMonogram } from './monogram.gpu';
+import { useMonogram } from './monogram';
 
 // --- Constants --- (Copied and relevant ones kept)
 const GRID_COLOR = '#F2F2F233';

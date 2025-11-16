@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { useWorldEngine } from '../bitworld/world.engine';
 import { BitCanvas } from '../bitworld/bit.canvas';
-import { useMonogram } from '../bitworld/monogram.gpu';
+import { useMonogram } from '../bitworld/monogram';
 import { auth, database, getUserProfile } from '../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { ref, set, serverTimestamp, get } from 'firebase/database';
