@@ -125,7 +125,6 @@ const CHUNK_NARA_SHADER = `
 @group(0) @binding(0) var<storage, read_write> output: array<f32>;
 @group(0) @binding(1) var<uniform> params: NaraParams;
 @group(0) @binding(2) var naraTexture: texture_2d<f32>;
-@group(0) @binding(3) var naraSampler: sampler;
 
 struct NaraParams {
     chunkWorldX: f32,
@@ -294,7 +293,6 @@ class MonogramSystem {
     private naraPipeline: GPUComputePipeline | null = null;
     private naraParamsBuffer: GPUBuffer | null = null;
     private naraTexture: GPUTexture | null = null;
-    private naraSampler: GPUSampler | null = null;
     private naraAnchor: { x: number, y: number } | null = null;
 
     private readonly CHUNK_SIZE = 32;
@@ -413,14 +411,6 @@ class MonogramSystem {
                     [textBitmap.width, textBitmap.height, 1]
                 );
 
-                // Create sampler
-                this.naraSampler = this.device.createSampler({
-                    magFilter: 'linear',
-                    minFilter: 'linear',
-                    addressModeU: 'clamp-to-edge',
-                    addressModeV: 'clamp-to-edge'
-                });
-
                 console.log(`[Monogram] NARA texture created: ${textBitmap.width}x${textBitmap.height}`);
             }
 
@@ -522,7 +512,7 @@ class MonogramSystem {
     }
 
     private async computeChunkNara(chunkWorldX: number, chunkWorldY: number): Promise<Float32Array> {
-        if (!this.device || !this.naraPipeline || !this.naraParamsBuffer || !this.naraTexture || !this.naraSampler) {
+        if (!this.device || !this.naraPipeline || !this.naraParamsBuffer || !this.naraTexture) {
             throw new Error('[Monogram] NARA pipeline not initialized');
         }
 
@@ -581,8 +571,7 @@ class MonogramSystem {
             entries: [
                 { binding: 0, resource: { buffer: outputBuffer } },
                 { binding: 1, resource: { buffer: this.naraParamsBuffer } },
-                { binding: 2, resource: this.naraTexture.createView() },
-                { binding: 3, resource: this.naraSampler }
+                { binding: 2, resource: this.naraTexture.createView() }
             ]
         });
 
