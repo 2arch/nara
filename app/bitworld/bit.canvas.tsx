@@ -6332,7 +6332,7 @@ Camera & Viewport Controls:
             const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
 
             // Update monogram trail
-            monogram.updateMousePosition(worldPos.x, worldPos.y);
+            monogram.updateMousePosition(worldPos);
 
             // Check if we're in a glitched region - if so, snap to half-cells (vertical subdivision)
             const baseX = Math.floor(worldPos.x);
