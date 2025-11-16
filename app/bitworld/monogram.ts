@@ -79,6 +79,15 @@ fn perlin(worldX: f32, worldY: f32) -> f32 {
 }
 
 fn calculateArtifactGlow(worldX: f32, worldY: f32, time: f32) -> f32 {
+    // Add worm-like wiggle effect to the glow boundary
+    let wiggleFreq = 0.8;  // Wiggle speed
+    let wiggleAmp = 0.4;   // Wiggle amplitude
+    let wiggleX = sin(time * wiggleFreq + worldY * 0.5) * wiggleAmp;
+    let wiggleY = cos(time * wiggleFreq + worldX * 0.5) * wiggleAmp;
+
+    let sampledX = worldX + wiggleX;
+    let sampledY = worldY + wiggleY;
+
     let glowCount = u32(params.glowCount);
     var totalGlow = 0.0;
 
@@ -97,12 +106,12 @@ fn calculateArtifactGlow(worldX: f32, worldY: f32, time: f32) -> f32 {
         let rectBottom = endY;
 
         // Clamp current position to rectangle bounds to find nearest point
-        let nearestX = clamp(worldX, rectLeft, rectRight);
-        let nearestY = clamp(worldY, rectTop, rectBottom);
+        let nearestX = clamp(sampledX, rectLeft, rectRight);
+        let nearestY = clamp(sampledY, rectTop, rectBottom);
 
         // Calculate distance to nearest point on rectangle
-        let dx = worldX - nearestX;
-        let dy = worldY - nearestY;
+        let dx = sampledX - nearestX;
+        let dy = sampledY - nearestY;
         let dist = sqrt(dx * dx + dy * dy);
 
         // Glow parameters
