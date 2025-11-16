@@ -464,7 +464,7 @@ class MonogramSystem {
 export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
     const [options, setOptions] = useState<MonogramOptions>({
         enabled: initialOptions?.enabled ?? true,
-        speed: initialOptions?.speed ?? 0.1,
+        speed: initialOptions?.speed ?? 0.5,  // Single speed controller (lower = slower)
         complexity: initialOptions?.complexity ?? 1.0,
         mode: initialOptions?.mode ?? 'perlin'
     });
@@ -500,7 +500,7 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
             const deltaTime = (now - lastTime) / 1000;
             lastTime = now;
 
-            systemRef.current?.updateTime(deltaTime * 5);
+            systemRef.current?.updateTime(deltaTime);
             animationFrame = requestAnimationFrame(animate);
         };
 
