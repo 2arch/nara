@@ -250,30 +250,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let texX = (finalX / params.scale + params.textureWidth / 2.0) / params.textureWidth;
     let texY = (finalY / params.scale + params.textureHeight / 2.0) / params.textureHeight;
 
-    // 8. Bounds check
-    var brightness = 0.0;
-    if (texX >= 0.0 && texX <= 1.0 && texY >= 0.0 && texY <= 1.0) {
-        // 9. Sample texture
-        let texCoord = vec2<f32>(texX, texY);
-        brightness = textureSample(naraTexture, naraSampler, texCoord).r;
-
-        // 10. Glow enhancement
-        if (brightness > 0.7) {
-            brightness = min(1.0, brightness * 1.3);
-        } else if (brightness > 0.4) {
-            brightness = min(1.0, brightness * 1.1);
-        }
-
-        // 11. Post-effects
-        let scanline = 0.95 + sin(params.time * 2.5 + worldY * 0.02) * 0.05;
-        let flicker = 0.95 + sin(params.time * 15.0 + worldX * 0.01) * 0.05;
-        let pulse = 0.9 + sin(params.time * 1.5) * 0.1;
-
-        brightness = brightness * scanline * flicker * pulse;
-    }
+    // DIAGNOSTIC: Output a simple test pattern to verify shader runs
+    // This should create animated concentric circles
+    let testPattern = sin(sqrt(relX * relX + relY * relY) * 0.1 - params.time) * 0.5 + 0.5;
 
     let index = localY * chunkSize + localX;
-    output[index] = max(0.0, min(1.0, brightness));
+    output[index] = testPattern;
 }
 `;
 
