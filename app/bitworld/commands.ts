@@ -202,7 +202,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'unpublish': 'Unpublish your canvas. Makes your canvas private again. It will no longer be accessible at the public URL.',
     'share': 'Get a shareable link to your canvas. Copy this link to share your canvas with others. If published, they can view it; if private, you control access.',
     'spawn': 'Set your spawn point. This is where you\'ll start when you open this canvas. Type /spawn to set it to your current position.',
-    'monogram': 'Control WebGPU background effects. /monogram to toggle on/off, /monogram clear for character glows only, /monogram perlin for perlin noise with character glows.',
+    'monogram': 'Control WebGPU background effects. /monogram to toggle on/off, /monogram clear for character glows only, /monogram perlin for perlin noise with character glows, /monogram nara for animated NARA text.',
     'signin': 'Sign in to your Nara account. Required for saving work, publishing canvases, and accessing AI features.',
     'signout': 'Sign out of your Nara account. You\'ll return to read-only mode.',
     'account': 'Manage your account settings. Use /account reset to reset your password.',
@@ -2705,6 +2705,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     // Set mode to perlin (noise + glows)
                     monogramSystem.setOptions((prev: any) => ({ ...prev, enabled: true, mode: 'perlin' }));
                     setDialogueWithRevert('Monogram mode: perlin (noise + glows)', setDialogueText);
+                } else if (option === 'nara') {
+                    // Set mode to nara (animated text)
+                    monogramSystem.setOptions((prev: any) => ({ ...prev, enabled: true, mode: 'nara' }));
+                    setDialogueWithRevert('Monogram mode: nara (animated NARA text)', setDialogueText);
                 } else {
                     // Unknown option - toggle instead
                     monogramSystem.toggleEnabled();
