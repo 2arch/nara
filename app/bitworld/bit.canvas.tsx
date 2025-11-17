@@ -2984,7 +2984,7 @@ Camera & Viewport Controls:
 
             const wrappedLines = wrapText(hostText, wrapWidth);
             const maxLineWidth = Math.max(...wrappedLines.map(line => line.length));
-            const totalHeight = wrappedLines.length;
+            const totalHeight = wrappedLines.length * GRID_CELL_SPAN;
 
             // Position text: left-aligned on mobile (portrait), centered on desktop
             let textStartX: number;
@@ -3038,7 +3038,7 @@ Camera & Viewport Controls:
                         textCells.add(`${textStartX + x},${y}`);
                     }
                 }
-                y++;
+                y += GRID_CELL_SPAN;
             });
 
             // Render glow for each text cell
@@ -3148,7 +3148,7 @@ Camera & Viewport Controls:
                         }
                     }
                 }
-                y++;
+                y += GRID_CELL_SPAN;
             });
 
             // Render context-specific hints for certain messages
