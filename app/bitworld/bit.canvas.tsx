@@ -3080,12 +3080,12 @@ Camera & Viewport Controls:
                         if (!alpha) continue;
 
                         if (glowX >= startWorldX - 5 && glowX <= endWorldX + 5 && glowY >= startWorldY - 5 && glowY <= endWorldY + 5) {
-                            const screenPos = engine.worldToScreen(glowX, glowY, currentZoom, currentOffset);
-                            if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
-                                screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                            const topScreenPos = engine.worldToScreen(glowX, glowY, currentZoom, currentOffset);
+                            if (topScreenPos.x > -effectiveCharWidth * 2 && topScreenPos.x < cssWidth + effectiveCharWidth &&
+                                topScreenPos.y > -effectiveCharHeight * 2 && topScreenPos.y < cssHeight + effectiveCharHeight) {
 
                                 ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, ${alpha})`;
-                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                             }
                         }
                     }
@@ -3101,9 +3101,9 @@ Camera & Viewport Controls:
                     const worldY = y;
 
                     if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                        if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
-                            screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                        const topScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                        if (topScreenPos.x > -effectiveCharWidth * 2 && topScreenPos.x < cssWidth + effectiveCharWidth &&
+                            topScreenPos.y > -effectiveCharHeight * 2 && topScreenPos.y < cssHeight + effectiveCharHeight) {
 
                             if (char && char.trim() !== '') {
                                 // Apply background highlight for host text with fade-in
@@ -3124,7 +3124,7 @@ Camera & Viewport Controls:
                                     return color;
                                 })();
                                 ctx.fillStyle = bgColorWithAlpha;
-                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
 
                                 // Render the character with host color and fade-in
                                 const hostColorWithAlpha = (() => {
@@ -3143,7 +3143,7 @@ Camera & Viewport Controls:
                                     return hostColor;
                                 })();
                                 ctx.fillStyle = hostColorWithAlpha;
-                                renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
+                                renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
                             }
                         }
                     }
