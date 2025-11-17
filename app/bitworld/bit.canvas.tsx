@@ -1514,14 +1514,6 @@ Camera & Viewport Controls:
     const isMiddleMouseDownRef = useRef(false);
     const intermediatePanOffsetRef = useRef<Point>(engine.viewOffset); // Track offset during pan
 
-    // Refs for trail during pan
-    const panTrailAnchorRef = useRef<Point | null>(null); // World position where pan started
-    const panStartScreenRef = useRef<Point | null>(null); // Screen position where pan started
-
-    // Refs for trail during touch
-    const touchTrailAnchorRef = useRef<Point | null>(null); // World position where touch started
-    const touchStartScreenRef = useRef<Point | null>(null); // Screen position where touch started
-
     // Ref for tracking selection drag state (mouse button down)
     const isSelectingMouseDownRef = useRef(false);
     
@@ -5972,15 +5964,6 @@ Camera & Viewport Controls:
             const info = engine.handlePanStart(e.clientX, e.clientY);
             panStartInfoRef.current = info;
             intermediatePanOffsetRef.current = { ...engine.viewOffset }; // Clone to avoid reference issues
-
-            // Clear trail to prevent discontinuity when entering pan mode
-            monogram.clearTrail();
-
-            // Capture pan start positions for trail tracking
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            panStartScreenRef.current = { x, y };
-            panTrailAnchorRef.current = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
             panStartPosRef.current = { ...engine.viewOffset }; // Track starting position for distance
             setIsPanning(true);
             setPanDistance(0);
@@ -6344,29 +6327,8 @@ Camera & Viewport Controls:
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
-        // Handle trail tracking
-        if (isMiddleMouseDownRef.current && panStartScreenRef.current && panTrailAnchorRef.current) {
-            // Panning: calculate trail based on screen motion
-            const screenDelta = {
-                x: x - panStartScreenRef.current.x,
-                y: y - panStartScreenRef.current.y
-            };
-
-            // Convert screen delta to world delta at current zoom
-            const worldDelta = {
-                x: screenDelta.x / engine.zoomLevel,
-                y: screenDelta.y / engine.zoomLevel
-            };
-
-            // Trail position = anchor + accumulated mouse motion in world space
-            const trailWorldPos = {
-                x: panTrailAnchorRef.current.x + worldDelta.x,
-                y: panTrailAnchorRef.current.y + worldDelta.y
-            };
-
-            monogram.updateMousePosition(trailWorldPos);
-        } else if (!isSelectingMouseDownRef.current) {
-            // Normal mode: track mouse position directly
+        // Handle trail tracking - only in normal mode (not during pan or selection)
+        if (!isMiddleMouseDownRef.current && !isSelectingMouseDownRef.current) {
             const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
             monogram.updateMousePosition(worldPos);
         }
@@ -6709,10 +6671,6 @@ Camera & Viewport Controls:
             engine.handlePanEnd(intermediatePanOffsetRef.current); // Commit final offset
             panStartInfoRef.current = null;
             panStartPosRef.current = null;
-
-            // Clear pan trail refs
-            panStartScreenRef.current = null;
-            panTrailAnchorRef.current = null;
             if (canvasRef.current) canvasRef.current.style.cursor = 'text';
 
             // Clear pan distance after a delay
@@ -7037,8 +6995,6 @@ Camera & Viewport Controls:
             isMiddleMouseDownRef.current = false;
             engine.handlePanEnd(intermediatePanOffsetRef.current);
             panStartInfoRef.current = null;
-            panStartScreenRef.current = null;
-            panTrailAnchorRef.current = null;
             if (canvasRef.current) canvasRef.current.style.cursor = 'text';
         }
 
@@ -7101,15 +7057,6 @@ Camera & Viewport Controls:
             const centerClientY = (touches[0].clientY + touches[1].clientY) / 2;
             const info = engine.handlePanStart(centerClientX, centerClientY);
             panStartInfoRef.current = info;
-
-            // Clear trail to prevent discontinuity when entering pan mode
-            monogram.clearTrail();
-
-            // Capture touch start positions for trail tracking
-            const centerScreenX = centerClientX - rect.left;
-            const centerScreenY = centerClientY - rect.top;
-            touchStartScreenRef.current = { x: centerScreenX, y: centerScreenY };
-            touchTrailAnchorRef.current = engine.screenToWorld(centerScreenX, centerScreenY, engine.zoomLevel, engine.viewOffset);
             intermediatePanOffsetRef.current = { ...engine.viewOffset };
             panStartPosRef.current = { ...engine.viewOffset }; // Track starting position for distance
             setIsPanning(true);
@@ -7350,16 +7297,6 @@ Camera & Viewport Controls:
                 isTouchPanningRef.current = true;
                 const info = engine.handlePanStart(touches[0].clientX, touches[0].clientY);
                 panStartInfoRef.current = info;
-
-                // Clear trail to prevent discontinuity when entering pan mode
-                monogram.clearTrail();
-
-                // Capture touch start positions for trail tracking
-                const touchScreenX = touches[0].clientX - rect.left;
-                const touchScreenY = touches[0].clientY - rect.top;
-                touchStartScreenRef.current = { x: touchScreenX, y: touchScreenY };
-                touchTrailAnchorRef.current = engine.screenToWorld(touchScreenX, touchScreenY, engine.zoomLevel, engine.viewOffset);
-
                 intermediatePanOffsetRef.current = { ...engine.viewOffset };
                 panStartPosRef.current = { ...engine.viewOffset };
                 setIsPanning(true);
@@ -7780,25 +7717,6 @@ Camera & Viewport Controls:
             const newOffset = engine.handlePanMove(centerClientX, centerClientY, panStartInfoRef.current);
             intermediatePanOffsetRef.current = newOffset;
 
-            // Update trail based on touch motion
-            if (touchStartScreenRef.current && touchTrailAnchorRef.current) {
-                const centerScreenX = centerClientX - rect.left;
-                const centerScreenY = centerClientY - rect.top;
-                const screenDelta = {
-                    x: centerScreenX - touchStartScreenRef.current.x,
-                    y: centerScreenY - touchStartScreenRef.current.y
-                };
-                const worldDelta = {
-                    x: screenDelta.x / engine.zoomLevel,
-                    y: screenDelta.y / engine.zoomLevel
-                };
-                const trailWorldPos = {
-                    x: touchTrailAnchorRef.current.x + worldDelta.x,
-                    y: touchTrailAnchorRef.current.y + worldDelta.y
-                };
-                monogram.updateMousePosition(trailWorldPos);
-            }
-
             // Calculate pan distance (for display only)
             if (panStartPosRef.current) {
                 const dx = newOffset.x - panStartPosRef.current.x;
@@ -7830,25 +7748,6 @@ Camera & Viewport Controls:
 
             const newOffset = engine.handlePanMove(touches[0].clientX, touches[0].clientY, panStartInfoRef.current);
             intermediatePanOffsetRef.current = newOffset;
-
-            // Update trail based on touch motion
-            if (touchStartScreenRef.current && touchTrailAnchorRef.current) {
-                const touchScreenX = touches[0].clientX - rect.left;
-                const touchScreenY = touches[0].clientY - rect.top;
-                const screenDelta = {
-                    x: touchScreenX - touchStartScreenRef.current.x,
-                    y: touchScreenY - touchStartScreenRef.current.y
-                };
-                const worldDelta = {
-                    x: screenDelta.x / engine.zoomLevel,
-                    y: screenDelta.y / engine.zoomLevel
-                };
-                const trailWorldPos = {
-                    x: touchTrailAnchorRef.current.x + worldDelta.x,
-                    y: touchTrailAnchorRef.current.y + worldDelta.y
-                };
-                monogram.updateMousePosition(trailWorldPos);
-            }
 
             // Calculate pan distance (for display only)
             if (panStartPosRef.current) {
@@ -7895,12 +7794,6 @@ Camera & Viewport Controls:
                     y: Math.floor(worldPos.y)
                 });
             }
-        } else if (touches.length === 1 && !isTouchPanningRef.current && !isTouchSelectingRef.current) {
-            // Normal touch move: track touch position directly for trails (like mouse normal mode)
-            const touchScreenX = touches[0].clientX - rect.left;
-            const touchScreenY = touches[0].clientY - rect.top;
-            const worldPos = engine.screenToWorld(touchScreenX, touchScreenY, engine.zoomLevel, engine.viewOffset);
-            monogram.updateMousePosition(worldPos);
         }
     }, [engine]);
 
