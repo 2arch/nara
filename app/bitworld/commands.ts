@@ -225,7 +225,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllLabels, getAllBounds, availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, monogramSystem }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllLabels, getAllBounds = () => [], availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, monogramSystem }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const previousBackgroundStateRef = useRef<{
@@ -466,28 +466,51 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         return lines;
     }, []);
 
-    // Utility function to render command display (command text + autocomplete suggestions)
-    const renderCommandDisplay = useCallback((input: string, matchedCommands: string[], commandStartPos: Point): WorldData => {
-        const newCommandData: WorldData = {};
-        const commandText = `/${input}`;
-
-        // Draw command text at command start position
-        for (let i = 0; i < commandText.length; i++) {
-            const key = `${commandStartPos.x + i},${commandStartPos.y}`;
-            newCommandData[key] = commandText[i];
+    /**
+     * Draw text string to WorldData grid at specified position
+     * Core rendering primitive for character-by-character grid text
+     */
+    const drawTextToGrid = useCallback((
+        text: string,
+        startX: number,
+        startY: number,
+        existingData: WorldData = {}
+    ): WorldData => {
+        const result = { ...existingData };
+        for (let i = 0; i < text.length; i++) {
+            result[`${startX + i},${startY}`] = text[i];
         }
+        return result;
+    }, []);
 
-        // Draw autocomplete suggestions below
-        matchedCommands.forEach((command, index) => {
-            const suggestionY = commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
-            for (let i = 0; i < command.length; i++) {
-                const key = `${commandStartPos.x + i},${suggestionY}`;
-                newCommandData[key] = command[i];
-            }
+    /**
+     * Draw command text with vertical suggestion list below
+     * Used for command autocomplete display
+     */
+    const drawCommandWithSuggestions = useCallback((
+        commandText: string,
+        suggestions: string[],
+        startPos: Point
+    ): WorldData => {
+        let data: WorldData = {};
+
+        // Draw main command text
+        data = drawTextToGrid(commandText, startPos.x, startPos.y, data);
+
+        // Draw suggestions vertically below
+        suggestions.forEach((suggestion, index) => {
+            const suggestionY = startPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
+            data = drawTextToGrid(suggestion, startPos.x, suggestionY, data);
         });
 
-        return newCommandData;
-    }, []);
+        return data;
+    }, [drawTextToGrid]);
+
+    // Utility function to render command display (command text + autocomplete suggestions)
+    const renderCommandDisplay = useCallback((input: string, matchedCommands: string[], commandStartPos: Point): WorldData => {
+        const commandText = `/${input}`;
+        return drawCommandWithSuggestions(commandText, matchedCommands, commandStartPos);
+    }, [drawCommandWithSuggestions]);
 
     // Utility function to parse command arguments from command string
     const parseCommandArgs = useCallback((commandString: string): { command: string; args: string[]; firstArg?: string } => {
@@ -498,6 +521,22 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             firstArg: parts[1]
         };
     }, []);
+
+    /**
+     * Parse current command input into convenient parts
+     * Provides multiple formats for accessing arguments
+     */
+    const parseCurrentInput = useCallback(() => {
+        const parts = commandState.input.trim().split(/\s+/);
+        return {
+            parts,
+            arg1: parts[1],
+            arg2: parts[2],
+            arg3: parts[3],
+            restAsString: parts.slice(1).join(' '),
+            argsArray: parts.slice(1)
+        };
+    }, [commandState.input]);
 
     // Utility function to calculate selection dimensions
     const calculateSelectionDimensions = useCallback((selection: { startX: number; endX: number; startY: number; endY: number }): { width: number; height: number } => {
@@ -526,6 +565,124 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             commandStartPos: commandState.commandStartPos
         };
     }, [commandState.commandStartPos, clearCommandState]);
+
+    /**
+     * Execute command that triggers optional callback
+     * Handles callback invocation, cleanup, and optional fallback message
+     */
+    const executeCallbackCommand = useCallback((
+        callback: (() => void) | undefined,
+        fallbackMessage?: string
+    ): null => {
+        if (callback) {
+            callback();
+        } else if (fallbackMessage) {
+            setDialogueWithRevert(fallbackMessage, setDialogueText);
+        }
+
+        clearCommandState();
+        return null;
+    }, [setDialogueText, clearCommandState]);
+
+    /**
+     * Toggle a boolean mode state and show feedback
+     * Handles state update, feedback message, and cleanup
+     */
+    const executeToggleModeCommand = useCallback(<K extends keyof ModeState>(
+        modeKey: K,
+        enabledMessage: string,
+        disabledMessage: string
+    ): null => {
+        setModeState(prev => ({
+            ...prev,
+            [modeKey]: !(prev[modeKey] as boolean)
+        }));
+
+        const newState = !(modeState[modeKey] as boolean);
+        setDialogueWithRevert(
+            newState ? enabledMessage : disabledMessage,
+            setDialogueText
+        );
+
+        clearCommandState();
+        return null;
+    }, [modeState, setModeState, setDialogueText, clearCommandState]);
+
+    /**
+     * Create a region entity from current selection
+     * Handles validation, creation, and feedback
+     */
+    const createRegionFromSelection = useCallback((
+        regionType: 'mail' | 'note',
+        options: {
+            successMessage?: (dims: { width: number; height: number }) => string;
+            additionalData?: Record<string, any>;
+            pendingMessage?: string;
+            additionalWorldDataCallback?: (key: string, selection: any, worldData: WorldData) => WorldData;
+        } = {}
+    ): boolean => {
+        const existingSelection = getNormalizedSelection?.();
+
+        if (!existingSelection) {
+            const defaultPendingMsg = `Make a selection, then press Enter to create ${regionType} region`;
+            createPendingCommand(regionType, options.pendingMessage || defaultPendingMsg);
+            return false;
+        }
+
+        const hasMeaningfulSelection =
+            existingSelection.startX !== existingSelection.endX ||
+            existingSelection.startY !== existingSelection.endY;
+
+        if (!hasMeaningfulSelection) {
+            setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
+            return false;
+        }
+
+        if (!setWorldData || !worldData || !setSelectionStart || !setSelectionEnd) {
+            return false;
+        }
+
+        const timestamp = Date.now();
+        const regionData = {
+            startX: existingSelection.startX,
+            endX: existingSelection.endX,
+            startY: existingSelection.startY,
+            endY: existingSelection.endY,
+            timestamp,
+            ...options.additionalData
+        };
+
+        const key = `${regionType}_${existingSelection.startX},${existingSelection.startY}_${timestamp}`;
+        let newWorldData = { ...worldData };
+        newWorldData[key] = JSON.stringify(regionData);
+
+        // Allow caller to add additional world data (e.g., mail button)
+        if (options.additionalWorldDataCallback) {
+            newWorldData = options.additionalWorldDataCallback(key, existingSelection, newWorldData);
+        }
+
+        setWorldData(newWorldData);
+
+        const { width, height } = calculateSelectionDimensions(existingSelection);
+        const defaultSuccessMsg = (dims: { width: number; height: number }) =>
+            `${regionType.charAt(0).toUpperCase() + regionType.slice(1)} region created (${dims.width}×${dims.height})`;
+        const successMsg = options.successMessage || defaultSuccessMsg;
+        setDialogueWithRevert(successMsg({ width, height }), setDialogueText);
+
+        setSelectionStart(null);
+        setSelectionEnd(null);
+
+        return true;
+    }, [
+        getNormalizedSelection,
+        setWorldData,
+        worldData,
+        setSelectionStart,
+        setSelectionEnd,
+        setDialogueText,
+        calculateSelectionDimensions,
+        createPendingCommand
+    ]);
 
     // Utility function to match commands based on input
     const matchCommands = useCallback((input: string): string[] => {
@@ -1316,10 +1473,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 }
 
                 // Draw command
-                for (let i = 0; i < command.length; i++) {
-                    const cmdKey = `${cursorPos.x + i},${currentY}`;
-                    newCommandData[cmdKey] = command[i];
-                }
+                const commandDrawn = drawTextToGrid(command, cursorPos.x, currentY, newCommandData);
+                Object.assign(newCommandData, commandDrawn);
                 currentY += GRID_CELL_SPAN;
             });
         });
@@ -1466,8 +1621,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         // Handle /talk command for face-piloted geometry
         if (commandToExecute.startsWith('talk')) {
-            const inputParts = commandState.input.trim().split(/\s+/);
-            const faceName = inputParts.length > 1 ? inputParts[1].toLowerCase() : 'macintosh';
+            const { arg1 } = parseCurrentInput();
+            const faceName = arg1 ? arg1.toLowerCase() : 'macintosh';
 
             try {
                 // Always use front camera for face tracking
@@ -1520,13 +1675,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('bg')) {
-            const inputParts = commandState.input.trim().split(/\s+/);
-            const bgArg = inputParts.length > 1 ? inputParts[1] : undefined;
-
-            // Extract optional parameters
-            const param2 = inputParts.length > 2 ? inputParts[2] : undefined;
-            const param3 = inputParts.length > 3 ? inputParts[3] : undefined;
-            const restOfInput = inputParts.slice(1).join(' '); // Everything after /bg
+            const { arg1: bgArg, arg2: param2, arg3: param3, restAsString: restOfInput } = parseCurrentInput();
 
             // Check if /bg was called with no args and there's an image at cursor position
             if (!bgArg && worldData) {
@@ -1654,13 +1803,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('text')) {
-            const inputParts = commandState.input.trim().split(/\s+/);
-            const firstArg = inputParts.length > 1 ? inputParts[1] : undefined;
+            const { arg1: firstArg, arg2, arg3 } = parseCurrentInput();
 
             // Check if --g flag is present for global update
             const isGlobal = firstArg === '--g';
-            const colorArg = isGlobal ? (inputParts.length > 2 ? inputParts[2] : undefined) : firstArg;
-            const backgroundArg = isGlobal ? (inputParts.length > 3 ? inputParts[3] : undefined) : (inputParts.length > 2 ? inputParts[2] : undefined);
+            const colorArg = isGlobal ? arg2 : firstArg;
+            const backgroundArg = isGlobal ? arg3 : arg2;
 
             if (colorArg) {
                 // Validate color format (hex code or named colors)
@@ -1845,8 +1993,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('search')) {
-            const inputParts = commandState.input.trim().split(/\s+/);
-            const searchTerm = inputParts.slice(1).join(' ');
+            const { restAsString: searchTerm } = parseCurrentInput();
             
             if (searchTerm) {
                 // Activate search with the term
@@ -2061,19 +2208,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('indent')) {
-            // Toggle smart indentation
-            setModeState(prev => ({
-                ...prev,
-                isIndentEnabled: !prev.isIndentEnabled
-            }));
-            
-            const newState = !modeState.isIndentEnabled;
-            setDialogueWithRevert(newState ? "Smart indentation enabled" : "Smart indentation disabled", setDialogueText);
-            
-            // Clear command mode
-            clearCommandState();
-            
-            return null;
+            return executeToggleModeCommand('isIndentEnabled', "Smart indentation enabled", "Smart indentation disabled");
         }
 
         if (commandToExecute.startsWith('signin')) {
@@ -2238,43 +2373,15 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('move')) {
-            // Toggle move mode
-            setModeState(prev => ({
-                ...prev,
-                isMoveMode: !prev.isMoveMode
-            }));
-
-            const newState = !modeState.isMoveMode;
-            setDialogueWithRevert(newState ? "Move mode enabled - hover over text blocks to drag them. Press Escape to exit." : "Move mode disabled", setDialogueText);
-
-            // Clear command mode
-            clearCommandState();
-
-            return null;
+            return executeToggleModeCommand('isMoveMode', "Move mode enabled - hover over text blocks to drag them. Press Escape to exit.", "Move mode disabled");
         }
 
         if (commandToExecute.startsWith('upgrade')) {
-            // Trigger the upgrade flow
-            if (triggerUpgradeFlow) {
-                triggerUpgradeFlow();
-            }
-
-            // Clear command mode
-            clearCommandState();
-
-            return null;
+            return executeCallbackCommand(triggerUpgradeFlow, "Upgrade flow not available");
         }
 
         if (commandToExecute.startsWith('tutorial')) {
-            // Trigger the tutorial flow
-            if (triggerTutorialFlow) {
-                triggerTutorialFlow();
-            }
-
-            // Clear command mode
-            clearCommandState();
-
-            return null;
+            return executeCallbackCommand(triggerTutorialFlow, "Tutorial flow not available");
         }
 
         if (commandToExecute.startsWith('help')) {
@@ -2289,26 +2396,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             });
 
             // Build command data - just show commands, no help text yet
-            const newCommandData: WorldData = {};
-            const commandText = '/';
-
-            // Draw command text
-            for (let i = 0; i < commandText.length; i++) {
-                const key = `${commandState.commandStartPos.x + i},${commandState.commandStartPos.y}`;
-                newCommandData[key] = commandText[i];
-            }
-
-            // Draw all commands without help text (help text shown on hover)
-            allCommands.forEach((command, index) => {
-                const suggestionY = commandState.commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
-
-                // Draw command name
-                for (let i = 0; i < command.length; i++) {
-                    const key = `${commandState.commandStartPos.x + i},${suggestionY}`;
-                    newCommandData[key] = command[i];
-                }
-            });
-
+            const newCommandData = drawCommandWithSuggestions('/', allCommands, commandState.commandStartPos);
             setCommandData(newCommandData);
             setCommandState(prev => ({
                 ...prev,
@@ -2327,8 +2415,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         // Handle monogram command (WebGPU background effects)
         if (commandToExecute.startsWith('monogram')) {
-            const inputParts = commandState.input.trim().split(/\s+/);
-            const args = inputParts.slice(1);
+            const { argsArray: args } = parseCurrentInput();
 
             if (args.length > 0 && monogramSystem) {
                 const option = args[0].toLowerCase();
@@ -3100,24 +3187,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                     // Update command state with the completed command
                     setCommandState(prev => {
-                        const newCommandData: WorldData = {};
-                        const commandText = `/${selectedCommand}`;
-
-                        // Draw command text
-                        for (let i = 0; i < commandText.length; i++) {
-                            const key = `${prev.commandStartPos.x + i},${prev.commandStartPos.y}`;
-                            newCommandData[key] = commandText[i];
-                        }
-
-                        // Draw suggestions
-                        newMatchedCommands.forEach((command, index) => {
-                            const suggestionY = prev.commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
-                            for (let i = 0; i < command.length; i++) {
-                                const key = `${prev.commandStartPos.x + i},${suggestionY}`;
-                                newCommandData[key] = command[i];
-                            }
-                        });
-
+                        const newCommandData = drawCommandWithSuggestions(
+                            `/${selectedCommand}`,
+                            newMatchedCommands,
+                            prev.commandStartPos
+                        );
                         setCommandData(newCommandData);
 
                         return {

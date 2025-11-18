@@ -56,10 +56,7 @@ interface ImageAttachment {
  * Content types determine function and rendering:
  * - 'text': Text overlay (default)
  * - 'image': Image display
- * - 'iframe': Embedded webpage
  * - 'mail': Email composer
- * - 'bound': Selection/grouping region
- * - 'glitch': Glitch effect region
  * - 'list': Scrollable list
  *
  * All notes work with patterns, styles, and standard operations (move, resize, delete)
@@ -73,7 +70,7 @@ interface Note {
     timestamp: number;
 
     // Content type determines function (defaults to 'text' if omitted)
-    contentType?: 'text' | 'image' | 'iframe' | 'mail' | 'bound' | 'glitch' | 'list';
+    contentType?: 'text' | 'image' | 'mail' | 'list';
 
     // Visual styling
     style?: string;           // Style name (e.g., "glow", "solid", "glowing")
@@ -84,8 +81,6 @@ interface Note {
     content?: {
         // Image content
         imageData?: ImageAttachment;
-        // Iframe content
-        iframeUrl?: string;
         // Mail content
         mailData?: {};
         // List content
@@ -95,13 +90,10 @@ interface Note {
             color: string;
             title?: string;
         };
-        // Bound content (no additional data needed)
-        // Glitch content (no additional data needed)
     };
 
     // Legacy support: top-level properties for backward compatibility
     imageData?: ImageAttachment;
-    iframeUrl?: string;
     mailData?: {};
 }
 
@@ -112,7 +104,7 @@ interface Note {
 /**
  * Parse note from worldData entry
  * Treats all region-spanning storage formats as unified notes with contentType
- * Supports: note_, image_, iframe_, mail_, bound_, glitched_, list_
+ * Supports: note_, image_, mail_, list_
  */
 function parseNoteFromWorldData(key: string, value: any): Note | null {
     try {
@@ -134,8 +126,6 @@ function parseNoteFromWorldData(key: string, value: any): Note | null {
             baseNote.contentType = data.contentType;
         } else if (key.startsWith('image_')) {
             baseNote.contentType = 'image';
-        } else if (key.startsWith('iframe_')) {
-            baseNote.contentType = 'iframe';
         } else if (key.startsWith('mail_')) {
             baseNote.contentType = 'mail';
         } else if (key.startsWith('list_')) {
@@ -161,12 +151,6 @@ function parseNoteFromWorldData(key: string, value: any): Note | null {
                 baseNote.imageData = imageData;
                 break;
 
-            case 'iframe':
-                const iframeUrl = data.url || data.iframeUrl;
-                baseNote.content = { iframeUrl };
-                baseNote.iframeUrl = iframeUrl;
-                break;
-
             case 'mail':
                 const mailData = data.mailData || {};
                 baseNote.content = { mailData };
@@ -184,8 +168,6 @@ function parseNoteFromWorldData(key: string, value: any): Note | null {
                 };
                 break;
 
-            case 'bound':
-            case 'glitch':
             case 'text':
             default:
                 // No additional content data needed
@@ -218,8 +200,7 @@ function findNoteAtPosition(
     for (const key in worldData) {
         // Check all region-spanning note types
         if (key.startsWith('note_') || key.startsWith('image_') ||
-            key.startsWith('iframe_') || key.startsWith('mail_') ||
-            key.startsWith('list_')) {
+            key.startsWith('mail_') || key.startsWith('list_')) {
 
             const note = parseNoteFromWorldData(key, worldData[key]);
             if (note && isPointInNote(pos, note)) {
@@ -241,15 +222,181 @@ function getNoteDimensions(note: Note): { width: number; height: number } {
 }
 
 /**
+ * Generate rgba color string from engine text color with specified alpha
+ */
+function getTextColor(engine: any, alpha: number = 1): string {
+    return `rgba(${hexToRgb(engine.textColor)}, ${alpha})`;
+}
+
+/**
+ * Safely parse JSON entity data from worldData
+ * Returns null if parsing fails (invalid JSON)
+ */
+function safeParseEntityData<T = any>(
+    worldData: WorldData,
+    key: string
+): T | null {
+    try {
+        return JSON.parse(worldData[key] as string);
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * Calculate screen coordinates for world bounds
+ * Converts world space bounding box to screen space coordinates
+ */
+function calculateScreenBounds(
+    bounds: { startX: number; endX: number; startY: number; endY: number },
+    engine: any,
+    currentZoom: number,
+    currentOffset: { x: number; y: number }
+): { topLeft: Point; bottomRight: Point; width: number; height: number } {
+    const topLeft = engine.worldToScreen(bounds.startX, bounds.startY, currentZoom, currentOffset);
+    const bottomRight = engine.worldToScreen(bounds.endX + 1, bounds.endY + 1, currentZoom, currentOffset);
+
+    return {
+        topLeft,
+        bottomRight,
+        width: bottomRight.x - topLeft.x,
+        height: bottomRight.y - topLeft.y
+    };
+}
+
+/**
+ * Calculate dimensions for cover-fit aspect ratio (used for backgrounds)
+ * Maintains aspect ratio while ensuring content covers the entire target area
+ */
+function calculateCoverFit(
+    sourceWidth: number,
+    sourceHeight: number,
+    targetWidth: number,
+    targetHeight: number
+): { drawX: number; drawY: number; drawWidth: number; drawHeight: number } {
+    const sourceAspect = sourceWidth / sourceHeight;
+    const targetAspect = targetWidth / targetHeight;
+
+    let drawWidth: number;
+    let drawHeight: number;
+
+    if (sourceAspect > targetAspect) {
+        // Source is wider - fit to height and crop sides
+        drawHeight = targetHeight;
+        drawWidth = targetHeight * sourceAspect;
+    } else {
+        // Source is taller - fit to width and crop top/bottom
+        drawWidth = targetWidth;
+        drawHeight = targetWidth / sourceAspect;
+    }
+
+    return {
+        drawX: (targetWidth - drawWidth) / 2,
+        drawY: (targetHeight - drawHeight) / 2,
+        drawWidth,
+        drawHeight
+    };
+}
+
+/**
+ * Render drag preview for entity being moved with shift+drag
+ * Shows destination preview with translucent overlay
+ */
+function renderDragPreview(
+    ctx: CanvasRenderingContext2D,
+    bounds: { startX: number; endX: number; startY: number; endY: number },
+    distanceX: number,
+    distanceY: number,
+    fillStyle: string,
+    engine: any,
+    currentZoom: number,
+    currentOffset: { x: number; y: number },
+    effectiveCharWidth: number,
+    effectiveCharHeight: number,
+    cssWidth: number,
+    cssHeight: number
+): void {
+    ctx.fillStyle = fillStyle;
+
+    for (let y = bounds.startY; y <= bounds.endY; y++) {
+        for (let x = bounds.startX; x <= bounds.endX; x++) {
+            const destX = x + distanceX;
+            const destY = y + distanceY;
+            const destScreenPos = engine.worldToScreen(destX, destY, currentZoom, currentOffset);
+
+            // Only draw if visible on screen
+            if (destScreenPos.x >= -effectiveCharWidth && destScreenPos.x <= cssWidth &&
+                destScreenPos.y >= -effectiveCharHeight && destScreenPos.y <= cssHeight) {
+                ctx.fillRect(destScreenPos.x, destScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+            }
+        }
+    }
+}
+
+/**
+ * Render selection border and resize thumbs for selected entities
+ */
+function renderEntitySelection(
+    ctx: CanvasRenderingContext2D,
+    bounds: { startX: number; endX: number; startY: number; endY: number },
+    options: {
+        showBorder?: boolean;
+        borderColor?: string;
+        thumbColor?: string;
+        lineWidth?: number;
+        thumbSize?: number;
+    },
+    engine: any,
+    currentZoom: number,
+    currentOffset: { x: number; y: number }
+): void {
+    const {
+        showBorder = true,
+        borderColor = '#00ff00',
+        thumbColor = '#00ff00',
+        lineWidth = 3,
+        thumbSize = 8
+    } = options;
+
+    const screenBounds = calculateScreenBounds(bounds, engine, currentZoom, currentOffset);
+
+    // Draw border if enabled
+    if (showBorder) {
+        ctx.strokeStyle = borderColor;
+        ctx.lineWidth = lineWidth;
+        const halfWidth = lineWidth / 2;
+        ctx.strokeRect(
+            screenBounds.topLeft.x + halfWidth,
+            screenBounds.topLeft.y + halfWidth,
+            screenBounds.width - lineWidth,
+            screenBounds.height - lineWidth
+        );
+    }
+
+    // Draw corner resize thumbs
+    ctx.fillStyle = thumbColor;
+
+    const left = screenBounds.topLeft.x;
+    const right = screenBounds.bottomRight.x;
+    const top = screenBounds.topLeft.y;
+    const bottom = screenBounds.bottomRight.y;
+
+    // Corner thumbs
+    ctx.fillRect(left - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-left
+    ctx.fillRect(right - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-right
+    ctx.fillRect(left - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-left
+    ctx.fillRect(right - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-right
+}
+
+/**
  * Get note type based on contentType (with legacy fallback)
  */
-function getNoteType(note: Note): 'text' | 'image' | 'iframe' | 'mail' | 'bound' | 'glitch' | 'list' {
+function getNoteType(note: Note): 'text' | 'image' | 'mail' | 'list' {
     // Use explicit contentType if available
     if (note.contentType) return note.contentType;
 
     // Legacy fallback: infer from top-level properties
     if (note.imageData) return 'image';
-    if (note.iframeUrl) return 'iframe';
     if (note.mailData) return 'mail';
     return 'text';
 }
@@ -274,8 +421,8 @@ interface NoteRenderContext {
 
 /**
  * Unified note rendering function
- * Renders notes based on contentType (text, image, iframe, mail)
- * Note: bound, glitch, and list are rendered separately in the main canvas loop
+ * Renders notes based on contentType (text, image, mail)
+ * Note: list is rendered separately in the main canvas loop
  */
 function renderNote(note: Note, context: NoteRenderContext, renderContext?: BaseRenderContext): void {
     const { ctx, engine, currentZoom, currentOffset, effectiveCharWidth, effectiveCharHeight, cssWidth, cssHeight, hexToRgb } = context;
@@ -370,10 +517,6 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
             ctx.restore();
         }
 
-    } else if (contentType === 'iframe') {
-        // IFRAME NOTE: Rendered as React component, not on canvas
-        return;
-
     } else if (contentType === 'mail') {
         // MAIL NOTE: Render yellow/amber overlay
         const mailColor = 'rgba(255, 193, 7, 0.15)';
@@ -423,7 +566,7 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
             ctx.restore();
         } else {
             // Default: semi-transparent overlay
-            const planColor = `rgba(${hexToRgb(engine.textColor)}, 0.15)`;
+            const planColor = getTextColor(engine, 0.15);
             ctx.fillStyle = planColor;
 
             for (let worldY = startY; worldY <= endY; worldY++) {
@@ -885,6 +1028,175 @@ interface CursorTrailPosition {
 }
 
 
+// ============================================================================
+// WORLDDATA ITERATION HELPERS
+// ============================================================================
+
+/**
+ * Iterate over entities by prefix with automatic parsing
+ * Uses generator for memory efficiency and lazy evaluation
+ *
+ * @example
+ * // Iterate notes
+ * for (const { key, data } of getEntitiesByPrefix(worldData, 'note_')) {
+ *     renderNote(data);
+ * }
+ *
+ * // Collect all into array
+ * const allNotes = Array.from(getEntitiesByPrefix(worldData, 'note_'));
+ */
+function* getEntitiesByPrefix<T = any>(
+    worldData: WorldData,
+    prefix: string,
+    parse: boolean = true
+): Generator<{ key: string; data: T }> {
+    for (const key in worldData) {
+        if (key.startsWith(prefix)) {
+            if (parse) {
+                const data = safeParseEntityData<T>(worldData, key);
+                if (data) yield { key, data };
+            } else {
+                yield { key, data: worldData[key] as T };
+            }
+        }
+    }
+}
+
+/**
+ * Count entities by prefix (common operation)
+ *
+ * @example
+ * const noteCount = countEntitiesByPrefix(worldData, 'note_');
+ */
+function countEntitiesByPrefix(worldData: WorldData, prefix: string): number {
+    let count = 0;
+    for (const key in worldData) {
+        if (key.startsWith(prefix)) count++;
+    }
+    return count;
+}
+
+// ============================================================================
+// ENTITY POSITION FINDER (Config-Based)
+// ============================================================================
+
+/**
+ * Configuration for entity position finding
+ */
+interface EntityFinderConfig {
+    prefix: string;
+    parse: boolean;
+    getBounds: (data: any) => { startX: number; endX: number; startY: number; endY: number };
+    returnKey?: boolean;
+}
+
+/**
+ * Entity finder configurations for different types
+ */
+const entityFinders: Record<string, EntityFinderConfig> = {
+    image: {
+        prefix: 'image_',
+        parse: false,
+        getBounds: (data) => ({
+            startX: data.startX,
+            endX: data.endX,
+            startY: data.startY,
+            endY: data.endY
+        }),
+        returnKey: false
+    },
+    pattern: {
+        prefix: 'pattern_',
+        parse: true,
+        getBounds: (data) => {
+            const { centerX, centerY, width = 120, height = 60 } = data;
+            const startX = Math.floor(centerX - width / 2);
+            const startY = Math.floor(centerY - height / 2);
+            return {
+                startX,
+                endX: startX + width,
+                startY,
+                endY: startY + height
+            };
+        },
+        returnKey: true
+    },
+    iframe: {
+        prefix: 'iframe_',
+        parse: true,
+        getBounds: (data) => ({
+            startX: data.startX,
+            endX: data.endX,
+            startY: data.startY,
+            endY: data.endY
+        }),
+        returnKey: true
+    },
+    note: {
+        prefix: 'note_',
+        parse: true,
+        getBounds: (data) => ({
+            startX: data.startX,
+            endX: data.endX,
+            startY: data.startY,
+            endY: data.endY
+        }),
+        returnKey: true
+    },
+    mail: {
+        prefix: 'mail_',
+        parse: true,
+        getBounds: (data) => ({
+            startX: data.startX,
+            endX: data.endX,
+            startY: data.startY,
+            endY: data.endY
+        }),
+        returnKey: true
+    }
+};
+
+/**
+ * Unified entity finder by type and position
+ * Replaces findImageAtPosition, findPatternAtPosition, findPlanAtPosition, findMailAtPosition
+ *
+ * @example
+ * const image = findEntityAtPosition(engine.worldData, cursorPos, 'image');
+ * const pattern = findEntityAtPosition(engine.worldData, cursorPos, 'pattern');
+ */
+function findEntityAtPosition(
+    worldData: WorldData,
+    pos: Point,
+    entityType: keyof typeof entityFinders
+): any {
+    const config = entityFinders[entityType];
+    if (!config) return null;
+
+    for (const key in worldData) {
+        if (key.startsWith(config.prefix)) {
+            let data;
+
+            if (config.parse) {
+                data = safeParseEntityData(worldData, key);
+                if (!data) continue;
+            } else {
+                data = worldData[key];
+            }
+
+            const bounds = config.getBounds(data);
+
+            if (pos.x >= bounds.startX && pos.x <= bounds.endX &&
+                pos.y >= bounds.startY && pos.y <= bounds.endY) {
+                return config.returnKey ? { key, data } : data;
+            }
+        }
+    }
+
+    return null;
+}
+
+// ============================================================================
+
 interface BitCanvasProps {
     engine: WorldEngine;
     cursorColorAlternate: boolean;
@@ -937,8 +1249,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         roomIndex: null
     });
 
-    const [selectedIframeKey, setSelectedIframeKey] = useState<string | null>(null);
-    const [activeIframeKey, setActiveIframeKey] = useState<string | null>(null); // Double-click activated iframe
     const [selectedMailKey, setSelectedMailKey] = useState<string | null>(null);
 
     const [clipboardFlashBounds, setClipboardFlashBounds] = useState<Map<string, number>>(new Map()); // boundKey -> timestamp
@@ -1521,21 +1831,18 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             }
         };
 
-        for (const key in engine.worldData) {
-            if (key.startsWith('image_')) {
-                const imageData = engine.worldData[key];
-                if (engine.isImageData(imageData)) {
-                    // Preload main image
-                    if (!imageCache.current.has(imageData.src)) {
-                        const img = new Image();
-                        img.src = imageData.src;
-                        imageCache.current.set(imageData.src, img);
-                    }
+        for (const { data: imageData } of getEntitiesByPrefix(engine.worldData, 'image_', false)) {
+            if (engine.isImageData(imageData)) {
+                // Preload main image
+                if (!imageCache.current.has(imageData.src)) {
+                    const img = new Image();
+                    img.src = imageData.src;
+                    imageCache.current.set(imageData.src, img);
+                }
 
-                    // Load GIF frames if animated
-                    if (imageData.isAnimated && imageData.frameTiming && !gifFrameCache.current.has(imageData.src)) {
-                        loadGIFFrames(imageData.frameTiming, imageData.src);
-                    }
+                // Load GIF frames if animated
+                if (imageData.isAnimated && imageData.frameTiming && !gifFrameCache.current.has(imageData.src)) {
+                    loadGIFFrames(imageData.frameTiming, imageData.src);
                 }
             }
         }
@@ -2058,31 +2365,24 @@ Camera & Viewport Controls:
         const tasksIndex = new Map<string, boolean>();
         const completedTasksIndex = new Map<string, boolean>();
 
-        for (const labelKey in engine.worldData) {
-            if (labelKey.startsWith('label_')) {
-                try {
-                    const labelData = JSON.parse(engine.worldData[labelKey] as string);
-                    if (labelData.type === 'task') {
-                        if (!labelData.completed) {
-                            // Index every position within active task bounds
-                            for (let y = labelData.startY; y <= labelData.endY; y++) {
-                                for (let x = labelData.startX; x <= labelData.endX; x++) {
-                                    const key = `${x},${y}`;
-                                    tasksIndex.set(key, true);
-                                }
-                            }
-                        } else {
-                            // Index every position within completed task bounds
-                            for (let y = labelData.startY; y <= labelData.endY; y++) {
-                                for (let x = labelData.startX; x <= labelData.endX; x++) {
-                                    const key = `${x},${y}`;
-                                    completedTasksIndex.set(key, true);
-                                }
-                            }
+        for (const { data: labelData } of getEntitiesByPrefix(engine.worldData, 'label_')) {
+            if (labelData.type === 'task') {
+                if (!labelData.completed) {
+                    // Index every position within active task bounds
+                    for (let y = labelData.startY; y <= labelData.endY; y++) {
+                        for (let x = labelData.startX; x <= labelData.endX; x++) {
+                            const key = `${x},${y}`;
+                            tasksIndex.set(key, true);
                         }
                     }
-                } catch (e) {
-                    // Skip invalid label data
+                } else {
+                    // Index every position within completed task bounds
+                    for (let y = labelData.startY; y <= labelData.endY; y++) {
+                        for (let x = labelData.startX; x <= labelData.endX; x++) {
+                            const key = `${x},${y}`;
+                            completedTasksIndex.set(key, true);
+                        }
+                    }
                 }
             }
         }
@@ -2176,100 +2476,21 @@ Camera & Viewport Controls:
         return block;
     }, []);
     
+    // Unified position finders using config-based approach
     const findImageAtPosition = useCallback((pos: Point): any => {
-        // Check persistent images in worldData
-        for (const key in engine.worldData) {
-            if (key.startsWith('image_')) {
-                const imageData = engine.worldData[key];
-                if (engine.isImageData(imageData)) {
-                    // Check if position is within image bounds
-                    if (pos.x >= imageData.startX && pos.x <= imageData.endX &&
-                        pos.y >= imageData.startY && pos.y <= imageData.endY) {
-                        return imageData;
-                    }
-                }
-            }
-        }
-        return null;
+        return findEntityAtPosition(engine.worldData, pos, 'image');
     }, [engine]);
 
     const findPatternAtPosition = useCallback((pos: Point): { key: string; data: any } | null => {
-        for (const key in engine.worldData) {
-            if (key.startsWith('pattern_')) {
-                try {
-                    const patternData = JSON.parse(engine.worldData[key] as string);
-                    const { centerX, centerY, width = 120, height = 60 } = patternData;
-
-                    const startX = Math.floor(centerX - width / 2);
-                    const startY = Math.floor(centerY - height / 2);
-                    const endX = startX + width;
-                    const endY = startY + height;
-
-                    if (pos.x >= startX && pos.x < endX && pos.y >= startY && pos.y < endY) {
-                        return { key, data: patternData };
-                    }
-                } catch (e) {
-                    continue;
-                }
-            }
-        }
-        return null;
-    }, [engine]);
-
-    const findIframeAtPosition = useCallback((pos: Point): { key: string, data: any } | null => {
-        for (const key in engine.worldData) {
-            if (key.startsWith('iframe_')) {
-                try {
-                    const iframeData = JSON.parse(engine.worldData[key] as string);
-                    // Check if position is within iframe bounds
-                    if (pos.x >= iframeData.startX && pos.x <= iframeData.endX &&
-                        pos.y >= iframeData.startY && pos.y <= iframeData.endY) {
-                        return { key, data: iframeData };
-                    }
-                } catch (e) {
-                    // Skip invalid iframe data
-                }
-            }
-        }
-        return null;
+        return findEntityAtPosition(engine.worldData, pos, 'pattern');
     }, [engine]);
 
     const findPlanAtPosition = useCallback((pos: Point): { key: string, data: any } | null => {
-        // Check all note regions in worldData
-        for (const key in engine.worldData) {
-            if (key.startsWith('note_')) {
-                try {
-                    const noteData = JSON.parse(engine.worldData[key] as string);
-                    // Check if position is within note bounds
-                    if (pos.x >= noteData.startX && pos.x <= noteData.endX &&
-                        pos.y >= noteData.startY && pos.y <= noteData.endY) {
-                        return { key, data: noteData };
-                    }
-                } catch (e) {
-                    // Skip invalid note data
-                }
-            }
-        }
-        return null;
+        return findEntityAtPosition(engine.worldData, pos, 'note');
     }, [engine]);
 
     const findMailAtPosition = useCallback((pos: Point): { key: string, data: any } | null => {
-        // Check all mail regions in worldData
-        for (const key in engine.worldData) {
-            if (key.startsWith('mail_')) {
-                try {
-                    const mailData = JSON.parse(engine.worldData[key] as string);
-                    // Check if position is within mail bounds
-                    if (pos.x >= mailData.startX && pos.x <= mailData.endX &&
-                        pos.y >= mailData.startY && pos.y <= mailData.endY) {
-                        return { key, data: mailData };
-                    }
-                } catch (e) {
-                    // Skip invalid mail data
-                }
-            }
-        }
-        return null;
+        return findEntityAtPosition(engine.worldData, pos, 'mail');
     }, [engine]);
 
     // Helper to get chronological list of note regions and text blocks
@@ -2287,46 +2508,38 @@ Camera & Viewport Controls:
         }> = [];
 
         // Collect all note regions
-        for (const key in engine.worldData) {
-            if (key.startsWith('note_')) {
-                try {
-                    const noteData = JSON.parse(engine.worldData[key] as string);
-
-                    // Extract text content within note bounds
-                    let content = '';
-                    for (let y = noteData.startY; y <= noteData.endY; y++) {
-                        let rowContent = '';
-                        for (let x = noteData.startX; x <= noteData.endX; x++) {
-                            const cellKey = `${x},${y}`;
-                            const cellData = engine.worldData[cellKey];
-                            if (cellData && !engine.isImageData(cellData)) {
-                                const char = engine.getCharacter(cellData);
-                                rowContent += char || ' ';
-                            } else {
-                                rowContent += ' ';
-                            }
-                        }
-                        // Trim trailing spaces but preserve line structure
-                        if (content.length > 0 || rowContent.trim().length > 0) {
-                            content += rowContent.trimEnd() + '\n';
-                        }
+        for (const { key, data: noteData } of getEntitiesByPrefix(engine.worldData, 'note_')) {
+            // Extract text content within note bounds
+            let content = '';
+            for (let y = noteData.startY; y <= noteData.endY; y++) {
+                let rowContent = '';
+                for (let x = noteData.startX; x <= noteData.endX; x++) {
+                    const cellKey = `${x},${y}`;
+                    const cellData = engine.worldData[cellKey];
+                    if (cellData && !engine.isImageData(cellData)) {
+                        const char = engine.getCharacter(cellData);
+                        rowContent += char || ' ';
+                    } else {
+                        rowContent += ' ';
                     }
-
-                    items.push({
-                        type: 'note',
-                        timestamp: noteData.timestamp || 0,
-                        content: content.trim(),
-                        bounds: {
-                            startX: noteData.startX,
-                            startY: noteData.startY,
-                            endX: noteData.endX,
-                            endY: noteData.endY
-                        }
-                    });
-                } catch (e) {
-                    // Skip invalid note data
+                }
+                // Trim trailing spaces but preserve line structure
+                if (content.length > 0 || rowContent.trim().length > 0) {
+                    content += rowContent.trimEnd() + '\n';
                 }
             }
+
+            items.push({
+                type: 'note',
+                timestamp: noteData.timestamp || 0,
+                content: content.trim(),
+                bounds: {
+                    startX: noteData.startX,
+                    startY: noteData.startY,
+                    endX: noteData.endX,
+                    endY: noteData.endY
+                }
+            });
         }
 
         // Collect all text blocks (excluding those already in note regions)
@@ -2441,16 +2654,9 @@ Camera & Viewport Controls:
         // Check if we're in a clipboard-flashed bound
         const flashingBoundKey = isInClipboardFlashBound(worldPos);
 
-        // Check if we're in a glitched region
-        const subY = worldPos.subY !== undefined ? worldPos.subY : 0;
-        const hasSubY = worldPos.subY !== undefined;
-        const isGlitched = hasSubY || (() => {
-            return false;
-        })();
-
-        // Adjust height and Y position for glitched cells
-        const previewHeight = isGlitched ? effectiveCharHeight / 2 : effectiveCharHeight * GRID_CELL_SPAN;
-        const adjustedScreenY = isGlitched ? (screenPos.y + (subY * effectiveCharHeight)) : topScreenPos.y;
+        // Set preview dimensions
+        const previewHeight = effectiveCharHeight * GRID_CELL_SPAN;
+        const adjustedScreenY = topScreenPos.y;
 
         // Only draw if visible on screen
         if (screenPos.x < -effectiveCharWidth || screenPos.x > cssWidth ||
@@ -2474,7 +2680,7 @@ Camera & Viewport Controls:
                 const topLeftScreen = engine.worldToScreen(imageAtPosition.startX, imageAtPosition.startY, currentZoom, currentOffset);
                 const bottomRightScreen = engine.worldToScreen(imageAtPosition.endX + 1, imageAtPosition.endY + 1, currentZoom, currentOffset);
 
-                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.7)`; // Border matching text accent color
+                ctx.strokeStyle = getTextColor(engine, 0.7); // Border matching text accent color
                 const lineWidth = 2;
                 ctx.lineWidth = lineWidth;
                 const halfWidth = lineWidth / 2;
@@ -2495,7 +2701,7 @@ Camera & Viewport Controls:
                 // Multiply gray with cyan: rgba(128,128,128) * rgba(0,255,255) = rgba(0,128,128)
                 overlayColor = `rgba(0, 128, 128, 0.4)`; // Cyan-tinted gray
             } else {
-                overlayColor = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
+                overlayColor = getTextColor(engine, 0.3);
             }
             ctx.fillStyle = overlayColor;
 
@@ -2520,7 +2726,7 @@ Camera & Viewport Controls:
                 const topLeftScreen = engine.worldToScreen(minX, minY, currentZoom, currentOffset);
                 const bottomRightScreen = engine.worldToScreen(maxX + 1, maxY + 1, currentZoom, currentOffset);
 
-                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.7)`; // Border matching text accent color
+                ctx.strokeStyle = getTextColor(engine, 0.7); // Border matching text accent color
                 const lineWidth = 2;
                 ctx.lineWidth = lineWidth;
                 const halfWidth = lineWidth / 2;
@@ -2531,8 +2737,8 @@ Camera & Viewport Controls:
                     bottomRightScreen.y - topLeftScreen.y - lineWidth
                 );
             } else {
-                // Draw outline around the hovered cell (use adjusted dimensions for glitched cells)
-                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
+                // Draw outline around the hovered cell
+                ctx.strokeStyle = getTextColor(engine, 0.8);
                 const lineWidth = 2;
                 ctx.lineWidth = lineWidth;
                 const halfWidth = lineWidth / 2;
@@ -2540,8 +2746,8 @@ Camera & Viewport Controls:
             }
         } else {
             if (shiftPressed) {
-                // When shift is pressed over empty cell, draw border (use adjusted dimensions for glitched cells)
-                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.7)`; // Border matching text accent color
+                // When shift is pressed over empty cell, draw border
+                ctx.strokeStyle = getTextColor(engine, 0.7); // Border matching text accent color
                 const lineWidth = 2;
                 ctx.lineWidth = lineWidth;
                 const halfWidth = lineWidth / 2;
@@ -2550,8 +2756,8 @@ Camera & Viewport Controls:
                 ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.2)`; // Fill matching text accent color
                 ctx.fillRect(screenPos.x, adjustedScreenY, effectiveCharWidth, previewHeight);
             } else {
-                // Regular preview for empty cells (use adjusted dimensions for glitched cells)
-                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.7)`;
+                // Regular preview for empty cells
+                ctx.strokeStyle = getTextColor(engine, 0.7);
                 const lineWidth = 2;
                 ctx.lineWidth = lineWidth;
                 const halfWidth = lineWidth / 2;
@@ -2703,26 +2909,8 @@ Camera & Viewport Controls:
             // Draw the cached image if it's loaded, maintaining aspect ratio
             if (backgroundImageRef.current && backgroundImageRef.current.complete) {
                 const image = backgroundImageRef.current;
-                const imageAspect = image.naturalWidth / image.naturalHeight;
-                const canvasAspect = cssWidth / cssHeight;
-
-                let drawWidth, drawHeight, drawX, drawY;
-
-                if (imageAspect > canvasAspect) {
-                    // Image is wider than canvas - fit to height and crop sides
-                    drawHeight = cssHeight;
-                    drawWidth = cssHeight * imageAspect;
-                    drawX = (cssWidth - drawWidth) / 2;
-                    drawY = 0;
-                } else {
-                    // Image is taller than canvas - fit to width and crop top/bottom
-                    drawWidth = cssWidth;
-                    drawHeight = cssWidth / imageAspect;
-                    drawX = 0;
-                    drawY = (cssHeight - drawHeight) / 2;
-                }
-
-                ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+                const dims = calculateCoverFit(image.naturalWidth, image.naturalHeight, cssWidth, cssHeight);
+                ctx.drawImage(image, dims.drawX, dims.drawY, dims.drawWidth, dims.drawHeight);
             }
         } else if (engine.backgroundMode === 'video' && engine.backgroundVideo) {
             // Clear canvas first
@@ -2747,26 +2935,8 @@ Camera & Viewport Controls:
             // Draw the video if it's loaded and playing, maintaining aspect ratio
             if (backgroundVideoRef.current && backgroundVideoRef.current.readyState >= 2) {
                 const video = backgroundVideoRef.current;
-                const videoAspect = video.videoWidth / video.videoHeight;
-                const canvasAspect = cssWidth / cssHeight;
-
-                let drawWidth, drawHeight, drawX, drawY;
-
-                if (videoAspect > canvasAspect) {
-                    // Video is wider than canvas - fit to height and crop sides
-                    drawHeight = cssHeight;
-                    drawWidth = cssHeight * videoAspect;
-                    drawX = (cssWidth - drawWidth) / 2;
-                    drawY = 0;
-                } else {
-                    // Video is taller than canvas - fit to width and crop top/bottom
-                    drawWidth = cssWidth;
-                    drawHeight = cssWidth / videoAspect;
-                    drawX = 0;
-                    drawY = (cssHeight - drawHeight) / 2;
-                }
-
-                ctx.drawImage(video, drawX, drawY, drawWidth, drawHeight);
+                const dims = calculateCoverFit(video.videoWidth, video.videoHeight, cssWidth, cssHeight);
+                ctx.drawImage(video, dims.drawX, dims.drawY, dims.drawWidth, dims.drawHeight);
             }
         } else if (engine.backgroundMode === 'space') {
             // Clear canvas for space background (handled by SpaceBackground component)
@@ -2794,26 +2964,8 @@ Camera & Viewport Controls:
             // Draw the stream if video is ready, maintaining aspect ratio
             if (backgroundStreamVideoRef.current.readyState >= 2) {
                 const video = backgroundStreamVideoRef.current;
-                const videoAspect = video.videoWidth / video.videoHeight;
-                const canvasAspect = cssWidth / cssHeight;
-
-                let drawWidth, drawHeight, drawX, drawY;
-
-                if (videoAspect > canvasAspect) {
-                    // Video is wider than canvas - fit to height and crop sides
-                    drawHeight = cssHeight;
-                    drawWidth = cssHeight * videoAspect;
-                    drawX = (cssWidth - drawWidth) / 2;
-                    drawY = 0;
-                } else {
-                    // Video is taller than canvas - fit to width and crop top/bottom
-                    drawWidth = cssWidth;
-                    drawHeight = cssWidth / videoAspect;
-                    drawX = 0;
-                    drawY = (cssHeight - drawHeight) / 2;
-                }
-
-                ctx.drawImage(video, drawX, drawY, drawWidth, drawHeight);
+                const dims = calculateCoverFit(video.videoWidth, video.videoHeight, cssWidth, cssHeight);
+                ctx.drawImage(video, dims.drawX, dims.drawY, dims.drawWidth, dims.drawHeight);
             }
         } else {
             // Default transparent mode
@@ -3266,7 +3418,7 @@ Camera & Viewport Controls:
 
         ctx.fillStyle = engine.textColor;
         for (const key in engine.worldData) {
-            // Skip block, label, bound, glitched, and image data - we render those separately
+            // Skip block, label, and image data - we render those separately
             if (key.startsWith('block_') || key.startsWith('label_') || key.startsWith('image_')) continue;
 
             const [xStr, yStr] = key.split(',');
@@ -4223,96 +4375,6 @@ Camera & Viewport Controls:
             });
         } // Close lightModeData check
 
-        // === Render Waypoint Arrows for Off-Screen Bounds ===
-        if (!engine.isNavVisible) {
-            for (const key in engine.worldData) {
-                if (key.startsWith('bound_')) {
-                    try {
-                        const boundData = JSON.parse(engine.worldData[key] as string);
-                        const { startX, endX, startY, endY, maxY } = boundData;
-
-                        // Use the center of the top bar as reference point
-                        const boundCenterX = Math.floor((startX + endX) / 2);
-                        const boundY = startY;
-
-                        // Check if bound is visible in viewport
-                        const isVisible = startX <= viewBounds.maxX && endX >= viewBounds.minX &&
-                                        startY >= viewBounds.minY && startY <= viewBounds.maxY;
-
-                        if (!isVisible) {
-                            // Calculate distance from viewport center to bound
-                            const viewportCenter = engine.getViewportCenter();
-                            const deltaX = boundCenterX - viewportCenter.x;
-                            const deltaY = boundY - viewportCenter.y;
-                            const distance = Math.round(Math.sqrt(deltaX * deltaX + deltaY * deltaY));
-
-                            // Only show waypoint arrow if within proximity threshold
-                            if (distance <= engine.settings.labelProximityThreshold) {
-                                const boundScreenPos = engine.worldToScreen(boundCenterX, boundY, currentZoom, currentOffset);
-                                const intersection = getViewportEdgeIntersection(
-                                    viewportCenterScreen.x, viewportCenterScreen.y,
-                                    boundScreenPos.x, boundScreenPos.y,
-                                    cssWidth, cssHeight
-                                );
-
-                                if (intersection) {
-                                    const edgeBuffer = ARROW_MARGIN;
-                                    let adjustedX = intersection.x;
-                                    let adjustedY = intersection.y;
-
-                                    adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
-                                    adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
-
-                                    // Use text color for arrow (programmatic - matches current theme)
-                                    const isFocused = engine.focusedBoundKey === key;
-                                    const arrowColor = isFocused ? engine.textColor : `${engine.textColor}CC`;
-
-                                    drawArrow(ctx, adjustedX, adjustedY, intersection.angle, arrowColor);
-
-                                    // Draw bound identifier text next to arrow
-                                    const boundWidth = endX - startX + 1;
-                                    // Use title from boundData if available, otherwise default to bound[width]
-                                    const boundLabel = boundData.title || `bound[${boundWidth}]`;
-
-                                    ctx.fillStyle = arrowColor;
-                                    ctx.font = `${effectiveFontSize}px ${fontFamily}`;
-                                    const textOffset = ARROW_SIZE * 1.5;
-
-                                    let textX = adjustedX - Math.cos(intersection.angle) * textOffset;
-                                    let textY = adjustedY - Math.sin(intersection.angle) * textOffset;
-
-                                    // Adjust alignment to keep text inside the screen bounds
-                                    if (Math.abs(intersection.angle) < Math.PI / 2) {
-                                        ctx.textAlign = 'right';
-                                    } else {
-                                        ctx.textAlign = 'left';
-                                    }
-
-                                    if (intersection.angle > Math.PI / 4 && intersection.angle < 3 * Math.PI / 4) {
-                                        ctx.textBaseline = 'bottom';
-                                    } else if (intersection.angle < -Math.PI / 4 && intersection.angle > -3 * Math.PI / 4) {
-                                        ctx.textBaseline = 'top';
-                                    } else {
-                                        ctx.textBaseline = 'middle';
-                                    }
-
-                                    // Add distance indicator only if proximity threshold is not disabled
-                                    const distanceText = engine.settings.labelProximityThreshold >= 999999 ? '' : ` [${distance}]`;
-                                    ctx.fillText(boundLabel + distanceText, textX, textY);
-
-                                    // Reset to defaults
-                                    ctx.textAlign = 'left';
-                                    ctx.textBaseline = 'top';
-                                }
-                            }
-                        }
-                    } catch (e) {
-                        // Skip invalid bound data
-                    }
-                }
-            }
-        }
-
         // === Render Blocks ===
         const visibleBlocks = engine.queryVisibleEntities(startWorldX - 5, startWorldY - 5, endWorldX + 5, endWorldY + 5);
         for (const key of visibleBlocks) {
@@ -4822,7 +4884,7 @@ Camera & Viewport Controls:
                     // Draw outer border only if not glow (glow already rendered above)
                     // Default border is more opaque for better visibility
                     if (!patternStyle || patternStyle.border.type !== 'glow') {
-                        const defaultBorderColor = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
+                        const defaultBorderColor = getTextColor(engine, 0.8);
                         const borderColor = patternStyle?.border.type === 'solid' && patternStyle.border.color
                             ? patternStyle.border.color
                             : defaultBorderColor;
@@ -4889,7 +4951,7 @@ Camera & Viewport Controls:
 
                     // Room corner thumbs
                     const roomThumbSize = 8;
-                    ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
+                    ctx.fillStyle = getTextColor(engine, 0.8);
                     ctx.fillRect(roomLeft - roomThumbSize / 2, roomTop - roomThumbSize / 2, roomThumbSize, roomThumbSize);
                     ctx.fillRect(roomRight - roomThumbSize / 2, roomTop - roomThumbSize / 2, roomThumbSize, roomThumbSize);
                     ctx.fillRect(roomLeft - roomThumbSize / 2, roomBottom - roomThumbSize / 2, roomThumbSize, roomThumbSize);
@@ -4935,7 +4997,7 @@ Camera & Viewport Controls:
             const maxY = Math.max(start.y, end.y);
 
             // Use light transparent version of text accent color
-            const selectionColor = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
+            const selectionColor = getTextColor(engine, 0.3);
             ctx.fillStyle = selectionColor;
 
             // Check if selection started on a character (including spaces - text-aware selection mode)
@@ -5073,144 +5135,34 @@ Camera & Viewport Controls:
         if (selectedImageKey) {
             const selectedImageData = engine.worldData[selectedImageKey];
             if (engine.isImageData(selectedImageData)) {
-                // Draw selection border around the selected image
-                const topLeftScreen = engine.worldToScreen(selectedImageData.startX, selectedImageData.startY, currentZoom, currentOffset);
-                const bottomRightScreen = engine.worldToScreen(selectedImageData.endX + 1, selectedImageData.endY + 1, currentZoom, currentOffset);
-                
-                // Use text accent color for selection border
-                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
-                const lineWidth = 3; // Slightly thicker to indicate selection
-                ctx.lineWidth = lineWidth;
-                const halfWidth = lineWidth / 2;
-                ctx.strokeRect(
-                    topLeftScreen.x + halfWidth,
-                    topLeftScreen.y + halfWidth,
-                    bottomRightScreen.x - topLeftScreen.x - lineWidth,
-                    bottomRightScreen.y - topLeftScreen.y - lineWidth
-                );
-
-                // Draw resize thumbs (handles) at corners only
-                const thumbSize = 8;
-                const thumbColor = `rgba(${hexToRgb(engine.textColor)}, 1)`;
-                ctx.fillStyle = thumbColor;
-
-                const left = topLeftScreen.x;
-                const right = bottomRightScreen.x;
-                const top = topLeftScreen.y;
-                const bottom = bottomRightScreen.y;
-
-                // Corner thumbs
-                ctx.fillRect(left - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-left
-                ctx.fillRect(right - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-right
-                ctx.fillRect(left - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-left
-                ctx.fillRect(right - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-right
+                renderEntitySelection(ctx, selectedImageData, {
+                    showBorder: true,
+                    borderColor: getTextColor(engine, 0.8),
+                    thumbColor: getTextColor(engine, 1)
+                }, engine, currentZoom, currentOffset);
             }
         }
 
         // === Render Selected Note Border ===
         if (selectedNoteKey) {
-            try {
-                const selectedPlanData = JSON.parse(engine.worldData[selectedNoteKey] as string);
-                const topLeftScreen = engine.worldToScreen(selectedPlanData.startX, selectedPlanData.startY, currentZoom, currentOffset);
-                const bottomRightScreen = engine.worldToScreen(selectedPlanData.endX + 1, selectedPlanData.endY + 1, currentZoom, currentOffset);
-
-                // Draw resize thumbs (handles) at corners only (no border)
-                const thumbSize = 8;
-                const thumbColor = `rgba(${hexToRgb(engine.textColor)}, 1)`;
-                ctx.fillStyle = thumbColor;
-
-                const left = topLeftScreen.x;
-                const right = bottomRightScreen.x;
-                const top = topLeftScreen.y;
-                const bottom = bottomRightScreen.y;
-
-                // Corner thumbs
-                ctx.fillRect(left - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-left
-                ctx.fillRect(right - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-right
-                ctx.fillRect(left - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-left
-                ctx.fillRect(right - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-right
-            } catch (e) {
-                // Skip invalid note data
-            }
-        }
-
-        // === Render Selected Iframe Border ===
-        if (selectedIframeKey) {
-            try {
-                const selectedIframeData = JSON.parse(engine.worldData[selectedIframeKey] as string);
-                // Draw selection border around the selected iframe
-                const topLeftScreen = engine.worldToScreen(selectedIframeData.startX, selectedIframeData.startY, currentZoom, currentOffset);
-                const bottomRightScreen = engine.worldToScreen(selectedIframeData.endX + 1, selectedIframeData.endY + 1, currentZoom, currentOffset);
-
-                // Use text accent color for selection border
-                ctx.strokeStyle = `rgba(${hexToRgb(engine.textColor)}, 0.8)`;
-                const lineWidth = 3; // Slightly thicker to indicate selection
-                ctx.lineWidth = lineWidth;
-                const halfWidth = lineWidth / 2;
-                ctx.strokeRect(
-                    topLeftScreen.x + halfWidth,
-                    topLeftScreen.y + halfWidth,
-                    bottomRightScreen.x - topLeftScreen.x - lineWidth,
-                    bottomRightScreen.y - topLeftScreen.y - lineWidth
-                );
-
-                // Draw resize thumbs (handles) at corners only
-                const thumbSize = 8;
-                const thumbColor = `rgba(${hexToRgb(engine.textColor)}, 1)`;
-                ctx.fillStyle = thumbColor;
-
-                const left = topLeftScreen.x;
-                const right = bottomRightScreen.x;
-                const top = topLeftScreen.y;
-                const bottom = bottomRightScreen.y;
-
-                // Corner thumbs
-                ctx.fillRect(left - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-left
-                ctx.fillRect(right - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-right
-                ctx.fillRect(left - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-left
-                ctx.fillRect(right - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-right
-            } catch (e) {
-                // Skip invalid iframe data
+            const selectedPlanData = safeParseEntityData(engine.worldData, selectedNoteKey);
+            if (selectedPlanData) {
+                renderEntitySelection(ctx, selectedPlanData, {
+                    showBorder: false, // Notes only show thumbs, no border
+                    thumbColor: getTextColor(engine, 1)
+                }, engine, currentZoom, currentOffset);
             }
         }
 
         // === Render Selected Mail Border ===
         if (selectedMailKey) {
-            try {
-                const selectedMailData = JSON.parse(engine.worldData[selectedMailKey] as string);
-                // Draw selection border around the selected mail region
-                const topLeftScreen = engine.worldToScreen(selectedMailData.startX, selectedMailData.startY, currentZoom, currentOffset);
-                const bottomRightScreen = engine.worldToScreen(selectedMailData.endX + 1, selectedMailData.endY + 1, currentZoom, currentOffset);
-
-                // Use amber color for mail selection border
-                ctx.strokeStyle = 'rgba(255, 193, 7, 0.8)';
-                const lineWidth = 3; // Slightly thicker to indicate selection
-                ctx.lineWidth = lineWidth;
-                const halfWidth = lineWidth / 2;
-                ctx.strokeRect(
-                    topLeftScreen.x + halfWidth,
-                    topLeftScreen.y + halfWidth,
-                    bottomRightScreen.x - topLeftScreen.x - lineWidth,
-                    bottomRightScreen.y - topLeftScreen.y - lineWidth
-                );
-
-                // Draw resize thumbs (handles) at corners only
-                const thumbSize = 8;
-                const thumbColor = 'rgba(255, 193, 7, 1)';
-                ctx.fillStyle = thumbColor;
-
-                const left = topLeftScreen.x;
-                const right = bottomRightScreen.x;
-                const top = topLeftScreen.y;
-                const bottom = bottomRightScreen.y;
-
-                // Corner thumbs
-                ctx.fillRect(left - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-left
-                ctx.fillRect(right - thumbSize / 2, top - thumbSize / 2, thumbSize, thumbSize); // Top-right
-                ctx.fillRect(left - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-left
-                ctx.fillRect(right - thumbSize / 2, bottom - thumbSize / 2, thumbSize, thumbSize); // Bottom-right
-            } catch (e) {
-                // Skip invalid mail data
+            const selectedMailData = safeParseEntityData(engine.worldData, selectedMailKey);
+            if (selectedMailData) {
+                renderEntitySelection(ctx, selectedMailData, {
+                    showBorder: true,
+                    borderColor: 'rgba(255, 193, 7, 0.8)', // Amber color for mail
+                    thumbColor: 'rgba(255, 193, 7, 1)'
+                }, engine, currentZoom, currentOffset);
             }
         }
 
@@ -5252,82 +5204,35 @@ Camera & Viewport Controls:
                 
                 if (imageAtPosition) {
                     // Draw preview for image destination
-                    ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.3)`; // Preview matching text accent color
-                    
-                    // Create all positions within the image bounds at the new location
-                    for (let y = imageAtPosition.startY; y <= imageAtPosition.endY; y++) {
-                        for (let x = imageAtPosition.startX; x <= imageAtPosition.endX; x++) {
-                            const destX = x + distanceX;
-                            const destY = y + distanceY;
-                            const destScreenPos = engine.worldToScreen(destX, destY, currentZoom, currentOffset);
-                            
-                            // Only draw if visible on screen
-                            if (destScreenPos.x >= -effectiveCharWidth && destScreenPos.x <= cssWidth && 
-                                destScreenPos.y >= -effectiveCharHeight && destScreenPos.y <= cssHeight) {
-                                ctx.fillRect(destScreenPos.x, destScreenPos.y, effectiveCharWidth, effectiveCharHeight);
-                            }
-                        }
-                    }
+                    renderDragPreview(
+                        ctx, imageAtPosition, distanceX, distanceY,
+                        getTextColor(engine, 0.3),
+                        engine, currentZoom, currentOffset,
+                        effectiveCharWidth, effectiveCharHeight, cssWidth, cssHeight
+                    );
                 } else if (selectedNoteKey) {
                     // Draw preview for note region destination
                     try {
                         const noteData = JSON.parse(engine.worldData[selectedNoteKey] as string);
-                        ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
-
-                        for (let y = noteData.startY; y <= noteData.endY; y++) {
-                            for (let x = noteData.startX; x <= noteData.endX; x++) {
-                                const destX = x + distanceX;
-                                const destY = y + distanceY;
-                                const destScreenPos = engine.worldToScreen(destX, destY, currentZoom, currentOffset);
-
-                                if (destScreenPos.x >= -effectiveCharWidth && destScreenPos.x <= cssWidth &&
-                                    destScreenPos.y >= -effectiveCharHeight && destScreenPos.y <= cssHeight) {
-                                    ctx.fillRect(destScreenPos.x, destScreenPos.y, effectiveCharWidth, effectiveCharHeight);
-                                }
-                            }
-                        }
+                        renderDragPreview(
+                            ctx, noteData, distanceX, distanceY,
+                            getTextColor(engine, 0.3),
+                            engine, currentZoom, currentOffset,
+                            effectiveCharWidth, effectiveCharHeight, cssWidth, cssHeight
+                        );
                     } catch (e) {
                         // Invalid note data, skip preview
-                    }
-                } else if (selectedIframeKey) {
-                    // Draw preview for iframe region destination
-                    try {
-                        const iframeData = JSON.parse(engine.worldData[selectedIframeKey] as string);
-                        ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
-
-                        for (let y = iframeData.startY; y <= iframeData.endY; y++) {
-                            for (let x = iframeData.startX; x <= iframeData.endX; x++) {
-                                const destX = x + distanceX;
-                                const destY = y + distanceY;
-                                const destScreenPos = engine.worldToScreen(destX, destY, currentZoom, currentOffset);
-
-                                if (destScreenPos.x >= -effectiveCharWidth && destScreenPos.x <= cssWidth &&
-                                    destScreenPos.y >= -effectiveCharHeight && destScreenPos.y <= cssHeight) {
-                                    ctx.fillRect(destScreenPos.x, destScreenPos.y, effectiveCharWidth, effectiveCharHeight);
-                                }
-                            }
-                        }
-                    } catch (e) {
-                        // Invalid iframe data, skip preview
                     }
                 } else if (selectedMailKey) {
                     // Draw preview for mail region destination
                     try {
                         const mailData = JSON.parse(engine.worldData[selectedMailKey] as string);
-                        ctx.fillStyle = 'rgba(255, 193, 7, 0.3)'; // Amber color for mail
-
-                        for (let y = mailData.startY; y <= mailData.endY; y++) {
-                            for (let x = mailData.startX; x <= mailData.endX; x++) {
-                                const destX = x + distanceX;
-                                const destY = y + distanceY;
-                                const destScreenPos = engine.worldToScreen(destX, destY, currentZoom, currentOffset);
-
-                                if (destScreenPos.x >= -effectiveCharWidth && destScreenPos.x <= cssWidth &&
-                                    destScreenPos.y >= -effectiveCharHeight && destScreenPos.y <= cssHeight) {
-                                    ctx.fillRect(destScreenPos.x, destScreenPos.y, effectiveCharWidth, effectiveCharHeight);
-                                }
-                            }
-                        }
+                        renderDragPreview(
+                            ctx, mailData, distanceX, distanceY,
+                            'rgba(255, 193, 7, 0.3)', // Amber color for mail
+                            engine, currentZoom, currentOffset,
+                            effectiveCharWidth, effectiveCharHeight, cssWidth, cssHeight
+                        );
                     } catch (e) {
                         // Invalid mail data, skip preview
                     }
@@ -5340,37 +5245,33 @@ Camera & Viewport Controls:
                         const minY = Math.floor(Math.min(engine.selectionStart.y, engine.selectionEnd.y));
                         const maxY = Math.floor(Math.max(engine.selectionStart.y, engine.selectionEnd.y));
 
-                        ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
-
-                        for (let y = minY; y <= maxY; y++) {
-                            for (let x = minX; x <= maxX; x++) {
-                                const destX = x + distanceX;
-                                const destY = y + distanceY;
-                                const destScreenPos = engine.worldToScreen(destX, destY, currentZoom, currentOffset);
-
-                                if (destScreenPos.x >= -effectiveCharWidth && destScreenPos.x <= cssWidth &&
-                                    destScreenPos.y >= -effectiveCharHeight && destScreenPos.y <= cssHeight) {
-                                    ctx.fillRect(destScreenPos.x, destScreenPos.y, effectiveCharWidth, effectiveCharHeight);
-                                }
-                            }
-                        }
+                        renderDragPreview(
+                            ctx,
+                            { startX: minX, endX: maxX, startY: minY, endY: maxY },
+                            distanceX, distanceY,
+                            getTextColor(engine, 0.3),
+                            engine, currentZoom, currentOffset,
+                            effectiveCharWidth, effectiveCharHeight, cssWidth, cssHeight
+                        );
                     } else {
                         // No selection - use text block detection (original behavior)
                         const textBlock = findTextBlock(shiftDragStartPos, engine.worldData, engine);
 
                         if (textBlock.length > 0) {
-                            ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, 0.3)`;
+                            // Calculate bounds from text block positions
+                            const minX = Math.min(...textBlock.map(p => p.x));
+                            const maxX = Math.max(...textBlock.map(p => p.x));
+                            const minY = Math.min(...textBlock.map(p => p.y));
+                            const maxY = Math.max(...textBlock.map(p => p.y));
 
-                            for (const pos of textBlock) {
-                                const destX = pos.x + distanceX;
-                                const destY = pos.y + distanceY;
-                                const destScreenPos = engine.worldToScreen(destX, destY, currentZoom, currentOffset);
-
-                                if (destScreenPos.x >= -effectiveCharWidth && destScreenPos.x <= cssWidth &&
-                                    destScreenPos.y >= -effectiveCharHeight && destScreenPos.y <= cssHeight) {
-                                    ctx.fillRect(destScreenPos.x, destScreenPos.y, effectiveCharWidth, effectiveCharHeight);
-                                }
-                            }
+                            renderDragPreview(
+                                ctx,
+                                { startX: minX, endX: maxX, startY: minY, endY: maxY },
+                                distanceX, distanceY,
+                                getTextColor(engine, 0.3),
+                                engine, currentZoom, currentOffset,
+                                effectiveCharWidth, effectiveCharHeight, cssWidth, cssHeight
+                            );
                         }
                     }
                 }
@@ -5729,7 +5630,7 @@ Camera & Viewport Controls:
                 onPublishClick: handlePublishClick,
                 onNavigateClick: handleNavigateClick,
                 getStatePublishStatus: getStatePublishStatus,
-                bounds: engine.getAllBounds()
+                bounds: [] // bound_ is legacy - always empty
             });
         }
 
@@ -5772,7 +5673,7 @@ Camera & Viewport Controls:
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, engine.faceOrientation, engine.isFaceDetectionEnabled, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, selectedNoteKey, selectedIframeKey, selectedMailKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, enhancedDebugText, showCursor, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateTasksIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
+    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, engine.faceOrientation, engine.isFaceDetectionEnabled, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, selectedNoteKey, selectedMailKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, enhancedDebugText, showCursor, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateTasksIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
 
 
     // --- Drawing Loop Effect ---
@@ -5997,57 +5898,35 @@ Camera & Viewport Controls:
                     engine.handleSelectionEnd();
                     setSelectedImageKey(null);
                     setSelectedNoteKey(planAtPosition.key);
-                    setSelectedIframeKey(null);
 
                     // Set flag to prevent trail creation
                     isClickMovementRef.current = true;
                 } else {
-                    // If no text block, image, or note found, check for iframe
-                    const iframeAtPosition = findIframeAtPosition(snappedWorldPos);
+                    // If no text block, image, or note found, check for mail
+                    const mailAtPosition = findMailAtPosition(snappedWorldPos);
 
-                    if (iframeAtPosition) {
-                        // Double-click on iframe activates it for interaction
-                        setActiveIframeKey(iframeAtPosition.key);
-                        setSelectedIframeKey(iframeAtPosition.key);
+                    if (mailAtPosition) {
+                        // Double-click on mail selects it
+                        setSelectedMailKey(mailAtPosition.key);
                         setSelectedImageKey(null);
                         setSelectedNoteKey(null);
-                        setSelectedMailKey(null);
                         engine.handleSelectionStart(0, 0);
                         engine.handleSelectionEnd();
 
                         // Set flag to prevent trail creation
                         isClickMovementRef.current = true;
                     } else {
-                        // If no text block, image, note, or iframe found, check for mail
-                        const mailAtPosition = findMailAtPosition(snappedWorldPos);
-
-                        if (mailAtPosition) {
-                            // Double-click on mail selects it
-                            setSelectedMailKey(mailAtPosition.key);
-                            setSelectedImageKey(null);
-                            setSelectedNoteKey(null);
-                            setSelectedIframeKey(null);
-                            setActiveIframeKey(null);
-                            engine.handleSelectionStart(0, 0);
-                            engine.handleSelectionEnd();
-
-                            // Set flag to prevent trail creation
-                            isClickMovementRef.current = true;
-                        } else {
-                            // Clear any selections if clicking on empty space
-                            setSelectedImageKey(null);
-                            setSelectedNoteKey(null);
-                            setSelectedIframeKey(null);
-                            setActiveIframeKey(null);
-                            setSelectedMailKey(null);
-                        }
+                        // Clear any selections if clicking on empty space
+                        setSelectedImageKey(null);
+                        setSelectedNoteKey(null);
+                        setSelectedMailKey(null);
                     }
                 }
             }
         }
 
         canvasRef.current?.focus(); // Ensure focus for keyboard
-    }, [engine, findTextBlock, findImageAtPosition, findPlanAtPosition, findIframeAtPosition, findMailAtPosition]);
+    }, [engine, findTextBlock, findImageAtPosition, findPlanAtPosition, findMailAtPosition]);
     
     const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -6152,46 +6031,6 @@ Camera & Viewport Controls:
                     }
                 } catch (e) {
                     // Skip invalid note data
-                }
-            }
-
-            // Check iframe resize handles
-            if (selectedIframeKey) {
-                try {
-                    const selectedIframeData = JSON.parse(engine.worldData[selectedIframeKey] as string);
-                    const topLeftScreen = engine.worldToScreen(selectedIframeData.startX, selectedIframeData.startY, engine.zoomLevel, engine.viewOffset);
-                    const bottomRightScreen = engine.worldToScreen(selectedIframeData.endX + 1, selectedIframeData.endY + 1, engine.zoomLevel, engine.viewOffset);
-
-                    const left = topLeftScreen.x;
-                    const right = bottomRightScreen.x;
-                    const top = topLeftScreen.y;
-                    const bottom = bottomRightScreen.y;
-
-                    // Check each corner handle
-                    let handle: ResizeHandle | null = null;
-                    if (isWithinThumb(x, y, left, top)) handle = 'top-left';
-                    else if (isWithinThumb(x, y, right, top)) handle = 'top-right';
-                    else if (isWithinThumb(x, y, right, bottom)) handle = 'bottom-right';
-                    else if (isWithinThumb(x, y, left, bottom)) handle = 'bottom-left';
-
-                    if (handle) {
-                        setResizeState({
-                            active: true,
-                            type: 'iframe',
-                            key: selectedIframeKey,
-                            handle,
-                            originalBounds: {
-                                startX: selectedIframeData.startX,
-                                startY: selectedIframeData.startY,
-                                endX: selectedIframeData.endX,
-                                endY: selectedIframeData.endY
-                            },
-                            roomIndex: null
-                        });
-                        return; // Early return, don't process other mouse events
-                    }
-                } catch (e) {
-                    // Skip invalid iframe data
                 }
             }
 
@@ -6360,13 +6199,12 @@ Camera & Viewport Controls:
                     engine.handleCanvasClick(x, y, true, false, e.metaKey, e.ctrlKey);
                 }
             } else {
-                // Check if clicking on an iframe (single click selects it)
+                // Check if clicking on a pattern or starting regular selection
                 const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
                 const snappedWorldPos = {
                     x: Math.floor(worldPos.x),
                     y: Math.floor(worldPos.y)
                 };
-                const iframeAtPosition = findIframeAtPosition(snappedWorldPos);
 
                 // Check for pattern first
                 const patternAtPosition = findPatternAtPosition(snappedWorldPos);
@@ -6374,36 +6212,16 @@ Camera & Viewport Controls:
                 if (patternAtPosition) {
                     // Single click on pattern selects it (shows resize handles)
                     setSelectedPatternKey(patternAtPosition.key);
-                    setSelectedIframeKey(null);
                     setSelectedImageKey(null);
                     setSelectedNoteKey(null);
                     setSelectedMailKey(null);
-                    if (activeIframeKey) {
-                        setActiveIframeKey(null);
-                    }
-                    isSelectingMouseDownRef.current = false;
-                } else if (iframeAtPosition) {
-                    // Single click on iframe selects it (shows resize handles)
-                    setSelectedIframeKey(iframeAtPosition.key);
-                    setSelectedImageKey(null);
-                    setSelectedNoteKey(null);
-                    setSelectedPatternKey(null);
-                    // Deactivate if clicking outside the currently active iframe
-                    if (activeIframeKey && activeIframeKey !== iframeAtPosition.key) {
-                        setActiveIframeKey(null);
-                    }
                     isSelectingMouseDownRef.current = false;
                 } else {
                     // Clear all selections when starting regular selection
                     setSelectedImageKey(null);
                     setSelectedNoteKey(null);
-                    setSelectedIframeKey(null);
                     setSelectedPatternKey(null);
                     setSelectedMailKey(null);
-                    // Deactivate any active iframe when clicking outside
-                    if (activeIframeKey) {
-                        setActiveIframeKey(null);
-                    }
 
                     // Regular selection start
                     isSelectingMouseDownRef.current = true; // Track mouse down state
@@ -6413,7 +6231,7 @@ Camera & Viewport Controls:
 
             canvasRef.current?.focus();
         }
-    }, [engine, selectedImageKey, selectedNoteKey, selectedIframeKey, activeIframeKey, selectedMailKey, findIframeAtPosition]);
+    }, [engine, selectedImageKey, selectedNoteKey, selectedMailKey]);
 
     const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -6432,67 +6250,36 @@ Camera & Viewport Controls:
         if (!isMiddleMouseDownRef.current && !isSelectingMouseDownRef.current) {
             const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
 
-            // Check if we're in a glitched region - if so, snap to half-cells (vertical subdivision)
+            // Snap to integer grid cells
             const baseX = Math.floor(worldPos.x);
             const baseY = Math.floor(worldPos.y);
-
-            // Check if this base cell is in a glitched region
-            let isInGlitch = false;
-            for (const key in engine.worldData) {
-                if (key.startsWith('glitched_')) {
-                    try {
-                        const glitchData = JSON.parse(engine.worldData[key] as string);
-                        if (baseX >= glitchData.startX && baseX <= glitchData.endX &&
-                            baseY >= glitchData.startY && baseY <= glitchData.endY) {
-                            isInGlitch = true;
-                            break;
-                        }
-                    } catch (e) {
-                        // Skip invalid glitch data
-                    }
-                }
-            }
-
-            // Calculate which half of the cell we're in (only for glitched regions)
-            const snappedWorldPos: any = {
+            const snappedWorldPos = {
                 x: baseX,
                 y: baseY
             };
-
-            if (isInGlitch) {
-                const fractionalY = worldPos.y - baseY;
-                snappedWorldPos.subY = fractionalY >= 0.5 ? 0.5 : 0;
-            }
             setMouseWorldPos(snappedWorldPos);
 
             // Check if hovering over a link or task and update cursor
             let isOverLink = false;
             let isOverTask = false;
 
-            for (const key in engine.worldData) {
-                if (key.startsWith('link_')) {
-                    try {
-                        const linkData = JSON.parse(engine.worldData[key] as string);
-                        if (baseX >= linkData.startX && baseX <= linkData.endX &&
-                            baseY >= linkData.startY && baseY <= linkData.endY) {
-                            isOverLink = true;
-                            break;
-                        }
-                    } catch (e) {
-                        // Skip invalid link data
-                    }
-                } else if (key.startsWith('label_')) {
-                    const labelData = JSON.parse(engine.worldData[key] as string);
-                    if (labelData.type !== 'task') continue;
-                    try {
-                        const taskData = JSON.parse(engine.worldData[key] as string);
-                        if (baseX >= taskData.startX && baseX <= taskData.endX &&
-                            baseY >= taskData.startY && baseY <= taskData.endY) {
-                            isOverTask = true;
-                            break;
-                        }
-                    } catch (e) {
-                        // Skip invalid task data
+            // Check links
+            for (const { data: linkData } of getEntitiesByPrefix(engine.worldData, 'link_')) {
+                if (baseX >= linkData.startX && baseX <= linkData.endX &&
+                    baseY >= linkData.startY && baseY <= linkData.endY) {
+                    isOverLink = true;
+                    break;
+                }
+            }
+
+            // Check tasks
+            if (!isOverLink) {
+                for (const { data: labelData } of getEntitiesByPrefix(engine.worldData, 'label_')) {
+                    if (labelData.type === 'task' &&
+                        baseX >= labelData.startX && baseX <= labelData.endX &&
+                        baseY >= labelData.startY && baseY <= labelData.endY) {
+                        isOverTask = true;
+                        break;
                     }
                 }
             }
@@ -6627,22 +6414,6 @@ Camera & Viewport Controls:
                     }
                 } catch (e) {
                     // Invalid note data
-                }
-            } else if (resizeState.type === 'iframe' && resizeState.key) {
-                try {
-                    const iframeData = JSON.parse(engine.worldData[resizeState.key] as string);
-                    engine.setWorldData(prev => ({
-                        ...prev,
-                        [resizeState.key!]: JSON.stringify({
-                            ...iframeData,
-                            startX: newBounds.startX,
-                            startY: newBounds.startY,
-                            endX: newBounds.endX,
-                            endY: newBounds.endY
-                        })
-                    }));
-                } catch (e) {
-                    // Invalid iframe data
                 }
             } else if (resizeState.type === 'mail' && resizeState.key) {
                 try {
@@ -6911,36 +6682,6 @@ Camera & Viewport Controls:
                                 setSelectedNoteKey(newPlanKey);
                             } catch (e) {
                                 // Invalid note data, skip move
-                            }
-                        } else if (selectedIframeKey) {
-                            // Check if we're moving a selected iframe region
-                            try {
-                                const iframeData = JSON.parse(engine.worldData[selectedIframeKey] as string);
-
-                                // Create new iframe region with shifted coordinates
-                                const newIframeData = {
-                                    startX: iframeData.startX + distanceX,
-                                    endX: iframeData.endX + distanceX,
-                                    startY: iframeData.startY + distanceY,
-                                    endY: iframeData.endY + distanceY,
-                                    url: iframeData.url,
-                                    timestamp: Date.now()
-                                };
-
-                                // Delete old iframe and create new one with shifted position
-                                const newIframeKey = `iframe_${newIframeData.startX},${newIframeData.startY}_${Date.now()}`;
-
-                                engine.setWorldData(prev => {
-                                    const newData = { ...prev };
-                                    delete newData[selectedIframeKey];
-                                    newData[newIframeKey] = JSON.stringify(newIframeData);
-                                    return newData;
-                                });
-
-                                // Update selected key to the new iframe region
-                                setSelectedIframeKey(newIframeKey);
-                            } catch (e) {
-                                // Invalid iframe data, skip move
                             }
                         } else if (selectedMailKey) {
                             // Check if we're moving a selected mail region
@@ -7415,10 +7156,9 @@ Camera & Viewport Controls:
             const touchWorldY = Math.floor(worldPos.y);
             const touchWorldPos = { x: touchWorldX, y: touchWorldY };
 
-            // Check if touch is over a moveable object (selection, image, note, iframe, mail)
+            // Check if touch is over a moveable object (selection, image, note, mail)
             let isOverMoveableObject = false;
             let foundNoteKey: string | null = null;
-            let foundIframeKey: string | null = null;
             let foundMailKey: string | null = null;
 
             // Check for active selection
@@ -7441,58 +7181,19 @@ Camera & Viewport Controls:
 
             // Check for ANY note at this position (not just selected one)
             if (!isOverMoveableObject) {
-                for (const key in engine.worldData) {
-                    if (key.startsWith('note_')) {
-                        try {
-                            const noteData = JSON.parse(engine.worldData[key] as string);
-                            if (touchWorldX >= noteData.startX && touchWorldX <= noteData.endX &&
-                                touchWorldY >= noteData.startY && touchWorldY <= noteData.endY) {
-                                isOverMoveableObject = true;
-                                foundNoteKey = key;
-                                break;
-                            }
-                        } catch (e) {
-                            // Invalid note data
-                        }
-                    }
-                }
-            }
-
-            // Check for ANY iframe at this position
-            if (!isOverMoveableObject) {
-                for (const key in engine.worldData) {
-                    if (key.startsWith('iframe_')) {
-                        try {
-                            const iframeData = JSON.parse(engine.worldData[key] as string);
-                            if (touchWorldX >= iframeData.startX && touchWorldX <= iframeData.endX &&
-                                touchWorldY >= iframeData.startY && touchWorldY <= iframeData.endY) {
-                                isOverMoveableObject = true;
-                                foundIframeKey = key;
-                                break;
-                            }
-                        } catch (e) {
-                            // Invalid iframe data
-                        }
-                    }
+                const noteAtPos = findPlanAtPosition(touchWorldPos);
+                if (noteAtPos) {
+                    isOverMoveableObject = true;
+                    foundNoteKey = noteAtPos.key;
                 }
             }
 
             // Check for ANY mail at this position
             if (!isOverMoveableObject) {
-                for (const key in engine.worldData) {
-                    if (key.startsWith('mail_')) {
-                        try {
-                            const mailData = JSON.parse(engine.worldData[key] as string);
-                            if (touchWorldX >= mailData.startX && touchWorldX <= mailData.endX &&
-                                touchWorldY >= mailData.startY && touchWorldY <= mailData.endY) {
-                                isOverMoveableObject = true;
-                                foundMailKey = key;
-                                break;
-                            }
-                        } catch (e) {
-                            // Invalid mail data
-                        }
-                    }
+                const mailAtPos = findMailAtPosition(touchWorldPos);
+                if (mailAtPos) {
+                    isOverMoveableObject = true;
+                    foundMailKey = mailAtPos.key;
                 }
             }
 
@@ -7502,18 +7203,11 @@ Camera & Viewport Controls:
                     // Auto-select the object under the touch
                     if (foundNoteKey) {
                         setSelectedNoteKey(foundNoteKey);
-                        setSelectedIframeKey(null);
-                        setSelectedMailKey(null);
-                        setSelectedPatternKey(null);
-                    } else if (foundIframeKey) {
-                        setSelectedIframeKey(foundIframeKey);
-                        setSelectedNoteKey(null);
                         setSelectedMailKey(null);
                         setSelectedPatternKey(null);
                     } else if (foundMailKey) {
                         setSelectedMailKey(foundMailKey);
                         setSelectedNoteKey(null);
-                        setSelectedIframeKey(null);
                         setSelectedPatternKey(null);
                     }
 
@@ -7681,22 +7375,6 @@ Camera & Viewport Controls:
                     }
                 } catch (e) {
                     // Invalid note data
-                }
-            } else if (resizeState.type === 'iframe' && resizeState.key) {
-                try {
-                    const iframeData = JSON.parse(engine.worldData[resizeState.key] as string);
-                    engine.setWorldData(prev => ({
-                        ...prev,
-                        [resizeState.key!]: JSON.stringify({
-                            ...iframeData,
-                            startX: newBounds.startX,
-                            startY: newBounds.startY,
-                            endX: newBounds.endX,
-                            endY: newBounds.endY
-                        })
-                    }));
-                } catch (e) {
-                    // Invalid iframe data
                 }
             } else if (resizeState.type === 'mail' && resizeState.key) {
                 try {
@@ -8038,31 +7716,6 @@ Camera & Viewport Controls:
                         } catch (e) {
                             // Invalid note data
                         }
-                    } else if (selectedIframeKey) {
-                        // Move iframe
-                        try {
-                            const iframeData = JSON.parse(engine.worldData[selectedIframeKey] as string);
-                            const newIframeData = {
-                                startX: iframeData.startX + distanceX,
-                                endX: iframeData.endX + distanceX,
-                                startY: iframeData.startY + distanceY,
-                                endY: iframeData.endY + distanceY,
-                                url: iframeData.url,
-                                timestamp: Date.now()
-                            };
-
-                            const newIframeKey = `iframe_${newIframeData.startX},${newIframeData.startY}_${Date.now()}`;
-                            engine.setWorldData(prev => {
-                                const newData = { ...prev };
-                                delete newData[selectedIframeKey];
-                                newData[newIframeKey] = JSON.stringify(newIframeData);
-                                return newData;
-                            });
-
-                            setSelectedIframeKey(newIframeKey);
-                        } catch (e) {
-                            // Invalid iframe data
-                        }
                     } else if (selectedMailKey) {
                         // Move mail
                         try {
@@ -8329,7 +7982,7 @@ Camera & Viewport Controls:
 
         touchStartRef.current = null;
         touchHasMovedRef.current = false;
-    }, [engine, handleCanvasClick, findImageAtPosition, selectedNoteKey, setSelectedNoteKey, selectedIframeKey, setSelectedIframeKey, selectedMailKey, setSelectedMailKey]);
+    }, [engine, handleCanvasClick, findImageAtPosition, selectedNoteKey, setSelectedNoteKey, selectedMailKey, setSelectedMailKey]);
 
     // === IME Composition Handlers ===
     const handleCompositionStart = useCallback((e: React.CompositionEvent<HTMLCanvasElement>) => {
@@ -8525,34 +8178,6 @@ Camera & Viewport Controls:
         // Patterns cannot be deleted directly with backspace
         // They are deleted automatically when all their notes are removed
 
-        // Handle iframe region-specific keys before passing to engine
-        if (selectedIframeKey && e.key === 'Backspace') {
-            // Check if user is actively typing (has text content at or before cursor)
-            // If so, let backspace delete text instead of the iframe
-            const cursorKey = `${engine.cursorPos.x},${engine.cursorPos.y}`;
-            const beforeCursorKey = `${engine.cursorPos.x - 1},${engine.cursorPos.y}`;
-            const hasTextAtCursor = engine.worldData[cursorKey] && typeof engine.worldData[cursorKey] === 'string';
-            const hasTextBeforeCursor = engine.worldData[beforeCursorKey] && typeof engine.worldData[beforeCursorKey] === 'string';
-
-            if (hasTextAtCursor || hasTextBeforeCursor) {
-                // User is typing, let engine handle backspace normally
-                return;
-            }
-
-            // No text content - safe to delete the iframe
-            // Delete the selected iframe region
-            engine.setWorldData(prev => {
-                const newData = { ...prev };
-                delete newData[selectedIframeKey];
-                return newData;
-            });
-            setSelectedIframeKey(null); // Clear selection
-            setActiveIframeKey(null); // Clear active state as well
-            e.preventDefault();
-            e.stopPropagation();
-            return;
-        }
-
         // Handle mail region-specific keys before passing to engine
         if (selectedMailKey && e.key === 'Backspace') {
             // Check if user is actively typing (has text content at or before cursor)
@@ -8589,7 +8214,7 @@ Camera & Viewport Controls:
             e.preventDefault();
             e.stopPropagation();
         }
-    }, [engine, handleKeyDownFromController, selectedImageKey, selectedNoteKey, selectedPatternKey, selectedIframeKey, selectedMailKey, hostDialogue]);
+    }, [engine, handleKeyDownFromController, selectedImageKey, selectedNoteKey, selectedPatternKey, selectedMailKey, hostDialogue]);
 
     const hiddenInputRef = useRef<HTMLInputElement>(null);
 
@@ -8726,66 +8351,7 @@ Camera & Viewport Controls:
                     </div>
                 );
             })()} */}
-            {/* Render iframes for iframe regions (Unified) */}
-            {(() => {
-                const iframes: React.JSX.Element[] = [];
 
-                for (const key in engine.worldData) {
-                    if (key.startsWith('iframe_')) {
-                        const note = parseNoteFromWorldData(key, engine.worldData[key]);
-                        if (note && note.iframeUrl) {
-                            const { startX, endX, startY, endY } = note;
-                            const url = note.iframeUrl;
-
-                            // Convert world coordinates to screen coordinates
-                            const topLeft = engine.worldToScreen(startX, startY, engine.zoomLevel, engine.viewOffset);
-                            const bottomRight = engine.worldToScreen(endX + 1, endY + 1, engine.zoomLevel, engine.viewOffset);
-
-                            const left = topLeft.x;
-                            const top = topLeft.y;
-                            const width = bottomRight.x - topLeft.x;
-                            const height = bottomRight.y - topLeft.y;
-
-                            // Only render if visible on screen
-                            const rect = canvasRef.current?.getBoundingClientRect();
-                            if (rect &&
-                                left < rect.width &&
-                                top < rect.height &&
-                                left + width > 0 &&
-                                top + height > 0) {
-
-                                const isActive = activeIframeKey === key;
-                                const isSelected = selectedIframeKey === key;
-
-                                iframes.push(
-                                    <iframe
-                                        key={key}
-                                        src={url}
-                                        style={{
-                                            position: 'absolute',
-                                            left: `${left}px`,
-                                            top: `${top}px`,
-                                            width: `${width}px`,
-                                            height: `${height}px`,
-                                            // border: isSelected
-                                            //     ? '5px solid rgba(100, 150, 255, 0.8)'
-                                            //     : '5px solid rgba(100, 100, 100, 0.3)',
-                                            borderRadius: '2px',
-                                            backgroundColor: '#fff',
-                                            zIndex: 10,
-                                            pointerEvents: isActive ? 'auto' : 'none'
-                                        }}
-                                        sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
-                                        referrerPolicy="no-referrer"
-                                    />
-                                );
-                            }
-                        }
-                    }
-                }
-
-                return iframes.length > 0 ? <>{iframes}</> : null;
-            })()}
             {/* Hidden input for IME composition and mobile keyboard - only in write mode OR host mode */}
             {(!engine.isReadOnly || hostDialogue.isHostActive) && (
                 <input
