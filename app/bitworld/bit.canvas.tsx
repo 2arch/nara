@@ -3685,354 +3685,11 @@ Camera & Viewport Controls:
         }
 
         // === Render Command Data ===
-        // TODO: MOVE TO LAYER 3: UI (after notes/sprites) for proper z-order
-        // Currently renders here (LAYER 1) - needs to move to line ~5629
-        if (engine.commandState.isActive) {
-            // First, draw background for selected command (only if user has navigated)
-            if (engine.commandState.hasNavigated) {
-                const selectedCommandY = engine.commandState.commandStartPos.y + GRID_CELL_SPAN + (engine.commandState.selectedIndex * GRID_CELL_SPAN);
-                const selectedCommand = engine.commandState.matchedCommands[engine.commandState.selectedIndex];
-                if (selectedCommand) {
-                    const selectedBottomScreenPos = engine.worldToScreen(engine.commandState.commandStartPos.x, selectedCommandY, currentZoom, currentOffset);
-                    const selectedTopScreenPos = engine.worldToScreen(engine.commandState.commandStartPos.x, selectedCommandY - 1, currentZoom, currentOffset);
-                    if (selectedBottomScreenPos.x > -effectiveCharWidth * 2 && selectedBottomScreenPos.x < cssWidth + effectiveCharWidth && selectedTopScreenPos.y > -effectiveCharHeight * 2 && selectedBottomScreenPos.y < cssHeight + effectiveCharHeight) {
-                        ctx.fillStyle = 'rgba(255, 107, 53, 0.3)'; // Highlight background
-                        ctx.fillRect(selectedTopScreenPos.x, selectedTopScreenPos.y, selectedCommand.length * effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-                    }
-                }
-            }
-        }
+        // MOVED TO LAYER 3: UI (line ~5301) - Command menu now renders after notes/sprites
+        // This section removed - command menu rendering happens in LAYER 3 for proper z-order
 
-        for (const key in engine.commandData) {
-            const [xStr, yStr] = key.split(',');
-            const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
+        // Removed old command menu code - now in LAYER 3: UI (line ~5301)
 
-            // Skip positions that are currently being used for IME composition preview in command mode
-            if (engine.isComposing && engine.compositionStartPos && engine.compositionText && engine.commandState.isActive) {
-                const compStartX = engine.compositionStartPos.x;
-                const compEndX = compStartX + engine.compositionText.length - 1;
-                const compY = engine.compositionStartPos.y;
-                if (worldY === compY && worldX >= compStartX && worldX <= compEndX) {
-                    continue;
-                }
-            }
-
-            if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                const charData = engine.commandData[key];
-                
-                // Skip image data - only process text characters
-                if (engine.isImageData(charData)) {
-                    continue;
-                }
-                
-                const char = typeof charData === 'string' ? charData : charData.char;
-                const charStyle = typeof charData === 'object' && 'style' in charData ? charData.style : undefined;
-                const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
-                if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth && topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
-                    // Check if this is a category label (special background marker)
-                    const isCategoryLabel = charStyle?.background === 'category-label';
-
-                    // Get command text and check if it's a color command
-                    const suggestionIndex = (worldY - engine.commandState.commandStartPos.y - GRID_CELL_SPAN) / GRID_CELL_SPAN;
-                    let highlightColor: string | null = null;
-                    let commandText = '';
-
-                    if (suggestionIndex >= 0 && suggestionIndex < engine.commandState.matchedCommands.length) {
-                        commandText = engine.commandState.matchedCommands[suggestionIndex] || '';
-
-                        // Extract color from bg/text commands
-                        if (commandText.startsWith('bg ')) {
-                            const parts = commandText.split(' ');
-                            const colorArg = parts[1];
-                            if (colorArg && !['clear', 'live', 'web'].includes(colorArg)) {
-                                highlightColor = COLOR_MAP[colorArg.toLowerCase()] || (colorArg.startsWith('#') ? colorArg : null);
-                            }
-                        } else if (commandText.startsWith('text ')) {
-                            const parts = commandText.split(' ');
-                            const colorArg = parts[parts[1] === '--g' ? 2 : 1];
-                            if (colorArg && colorArg !== '--g') {
-                                highlightColor = COLOR_MAP[colorArg.toLowerCase()] || (colorArg.startsWith('#') ? colorArg : null);
-                            }
-                        }
-                    }
-
-                    // Check if mouse is hovering over this command line
-                    let isHovered = false;
-                    if (mouseWorldPos && worldY > engine.commandState.commandStartPos.y) {
-                        if (isCategoryLabel) {
-                            // For category labels, highlight if hovering over any command in this category
-                            const categoryName = charStyle?.color; // Category name is stored in style.color
-                            const hoveredIndex = Math.floor(mouseWorldPos.y) - engine.commandState.commandStartPos.y - 1;
-                            if (hoveredIndex >= 0 && hoveredIndex < engine.commandState.matchedCommands.length) {
-                                const hoveredCommand = engine.commandState.matchedCommands[hoveredIndex];
-                                // Check if hovered command belongs to this category
-                                isHovered = (categoryName && COMMAND_CATEGORIES[categoryName as keyof typeof COMMAND_CATEGORIES]?.includes(hoveredCommand)) || false;
-                            }
-                        } else {
-                            // For regular commands, just check Y coordinate
-                            isHovered = Math.floor(mouseWorldPos.y) === worldY;
-                        }
-                    }
-
-                    // Draw background for command data
-                    if (isCategoryLabel) {
-                        // Category label - flip colors with alpha matching command suggestions
-                        // Special handling for stream mode
-                        const useStreamMode = engine.backgroundMode === 'stream' && !engine.backgroundColor;
-
-                        const bgHex = useStreamMode ? '000000' : (engine.backgroundColor || '#FFFFFF').replace('#', '');
-                        const bgR = parseInt(bgHex.substring(0, 2), 16);
-                        const bgG = parseInt(bgHex.substring(2, 4), 16);
-                        const bgB = parseInt(bgHex.substring(4, 6), 16);
-
-                        const textHex = useStreamMode ? 'FFFFFF' : engine.textColor.replace('#', '');
-                        const textR = parseInt(textHex.substring(0, 2), 16);
-                        const textG = parseInt(textHex.substring(2, 4), 16);
-                        const textB = parseInt(textHex.substring(4, 6), 16);
-
-                        // Check if this category label should be highlighted based on selected command
-                        let isSelected = false;
-                        if (engine.commandState.isActive && engine.commandState.hasNavigated && engine.commandState.selectedIndex >= 0) {
-                            const categoryName = charStyle?.color; // Category name is stored in style.color
-                            const selectedCommand = engine.commandState.matchedCommands[engine.commandState.selectedIndex];
-                            if (selectedCommand && categoryName) {
-                                // Check if selected command belongs to this category
-                                isSelected = COMMAND_CATEGORIES[categoryName]?.includes(selectedCommand) || false;
-                            }
-                        }
-
-                        if (isHovered) {
-                            // Hovered category label
-                            if (useStreamMode) {
-                                // Stream mode - no background, just white text
-                                ctx.fillStyle = '#FFFFFF';
-                            } else {
-                                // Normal mode - use background
-                                ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
-                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-                                ctx.fillStyle = engine.textColor;
-                            }
-                        } else if (isSelected) {
-                            // Selected category label
-                            if (useStreamMode) {
-                                // Stream mode - no background, just white text
-                                ctx.fillStyle = '#FFFFFF';
-                            } else {
-                                // Normal mode - use background
-                                ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.8)`;
-                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-                                ctx.fillStyle = engine.textColor;
-                            }
-                        } else {
-                            // Other category labels
-                            if (useStreamMode) {
-                                // Stream mode - no background, just white text with opacity
-                                ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-                            } else {
-                                // Normal mode - use background
-                                ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.6)`;
-                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-                                ctx.fillStyle = `rgba(${textR}, ${textG}, ${textB}, 0.6)`;
-                            }
-                        }
-                    } else if (worldY === engine.commandState.commandStartPos.y) {
-                        // Command line (typed command) - use text color at full opacity
-                        // Special case: for stream/webcam mode with no background color, don't draw background box
-                        if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
-                            // No background - just white text
-                            ctx.fillStyle = '#FFFFFF';
-                        } else {
-                            ctx.fillStyle = engine.textColor;
-                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-                            // Text uses background color
-                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
-                        }
-                    } else if (isHovered) {
-                        // Hovered suggestion - use swatch color if available, otherwise text color
-                        if (highlightColor) {
-                            ctx.fillStyle = highlightColor;
-                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-                            // Text uses contrasting color (white or black based on luminance)
-                            const hex = highlightColor.replace('#', '');
-                            const r = parseInt(hex.substring(0, 2), 16);
-                            const g = parseInt(hex.substring(2, 4), 16);
-                            const b = parseInt(hex.substring(4, 6), 16);
-                            const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-                            ctx.fillStyle = luminance > 0.5 ? '#000000' : '#FFFFFF';
-                        } else if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
-                            // Stream mode - no background, just white text
-                            ctx.fillStyle = '#FFFFFF';
-                        } else {
-                            const hex = engine.textColor.replace('#', '');
-                            const r = parseInt(hex.substring(0, 2), 16);
-                            const g = parseInt(hex.substring(2, 4), 16);
-                            const b = parseInt(hex.substring(4, 6), 16);
-                            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.9)`;
-                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
-                        }
-                    } else if (engine.commandState.isActive && engine.commandState.hasNavigated && worldY === engine.commandState.commandStartPos.y + GRID_CELL_SPAN + (engine.commandState.selectedIndex * GRID_CELL_SPAN)) {
-                        // Selected suggestion - use swatch color at 80% opacity if available
-                        if (highlightColor) {
-                            const hex = highlightColor.replace('#', '');
-                            const r = parseInt(hex.substring(0, 2), 16);
-                            const g = parseInt(hex.substring(2, 4), 16);
-                            const b = parseInt(hex.substring(4, 6), 16);
-                            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.8)`;
-                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-                            const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-                            ctx.fillStyle = luminance > 0.5 ? '#000000' : '#FFFFFF';
-                        } else if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
-                            // Stream mode - no background, just white text
-                            ctx.fillStyle = '#FFFFFF';
-                        } else {
-                            const hex = engine.textColor.replace('#', '');
-                            const r = parseInt(hex.substring(0, 2), 16);
-                            const g = parseInt(hex.substring(2, 4), 16);
-                            const b = parseInt(hex.substring(4, 6), 16);
-                            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.8)`;
-                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
-                        }
-                    } else {
-                        // Other suggestions - use text color at 60% opacity
-                        if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
-                            // Stream mode - no background, just white text with opacity
-                            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-                        } else {
-                            const hex = engine.textColor.replace('#', '');
-                            const r = parseInt(hex.substring(0, 2), 16);
-                            const g = parseInt(hex.substring(2, 4), 16);
-                            const b = parseInt(hex.substring(4, 6), 16);
-                            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.6)`;
-                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-                            // Text uses background color at higher opacity for readability
-                            const bgHex = (engine.backgroundColor || '#FFFFFF').replace('#', '');
-                            const bgR = parseInt(bgHex.substring(0, 2), 16);
-                            const bgG = parseInt(bgHex.substring(2, 4), 16);
-                            const bgB = parseInt(bgHex.substring(4, 6), 16);
-                            ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
-                        }
-                    }
-
-                    // Draw text (only if not a space)
-                    if (char && char.trim() !== '') {
-                        renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
-                    }
-
-                    // Draw color swatch for color-related commands (only on first character of suggestion line)
-                    if (worldX === engine.commandState.commandStartPos.x && worldY > engine.commandState.commandStartPos.y) {
-                        // Get the full command text for this line
-                        const suggestionIndex = (worldY - engine.commandState.commandStartPos.y - GRID_CELL_SPAN) / GRID_CELL_SPAN;
-                        if (suggestionIndex >= 0 && suggestionIndex < engine.commandState.matchedCommands.length) {
-                            const commandText = engine.commandState.matchedCommands[suggestionIndex] || '';
-
-
-                            let swatchColor: string | null = null;
-
-                            // Check if this is a bg command with a color
-                            if (commandText.startsWith('bg ')) {
-                                const parts = commandText.split(' ');
-                                const colorArg = parts[1];
-
-                                // Skip 'clear', 'live', 'web'
-                                if (colorArg && !['clear', 'live', 'web'].includes(colorArg)) {
-                                    swatchColor = COLOR_MAP[colorArg.toLowerCase()] || (colorArg.startsWith('#') ? colorArg : null);
-                                }
-                            }
-                            // Check if this is a text command with a color
-                            else if (commandText.startsWith('text ')) {
-                                const parts = commandText.split(' ');
-                                let colorArg: string | undefined;
-
-                                // Handle both /text [color] and /text --g [color]
-                                if (parts[1] === '--g' && parts.length > 2) {
-                                    colorArg = parts[2];
-                                } else if (parts[1] && parts[1] !== '--g') {
-                                    colorArg = parts[1];
-                                }
-
-                                if (colorArg) {
-                                    swatchColor = COLOR_MAP[colorArg.toLowerCase()] || (colorArg.startsWith('#') ? colorArg : null);
-                                }
-                            }
-
-                            if (swatchColor) {
-                                // Draw full-sized color cell to the left of the command
-                                const cellX = topScreenPos.x - effectiveCharWidth;
-                                const cellY = topScreenPos.y;
-
-                                ctx.fillStyle = swatchColor;
-                                ctx.fillRect(cellX, cellY, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-                            }
-
-                            // In help mode, show help text on hover (styled like category labels)
-                            if (engine.commandState.helpMode && isHovered) {
-                                const baseCommand = commandText.split(' ')[0];
-                                const helpText = COMMAND_HELP[baseCommand];
-                                if (helpText) {
-                                    // Find the longest command to determine consistent help text start position
-                                    const longestCommandLength = Math.max(...engine.commandState.matchedCommands.map(cmd => cmd.length));
-                                    const helpStartX = engine.commandState.commandStartPos.x + longestCommandLength + 1; // +3 for 2 spaces gap
-                                    const maxWrapWidth = 60; // Maximum width for help text
-
-                                    // Get background and text colors for category-label style
-                                    const bgHex = (engine.backgroundColor || '#FFFFFF').replace('#', '');
-                                    const bgR = parseInt(bgHex.substring(0, 2), 16);
-                                    const bgG = parseInt(bgHex.substring(2, 4), 16);
-                                    const bgB = parseInt(bgHex.substring(4, 6), 16);
-
-                                    // Word wrap the help text
-                                    const wrapText = (text: string, maxWidth: number): string[] => {
-                                        const words = text.split(' ');
-                                        const lines: string[] = [];
-                                        let currentLine = '';
-
-                                        for (const word of words) {
-                                            const testLine = currentLine ? `${currentLine} ${word}` : word;
-                                            if (testLine.length <= maxWidth) {
-                                                currentLine = testLine;
-                                            } else {
-                                                if (currentLine) lines.push(currentLine);
-                                                currentLine = word;
-                                            }
-                                        }
-                                        if (currentLine) lines.push(currentLine);
-                                        return lines;
-                                    };
-
-                                    const wrappedLines = wrapText(helpText, maxWrapWidth);
-
-                                    // Draw wrapped help text with category-label styling
-                                    wrappedLines.forEach((line, lineIndex) => {
-                                        const helpY = worldY + lineIndex;
-                                        for (let i = 0; i < line.length; i++) {
-                                            const helpWorldX = helpStartX + i;
-                                            const helpBottomScreenPos = engine.worldToScreen(helpWorldX, helpY, currentZoom, currentOffset);
-                                            const helpTopScreenPos = engine.worldToScreen(helpWorldX, helpY - 1, currentZoom, currentOffset);
-
-                                            if (helpBottomScreenPos.x > -effectiveCharWidth * 2 && helpBottomScreenPos.x < cssWidth + effectiveCharWidth &&
-                                                helpTopScreenPos.y > -effectiveCharHeight * 2 && helpBottomScreenPos.y < cssHeight + effectiveCharHeight) {
-                                                // Draw background (90% opacity like hovered category labels)
-                                                ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
-                                                ctx.fillRect(helpTopScreenPos.x, helpTopScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-
-                                                // Draw text in text color
-                                                ctx.fillStyle = engine.textColor;
-                                                if (line[i] && line[i].trim() !== '') {
-                                                    renderText(ctx, line[i], helpTopScreenPos.x, helpTopScreenPos.y + verticalTextOffset);
-                                                }
-                                            }
-                                        }
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
         // === Render IME Composition Preview for Command Mode ===
         if (engine.isComposing && engine.compositionText && engine.compositionStartPos && engine.commandState.isActive) {
@@ -5647,6 +5304,336 @@ Camera & Viewport Controls:
         }
 
         // NOTE: Full command menu rendering loop continues after selection highlight
+        for (const key in engine.commandData) {
+            const [xStr, yStr] = key.split(',');
+            const worldX = parseInt(xStr, 10); const worldY = parseInt(yStr, 10);
+
+            // Skip positions that are currently being used for IME composition preview in command mode
+            if (engine.isComposing && engine.compositionStartPos && engine.compositionText && engine.commandState.isActive) {
+                const compStartX = engine.compositionStartPos.x;
+                const compEndX = compStartX + engine.compositionText.length - 1;
+                const compY = engine.compositionStartPos.y;
+                if (worldY === compY && worldX >= compStartX && worldX <= compEndX) {
+                    continue;
+                }
+            }
+
+            if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                const charData = engine.commandData[key];
+                
+                // Skip image data - only process text characters
+                if (engine.isImageData(charData)) {
+                    continue;
+                }
+                
+                const char = typeof charData === 'string' ? charData : charData.char;
+                const charStyle = typeof charData === 'object' && 'style' in charData ? charData.style : undefined;
+                const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+                if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth && topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
+                    // Check if this is a category label (special background marker)
+                    const isCategoryLabel = charStyle?.background === 'category-label';
+
+                    // Get command text and check if it's a color command
+                    const suggestionIndex = (worldY - engine.commandState.commandStartPos.y - GRID_CELL_SPAN) / GRID_CELL_SPAN;
+                    let highlightColor: string | null = null;
+                    let commandText = '';
+
+                    if (suggestionIndex >= 0 && suggestionIndex < engine.commandState.matchedCommands.length) {
+                        commandText = engine.commandState.matchedCommands[suggestionIndex] || '';
+
+                        // Extract color from bg/text commands
+                        if (commandText.startsWith('bg ')) {
+                            const parts = commandText.split(' ');
+                            const colorArg = parts[1];
+                            if (colorArg && !['clear', 'live', 'web'].includes(colorArg)) {
+                                highlightColor = COLOR_MAP[colorArg.toLowerCase()] || (colorArg.startsWith('#') ? colorArg : null);
+                            }
+                        } else if (commandText.startsWith('text ')) {
+                            const parts = commandText.split(' ');
+                            const colorArg = parts[parts[1] === '--g' ? 2 : 1];
+                            if (colorArg && colorArg !== '--g') {
+                                highlightColor = COLOR_MAP[colorArg.toLowerCase()] || (colorArg.startsWith('#') ? colorArg : null);
+                            }
+                        }
+                    }
+
+                    // Check if mouse is hovering over this command line
+                    let isHovered = false;
+                    if (mouseWorldPos && worldY > engine.commandState.commandStartPos.y) {
+                        if (isCategoryLabel) {
+                            // For category labels, highlight if hovering over any command in this category
+                            const categoryName = charStyle?.color; // Category name is stored in style.color
+                            const hoveredIndex = Math.floor(mouseWorldPos.y) - engine.commandState.commandStartPos.y - 1;
+                            if (hoveredIndex >= 0 && hoveredIndex < engine.commandState.matchedCommands.length) {
+                                const hoveredCommand = engine.commandState.matchedCommands[hoveredIndex];
+                                // Check if hovered command belongs to this category
+                                isHovered = (categoryName && COMMAND_CATEGORIES[categoryName as keyof typeof COMMAND_CATEGORIES]?.includes(hoveredCommand)) || false;
+                            }
+                        } else {
+                            // For regular commands, just check Y coordinate
+                            isHovered = Math.floor(mouseWorldPos.y) === worldY;
+                        }
+                    }
+
+                    // Draw background for command data
+                    if (isCategoryLabel) {
+                        // Category label - flip colors with alpha matching command suggestions
+                        // Special handling for stream mode
+                        const useStreamMode = engine.backgroundMode === 'stream' && !engine.backgroundColor;
+
+                        const bgHex = useStreamMode ? '000000' : (engine.backgroundColor || '#FFFFFF').replace('#', '');
+                        const bgR = parseInt(bgHex.substring(0, 2), 16);
+                        const bgG = parseInt(bgHex.substring(2, 4), 16);
+                        const bgB = parseInt(bgHex.substring(4, 6), 16);
+
+                        const textHex = useStreamMode ? 'FFFFFF' : engine.textColor.replace('#', '');
+                        const textR = parseInt(textHex.substring(0, 2), 16);
+                        const textG = parseInt(textHex.substring(2, 4), 16);
+                        const textB = parseInt(textHex.substring(4, 6), 16);
+
+                        // Check if this category label should be highlighted based on selected command
+                        let isSelected = false;
+                        if (engine.commandState.isActive && engine.commandState.hasNavigated && engine.commandState.selectedIndex >= 0) {
+                            const categoryName = charStyle?.color; // Category name is stored in style.color
+                            const selectedCommand = engine.commandState.matchedCommands[engine.commandState.selectedIndex];
+                            if (selectedCommand && categoryName) {
+                                // Check if selected command belongs to this category
+                                isSelected = COMMAND_CATEGORIES[categoryName]?.includes(selectedCommand) || false;
+                            }
+                        }
+
+                        if (isHovered) {
+                            // Hovered category label
+                            if (useStreamMode) {
+                                // Stream mode - no background, just white text
+                                ctx.fillStyle = '#FFFFFF';
+                            } else {
+                                // Normal mode - use background
+                                ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
+                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                                ctx.fillStyle = engine.textColor;
+                            }
+                        } else if (isSelected) {
+                            // Selected category label
+                            if (useStreamMode) {
+                                // Stream mode - no background, just white text
+                                ctx.fillStyle = '#FFFFFF';
+                            } else {
+                                // Normal mode - use background
+                                ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.8)`;
+                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                                ctx.fillStyle = engine.textColor;
+                            }
+                        } else {
+                            // Other category labels
+                            if (useStreamMode) {
+                                // Stream mode - no background, just white text with opacity
+                                ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+                            } else {
+                                // Normal mode - use background
+                                ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.6)`;
+                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                                ctx.fillStyle = `rgba(${textR}, ${textG}, ${textB}, 0.6)`;
+                            }
+                        }
+                    } else if (worldY === engine.commandState.commandStartPos.y) {
+                        // Command line (typed command) - use text color at full opacity
+                        // Special case: for stream/webcam mode with no background color, don't draw background box
+                        if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
+                            // No background - just white text
+                            ctx.fillStyle = '#FFFFFF';
+                        } else {
+                            ctx.fillStyle = engine.textColor;
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                            // Text uses background color
+                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                        }
+                    } else if (isHovered) {
+                        // Hovered suggestion - use swatch color if available, otherwise text color
+                        if (highlightColor) {
+                            ctx.fillStyle = highlightColor;
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                            // Text uses contrasting color (white or black based on luminance)
+                            const hex = highlightColor.replace('#', '');
+                            const r = parseInt(hex.substring(0, 2), 16);
+                            const g = parseInt(hex.substring(2, 4), 16);
+                            const b = parseInt(hex.substring(4, 6), 16);
+                            const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+                            ctx.fillStyle = luminance > 0.5 ? '#000000' : '#FFFFFF';
+                        } else if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
+                            // Stream mode - no background, just white text
+                            ctx.fillStyle = '#FFFFFF';
+                        } else {
+                            const hex = engine.textColor.replace('#', '');
+                            const r = parseInt(hex.substring(0, 2), 16);
+                            const g = parseInt(hex.substring(2, 4), 16);
+                            const b = parseInt(hex.substring(4, 6), 16);
+                            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.9)`;
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                        }
+                    } else if (engine.commandState.isActive && engine.commandState.hasNavigated && worldY === engine.commandState.commandStartPos.y + GRID_CELL_SPAN + (engine.commandState.selectedIndex * GRID_CELL_SPAN)) {
+                        // Selected suggestion - use swatch color at 80% opacity if available
+                        if (highlightColor) {
+                            const hex = highlightColor.replace('#', '');
+                            const r = parseInt(hex.substring(0, 2), 16);
+                            const g = parseInt(hex.substring(2, 4), 16);
+                            const b = parseInt(hex.substring(4, 6), 16);
+                            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.8)`;
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                            const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+                            ctx.fillStyle = luminance > 0.5 ? '#000000' : '#FFFFFF';
+                        } else if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
+                            // Stream mode - no background, just white text
+                            ctx.fillStyle = '#FFFFFF';
+                        } else {
+                            const hex = engine.textColor.replace('#', '');
+                            const r = parseInt(hex.substring(0, 2), 16);
+                            const g = parseInt(hex.substring(2, 4), 16);
+                            const b = parseInt(hex.substring(4, 6), 16);
+                            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.8)`;
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                        }
+                    } else {
+                        // Other suggestions - use text color at 60% opacity
+                        if (engine.backgroundMode === 'stream' && !engine.backgroundColor) {
+                            // Stream mode - no background, just white text with opacity
+                            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                        } else {
+                            const hex = engine.textColor.replace('#', '');
+                            const r = parseInt(hex.substring(0, 2), 16);
+                            const g = parseInt(hex.substring(2, 4), 16);
+                            const b = parseInt(hex.substring(4, 6), 16);
+                            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.6)`;
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                            // Text uses background color at higher opacity for readability
+                            const bgHex = (engine.backgroundColor || '#FFFFFF').replace('#', '');
+                            const bgR = parseInt(bgHex.substring(0, 2), 16);
+                            const bgG = parseInt(bgHex.substring(2, 4), 16);
+                            const bgB = parseInt(bgHex.substring(4, 6), 16);
+                            ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
+                        }
+                    }
+
+                    // Draw text (only if not a space)
+                    if (char && char.trim() !== '') {
+                        renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
+                    }
+
+                    // Draw color swatch for color-related commands (only on first character of suggestion line)
+                    if (worldX === engine.commandState.commandStartPos.x && worldY > engine.commandState.commandStartPos.y) {
+                        // Get the full command text for this line
+                        const suggestionIndex = (worldY - engine.commandState.commandStartPos.y - GRID_CELL_SPAN) / GRID_CELL_SPAN;
+                        if (suggestionIndex >= 0 && suggestionIndex < engine.commandState.matchedCommands.length) {
+                            const commandText = engine.commandState.matchedCommands[suggestionIndex] || '';
+
+
+                            let swatchColor: string | null = null;
+
+                            // Check if this is a bg command with a color
+                            if (commandText.startsWith('bg ')) {
+                                const parts = commandText.split(' ');
+                                const colorArg = parts[1];
+
+                                // Skip 'clear', 'live', 'web'
+                                if (colorArg && !['clear', 'live', 'web'].includes(colorArg)) {
+                                    swatchColor = COLOR_MAP[colorArg.toLowerCase()] || (colorArg.startsWith('#') ? colorArg : null);
+                                }
+                            }
+                            // Check if this is a text command with a color
+                            else if (commandText.startsWith('text ')) {
+                                const parts = commandText.split(' ');
+                                let colorArg: string | undefined;
+
+                                // Handle both /text [color] and /text --g [color]
+                                if (parts[1] === '--g' && parts.length > 2) {
+                                    colorArg = parts[2];
+                                } else if (parts[1] && parts[1] !== '--g') {
+                                    colorArg = parts[1];
+                                }
+
+                                if (colorArg) {
+                                    swatchColor = COLOR_MAP[colorArg.toLowerCase()] || (colorArg.startsWith('#') ? colorArg : null);
+                                }
+                            }
+
+                            if (swatchColor) {
+                                // Draw full-sized color cell to the left of the command
+                                const cellX = topScreenPos.x - effectiveCharWidth;
+                                const cellY = topScreenPos.y;
+
+                                ctx.fillStyle = swatchColor;
+                                ctx.fillRect(cellX, cellY, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                            }
+
+                            // In help mode, show help text on hover (styled like category labels)
+                            if (engine.commandState.helpMode && isHovered) {
+                                const baseCommand = commandText.split(' ')[0];
+                                const helpText = COMMAND_HELP[baseCommand];
+                                if (helpText) {
+                                    // Find the longest command to determine consistent help text start position
+                                    const longestCommandLength = Math.max(...engine.commandState.matchedCommands.map(cmd => cmd.length));
+                                    const helpStartX = engine.commandState.commandStartPos.x + longestCommandLength + 1; // +3 for 2 spaces gap
+                                    const maxWrapWidth = 60; // Maximum width for help text
+
+                                    // Get background and text colors for category-label style
+                                    const bgHex = (engine.backgroundColor || '#FFFFFF').replace('#', '');
+                                    const bgR = parseInt(bgHex.substring(0, 2), 16);
+                                    const bgG = parseInt(bgHex.substring(2, 4), 16);
+                                    const bgB = parseInt(bgHex.substring(4, 6), 16);
+
+                                    // Word wrap the help text
+                                    const wrapText = (text: string, maxWidth: number): string[] => {
+                                        const words = text.split(' ');
+                                        const lines: string[] = [];
+                                        let currentLine = '';
+
+                                        for (const word of words) {
+                                            const testLine = currentLine ? `${currentLine} ${word}` : word;
+                                            if (testLine.length <= maxWidth) {
+                                                currentLine = testLine;
+                                            } else {
+                                                if (currentLine) lines.push(currentLine);
+                                                currentLine = word;
+                                            }
+                                        }
+                                        if (currentLine) lines.push(currentLine);
+                                        return lines;
+                                    };
+
+                                    const wrappedLines = wrapText(helpText, maxWrapWidth);
+
+                                    // Draw wrapped help text with category-label styling
+                                    wrappedLines.forEach((line, lineIndex) => {
+                                        const helpY = worldY + lineIndex;
+                                        for (let i = 0; i < line.length; i++) {
+                                            const helpWorldX = helpStartX + i;
+                                            const helpBottomScreenPos = engine.worldToScreen(helpWorldX, helpY, currentZoom, currentOffset);
+                                            const helpTopScreenPos = engine.worldToScreen(helpWorldX, helpY - 1, currentZoom, currentOffset);
+
+                                            if (helpBottomScreenPos.x > -effectiveCharWidth * 2 && helpBottomScreenPos.x < cssWidth + effectiveCharWidth &&
+                                                helpTopScreenPos.y > -effectiveCharHeight * 2 && helpBottomScreenPos.y < cssHeight + effectiveCharHeight) {
+                                                // Draw background (90% opacity like hovered category labels)
+                                                ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, 0.9)`;
+                                                ctx.fillRect(helpTopScreenPos.x, helpTopScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+
+                                                // Draw text in text color
+                                                ctx.fillStyle = engine.textColor;
+                                                if (line[i] && line[i].trim() !== '') {
+                                                    renderText(ctx, line[i], helpTopScreenPos.x, helpTopScreenPos.y + verticalTextOffset);
+                                                }
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // Rendering individual command characters with backgrounds, hovers, color swatches, etc.
         // This ensures the command menu always appears on top of world content (notes, sprites, patterns)
 
