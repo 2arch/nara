@@ -4603,8 +4603,8 @@ Camera & Viewport Controls:
         }
 
         // === Render Text and Mail Notes ===
-        // Render all text notes and mail notes
-        const visibleNotes = engine.queryVisibleEntities(startWorldX - 5, startWorldY - 5, endWorldX + 5, endWorldY + 5);
+        // Render all text notes and mail notes (extra buffer for sprite borders)
+        const visibleNotes = engine.queryVisibleEntities(startWorldX - 10, startWorldY - 10, endWorldX + 10, endWorldY + 10);
         for (const key of visibleNotes) {
             if (key.startsWith('note_') || key.startsWith('mail_')) {
                 const note = parseNoteFromWorldData(key, engine.worldData[key]);
