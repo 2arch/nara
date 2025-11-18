@@ -78,6 +78,7 @@ interface Note {
     // Visual styling
     style?: string;           // Style name (e.g., "glow", "solid", "glowing")
     patternKey?: string;      // Reference to parent pattern if part of one
+    originPatternKey?: string; // Original pattern before grafting (for lineage tracking)
 
     // Content-specific data (based on contentType)
     content?: {

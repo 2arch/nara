@@ -543,7 +543,8 @@ function generatePatternFromId(patternId: string, centerPos: Point = { x: 0, y: 
             endY: room.y + room.height - 1,
             timestamp: numericSeed,
             contentType: 'text',  // Default to text content type
-            patternKey: patternKey  // Reference back to parent pattern
+            patternKey: patternKey,  // Reference back to parent pattern
+            originPatternKey: patternKey  // Track original pattern for grafting
         };
         noteKeys.push(noteKey);
         noteObjects[noteKey] = JSON.stringify(noteData);
@@ -580,7 +581,16 @@ function generatePatternFromId(patternId: string, centerPos: Point = { x: 0, y: 
         width: actualWidth,
         height: actualHeight,
         timestamp: numericSeed,
-        noteKeys: noteKeys  // Store note keys instead of inline rooms
+        noteKeys: noteKeys,  // Store note keys instead of inline rooms
+
+        // Pattern generation metadata
+        generationType: 'bsp',
+        generationParams: {
+            depth: 3,
+            width: width,
+            height: height,
+            seed: numericSeed
+        }
     };
 
     return { patternData, patternKey, noteObjects };

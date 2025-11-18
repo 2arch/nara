@@ -2969,7 +2969,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         endX: room.x + room.width,
                         endY: room.y + room.height,
                         timestamp: timestamp,
-                        patternKey: patternKey  // Reference back to parent pattern
+                        patternKey: patternKey,  // Reference back to parent pattern
+                        originPatternKey: patternKey  // Track original pattern for grafting
                     };
                     noteKeys.push(noteKey);
                     noteObjects[noteKey] = JSON.stringify(noteData);
@@ -3010,7 +3011,16 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     width: actualWidth,
                     height: actualHeight,
                     timestamp: timestamp,
-                    noteKeys: noteKeys  // Store note keys instead of inline rooms
+                    noteKeys: noteKeys,  // Store note keys instead of inline rooms
+
+                    // Pattern generation metadata
+                    generationType: 'bsp',
+                    generationParams: {
+                        depth: 3,
+                        width: width,
+                        height: height,
+                        seed: seed
+                    }
                 };
 
                 setWorldData((prev: WorldData) => ({
@@ -3199,7 +3209,16 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     width: actualWidth,
                     height: actualHeight,
                     timestamp: timestamp,
-                    noteKeys: allNoteKeys
+                    noteKeys: allNoteKeys,
+
+                    // Pattern generation metadata
+                    // 'manual' if creating new pattern from scratch
+                    // 'grafted' if merging existing patterns together
+                    generationType: (isNewPattern ? 'manual' : 'grafted'),
+                    ...(existingPatternKeys.size > 0 && {
+                        // Track which patterns were merged (if grafting)
+                        sourcePatterns: Array.from(existingPatternKeys)
+                    })
                 };
 
                 // Update all notes to reference this pattern
@@ -3209,7 +3228,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         const noteData = JSON.parse(worldData[noteKey] as string);
                         updatedNotes[noteKey] = JSON.stringify({
                             ...noteData,
-                            patternKey: patternKey
+                            patternKey: patternKey,
+                            // Preserve originPatternKey if it exists, otherwise set it to the note's current patternKey
+                            originPatternKey: noteData.originPatternKey || noteData.patternKey || patternKey
                         });
                     } catch (e) {
                         // Skip invalid notes
