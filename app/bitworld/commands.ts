@@ -2224,62 +2224,27 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             // Check if user has 'super' membership
             if (membershipLevel !== 'super') {
                 setDialogueWithRevert("Mail command requires Super membership", setDialogueText);
-
-                // Clear command mode
                 clearCommandState();
-
                 return null;
             }
 
-            const existingSelection = getNormalizedSelection?.();
-
-            if (existingSelection) {
-                // Selection exists - create mail region immediately
-                const hasMeaningfulSelection =
-                    existingSelection.startX !== existingSelection.endX ||
-                    existingSelection.startY !== existingSelection.endY;
-
-                if (!hasMeaningfulSelection) {
-                    setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
-                } else if (setWorldData && worldData && setSelectionStart && setSelectionEnd) {
-                    // Create mail region data
-                    const mailRegion = {
-                        startX: existingSelection.startX,
-                        endX: existingSelection.endX,
-                        startY: existingSelection.startY,
-                        endY: existingSelection.endY,
-                        timestamp: Date.now()
-                    };
-
-                    // Store mail region in worldData with unique key
-                    const mailKey = `mail_${existingSelection.startX},${existingSelection.startY}_${Date.now()}`;
-
+            createRegionFromSelection('mail', {
+                successMessage: (dims) => `Mail region created (${dims.width}×${dims.height}). Row 1: To, Row 2: Subject, Row 3+: Message`,
+                pendingMessage: "Make a selection, then press Enter to create mail region",
+                additionalWorldDataCallback: (mailKey, selection, worldData) => {
                     // Create send button bound to this mail region (bottom-right corner)
                     const sendButton = {
                         mailKey: mailKey,
-                        x: existingSelection.endX,
-                        y: existingSelection.endY,
+                        x: selection.endX,
+                        y: selection.endY,
                         text: 'Send',
                         timestamp: Date.now()
                     };
                     const buttonKey = `mailbutton_${mailKey}`;
-
-                    const newWorldData = { ...worldData };
-                    newWorldData[mailKey] = JSON.stringify(mailRegion);
-                    newWorldData[buttonKey] = JSON.stringify(sendButton);
-                    setWorldData(newWorldData);
-
-                    const { width, height } = calculateSelectionDimensions(existingSelection);
-                    setDialogueWithRevert(`Mail region created (${width}×${height}). Row 1: To, Row 2: Subject, Row 3+: Message`, setDialogueText);
-
-                    // Clear selection
-                    setSelectionStart(null);
-                    setSelectionEnd(null);
+                    worldData[buttonKey] = JSON.stringify(sendButton);
+                    return worldData;
                 }
-            } else {
-                // No selection - set as pending command waiting for selection
-                createPendingCommand('mail', "Make a selection, then press Enter to create mail region");
-            }
+            });
 
             // Clear command mode
             clearCommandState();
@@ -2295,44 +2260,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (commandToExecute.startsWith('note')) {
             // /note command - one-shot note region creation from selection
-            // Check if there's already a selection
-            const existingSelection = getNormalizedSelection?.();
-
-            if (existingSelection) {
-                // Selection exists - create note region immediately
-                const hasMeaningfulSelection =
-                    existingSelection.startX !== existingSelection.endX ||
-                    existingSelection.startY !== existingSelection.endY;
-
-                if (!hasMeaningfulSelection) {
-                    setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
-                } else if (setWorldData && worldData && setSelectionStart && setSelectionEnd) {
-                    // Create note region data
-                    const noteRegion = {
-                        startX: existingSelection.startX,
-                        endX: existingSelection.endX,
-                        startY: existingSelection.startY,
-                        endY: existingSelection.endY,
-                        timestamp: Date.now()
-                    };
-
-                    // Store note region in worldData with unique key
-                    const noteKey = `note_${existingSelection.startX},${existingSelection.startY}_${Date.now()}`;
-                    const newWorldData = { ...worldData };
-                    newWorldData[noteKey] = JSON.stringify(noteRegion);
-                    setWorldData(newWorldData);
-
-                    const { width, height } = calculateSelectionDimensions(existingSelection);
-                    setDialogueWithRevert(`Note region saved (${width}×${height})`, setDialogueText);
-
-                    // Clear selection
-                    setSelectionStart(null);
-                    setSelectionEnd(null);
-                }
-            } else {
-                // No selection - set as pending command waiting for selection
-                createPendingCommand('note', "Make a selection, then press Enter to save as note region");
-            }
+            createRegionFromSelection('note', {
+                successMessage: (dims) => `Note region saved (${dims.width}×${dims.height})`,
+                pendingMessage: "Make a selection, then press Enter to save as note region"
+            });
 
             // Clear command mode
             clearCommandState();
