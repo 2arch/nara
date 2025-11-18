@@ -408,6 +408,115 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
     }, []);
 
+    // Utility function to clear command state (used after command execution)
+    const clearCommandState = useCallback(() => {
+        setCommandState({
+            isActive: false,
+            input: '',
+            matchedCommands: [],
+            selectedIndex: 0,
+            commandStartPos: { x: 0, y: 0 },
+            originalCursorPos: { x: 0, y: 0 },
+            hasNavigated: false
+        });
+        setCommandData({});
+    }, [setCommandState, setCommandData]);
+
+    // Utility function to validate and normalize color (supports color names and hex codes)
+    const validateColor = useCallback((color: string): { valid: boolean; hexColor?: string; error?: string } => {
+        const hexColor = (COLOR_MAP[color.toLowerCase()] || color).toUpperCase();
+        if (!/^#[0-9A-F]{6}$/i.test(hexColor)) {
+            return { valid: false, error: `Invalid color: ${color}. Use hex code (e.g., #FF0000) or name (e.g., red, blue).` };
+        }
+        return { valid: true, hexColor };
+    }, []);
+
+    // Utility function to wrap text to fit within a maximum width
+    const wrapText = useCallback((text: string, maxWidth: number): string[] => {
+        const paragraphs = text.split('\n');
+        const lines: string[] = [];
+
+        for (let i = 0; i < paragraphs.length; i++) {
+            const paragraph = paragraphs[i].trim();
+
+            if (paragraph === '') {
+                lines.push('');
+                continue;
+            }
+
+            const words = paragraph.split(' ');
+            let currentLine = '';
+
+            for (const word of words) {
+                const testLine = currentLine ? `${currentLine} ${word}` : word;
+                if (testLine.length <= maxWidth) {
+                    currentLine = testLine;
+                } else {
+                    if (currentLine) {
+                        lines.push(currentLine);
+                        currentLine = word;
+                    } else {
+                        lines.push(word.substring(0, maxWidth));
+                        currentLine = word.substring(maxWidth);
+                    }
+                }
+            }
+            if (currentLine) lines.push(currentLine);
+        }
+        return lines;
+    }, []);
+
+    // Utility function to render command display (command text + autocomplete suggestions)
+    const renderCommandDisplay = useCallback((input: string, matchedCommands: string[], commandStartPos: Point): WorldData => {
+        const newCommandData: WorldData = {};
+        const commandText = `/${input}`;
+
+        // Draw command text at command start position
+        for (let i = 0; i < commandText.length; i++) {
+            const key = `${commandStartPos.x + i},${commandStartPos.y}`;
+            newCommandData[key] = commandText[i];
+        }
+
+        // Draw autocomplete suggestions below
+        matchedCommands.forEach((command, index) => {
+            const suggestionY = commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
+            for (let i = 0; i < command.length; i++) {
+                const key = `${commandStartPos.x + i},${suggestionY}`;
+                newCommandData[key] = command[i];
+            }
+        });
+
+        return newCommandData;
+    }, []);
+
+    // Utility function to parse command arguments from command string
+    const parseCommandArgs = useCallback((commandString: string): { command: string; args: string[]; firstArg?: string } => {
+        const parts = commandString.split(/\s+/);
+        return {
+            command: parts[0],
+            args: parts.slice(1),
+            firstArg: parts[1]
+        };
+    }, []);
+
+    // Utility function to calculate selection dimensions
+    const calculateSelectionDimensions = useCallback((selection: { startX: number; endX: number; startY: number; endY: number }): { width: number; height: number } => {
+        return {
+            width: selection.endX - selection.startX + 1,
+            height: selection.endY - selection.startY + 1
+        };
+    }, []);
+
+    // Utility function to create a pending command (waiting for selection)
+    const createPendingCommand = useCallback((command: string, message: string, args: string[] = []) => {
+        setPendingCommand({
+            command,
+            args,
+            isWaitingForSelection: true
+        });
+        setDialogueWithRevert(message, setDialogueText);
+    }, [setPendingCommand, setDialogueText]);
+
     // Utility function to match commands based on input
     const matchCommands = useCallback((input: string): string[] => {
         // Filter signin/signout based on authentication state
@@ -753,24 +862,24 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
     const switchBackgroundMode = useCallback((newMode: BackgroundMode, bgColor?: string, textColor?: string, textBg?: string, aiPrompt?: string): boolean => {
         if (newMode === 'color' && bgColor) {
-            const hexBgColor = (COLOR_MAP[bgColor.toLowerCase()] || bgColor).toUpperCase();
-
-            if (!/^#[0-9A-F]{6}$/i.test(hexBgColor)) {
+            const bgColorResult = validateColor(bgColor);
+            if (!bgColorResult.valid) {
                 setDialogueWithRevert(`Invalid background color: ${bgColor}. Please use a name (e.g., white) or hex code (e.g., #1a1a1a).`, setDialogueText);
                 return false;
             }
+            const hexBgColor = bgColorResult.hexColor!;
             
             let finalTextColor: string;
             let preserveCustomText = false;
 
             if (textColor) {
                 // User specified text color - validate it
-                const hexTextColor = (COLOR_MAP[textColor.toLowerCase()] || textColor).toUpperCase();
-                if (!/^#[0-9A-F]{6}$/i.test(hexTextColor)) {
+                const textColorResult = validateColor(textColor);
+                if (!textColorResult.valid) {
                     setDialogueWithRevert(`Invalid text color: ${textColor}. Please use a name (e.g., white) or hex code (e.g., #1a1a1a).`, setDialogueText);
                     return false;
                 }
-                finalTextColor = hexTextColor;
+                finalTextColor = textColorResult.hexColor!;
             } else if (settings?.hasCustomTextColor && settings?.textColor) {
                 // User has previously set a custom text color via /text --g
                 // Preserve it instead of auto-assigning
@@ -789,12 +898,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             let finalTextBg: string | undefined;
             if (textBg) {
                 // User specified text background - validate it
-                const hexTextBg = (COLOR_MAP[textBg.toLowerCase()] || textBg).toUpperCase();
-                if (!/^#[0-9A-F]{6}$/i.test(hexTextBg)) {
+                const textBgResult = validateColor(textBg);
+                if (!textBgResult.valid) {
                     setDialogueWithRevert(`Invalid text background: ${textBg}. Please use a name (e.g., white) or hex code (e.g., #1a1a1a).`, setDialogueText);
                     return false;
                 }
-                finalTextBg = hexTextBg;
+                finalTextBg = textBgResult.hexColor!;
             }
 
             setModeState(prev => ({
@@ -1029,44 +1138,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         const persistTime = options?.persistTime || 3000; // Longer persistence for AI
         
         // Text wrapping that honors paragraph breaks
-        const wrapText = (text: string, maxWidth: number): string[] => {
-            // First split by paragraph breaks
-            const paragraphs = text.split('\n');
-            const lines: string[] = [];
-            
-            for (let i = 0; i < paragraphs.length; i++) {
-                const paragraph = paragraphs[i].trim();
-                
-                if (paragraph === '') {
-                    // Empty line for paragraph break
-                    lines.push('');
-                    continue;
-                }
-                
-                // Wrap this paragraph
-                const words = paragraph.split(' ');
-                let currentLine = '';
-                
-                for (const word of words) {
-                    const testLine = currentLine ? `${currentLine} ${word}` : word;
-                    if (testLine.length <= maxWidth) {
-                        currentLine = testLine;
-                    } else {
-                        if (currentLine) {
-                            lines.push(currentLine);
-                            currentLine = word;
-                        } else {
-                            // Word is longer than line, split it
-                            lines.push(word.substring(0, maxWidth));
-                            currentLine = word.substring(maxWidth);
-                        }
-                    }
-                }
-                if (currentLine) lines.push(currentLine);
-            }
-            return lines;
-        };
-        
         const wrappedLines = wrapText(text, wrapWidth);
         let lineIndex = 0;
         let charIndex = 0;
@@ -1138,40 +1209,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         const color = options?.color || '#808080';
         
         // Text wrapping that honors paragraph breaks
-        const wrapText = (text: string, maxWidth: number): string[] => {
-            const paragraphs = text.split('\n');
-            const lines: string[] = [];
-            
-            for (let i = 0; i < paragraphs.length; i++) {
-                const paragraph = paragraphs[i].trim();
-                
-                if (paragraph === '') {
-                    lines.push('');
-                    continue;
-                }
-                
-                const words = paragraph.split(' ');
-                let currentLine = '';
-                
-                for (const word of words) {
-                    const testLine = currentLine ? `${currentLine} ${word}` : word;
-                    if (testLine.length <= maxWidth) {
-                        currentLine = testLine;
-                    } else {
-                        if (currentLine) {
-                            lines.push(currentLine);
-                            currentLine = word;
-                        } else {
-                            lines.push(word.substring(0, maxWidth));
-                            currentLine = word.substring(maxWidth);
-                        }
-                    }
-                }
-                if (currentLine) lines.push(currentLine);
-            }
-            return lines;
-        };
-        
         const wrappedLines = wrapText(text, wrapWidth);
         const allCharPositions: Array<{ x: number; y: number; char: string }> = [];
 
@@ -1296,24 +1333,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const newMatchedCommands = matchCommands(newInput);
             
             // Update command display at original command start position
-            const newCommandData: WorldData = {};
-            const commandText = `/${newInput}`;
-            
-            // Draw command text at original command start position
-            for (let i = 0; i < commandText.length; i++) {
-                const key = `${prev.commandStartPos.x + i},${prev.commandStartPos.y}`;
-                newCommandData[key] = commandText[i];
-            }
-            
-            // Draw autocomplete suggestions below
-            newMatchedCommands.forEach((command, index) => {
-                const suggestionY = prev.commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
-                for (let i = 0; i < command.length; i++) {
-                    const key = `${prev.commandStartPos.x + i},${suggestionY}`;
-                    newCommandData[key] = command[i];
-                }
-            });
-            
+            const newCommandData = renderCommandDisplay(newInput, newMatchedCommands, prev.commandStartPos);
             setCommandData(newCommandData);
             
             return {
@@ -1330,16 +1350,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
     const handleBackspace = useCallback((): { shouldExitCommand: boolean; shouldMoveCursor: boolean } => {
         // If no input characters, signal to exit command mode
         if (commandState.input.length === 0) {
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
             return { shouldExitCommand: true, shouldMoveCursor: true };
         }
         
@@ -1349,24 +1360,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const newMatchedCommands = matchCommands(newInput);
             
             // Update command display
-            const newCommandData: WorldData = {};
-            const commandText = `/${newInput}`;
-            
-            // Draw command text at original command start position
-            for (let i = 0; i < commandText.length; i++) {
-                const key = `${prev.commandStartPos.x + i},${prev.commandStartPos.y}`;
-                newCommandData[key] = commandText[i];
-            }
-            
-            // Draw autocomplete suggestions below
-            newMatchedCommands.forEach((command, index) => {
-                const suggestionY = prev.commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
-                for (let i = 0; i < command.length; i++) {
-                    const key = `${prev.commandStartPos.x + i},${suggestionY}`;
-                    newCommandData[key] = command[i];
-                }
-            });
-            
+            const newCommandData = renderCommandDisplay(newInput, newMatchedCommands, prev.commandStartPos);
             setCommandData(newCommandData);
             
             return {
@@ -1434,19 +1428,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     }
                 }
             }
-            
+
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
-            
+            clearCommandState();
+
             return null; // Mode switches don't need further processing
         }
 
@@ -1464,16 +1449,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             return null; // Autocomplete toggle doesn't need further processing
         }
@@ -1528,16 +1504,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             return null;
         }
@@ -1578,16 +1545,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                                 setDialogueWithRevert("Press ESC to restore background", setDialogueText);
 
                                 // Clear command mode
-                                setCommandState({
-                                    isActive: false,
-                                    input: '',
-                                    matchedCommands: [],
-                                    selectedIndex: 0,
-                                    commandStartPos: { x: 0, y: 0 },
-                                    originalCursorPos: { x: 0, y: 0 },
-                                    hasNavigated: false
-                                });
-                                setCommandData({});
+                                clearCommandState();
 
                                 return null;
                             }
@@ -1642,16 +1600,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     }
 
                     // Clear command mode
-                    setCommandState({
-                        isActive: false,
-                        input: '',
-                        matchedCommands: [],
-                        selectedIndex: 0,
-                        commandStartPos: { x: 0, y: 0 },
-                        originalCursorPos: { x: 0, y: 0 },
-                        hasNavigated: false
-                    });
-                    setCommandData({});
+                    clearCommandState();
 
                     return null;
                 }
@@ -1689,16 +1638,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             return null;
         }
@@ -1719,23 +1659,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     // Reset to default text color
                     finalTextColor = modeState.textColor; // Use current global text color
                 } else {
-                    const hexColor = (COLOR_MAP[colorArg.toLowerCase()] || colorArg).toUpperCase();
-                    if (!/^#[0-9A-F]{6}$/i.test(hexColor)) {
+                    const colorResult = validateColor(colorArg);
+                    if (!colorResult.valid) {
                         setDialogueWithRevert(`Invalid color: ${colorArg}. Use hex code (e.g., #FF0000) or name (e.g., red, blue).`, setDialogueText);
                         // Clear command mode
-                        setCommandState({
-                            isActive: false,
-                            input: '',
-                            matchedCommands: [],
-                            selectedIndex: 0,
-                            commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                            hasNavigated: false
-                        });
-                        setCommandData({});
+                        clearCommandState();
                         return null;
                     }
-                    finalTextColor = hexColor;
+                    finalTextColor = colorResult.hexColor!;
                 }
                 
                 let finalTextBackground: string | undefined;
@@ -1743,23 +1674,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     if (backgroundArg.toLowerCase() === 'none') {
                         finalTextBackground = undefined;
                     } else {
-                        const hexBackground = (COLOR_MAP[backgroundArg.toLowerCase()] || backgroundArg).toUpperCase();
-                        if (!/^#[0-9A-F]{6}$/i.test(hexBackground)) {
+                        const bgResult = validateColor(backgroundArg);
+                        if (!bgResult.valid) {
                             setDialogueWithRevert(`Invalid background color: ${backgroundArg}. Use hex code or name.`, setDialogueText);
                             // Clear command mode
-                            setCommandState({
-                                isActive: false,
-                                input: '',
-                                matchedCommands: [],
-                                selectedIndex: 0,
-                                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                                hasNavigated: false
-                            });
-                            setCommandData({});
+                            clearCommandState();
                             return null;
                         }
-                        finalTextBackground = hexBackground;
+                        finalTextBackground = bgResult.hexColor!;
                     }
                 }
                 
@@ -1822,16 +1744,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             return null;
         }
@@ -1863,32 +1776,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
             
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
             
             return null;
         }
 
         if (commandToExecute.startsWith('nav')) {
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             // Use the command to execute instead of the typed input
             // Extract target name from command (format: "nav targetname")
@@ -1962,32 +1857,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
             
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
             
             return null;
         }
 
         if (commandToExecute.startsWith('state')) {
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
             
             // Parse the command to execute
             const commandParts = commandToExecute.split(' ');
@@ -2035,16 +1912,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (commandToExecute.startsWith('random')) {
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
             
             // Navigate to a random existing state
             if (username && availableStates.length > 0) {
@@ -2075,16 +1943,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const hasRegionFlag = parts.includes('--region');
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             // Return command execution for world engine to handle
             return {
@@ -2100,16 +1959,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const speed = parts.length > 1 ? parseInt(parts[1], 10) : 100;
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             // Return command execution for world engine to handle
             return {
@@ -2121,16 +1971,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (commandToExecute.startsWith('cluster')) {
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
             
             // Return command execution for world engine to handle cluster generation
             return {
@@ -2146,16 +1987,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const args = parts.slice(1); // Remove 'frames' from args
             
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
             
             // Return command execution for world engine to handle frame toggling
             return {
@@ -2167,16 +1999,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (commandToExecute.startsWith('clear')) {
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             // Return command execution for world engine to handle clearing the canvas
             return {
@@ -2190,16 +2013,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const parts = commandToExecute.split(' ');
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             // If user selected a specific clipboard entry
             if (parts.length > 1) {
@@ -2233,16 +2047,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 }));
 
                 // Return command execution to let world engine calculate initial offset
-                setCommandData({});
-                setCommandState({
-                    isActive: false,
-                    input: '',
-                    matchedCommands: [],
-                    selectedIndex: 0,
-                    commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                    hasNavigated: false
-                });
+                clearCommandState();
 
                 return {
                     command: 'cam',
@@ -2256,16 +2061,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             return null;
         }
@@ -2281,32 +2077,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             setDialogueWithRevert(newState ? "Smart indentation enabled" : "Smart indentation disabled", setDialogueText);
             
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
             
             return null;
         }
 
         if (commandToExecute.startsWith('signin')) {
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             // Return command execution for world engine to handle signin flow
             return {
@@ -2318,16 +2096,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (commandToExecute.startsWith('signout')) {
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             // Return command execution for world engine to handle the actual sign out
             return {
@@ -2344,16 +2113,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 setDialogueWithRevert("Mail command requires Super membership", setDialogueText);
 
                 // Clear command mode
-                setCommandState({
-                    isActive: false,
-                    input: '',
-                    matchedCommands: [],
-                    selectedIndex: 0,
-                    commandStartPos: { x: 0, y: 0 },
-                    originalCursorPos: { x: 0, y: 0 },
-                    hasNavigated: false
-                });
-                setCommandData({});
+                clearCommandState();
 
                 return null;
             }
@@ -2396,8 +2156,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     newWorldData[buttonKey] = JSON.stringify(sendButton);
                     setWorldData(newWorldData);
 
-                    const width = existingSelection.endX - existingSelection.startX + 1;
-                    const height = existingSelection.endY - existingSelection.startY + 1;
+                    const { width, height } = calculateSelectionDimensions(existingSelection);
                     setDialogueWithRevert(`Mail region created (${width}×${height}). Row 1: To, Row 2: Subject, Row 3+: Message`, setDialogueText);
 
                     // Clear selection
@@ -2406,26 +2165,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 }
             } else {
                 // No selection - set as pending command waiting for selection
-                setPendingCommand({
-                    command: 'mail',
-                    args: [],
-                    isWaitingForSelection: true
-                });
-
-                setDialogueWithRevert("Make a selection, then press Enter to create mail region", setDialogueText);
+                createPendingCommand('mail', "Make a selection, then press Enter to create mail region");
             }
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             // Return special flag to indicate cursor should be restored
             return {
@@ -2465,8 +2209,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     newWorldData[noteKey] = JSON.stringify(noteRegion);
                     setWorldData(newWorldData);
 
-                    const width = existingSelection.endX - existingSelection.startX + 1;
-                    const height = existingSelection.endY - existingSelection.startY + 1;
+                    const { width, height } = calculateSelectionDimensions(existingSelection);
                     setDialogueWithRevert(`Note region saved (${width}×${height})`, setDialogueText);
 
                     // Clear selection
@@ -2475,26 +2218,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 }
             } else {
                 // No selection - set as pending command waiting for selection
-                setPendingCommand({
-                    command: 'note',
-                    args: [],
-                    isWaitingForSelection: true
-                });
-
-                setDialogueWithRevert("Make a selection, then press Enter to save as note region", setDialogueText);
+                createPendingCommand('note', "Make a selection, then press Enter to save as note region");
             }
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             // Return special flag to indicate cursor should be restored
             return {
@@ -2507,16 +2235,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (commandToExecute.startsWith('list')) {
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             // Return command execution for immediate processing
             const args = inputParts.slice(1);
@@ -2530,16 +2249,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (commandToExecute.startsWith('unlist')) {
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             // Return command execution for immediate processing
             return {
@@ -2560,16 +2270,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             setDialogueWithRevert(newState ? "Move mode enabled - hover over text blocks to drag them. Press Escape to exit." : "Move mode disabled", setDialogueText);
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             return null;
         }
@@ -2581,16 +2282,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             return null;
         }
@@ -2602,16 +2294,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             return null;
         }
@@ -2662,16 +2345,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (commandToExecute.startsWith('spawn')) {
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             // Return command execution for world engine to handle spawn point setting
             return {
@@ -2725,32 +2399,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             return { command: 'monogram', args, commandStartPos: commandState.commandStartPos };
         }
 
         if (commandToExecute.startsWith('glitch')) {
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             // Return command execution for world engine to handle glitch region creation
             return {
@@ -2762,16 +2418,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (commandToExecute.startsWith('zoom')) {
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             // Return command execution for world engine to handle zoom animation
             return {
@@ -2784,16 +2431,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         // Handle commands that need text selection
         if (['transform', 'explain', 'summarize'].includes(commandToExecute.toLowerCase().split(' ')[0])) {
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
             
             // Set as pending command waiting for selection
             const args = inputParts.slice(1);
@@ -2809,16 +2447,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         // Handle share command - always publishes with region coordinates
         if (commandToExecute.startsWith('share')) {
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             return { command: 'share', args: [], commandStartPos: commandState.commandStartPos };
         }
@@ -2826,16 +2455,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         // Handle latex command - activates LaTeX input mode
         if (commandToExecute.startsWith('latex')) {
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             return { command: 'latex', args: [], commandStartPos: commandState.commandStartPos };
         }
@@ -2843,16 +2463,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         // Handle smiles command - activates SMILES (molecular structure) input mode
         if (commandToExecute.startsWith('smiles')) {
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             return { command: 'smiles', args: [], commandStartPos: commandState.commandStartPos };
         }
@@ -2863,16 +2474,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const args = parts.slice(1); // Capture --bitmap flag if present
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             return { command: 'upload', args, commandStartPos: commandState.commandStartPos };
         }
@@ -3033,16 +2635,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             return null; // Pattern doesn't need further processing
         }
@@ -3053,16 +2646,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
             if (!existingSelection) {
                 setDialogueWithRevert("Make a selection containing notes, then run /connect", setDialogueText);
-                setCommandState({
-                    isActive: false,
-                    input: '',
-                    matchedCommands: [],
-                    selectedIndex: 0,
-                    commandStartPos: { x: 0, y: 0 },
-                    originalCursorPos: { x: 0, y: 0 },
-                    hasNavigated: false
-                });
-                setCommandData({});
+                clearCommandState();
                 return null;
             }
 
@@ -3099,16 +2683,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                 if (overlappingNotes.length < 1) {
                     setDialogueWithRevert("Need at least 1 note in selection to connect", setDialogueText);
-                    setCommandState({
-                        isActive: false,
-                        input: '',
-                        matchedCommands: [],
-                        selectedIndex: 0,
-                        commandStartPos: { x: 0, y: 0 },
-                        originalCursorPos: { x: 0, y: 0 },
-                        hasNavigated: false
-                    });
-                    setCommandData({});
+                    clearCommandState();
                     return null;
                 }
 
@@ -3154,16 +2729,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     // No existing pattern - create a new one
                     if (overlappingNotes.length < 2) {
                         setDialogueWithRevert("Need at least 2 notes to create a new pattern", setDialogueText);
-                        setCommandState({
-                            isActive: false,
-                            input: '',
-                            matchedCommands: [],
-                            selectedIndex: 0,
-                            commandStartPos: { x: 0, y: 0 },
-                            originalCursorPos: { x: 0, y: 0 },
-                            hasNavigated: false
-                        });
-                        setCommandData({});
+                        clearCommandState();
                         return null;
                     }
                     const timestamp = Date.now();
@@ -3312,16 +2878,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             return null; // Pattern doesn't need further processing
         }
@@ -3332,16 +2889,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
             if (!styleName) {
                 setDialogueWithRevert("Usage: /style [stylename] - Available: solid, glow, glowing", setDialogueText);
-                setCommandState({
-                    isActive: false,
-                    input: '',
-                    matchedCommands: [],
-                    selectedIndex: 0,
-                    commandStartPos: { x: 0, y: 0 },
-                    originalCursorPos: { x: 0, y: 0 },
-                    hasNavigated: false
-                });
-                setCommandData({});
+                clearCommandState();
                 return null;
             }
 
@@ -3409,16 +2957,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             // If no target found, show error
             if (!targetKey || !targetType) {
                 setDialogueWithRevert("No note or pattern found at cursor. Move cursor inside a note/pattern or select one first.", setDialogueText);
-                setCommandState({
-                    isActive: false,
-                    input: '',
-                    matchedCommands: [],
-                    selectedIndex: 0,
-                    commandStartPos: { x: 0, y: 0 },
-                    originalCursorPos: { x: 0, y: 0 },
-                    hasNavigated: false
-                });
-                setCommandData({});
+                clearCommandState();
                 return null;
             }
 
@@ -3440,16 +2979,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             return null;
         }
@@ -3460,16 +2990,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const aiPrompt = commandToExecute; // Full input is the prompt
 
             // Clear command mode
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
 
             // Return special command for AI chat - world engine will handle the AI call
             // Pass isPermanent flag to differentiate Enter vs Cmd+Enter
@@ -3481,16 +3002,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         // Clear command mode for other commands
-        setCommandState({
-            isActive: false,
-            input: '',
-            matchedCommands: [],
-            selectedIndex: 0,
-            commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-            hasNavigated: false
-        });
-        setCommandData({});
+        clearCommandState();
 
         if (commandToExecute.toLowerCase().startsWith(commandName.toLowerCase())) {
             const args = inputParts.slice(1);
@@ -3536,24 +3048,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 const newMatchedCommands = matchCommands(newInput);
 
                 // Update command display at original command start position
-                const newCommandData: WorldData = {};
-                const commandText = `/${newInput}`;
-
-                // Draw command text at original command start position
-                for (let i = 0; i < commandText.length; i++) {
-                    const key = `${prev.commandStartPos.x + i},${prev.commandStartPos.y}`;
-                    newCommandData[key] = commandText[i];
-                }
-
-                // Draw autocomplete suggestions below
-                newMatchedCommands.forEach((command, index) => {
-                    const suggestionY = prev.commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
-                    for (let i = 0; i < command.length; i++) {
-                        const key = `${prev.commandStartPos.x + i},${suggestionY}`;
-                        newCommandData[key] = command[i];
-                    }
-                });
-
+                const newCommandData = renderCommandDisplay(newInput, newMatchedCommands, prev.commandStartPos);
                 setCommandData(newCommandData);
 
                 return {
@@ -3640,16 +3135,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
             // Exit command mode without executing and restore cursor to original position
             const originalPos = commandState.originalCursorPos;
-            setCommandState({
-                isActive: false,
-                input: '',
-                matchedCommands: [],
-                selectedIndex: 0,
-                commandStartPos: { x: 0, y: 0 },
-                originalCursorPos: { x: 0, y: 0 },
-                hasNavigated: false
-            });
-            setCommandData({});
+            clearCommandState();
             // Restore cursor to original position
             setCursorPos(originalPos);
             return true;
@@ -3739,24 +3225,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         const newMatchedCommands = matchCommands(newInput);
 
                         // Update command display
-                        const newCommandData: WorldData = {};
-                        const commandText = `/${newInput}`;
-
-                        // Draw command text at original command start position
-                        for (let i = 0; i < commandText.length; i++) {
-                            const key = `${prev.commandStartPos.x + i},${prev.commandStartPos.y}`;
-                            newCommandData[key] = commandText[i];
-                        }
-
-                        // Draw autocomplete suggestions below (if any)
-                        newMatchedCommands.forEach((command, index) => {
-                            const suggestionY = prev.commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
-                            for (let i = 0; i < command.length; i++) {
-                                const key = `${prev.commandStartPos.x + i},${suggestionY}`;
-                                newCommandData[key] = command[i];
-                            }
-                        });
-
+                        const newCommandData = renderCommandDisplay(newInput, newMatchedCommands, prev.commandStartPos);
                         setCommandData(newCommandData);
 
                         return {
@@ -3859,8 +3328,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     newWorldData[noteKey] = JSON.stringify(noteRegion);
                     setWorldData(newWorldData);
 
-                    const width = existingSelection.endX - existingSelection.startX + 1;
-                    const height = existingSelection.endY - existingSelection.startY + 1;
+                    const { width, height } = calculateSelectionDimensions(existingSelection);
                     setDialogueWithRevert(`Note region saved (${width}×${height})`, setDialogueText);
 
                     // Clear selection
@@ -3983,24 +3451,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const newMatchedCommands = matchCommands(newInput);
 
             // Update command display
-            const newCommandData: WorldData = {};
-            const commandText = `/${newInput}`;
-
-            // Draw command text at original command start position
-            for (let i = 0; i < commandText.length; i++) {
-                const key = `${prev.commandStartPos.x + i},${prev.commandStartPos.y}`;
-                newCommandData[key] = commandText[i];
-            }
-
-            // Draw autocomplete suggestions below
-            newMatchedCommands.forEach((command, index) => {
-                const suggestionY = prev.commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
-                for (let i = 0; i < command.length; i++) {
-                    const key = `${prev.commandStartPos.x + i},${suggestionY}`;
-                    newCommandData[key] = command[i];
-                }
-            });
-
+            const newCommandData = renderCommandDisplay(newInput, newMatchedCommands, prev.commandStartPos);
             setCommandData(newCommandData);
 
             return {
@@ -4019,24 +3470,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const newMatchedCommands = matchCommands(newInput);
 
             // Update command display at original command start position
-            const newCommandData: WorldData = {};
-            const commandText = `/${newInput}`;
-
-            // Draw command text at original command start position
-            for (let i = 0; i < commandText.length; i++) {
-                const key = `${prev.commandStartPos.x + i},${prev.commandStartPos.y}`;
-                newCommandData[key] = commandText[i];
-            }
-
-            // Draw autocomplete suggestions below
-            newMatchedCommands.forEach((command, index) => {
-                const suggestionY = prev.commandStartPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
-                for (let i = 0; i < command.length; i++) {
-                    const key = `${prev.commandStartPos.x + i},${suggestionY}`;
-                    newCommandData[key] = command[i];
-                }
-            });
-
+            const newCommandData = renderCommandDisplay(newInput, newMatchedCommands, prev.commandStartPos);
             setCommandData(newCommandData);
 
             return {
