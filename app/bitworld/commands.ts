@@ -3201,6 +3201,30 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 const actualCenterX = minX + actualWidth / 2;
                 const actualCenterY = minY + actualHeight / 2;
 
+                // Capture source pattern metadata before deletion (nested artefacts)
+                const sourcePatternMetadata = existingPatternKeys.size > 0
+                    ? Array.from(existingPatternKeys).map(key => {
+                        try {
+                            const sourceData = JSON.parse(worldData[key] as string);
+                            return {
+                                key,
+                                type: sourceData.generationType || 'unknown',
+                                // Preserve generation params if they exist (for BSP patterns)
+                                ...(sourceData.generationParams && {
+                                    params: sourceData.generationParams
+                                }),
+                                // Preserve source patterns if this was itself a graft
+                                ...(sourceData.sourcePatterns && {
+                                    sourcePatterns: sourceData.sourcePatterns
+                                })
+                            };
+                        } catch (e) {
+                            // Fallback if pattern data is invalid
+                            return { key, type: 'unknown' };
+                        }
+                    })
+                    : undefined;
+
                 // Create or update pattern data
                 const timestamp = Date.now();
                 const patternData = {
@@ -3215,9 +3239,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     // 'manual' if creating new pattern from scratch
                     // 'grafted' if merging existing patterns together
                     generationType: (isNewPattern ? 'manual' : 'grafted'),
-                    ...(existingPatternKeys.size > 0 && {
-                        // Track which patterns were merged (if grafting)
-                        sourcePatterns: Array.from(existingPatternKeys)
+                    ...(sourcePatternMetadata && {
+                        // Preserve complete metadata of merged patterns (nested artefacts)
+                        sourcePatterns: sourcePatternMetadata
                     })
                 };
 
