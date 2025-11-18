@@ -26,19 +26,9 @@ export interface MonogramOptions {
     trailFadeMs?: number;
 }
 
-// WebGPU Compute Shader - Generates 32x32 chunk of Perlin noise
-const CHUNK_PERLIN_SHADER = `
-@group(0) @binding(0) var<storage, read_write> output: array<f32>;
-@group(0) @binding(1) var<uniform> params: ChunkParams;
-
-struct ChunkParams {
-    chunkWorldX: f32,
-    chunkWorldY: f32,
-    chunkSize: f32,
-    time: f32,
-    complexity: f32,
-}
-
+// Shared WGSL utility functions for Perlin noise
+// Used by both PERLIN and NARA shader modes
+const PERLIN_UTILS_WGSL = `
 fn fade(t: f32) -> f32 {
     return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
 }
@@ -81,6 +71,22 @@ fn perlin(worldX: f32, worldY: f32) -> f32 {
 
     return lerp(v, x1, x2);
 }
+`;
+
+// WebGPU Compute Shader - Generates 32x32 chunk of Perlin noise
+const CHUNK_PERLIN_SHADER = `
+@group(0) @binding(0) var<storage, read_write> output: array<f32>;
+@group(0) @binding(1) var<uniform> params: ChunkParams;
+
+struct ChunkParams {
+    chunkWorldX: f32,
+    chunkWorldY: f32,
+    chunkSize: f32,
+    time: f32,
+    complexity: f32,
+}
+
+${PERLIN_UTILS_WGSL}
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -150,49 +156,7 @@ struct TrailParams {
     complexity: f32,
 }
 
-// Reuse Perlin noise functions
-fn fade(t: f32) -> f32 {
-    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
-}
-
-fn lerp(t: f32, a: f32, b: f32) -> f32 {
-    return a + t * (b - a);
-}
-
-fn grad(hash: u32, x: f32, y: f32) -> f32 {
-    let h = hash & 3u;
-    let u = select(y, x, h < 2u);
-    let v = select(x, y, h < 2u);
-    let sign_u = select(u, -u, (h & 1u) == 0u);
-    let sign_v = select(v, -v, (h & 2u) == 0u);
-    return sign_u + sign_v;
-}
-
-fn hash(i: i32) -> u32 {
-    var x = u32(i);
-    x = ((x >> 16u) ^ x) * 0x45d9f3bu;
-    x = ((x >> 16u) ^ x) * 0x45d9f3bu;
-    x = (x >> 16u) ^ x;
-    return x & 255u;
-}
-
-fn perlin(worldX: f32, worldY: f32) -> f32 {
-    let X = i32(floor(worldX));
-    let Y = i32(floor(worldY));
-    let fx = fract(worldX);
-    let fy = fract(worldY);
-
-    let u = fade(fx);
-    let v = fade(fy);
-
-    let a = hash(X) + u32(Y);
-    let b = hash(X + 1) + u32(Y);
-
-    let x1 = lerp(u, grad(hash(i32(a)), fx, fy), grad(hash(i32(b)), fx - 1.0, fy));
-    let x2 = lerp(u, grad(hash(i32(a + 1u)), fx, fy - 1.0), grad(hash(i32(b + 1u)), fx - 1.0, fy - 1.0));
-
-    return lerp(v, x1, x2);
-}
+${PERLIN_UTILS_WGSL}
 
 // Calculate trail effect for a world position
 fn calculateTrailEffect(worldX: f32, worldY: f32) -> f32 {

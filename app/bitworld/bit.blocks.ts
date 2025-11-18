@@ -128,8 +128,7 @@ export function extractLineCharacters(
     for (const key in worldData) {
         // Skip special keys that aren't regular character coordinates
         if (key.startsWith('label_') || key.startsWith('task_') || key.startsWith('block_') ||
-            key.startsWith('bound_') || key.startsWith('note_') || key.startsWith('image_') ||
-            key.startsWith('glitched_')) {
+            key.startsWith('note_') || key.startsWith('image_')) {
             continue;
         }
 
@@ -328,8 +327,7 @@ export function extractAllTextBlocks(
     for (const key in worldData) {
         // Skip special keys that aren't regular character coordinates
         if (key.startsWith('label_') || key.startsWith('task_') || key.startsWith('block_') ||
-            key.startsWith('bound_') || key.startsWith('note_') || key.startsWith('image_') ||
-            key.startsWith('glitched_')) {
+            key.startsWith('note_') || key.startsWith('image_')) {
             continue;
         }
 

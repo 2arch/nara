@@ -299,8 +299,6 @@ export interface WorldEngine {
     navMode: 'labels' | 'states' | 'bounds';
     toggleNavMode: () => void;
     getAllLabels: () => Array<{text: string, x: number, y: number, color: string}>;
-    getAllBounds: () => Array<{startX: number, endX: number, startY: number, endY: number, color: string, title?: string}>;
-    boundKeys: string[]; // Cached list of bound_ keys for performance
     getSortedLabels: (sortMode: 'chronological' | 'closest' | 'farthest', originPos: Point) => Array<{text: string, x: number, y: number, color: string}>;
     getUniqueColors: () => string[];
     toggleColorFilter: (color: string) => void;
@@ -345,7 +343,6 @@ export interface WorldEngine {
     }>;
     clustersVisible: boolean;
     updateClusterLabels: () => Promise<void>;
-    focusedBoundKey: string | null;
     isMoveMode: boolean;
     cameraMode: import('./commands').CameraMode;
     setCameraMode: (mode: import('./commands').CameraMode) => void;
@@ -765,8 +762,6 @@ export function useWorldEngine({
     const cursorPosRef = useRef<Point>(initialCursorPos); // Ref for synchronous cursor position access
     const [viewOffset, setViewOffset] = useState<Point>(initialCenteredOffset);
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
-    const [focusedBoundKey, setFocusedBoundKey] = useState<string | null>(null); // Track which bound is focused
-    const [boundCycleIndex, setBoundCycleIndex] = useState<number>(0); // Track which bound to cycle to next
     const [dialogueText, setDialogueTextState] = useState('');
     const [dialogueTimestamp, setDialogueTimestamp] = useState<number | undefined>(undefined);
     const tapeRecordingCallbackRef = useRef<(() => Promise<void> | void) | null>(null);
@@ -864,52 +859,6 @@ export function useWorldEngine({
         }
     }, [initialPatternId]); // Only run once on mount when initialPatternId exists
 
-    // Effect to detect when cursor is on a bounded region
-    useEffect(() => {
-        let foundBoundKey: string | null = null;
-        let bestMatch: { key: string, priority: number } | null = null;
-        
-        for (const key in worldData) {
-            if (key.startsWith('bound_')) {
-                try {
-                    const boundData = JSON.parse(worldData[key] as string);
-                    const { startX, endX, startY, endY, maxY } = boundData;
-                    
-                    // Check if cursor is within the bounded region
-                    const withinOriginalBounds = cursorPos.x >= startX && cursorPos.x <= endX &&
-                                                 cursorPos.y >= startY && cursorPos.y <= endY;
-                    
-                    // Also check if cursor is in the column constraint area (below the bound but within maxY)
-                    const withinColumnConstraint = endY < cursorPos.y && 
-                                                  cursorPos.x >= startX && cursorPos.x <= endX &&
-                                                  (maxY === null || maxY === undefined || cursorPos.y <= maxY);
-                    
-                    if (withinOriginalBounds || withinColumnConstraint) {
-                        // Priority system: prefer bounds where cursor is on top bar, then original bounds, then column constraints
-                        let priority = 0;
-                        if (cursorPos.y === startY) {
-                            priority = 3; // Highest priority: cursor is on the top bar
-                        } else if (withinOriginalBounds) {
-                            priority = 2; // Medium priority: cursor is within original bounds
-                        } else if (withinColumnConstraint) {
-                            priority = 1; // Lowest priority: cursor is in column constraint area
-                        }
-                        
-                        // Use the bound with highest priority, or if tied, the first one found
-                        if (!bestMatch || priority > bestMatch.priority) {
-                            bestMatch = { key, priority };
-                        }
-                    }
-                } catch (e) {
-                    // Skip invalid bound data
-                }
-            }
-        }
-        
-        foundBoundKey = bestMatch?.key || null;
-        setFocusedBoundKey(foundBoundKey);
-    }, [cursorPos, worldData]);
-    
     // Helper function to get world paths directly under /worlds/{userUid}/
     const getUserPath = useCallback((worldPath: string) => userUid ? `worlds/${userUid}/${worldPath.replace('worlds/', '')}` : `worlds/${worldPath.replace('worlds/', '')}`, [userUid]);
 
@@ -1058,45 +1007,6 @@ export function useWorldEngine({
         return labels;
     }, [worldData]);
 
-    // Cache bound keys to avoid filtering on every render
-    // Include both legacy bound_ keys and new note_ keys with contentType='bound'
-    const boundKeys = useMemo(() => {
-        return Object.keys(worldData).filter(k => {
-            if (k.startsWith('bound_')) return true;
-            if (k.startsWith('note_')) {
-                try {
-                    const data = JSON.parse(worldData[k] as string);
-                    return data.contentType === 'bound';
-                } catch (e) {
-                    return false;
-                }
-            }
-            return false;
-        });
-    }, [worldData]);
-
-    const getAllBounds = useCallback(() => {
-        const bounds: Array<{startX: number, endX: number, startY: number, endY: number, color: string, title?: string}> = [];
-        for (const key of boundKeys) {
-            try {
-                const boundData = JSON.parse(worldData[key] as string);
-                if (boundData.startX !== undefined && boundData.endX !== undefined &&
-                    boundData.startY !== undefined && boundData.endY !== undefined) {
-                    bounds.push({
-                        startX: boundData.startX,
-                        endX: boundData.endX,
-                        startY: boundData.startY,
-                        endY: boundData.endY,
-                        color: boundData.color || '#FFFF00',
-                        title: boundData.title
-                    });
-                }
-            } catch (e) {
-                // Skip invalid bound data
-            }
-        }
-        return bounds;
-    }, [worldData, boundKeys]);
 
     // Tape recording callback setter
     const setTapeRecordingCallback = useCallback((callback: () => Promise<void> | void) => {
@@ -1473,7 +1383,7 @@ export function useWorldEngine({
         isFaceDetectionEnabled,
         faceOrientation,
         setFaceDetectionEnabled,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllLabels, getAllBounds, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, triggerUpgradeFlow: () => {
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllLabels, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
         }
@@ -1507,7 +1417,7 @@ export function useWorldEngine({
         // Search through worldData for matches
         for (const key in worldData) {
             // Skip special keys (blocks, labels, bounds, etc.)
-            if (key.startsWith('block_') || key.startsWith('label_') || key.startsWith('bound_')) {
+            if (key.startsWith('block_') || key.startsWith('label_')) {
                 continue;
             }
 
@@ -1602,7 +1512,7 @@ export function useWorldEngine({
         // Group characters by line
         for (const key in worldData) {
             // Skip special keys (blocks, labels, bounds, etc.)
-            if (key.startsWith('block_') || key.startsWith('label_') || key.startsWith('bound_')) {
+            if (key.startsWith('block_') || key.startsWith('label_')) {
                 continue;
             }
             
@@ -2736,54 +2646,9 @@ export function useWorldEngine({
     }, [agentEnabled, viewOffset, agentState, agentPos, getViewportCenter, getEffectiveCharDims, zoomLevel]);
 
     // === Bounded Region Detection ===
-    const getBoundedRegion = useCallback((worldData: WorldData, cursorPos: Point): { startX: number; endX: number; y: number } | null => {
-        // Check if cursor is within any bounded region
-        const cursorX = cursorPos.x;
-        const cursorY = cursorPos.y;
-        
-        let closestBoundAbove: { startX: number; endX: number; y: number } | null = null;
-        let closestBoundY = -Infinity;
-        
-        // Look through all bound_ entries
-        for (const key in worldData) {
-            if (key.startsWith('bound_')) {
-                try {
-                    const boundData = JSON.parse(worldData[key] as string);
-                    
-                    // First check: is cursor within the bounds of this region?
-                    if (cursorX >= boundData.startX && cursorX <= boundData.endX &&
-                        cursorY >= boundData.startY && cursorY <= boundData.endY) {
-                        
-                        // Return the bounds for the current row (supporting multi-row bounded regions)
-                        return { 
-                            startX: boundData.startX, 
-                            endX: boundData.endX, 
-                            y: cursorY 
-                        };
-                    }
-                    
-                    // Second check: is this bound above us and within x range?
-                    // Find the closest bound above that spans our x position
-                    if (boundData.endY < cursorY && // Bound is above current position
-                        cursorX >= boundData.startX && cursorX <= boundData.endX && // We're within its x range
-                        boundData.endY > closestBoundY && // It's closer than any previous bound
-                        (boundData.maxY === null || boundData.maxY === undefined || cursorY <= boundData.maxY)) { // Check height limit
-                        
-                        closestBoundAbove = {
-                            startX: boundData.startX,
-                            endX: boundData.endX,
-                            y: cursorY // Use current cursor Y for the returned bound
-                        };
-                        closestBoundY = boundData.endY;
-                    }
-                } catch (e) {
-                    // Skip invalid bound data
-                }
-            }
-        }
-        
-        // Return the closest bound above if found
-        return closestBoundAbove;
+    // bound_ keys are legacy - always return null
+    const getBoundedRegion = useCallback((_worldData: WorldData, _cursorPos: Point): { startX: number; endX: number; y: number } | null => {
+        return null;
     }, []);
 
     const getNoteRegion = useCallback((worldData: WorldData, cursorPos: Point): { startX: number; endX: number; startY: number; endY: number } | null => {
@@ -2877,8 +2742,7 @@ export function useWorldEngine({
     const findNoteAtSelection = (startX: number, startY: number, endX: number, endY: number, currentWorldData: WorldData): { key: string; data: any } | null => {
         for (const key in currentWorldData) {
             if (key.startsWith('note_') || key.startsWith('image_') ||
-                key.startsWith('iframe_') || key.startsWith('mail_') ||
-                key.startsWith('bound_') || key.startsWith('glitched_') ||
+                key.startsWith('mail_') ||
                 key.startsWith('list_')) {
                 try {
                     const noteData = typeof currentWorldData[key] === 'string'
@@ -2902,8 +2766,7 @@ export function useWorldEngine({
     const findNoteContainingPoint = (x: number, y: number, currentWorldData: WorldData): { key: string; data: any } | null => {
         for (const key in currentWorldData) {
             if (key.startsWith('note_') || key.startsWith('image_') ||
-                key.startsWith('iframe_') || key.startsWith('mail_') ||
-                key.startsWith('bound_') || key.startsWith('glitched_') ||
+                key.startsWith('mail_') ||
                 key.startsWith('list_')) {
                 try {
                     const noteData = typeof currentWorldData[key] === 'string'
@@ -5195,37 +5058,8 @@ export function useWorldEngine({
                         const cursorY = cursorPos.y;
                         let foundRegion = false;
 
-                        // Check for bound at cursor
-                        for (const key in worldData) {
-                            if (key.startsWith('bound_')) {
-                                try {
-                                    const boundData = JSON.parse(worldData[key] as string);
-                                    const { startX, endX, startY, endY, maxY } = boundData;
-                                    const actualEndY = maxY !== null && maxY !== undefined ? maxY : endY;
-
-                                    // Check if cursor is within bound
-                                    if (cursorX >= startX && cursorX <= endX &&
-                                        cursorY >= startY && cursorY <= actualEndY) {
-                                        setFullscreenMode(true, {
-                                            type: 'bound',
-                                            key,
-                                            startX,
-                                            endX,
-                                            startY,
-                                            endY: actualEndY
-                                        });
-                                        setDialogueWithRevert("Entered fullscreen mode - Press Escape or /full to exit", setDialogueText);
-                                        foundRegion = true;
-                                        break;
-                                    }
-                                } catch (e) {
-                                    // Skip invalid bound data
-                                }
-                            }
-                        }
-
-                        // If no bound found, check for list
-                        if (!foundRegion) {
+                        // Check for list at cursor (bound_ is legacy - removed)
+                        {
                             for (const key in worldData) {
                                 if (key.startsWith('note_')) {
                                     try {
@@ -7403,7 +7237,7 @@ export function useWorldEngine({
                 // Check if current line has content
                 let currentLineHasContent = false;
                 for (const k in worldData) {
-                    if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
+                    if (k.startsWith('block_') || k.startsWith('label_')) continue;
                     const [xStr, yStr] = k.split(',');
                     const y = parseInt(yStr, 10);
                     if (y === cursorPos.y) {
@@ -7417,7 +7251,7 @@ export function useWorldEngine({
                     for (let y = cursorPos.y - 1; y >= 0; y--) {
                         let hasContent = false;
                         for (const k in worldData) {
-                            if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
+                            if (k.startsWith('block_') || k.startsWith('label_')) continue;
                             const [xStr, yStr] = k.split(',');
                             const checkY = parseInt(yStr, 10);
                             if (checkY === y) {
@@ -7445,7 +7279,7 @@ export function useWorldEngine({
                         while (searchY >= 0) {
                             let hasContent = false;
                             for (const k in worldData) {
-                                if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
+                                if (k.startsWith('block_') || k.startsWith('label_')) continue;
                                 const [xStr, yStr] = k.split(',');
                                 const y = parseInt(yStr, 10);
                                 if (y === searchY) {
@@ -7505,7 +7339,7 @@ export function useWorldEngine({
                 // Check if current line has content
                 let currentLineHasContent = false;
                 for (const k in worldData) {
-                    if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
+                    if (k.startsWith('block_') || k.startsWith('label_')) continue;
                     const [xStr, yStr] = k.split(',');
                     const y = parseInt(yStr, 10);
                     if (y === cursorPos.y) {
@@ -7520,7 +7354,7 @@ export function useWorldEngine({
                     for (let y = cursorPos.y + 1; y <= maxY; y++) {
                         let hasContent = false;
                         for (const k in worldData) {
-                            if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
+                            if (k.startsWith('block_') || k.startsWith('label_')) continue;
                             const [xStr, yStr] = k.split(',');
                             const checkY = parseInt(yStr, 10);
                             if (checkY === y) {
@@ -7548,7 +7382,7 @@ export function useWorldEngine({
                         while (searchY <= maxY) {
                             let hasContent = false;
                             for (const k in worldData) {
-                                if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
+                                if (k.startsWith('block_') || k.startsWith('label_')) continue;
                                 const [xStr, yStr] = k.split(',');
                                 const y = parseInt(yStr, 10);
                                 if (y === searchY) {
@@ -7586,7 +7420,7 @@ export function useWorldEngine({
                 // Cmd+Left: Move to beginning of line (leftmost character position)
                 let leftmostX = 0;
                 for (const k in worldData) {
-                    if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
+                    if (k.startsWith('block_') || k.startsWith('label_')) continue;
                     const [xStr, yStr] = k.split(',');
                     const checkY = parseInt(yStr, 10);
                     if (checkY === cursorPos.y) {
@@ -7603,7 +7437,7 @@ export function useWorldEngine({
                 let hasContentOnLine = false;
                 let leftmostX = cursorPos.x;
                 for (const k in worldData) {
-                    if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
+                    if (k.startsWith('block_') || k.startsWith('label_')) continue;
                     const [xStr, yStr] = k.split(',');
                     const checkY = parseInt(yStr, 10);
                     if (checkY === cursorPos.y) {
@@ -7661,7 +7495,7 @@ export function useWorldEngine({
                 // Cmd+Right: Move to end of line (rightmost character position + 1)
                 let rightmostX = cursorPos.x;
                 for (const k in worldData) {
-                    if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
+                    if (k.startsWith('block_') || k.startsWith('label_')) continue;
                     const [xStr, yStr] = k.split(',');
                     const checkY = parseInt(yStr, 10);
                     if (checkY === cursorPos.y) {
@@ -7679,7 +7513,7 @@ export function useWorldEngine({
                 let hasContentOnLine = false;
                 let rightmostX = cursorPos.x;
                 for (const k in worldData) {
-                    if (k.startsWith('block_') || k.startsWith('label_') || k.startsWith('bound_')) continue;
+                    if (k.startsWith('block_') || k.startsWith('label_')) continue;
                     const [xStr, yStr] = k.split(',');
                     const checkY = parseInt(yStr, 10);
                     if (checkY === cursorPos.y) {
@@ -8573,135 +8407,6 @@ export function useWorldEngine({
             // Now type the character - handle different modes
             let proposedCursorPos = { x: cursorAfterDelete.x + 1, y: cursorAfterDelete.y }; // Move cursor right
             
-            // Check for bounded region word wrapping
-            const boundedRegion = getBoundedRegion(dataToDeleteFrom, cursorAfterDelete);
-            if (boundedRegion && proposedCursorPos.x > boundedRegion.endX) {
-                // We're typing past the right edge of a bounded region
-                // Check if we can wrap to next line without exceeding height limit
-                const nextLineY = cursorAfterDelete.y + 1;
-                
-                // Find the bound that controls this region to check maxY and if we're within bounds
-                let canWrap = true;
-                let isWithinBoundedRegion = false;
-                
-                for (const key in dataToDeleteFrom) {
-                    if (key.startsWith('bound_')) {
-                        try {
-                            const boundData = JSON.parse(dataToDeleteFrom[key] as string);
-                            
-                            // Check if we're currently within this bound's original region or its column constraint area
-                            const withinOriginalBounds = cursorAfterDelete.x >= boundData.startX && 
-                                                         cursorAfterDelete.x <= boundData.endX &&
-                                                         cursorAfterDelete.y >= boundData.startY && 
-                                                         cursorAfterDelete.y <= boundData.endY;
-                            
-                            const withinColumnConstraint = boundData.endY < cursorAfterDelete.y && 
-                                                          cursorAfterDelete.x >= boundData.startX && 
-                                                          cursorAfterDelete.x <= boundData.endX &&
-                                                          (boundData.maxY === null || boundData.maxY === undefined || cursorAfterDelete.y <= boundData.maxY);
-                            
-                            if (withinOriginalBounds || withinColumnConstraint) {
-                                isWithinBoundedRegion = true;
-                                
-                                // Check if wrapping would exceed height limit
-                                if (boundData.maxY !== null && boundData.maxY !== undefined && nextLineY > boundData.maxY) {
-                                    canWrap = false;
-                                    break;
-                                }
-                            }
-                        } catch (e) {
-                            // Skip invalid bound data
-                        }
-                    }
-                }
-                
-                if (isWithinBoundedRegion) {
-                    if (canWrap) {
-                        // Simple word wrapping: scan backwards to find the last space, then move everything after it
-                        const currentLineY = cursorAfterDelete.y;
-                        let wrapPoint = boundedRegion.startX; // Default to start of line if no space found
-                        
-                        // Scan backwards from the boundary to find the last space
-                        for (let x = boundedRegion.endX; x >= boundedRegion.startX; x--) {
-                            const charKey = `${x},${currentLineY}`;
-                            const charData = dataToDeleteFrom[charKey];
-                            const char = typeof charData === 'string' ? charData : 
-                                        (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
-                            
-                            if (char === ' ') {
-                                wrapPoint = x + 1; // Start wrapping after the space
-                                break;
-                            }
-                        }
-                        
-                        // Only do word wrapping if we found a space and there's something to wrap
-                        if (wrapPoint > boundedRegion.startX && wrapPoint <= cursorAfterDelete.x) {
-                            // Collect all characters from wrap point to cursor
-                            const textToWrap: Array<{x: number, char: string, style?: any}> = [];
-                            
-                            for (let x = wrapPoint; x <= cursorAfterDelete.x; x++) {
-                                const charKey = `${x},${currentLineY}`;
-                                const charData = dataToDeleteFrom[charKey];
-                                if (charData) {
-                                    const char = typeof charData === 'string' ? charData : 
-                                               (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
-                                    const style = typeof charData === 'object' && 'style' in charData ? charData.style : undefined;
-                                    if (char) {
-                                        textToWrap.push({x, char, style});
-                                    }
-                                }
-                            }
-                            
-                            // Remove the text from current line (but keep the space)
-                            const updatedWorldData = { ...dataToDeleteFrom };
-                            for (let x = wrapPoint; x <= cursorAfterDelete.x; x++) {
-                                const charKey = `${x},${currentLineY}`;
-                                delete updatedWorldData[charKey];
-                            }
-                            
-                            // Add the text to next line
-                            let newX = boundedRegion.startX;
-                            for (const {char, style} of textToWrap) {
-                                if (char !== ' ') { // Skip spaces when wrapping
-                                    const newKey = `${newX},${nextLineY}`;
-                                    updatedWorldData[newKey] = style ? {char, style} : char;
-                                    newX++;
-                                }
-                            }
-                            
-                            // Add the current character being typed
-                            const finalKey = `${newX},${nextLineY}`;
-                            updatedWorldData[finalKey] = key;
-                            
-                            // Update world data and cursor position
-                            setWorldData(updatedWorldData);
-                            setCursorPos({ x: newX + 1, y: nextLineY });
-                            worldDataChanged = true;
-                            
-                            // Skip normal character placement since we handled it above
-                            return true;
-                        } else {
-                            // No good wrap point found - just move to next line
-                            proposedCursorPos = { 
-                                x: boundedRegion.startX, 
-                                y: nextLineY 
-                            };
-                        }
-                    } else {
-                        // Can't wrap within bounded region - allow typing beyond bounds
-                        proposedCursorPos = { 
-                            x: cursorAfterDelete.x + 1, 
-                            y: cursorAfterDelete.y 
-                        };
-                    }
-                } else {
-                    // We're outside bounded region - normal wrapping rules apply
-                    proposedCursorPos = { 
-                        x: boundedRegion.startX, 
-                        y: nextLineY 
-                    };
-                }
-            }
 
             // Check for note region word wrapping (if not already handled by bounded region)
             if (!worldDataChanged) {
@@ -10156,8 +9861,6 @@ export function useWorldEngine({
         getCursorDistanceFromCenter,
         getBlocksInRegion,
         getAllLabels,
-        getAllBounds,
-        boundKeys, // Cached list of bound_ keys for performance
         getSortedLabels,
         getUniqueColors,
         toggleColorFilter,
@@ -10242,7 +9945,6 @@ export function useWorldEngine({
         clusterLabels,
         clustersVisible,
         updateClusterLabels,
-        focusedBoundKey, // Expose focused bound for rendering
         isMoveMode,
         cameraMode,
         setCameraMode,
