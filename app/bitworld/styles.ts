@@ -42,7 +42,7 @@ export interface FillStyle {
  * Border/Frame style - how to draw outlines
  */
 export interface BorderStyle {
-    type: 'none' | 'solid' | 'glow';
+    type: 'none' | 'solid' | 'glow' | 'sprite';
 
     // Common properties
     color?: string;
@@ -54,6 +54,11 @@ export interface BorderStyle {
     pulse?: boolean;          // Whether to pulse
     flicker?: boolean;        // Whether to add flicker noise
     cardinalExtension?: number; // Extra glow on cardinal directions
+
+    // Sprite-specific properties
+    spriteSet?: string;       // Sprite set name (e.g., 'ruins')
+    spriteSize?: number;      // Size in cells (default 1)
+    spriteBasePath?: string;  // Firebase Storage base path
 }
 
 /**
@@ -152,6 +157,16 @@ export const BORDERS = {
         flicker: options?.flicker ?? true,
         cardinalExtension: options?.cardinalExtension ?? 1
     }),
+
+    sprite: (spriteSet: string, options?: {
+        size?: number;
+        basePath?: string;
+    }): BorderStyle => ({
+        type: 'sprite',
+        spriteSet,
+        spriteSize: options?.size ?? 1,
+        spriteBasePath: options?.basePath ?? 'sprites/borders/'
+    }),
 };
 
 // ============================================================================
@@ -191,6 +206,200 @@ export const FADES = {
     medium: { enabled: true, duration: 800, easing: 'smooth' } as FadeStyle,
     slow: { enabled: true, duration: 1500, easing: 'smooth' } as FadeStyle,
 };
+
+// ============================================================================
+// SPRITE BORDER SYSTEM
+// ============================================================================
+
+/**
+ * Sprite set containing all 8 border tiles
+ */
+export interface SpriteSet {
+    cornerTL: HTMLImageElement;
+    cornerTR: HTMLImageElement;
+    cornerBL: HTMLImageElement;
+    cornerBR: HTMLImageElement;
+    edgeTop: HTMLImageElement;
+    edgeRight: HTMLImageElement;
+    edgeBottom: HTMLImageElement;
+    edgeLeft: HTMLImageElement;
+}
+
+/**
+ * Global sprite cache: spriteSet name -> SpriteSet
+ */
+const spriteCache = new Map<string, SpriteSet>();
+
+/**
+ * Loading states for sprite sets
+ */
+const spriteLoadingStates = new Map<string, 'loading' | 'loaded' | 'error'>();
+
+/**
+ * Get Firebase Storage URL for a sprite
+ */
+function getSpriteUrl(basePath: string, spriteSet: string, spriteName: string): string {
+    const bucket = 'nara-a65bc.firebasestorage.app';
+    return `https://storage.googleapis.com/${bucket}/${basePath}${spriteSet}/${spriteName}.png`;
+}
+
+/**
+ * Load a single sprite image
+ */
+function loadSpriteImage(url: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error(`Failed to load sprite: ${url}`));
+        img.src = url;
+    });
+}
+
+/**
+ * Load a complete sprite set (all 8 tiles)
+ */
+export async function loadSpriteSet(
+    spriteSet: string,
+    basePath: string = 'sprites/borders/'
+): Promise<SpriteSet | null> {
+    // Check cache first
+    if (spriteCache.has(spriteSet)) {
+        return spriteCache.get(spriteSet)!;
+    }
+
+    // Check if already loading
+    if (spriteLoadingStates.get(spriteSet) === 'loading') {
+        // Wait for it to finish (poll with timeout)
+        return new Promise((resolve) => {
+            const checkInterval = setInterval(() => {
+                if (spriteLoadingStates.get(spriteSet) === 'loaded') {
+                    clearInterval(checkInterval);
+                    resolve(spriteCache.get(spriteSet) || null);
+                } else if (spriteLoadingStates.get(spriteSet) === 'error') {
+                    clearInterval(checkInterval);
+                    resolve(null);
+                }
+            }, 100);
+
+            // Timeout after 5 seconds
+            setTimeout(() => {
+                clearInterval(checkInterval);
+                resolve(null);
+            }, 5000);
+        });
+    }
+
+    // Start loading
+    spriteLoadingStates.set(spriteSet, 'loading');
+
+    try {
+        const [
+            cornerTL,
+            cornerTR,
+            cornerBL,
+            cornerBR,
+            edgeTop,
+            edgeRight,
+            edgeBottom,
+            edgeLeft
+        ] = await Promise.all([
+            loadSpriteImage(getSpriteUrl(basePath, spriteSet, 'corner-tl')),
+            loadSpriteImage(getSpriteUrl(basePath, spriteSet, 'corner-tr')),
+            loadSpriteImage(getSpriteUrl(basePath, spriteSet, 'corner-bl')),
+            loadSpriteImage(getSpriteUrl(basePath, spriteSet, 'corner-br')),
+            loadSpriteImage(getSpriteUrl(basePath, spriteSet, 'edge-top')),
+            loadSpriteImage(getSpriteUrl(basePath, spriteSet, 'edge-right')),
+            loadSpriteImage(getSpriteUrl(basePath, spriteSet, 'edge-bottom')),
+            loadSpriteImage(getSpriteUrl(basePath, spriteSet, 'edge-left'))
+        ]);
+
+        const sprites: SpriteSet = {
+            cornerTL,
+            cornerTR,
+            cornerBL,
+            cornerBR,
+            edgeTop,
+            edgeRight,
+            edgeBottom,
+            edgeLeft
+        };
+
+        spriteCache.set(spriteSet, sprites);
+        spriteLoadingStates.set(spriteSet, 'loaded');
+        return sprites;
+    } catch (error) {
+        console.error(`Failed to load sprite set "${spriteSet}":`, error);
+        spriteLoadingStates.set(spriteSet, 'error');
+        return null;
+    }
+}
+
+/**
+ * Render 9-slice sprite border
+ */
+function renderSpriteBorder(
+    context: BaseRenderContext,
+    bounds: CellBounds,
+    border: BorderStyle
+): void {
+    const { ctx, charWidth, charHeight } = context;
+    const { spriteSet, spriteSize = 1, spriteBasePath = 'sprites/borders/' } = border;
+
+    if (!spriteSet) return;
+
+    // Get sprites from cache
+    const sprites = spriteCache.get(spriteSet);
+    if (!sprites) {
+        // Sprites not loaded yet - trigger async load (non-blocking)
+        loadSpriteSet(spriteSet, spriteBasePath).then(() => {
+            // Will render on next frame
+        });
+        return;
+    }
+
+    const cellSize = spriteSize * charWidth;
+    const cellSizeY = spriteSize * charHeight;
+
+    // Calculate positions
+    const x = bounds.x * charWidth;
+    const y = bounds.y * charHeight;
+    const width = bounds.width * charWidth;
+    const height = bounds.height * charHeight;
+
+    // Corners (fixed)
+    ctx.drawImage(sprites.cornerTL, x, y, cellSize, cellSizeY);
+    ctx.drawImage(sprites.cornerTR, x + width - cellSize, y, cellSize, cellSizeY);
+    ctx.drawImage(sprites.cornerBL, x, y + height - cellSizeY, cellSize, cellSizeY);
+    ctx.drawImage(sprites.cornerBR, x + width - cellSize, y + height - cellSizeY, cellSize, cellSizeY);
+
+    // Top edge (tiled)
+    for (let i = cellSize; i < width - cellSize; i += cellSize) {
+        const tileWidth = Math.min(cellSize, width - cellSize - i);
+        ctx.drawImage(sprites.edgeTop, 0, 0, (tileWidth / cellSize) * sprites.edgeTop.width, sprites.edgeTop.height,
+            x + i, y, tileWidth, cellSizeY);
+    }
+
+    // Bottom edge (tiled)
+    for (let i = cellSize; i < width - cellSize; i += cellSize) {
+        const tileWidth = Math.min(cellSize, width - cellSize - i);
+        ctx.drawImage(sprites.edgeBottom, 0, 0, (tileWidth / cellSize) * sprites.edgeBottom.width, sprites.edgeBottom.height,
+            x + i, y + height - cellSizeY, tileWidth, cellSizeY);
+    }
+
+    // Left edge (tiled)
+    for (let i = cellSizeY; i < height - cellSizeY; i += cellSizeY) {
+        const tileHeight = Math.min(cellSizeY, height - cellSizeY - i);
+        ctx.drawImage(sprites.edgeLeft, 0, 0, sprites.edgeLeft.width, (tileHeight / cellSizeY) * sprites.edgeLeft.height,
+            x, y + i, cellSize, tileHeight);
+    }
+
+    // Right edge (tiled)
+    for (let i = cellSizeY; i < height - cellSizeY; i += cellSizeY) {
+        const tileHeight = Math.min(cellSizeY, height - cellSizeY - i);
+        ctx.drawImage(sprites.edgeRight, 0, 0, sprites.edgeRight.width, (tileHeight / cellSizeY) * sprites.edgeRight.height,
+            x + width - cellSize, y + i, cellSize, tileHeight);
+    }
+}
 
 // ============================================================================
 // PREDEFINED COMPLETE STYLES
@@ -250,6 +459,12 @@ export const RECT_STYLES = {
     iframe: {
         fill: FILLS.transparent('#000000', 0.3),
         border: BORDERS.solid('#666666', 1)
+    } as RectStyle,
+
+    // Sprite borders
+    ruins: {
+        fill: FILLS.none,
+        border: BORDERS.sprite('ruins', { size: 1 })
     } as RectStyle,
 };
 
@@ -423,6 +638,11 @@ export function renderStyledRect(
     // Render glow border first (if applicable)
     if (style.border.type === 'glow' && style.border.color) {
         renderGlowBorder(context, bounds, style.border);
+    }
+
+    // Render sprite border (if applicable)
+    if (style.border.type === 'sprite' && style.border.spriteSet) {
+        renderSpriteBorder(context, bounds, style.border);
     }
 
     // Render fill

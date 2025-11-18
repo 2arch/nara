@@ -53,4 +53,4 @@ functions/node_modules.env.local
 host-flows-export.json
 
 # functions
-/functions
+/functionsservice-account-key.json
