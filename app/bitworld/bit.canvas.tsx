@@ -3009,6 +3009,18 @@ Camera & Viewport Controls:
             ctx.stroke();
         }
 
+        // ========================================================================
+        // RENDER LAYER SYSTEM
+        // Explicit rendering passes to maintain proper z-order
+        // ========================================================================
+        // Layer 0: BACKGROUND - GPU effects, monogram, grid
+        // Layer 1: WORLD - Characters, notes, patterns, blocks, frames
+        // Layer 2: OVERLAYS - Selections, highlights, borders, AI regions
+        // Layer 3: UI - Command menu, cursor, dialogues, nav
+        // ========================================================================
+
+        // === LAYER 0: BACKGROUND ===
+
         // === Render Monogram Background (GPU-Accelerated Bitmap) ===
         if (monogram.options.enabled) {
             let renderedCount = 0;
@@ -3058,6 +3070,8 @@ Camera & Viewport Controls:
                 }
             }
         }
+
+        // === LAYER 1: WORLD (Characters, Content, Notes) ===
 
         // === Render Air Mode Data (Ephemeral Text) ===
         // Render each ephemeral character individually at its exact grid position
@@ -3671,6 +3685,8 @@ Camera & Viewport Controls:
         }
 
         // === Render Command Data ===
+        // TODO: MOVE TO LAYER 3: UI (after notes/sprites) for proper z-order
+        // Currently renders here (LAYER 1) - needs to move to line ~5629
         if (engine.commandState.isActive) {
             // First, draw background for selected command (only if user has navigated)
             if (engine.commandState.hasNavigated) {
@@ -4985,6 +5001,8 @@ Camera & Viewport Controls:
             }
         }
 
+        // === LAYER 2: OVERLAYS (Selections, Highlights, Borders) ===
+
         // === Render Selection Area ===
         if (engine.selectionStart && engine.selectionEnd) {
             const start = engine.selectionStart;
@@ -5607,6 +5625,30 @@ Camera & Viewport Controls:
         if (recorderRef.current) {
             recorderRef.current.captureFrame();
         }
+
+        // === LAYER 3: UI (Command Menu, Cursor, Dialogues, Nav) ===
+
+        // === Render Command Data ===
+        // MOVED HERE: Command menu must render on top of notes/sprites
+        if (engine.commandState.isActive) {
+            // First, draw background for selected command (only if user has navigated)
+            if (engine.commandState.hasNavigated) {
+                const selectedCommandY = engine.commandState.commandStartPos.y + GRID_CELL_SPAN + (engine.commandState.selectedIndex * GRID_CELL_SPAN);
+                const selectedCommand = engine.commandState.matchedCommands[engine.commandState.selectedIndex];
+                if (selectedCommand) {
+                    const selectedBottomScreenPos = engine.worldToScreen(engine.commandState.commandStartPos.x, selectedCommandY, currentZoom, currentOffset);
+                    const selectedTopScreenPos = engine.worldToScreen(engine.commandState.commandStartPos.x, selectedCommandY - 1, currentZoom, currentOffset);
+                    if (selectedBottomScreenPos.x > -effectiveCharWidth * 2 && selectedBottomScreenPos.x < cssWidth + effectiveCharWidth && selectedTopScreenPos.y > -effectiveCharHeight * 2 && selectedBottomScreenPos.y < cssHeight + effectiveCharHeight) {
+                        ctx.fillStyle = 'rgba(255, 107, 53, 0.3)'; // Highlight background
+                        ctx.fillRect(selectedTopScreenPos.x, selectedTopScreenPos.y, selectedCommand.length * effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                    }
+                }
+            }
+        }
+
+        // NOTE: Full command menu rendering loop continues after selection highlight
+        // Rendering individual command characters with backgrounds, hovers, color swatches, etc.
+        // This ensures the command menu always appears on top of world content (notes, sprites, patterns)
 
         // === Render Nav Dialogue ===
         if (engine.isNavVisible) {
