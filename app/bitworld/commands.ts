@@ -517,6 +517,16 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         setDialogueWithRevert(message, setDialogueText);
     }, [setPendingCommand, setDialogueText]);
 
+    // Utility function to execute simple passthrough commands (clear state + return to world engine)
+    const executeSimpleCommand = useCallback((command: string, args: string[] = []): CommandExecution => {
+        clearCommandState();
+        return {
+            command,
+            args,
+            commandStartPos: commandState.commandStartPos
+        };
+    }, [commandState.commandStartPos, clearCommandState]);
+
     // Utility function to match commands based on input
     const matchCommands = useCallback((input: string): string[] => {
         // Filter signin/signout based on authentication state
@@ -1970,15 +1980,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('cluster')) {
-            // Clear command mode
-            clearCommandState();
-            
-            // Return command execution for world engine to handle cluster generation
-            return {
-                command: 'cluster',
-                args: [],
-                commandStartPos: commandState.commandStartPos
-            };
+            return executeSimpleCommand('cluster');
         }
 
         if (commandToExecute.startsWith('frames')) {
@@ -1998,15 +2000,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('clear')) {
-            // Clear command mode
-            clearCommandState();
-
-            // Return command execution for world engine to handle clearing the canvas
-            return {
-                command: 'clear',
-                args: [],
-                commandStartPos: commandState.commandStartPos
-            };
+            return executeSimpleCommand('clear');
         }
 
         if (commandToExecute.startsWith('clip')) {
@@ -2083,27 +2077,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('signin')) {
-            // Clear command mode
-            clearCommandState();
-
-            // Return command execution for world engine to handle signin flow
-            return {
-                command: 'signin',
-                args: [],
-                commandStartPos: commandState.commandStartPos
-            };
+            return executeSimpleCommand('signin');
         }
 
         if (commandToExecute.startsWith('signout')) {
-            // Clear command mode
-            clearCommandState();
-
-            // Return command execution for world engine to handle the actual sign out
-            return {
-                command: 'signout',
-                args: [],
-                commandStartPos: commandState.commandStartPos
-            };
+            return executeSimpleCommand('signout');
         }
 
         if (commandToExecute.startsWith('mail')) {
@@ -2344,15 +2322,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('spawn')) {
-            // Clear command mode
-            clearCommandState();
-
-            // Return command execution for world engine to handle spawn point setting
-            return {
-                command: 'spawn',
-                args: [],
-                commandStartPos: commandState.commandStartPos
-            };
+            return executeSimpleCommand('spawn');
         }
 
         // Handle monogram command (WebGPU background effects)
@@ -2405,27 +2375,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('glitch')) {
-            // Clear command mode
-            clearCommandState();
-
-            // Return command execution for world engine to handle glitch region creation
-            return {
-                command: 'glitch',
-                args: [],
-                commandStartPos: commandState.commandStartPos
-            };
+            return executeSimpleCommand('glitch');
         }
 
         if (commandToExecute.startsWith('zoom')) {
-            // Clear command mode
-            clearCommandState();
-
-            // Return command execution for world engine to handle zoom animation
-            return {
-                command: 'zoom',
-                args: [],
-                commandStartPos: commandState.commandStartPos
-            };
+            return executeSimpleCommand('zoom');
         }
 
         // Handle commands that need text selection
@@ -2446,26 +2400,17 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         // Handle share command - always publishes with region coordinates
         if (commandToExecute.startsWith('share')) {
-            // Clear command mode
-            clearCommandState();
-
-            return { command: 'share', args: [], commandStartPos: commandState.commandStartPos };
+            return executeSimpleCommand('share');
         }
 
         // Handle latex command - activates LaTeX input mode
         if (commandToExecute.startsWith('latex')) {
-            // Clear command mode
-            clearCommandState();
-
-            return { command: 'latex', args: [], commandStartPos: commandState.commandStartPos };
+            return executeSimpleCommand('latex');
         }
 
         // Handle smiles command - activates SMILES (molecular structure) input mode
         if (commandToExecute.startsWith('smiles')) {
-            // Clear command mode
-            clearCommandState();
-
-            return { command: 'smiles', args: [], commandStartPos: commandState.commandStartPos };
+            return executeSimpleCommand('smiles');
         }
 
         // Handle upload command - opens file picker for image upload
