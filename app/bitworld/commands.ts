@@ -2260,9 +2260,18 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (commandToExecute.startsWith('note')) {
             // /note command - one-shot note region creation from selection
+            // Parse arguments: /note temp creates ephemeral notes with dashed borders
+            const args = inputParts.slice(1);
+            const isTemp = args.includes('temp');
+
             createRegionFromSelection('note', {
-                successMessage: (dims) => `Note region saved (${dims.width}×${dims.height})`,
-                pendingMessage: "Make a selection, then press Enter to save as note region"
+                successMessage: (dims) => isTemp
+                    ? `Ephemeral note created (${dims.width}×${dims.height})`
+                    : `Note region saved (${dims.width}×${dims.height})`,
+                pendingMessage: isTemp
+                    ? "Make a selection, then press Enter to save as ephemeral note"
+                    : "Make a selection, then press Enter to save as note region",
+                additionalData: isTemp ? { style: 'ephemeral' } : {}
             });
 
             // Clear command mode
@@ -2271,7 +2280,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             // Return special flag to indicate cursor should be restored
             return {
                 command: 'note',
-                args: [],
+                args: args,
                 commandStartPos: commandState.commandStartPos,
                 restoreCursor: true
             } as CommandExecution & { restoreCursor?: boolean };

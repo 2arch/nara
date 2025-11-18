@@ -42,11 +42,14 @@ export interface FillStyle {
  * Border/Frame style - how to draw outlines
  */
 export interface BorderStyle {
-    type: 'none' | 'solid' | 'glow' | 'sprite';
+    type: 'none' | 'solid' | 'dashed' | 'glow' | 'sprite';
 
     // Common properties
     color?: string;
     thickness?: number;       // In cells (for solid borders)
+
+    // Dashed-specific properties
+    dashPattern?: number[];   // Dash pattern [dash, gap] in pixels
 
     // Glow-specific properties
     glowRadius?: number;      // Glow radius in cells
@@ -140,6 +143,16 @@ export const BORDERS = {
         type: 'solid',
         color,
         thickness
+    }),
+
+    dashed: (color: string, options?: {
+        thickness?: number;
+        dashPattern?: number[];
+    }): BorderStyle => ({
+        type: 'dashed',
+        color,
+        thickness: options?.thickness ?? 1,
+        dashPattern: options?.dashPattern ?? [5, 5]
     }),
 
     glow: (color: string, options?: {
@@ -466,6 +479,12 @@ export const RECT_STYLES = {
         fill: FILLS.none,
         border: BORDERS.sprite('ruins', { size: 1 })
     } as RectStyle,
+
+    // Ephemeral/temporary notes
+    ephemeral: {
+        fill: FILLS.none,
+        border: BORDERS.dashed('#888888', { thickness: 1, dashPattern: [5, 5] })
+    } as RectStyle,
 };
 
 /**
@@ -655,12 +674,28 @@ export function renderStyledRect(
         const thickness = (style.border.thickness * charWidth);
         ctx.strokeStyle = style.border.color;
         ctx.lineWidth = thickness;
+        ctx.setLineDash([]);
         ctx.strokeRect(
             screenX + thickness / 2,
             screenY + thickness / 2,
             screenWidth - thickness,
             screenHeight - thickness
         );
+    }
+
+    // Render dashed border (if applicable)
+    if (style.border.type === 'dashed' && style.border.color && style.border.thickness) {
+        const thickness = (style.border.thickness * charWidth);
+        ctx.strokeStyle = style.border.color;
+        ctx.lineWidth = thickness;
+        ctx.setLineDash(style.border.dashPattern || [5, 5]);
+        ctx.strokeRect(
+            screenX + thickness / 2,
+            screenY + thickness / 2,
+            screenWidth - thickness,
+            screenHeight - thickness
+        );
+        ctx.setLineDash([]); // Reset to solid
     }
 
     ctx.restore();
