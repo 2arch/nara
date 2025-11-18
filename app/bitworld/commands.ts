@@ -3201,28 +3201,46 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 const actualCenterX = minX + actualWidth / 2;
                 const actualCenterY = minY + actualHeight / 2;
 
-                // Capture source pattern metadata before deletion (nested artefacts)
-                const sourcePatternMetadata = existingPatternKeys.size > 0
-                    ? Array.from(existingPatternKeys).map(key => {
+                // Flatten source patterns into atomic leaf nodes (BSP/manual only)
+                const flattenSourcePatterns = (patternKeys: Set<string>): any[] => {
+                    const leafPatterns: any[] = [];
+                    const seen = new Set<string>();
+
+                    const collect = (key: string) => {
+                        if (seen.has(key)) return;
+                        seen.add(key);
+
                         try {
                             const sourceData = JSON.parse(worldData[key] as string);
-                            return {
-                                key,
-                                type: sourceData.generationType || 'unknown',
-                                // Preserve generation params if they exist (for BSP patterns)
-                                ...(sourceData.generationParams && {
-                                    params: sourceData.generationParams
-                                }),
-                                // Preserve source patterns if this was itself a graft
-                                ...(sourceData.sourcePatterns && {
-                                    sourcePatterns: sourceData.sourcePatterns
-                                })
-                            };
+
+                            if (sourceData.generationType === 'grafted' && sourceData.sourcePatterns) {
+                                // Recursively flatten grafted patterns
+                                for (const source of sourceData.sourcePatterns) {
+                                    collect(source.key || source);
+                                }
+                            } else {
+                                // Leaf pattern (BSP or manual)
+                                leafPatterns.push({
+                                    key,
+                                    type: sourceData.generationType || 'unknown',
+                                    // Preserve generation params if they exist (for BSP patterns)
+                                    ...(sourceData.generationParams && {
+                                        params: sourceData.generationParams
+                                    })
+                                });
+                            }
                         } catch (e) {
                             // Fallback if pattern data is invalid
-                            return { key, type: 'unknown' };
+                            leafPatterns.push({ key, type: 'unknown' });
                         }
-                    })
+                    };
+
+                    patternKeys.forEach(collect);
+                    return leafPatterns;
+                };
+
+                const sourcePatternMetadata = existingPatternKeys.size > 0
+                    ? flattenSourcePatterns(existingPatternKeys)
                     : undefined;
 
                 // Create or update pattern data
@@ -3240,7 +3258,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     // 'grafted' if merging existing patterns together
                     generationType: (isNewPattern ? 'manual' : 'grafted'),
                     ...(sourcePatternMetadata && {
-                        // Preserve complete metadata of merged patterns (nested artefacts)
+                        // Flat list of all leaf patterns (atomistic, no nesting)
                         sourcePatterns: sourcePatternMetadata
                     })
                 };
