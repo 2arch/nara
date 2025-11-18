@@ -439,6 +439,443 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
 }
 
 // ============================================================================
+// Host Dialogue Rendering
+// ============================================================================
+
+/**
+ * Renders the host dialogue system with all its visual effects
+ *
+ * Handles:
+ * - Background dimming with fade-in
+ * - Text wrapping and centering (portrait vs desktop)
+ * - Pulsing glow effects around text
+ * - Context-specific hints
+ * - Off-screen directional arrows
+ *
+ * @param ctx - Canvas rendering context
+ * @param params - All rendering parameters bundled for cleaner signature
+ */
+function renderHostDialogue(
+    ctx: CanvasRenderingContext2D,
+    params: {
+        engine: any;
+        hostDialogue: any;
+        cssWidth: number;
+        cssHeight: number;
+        effectiveCharWidth: number;
+        effectiveCharHeight: number;
+        currentZoom: number;
+        currentOffset: { x: number; y: number };
+        startWorldX: number;
+        endWorldX: number;
+        startWorldY: number;
+        endWorldY: number;
+        verticalTextOffset: number;
+        hostDimBackground: boolean;
+        hasHostDimFadedInRef: React.MutableRefObject<boolean>;
+        hostDimFadeStartRef: React.MutableRefObject<number | null>;
+        getViewportEdgeIntersection: (
+            centerX: number,
+            centerY: number,
+            targetX: number,
+            targetY: number,
+            viewportWidth: number,
+            viewportHeight: number
+        ) => any;
+        renderText: (ctx: CanvasRenderingContext2D, text: string, x: number, y: number) => void;
+        drawArrow: (ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, color: string) => void;
+    }
+): void {
+    const {
+        engine,
+        hostDialogue,
+        cssWidth,
+        cssHeight,
+        effectiveCharWidth,
+        effectiveCharHeight,
+        currentZoom,
+        currentOffset,
+        startWorldX,
+        endWorldX,
+        startWorldY,
+        endWorldY,
+        verticalTextOffset,
+        hostDimBackground,
+        hasHostDimFadedInRef,
+        hostDimFadeStartRef,
+        getViewportEdgeIntersection,
+        renderText,
+        drawArrow
+    } = params;
+
+    if (!engine.hostData) {
+        // Reset dim fade tracking when host mode exits
+        if (hasHostDimFadedInRef.current || hostDimFadeStartRef.current !== null) {
+            hostDimFadeStartRef.current = null;
+            hasHostDimFadedInRef.current = false;
+        }
+        return;
+    }
+
+    const fadeDuration = 800; // ms
+
+    // Background dim fade-in (only once when host mode first activates)
+    if (hostDimBackground) {
+        // Initialize dim fade timer on first appearance
+        if (!hasHostDimFadedInRef.current && hostDimFadeStartRef.current === null) {
+            hostDimFadeStartRef.current = Date.now();
+        }
+
+        let dimProgress = 1.0; // Default to fully dimmed
+        if (hostDimFadeStartRef.current !== null && !hasHostDimFadedInRef.current) {
+            const dimElapsed = Date.now() - hostDimFadeStartRef.current;
+            dimProgress = Math.min(1, dimElapsed / fadeDuration);
+            // Smooth easing (ease-in-out)
+            dimProgress = dimProgress * dimProgress * (3 - 2 * dimProgress);
+
+            // Mark as faded in once complete
+            if (dimProgress >= 1.0) {
+                hasHostDimFadedInRef.current = true;
+            }
+        }
+
+        ctx.fillStyle = `rgba(0, 0, 0, ${0.4 * dimProgress})`;
+        ctx.fillRect(0, 0, cssWidth, cssHeight);
+    }
+
+    // Text fade-in (happens on each new message)
+    const textElapsed = engine.hostData.timestamp ? Date.now() - engine.hostData.timestamp : fadeDuration;
+    let fadeProgress = Math.min(1, textElapsed / fadeDuration);
+    // Smooth easing (ease-in-out)
+    fadeProgress = fadeProgress * fadeProgress * (3 - 2 * fadeProgress);
+
+    const hostText = engine.hostData.text;
+    const hostColor = engine.hostData.color || engine.textColor;
+
+    // Intelligent wrap width based on viewport (same logic as addInstantAIResponse)
+    const BASE_FONT_SIZE = 16;
+    const BASE_CHAR_WIDTH = BASE_FONT_SIZE * 0.6;
+    const charWidth = effectiveCharWidth || BASE_CHAR_WIDTH;
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
+    const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
+    const availableWidthChars = Math.floor(viewportWidth / charWidth);
+    const isPortrait = viewportHeight > viewportWidth;
+    const MARGIN_CHARS = isPortrait ? 2 : 8; // Smaller margins on mobile
+    const MAX_WIDTH_CHARS = 60;
+    const wrapWidth = Math.min(MAX_WIDTH_CHARS, availableWidthChars - (2 * MARGIN_CHARS));
+
+    // Text wrapping
+    const wrapText = (text: string, maxWidth: number): string[] => {
+        const paragraphs = text.split('\n');
+        const lines: string[] = [];
+        for (let i = 0; i < paragraphs.length; i++) {
+            const paragraph = paragraphs[i].trim();
+            if (paragraph === '') {
+                lines.push('');
+                continue;
+            }
+            const words = paragraph.split(' ');
+            let currentLine = '';
+            for (const word of words) {
+                const testLine = currentLine ? `${currentLine} ${word}` : word;
+                if (testLine.length <= maxWidth) {
+                    currentLine = testLine;
+                } else {
+                    if (currentLine) {
+                        lines.push(currentLine);
+                        currentLine = word;
+                    } else {
+                        lines.push(word.substring(0, maxWidth));
+                        currentLine = word.substring(maxWidth);
+                    }
+                }
+            }
+            if (currentLine) lines.push(currentLine);
+        }
+        return lines;
+    };
+
+    const wrappedLines = wrapText(hostText, wrapWidth);
+    const maxLineWidth = Math.max(...wrappedLines.map(line => line.length));
+    const totalHeight = wrappedLines.length * GRID_CELL_SPAN;
+
+    // Position text: left-aligned on mobile (portrait), centered on desktop
+    let textStartX: number;
+    let textStartY: number;
+
+    if (isPortrait) {
+        // Left-aligned with margin on mobile
+        textStartX = Math.floor(engine.hostData.centerPos.x - (availableWidthChars / 2) + MARGIN_CHARS);
+        textStartY = Math.floor(engine.hostData.centerPos.y - totalHeight / 2);
+    } else {
+        // Centered on desktop
+        textStartX = Math.floor(engine.hostData.centerPos.x - maxLineWidth / 2);
+        textStartY = Math.floor(engine.hostData.centerPos.y - totalHeight / 2);
+    }
+
+    // First pass: Render glow effect with gentle pulse + violent flicker perturbation
+    const GLOW_RADIUS = 2; // How many cells away the glow extends
+
+    // Base: Gentle sine wave pulse
+    const pulseSpeed = 0.001; // Slow, gentle pulse
+    const pulsePhase = (Date.now() * pulseSpeed) % (Math.PI * 2);
+    const basePulse = 0.6 + Math.sin(pulsePhase) * 0.2; // Oscillates 0.4 to 0.8
+
+    // Perturbation: Violent flickering noise (smaller but noticeable)
+    const flickerSpeed = 0.05; // Fast flicker
+    const time = Date.now() * flickerSpeed;
+    const flicker1 = Math.sin(time * 2.3) * 0.5 + 0.5; // Fast variation
+    const flicker2 = Math.sin(time * 4.7) * 0.5 + 0.5; // Rapid jitter
+    const randomNoise = Math.random(); // Random component
+
+    // Combine: base pulse with small violent perturbation layered on top
+    const flickerPerturbation = (flicker1 * 0.08 + flicker2 * 0.05 + randomNoise * 0.07);
+    const pulseIntensity = basePulse + flickerPerturbation;
+
+    // Apply fade-in to glow intensity
+    const glowAlphas = [0.6 * pulseIntensity * fadeProgress, 0.3 * pulseIntensity * fadeProgress]; // Alpha values for distance 1, 2
+
+    // Parse background color for alpha manipulation
+    const bgHex = (engine.backgroundColor || '#FFFFFF').replace('#', '');
+    const bgR = parseInt(bgHex.substring(0, 2), 16);
+    const bgG = parseInt(bgHex.substring(2, 4), 16);
+    const bgB = parseInt(bgHex.substring(4, 6), 16);
+
+    // Collect all text cell positions
+    const textCells = new Set<string>();
+    let y = textStartY;
+    wrappedLines.forEach(line => {
+        for (let x = 0; x < line.length; x++) {
+            const char = line[x];
+            if (char && char.trim() !== '') {
+                textCells.add(`${textStartX + x},${y}`);
+            }
+        }
+        y += GRID_CELL_SPAN;
+    });
+
+    // Render glow for each text cell
+    textCells.forEach(cellKey => {
+        const [cx, cy] = cellKey.split(',').map(Number);
+
+        // Extended radius for cardinal directions (up, down, left, right)
+        const CARDINAL_EXTENSION = 1; // Extra cell in cardinal directions
+        const maxRadius = GLOW_RADIUS + CARDINAL_EXTENSION;
+
+        // Render glow in surrounding cells
+        for (let dy = -maxRadius; dy <= maxRadius; dy++) {
+            for (let dx = -maxRadius; dx <= maxRadius; dx++) {
+                if (dx === 0 && dy === 0) continue; // Skip the text cell itself
+
+                const glowX = cx + dx;
+                const glowY = cy + dy;
+
+                // Skip if this is also a text cell
+                if (textCells.has(`${glowX},${glowY}`)) continue;
+
+                // Check if on cardinal direction (straight up/down/left/right)
+                const isCardinal = (dx === 0 || dy === 0);
+
+                // Use extended radius for cardinals, normal for diagonals
+                const effectiveRadius = isCardinal ? maxRadius : GLOW_RADIUS;
+
+                const distance = Math.max(Math.abs(dx), Math.abs(dy)); // Chebyshev distance
+                if (distance > effectiveRadius) continue;
+
+                // Map distance to alpha (use standard glow values, fade for extended)
+                let alpha;
+                if (distance <= GLOW_RADIUS) {
+                    alpha = glowAlphas[distance - 1];
+                } else {
+                    // Extended glow (only happens on cardinals) - very faint
+                    alpha = glowAlphas[GLOW_RADIUS - 1] * 0.3;
+                }
+                if (!alpha) continue;
+
+                if (glowX >= startWorldX - 5 && glowX <= endWorldX + 5 && glowY >= startWorldY - 5 && glowY <= endWorldY + 5) {
+                    const topScreenPos = engine.worldToScreen(glowX, glowY, currentZoom, currentOffset);
+                    if (topScreenPos.x > -effectiveCharWidth * 2 && topScreenPos.x < cssWidth + effectiveCharWidth &&
+                        topScreenPos.y > -effectiveCharHeight * 2 && topScreenPos.y < cssHeight + effectiveCharHeight) {
+
+                        ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, ${alpha})`;
+                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                    }
+                }
+            }
+        }
+    });
+
+    // Second pass: Render actual text with full background
+    y = textStartY;
+    wrappedLines.forEach(line => {
+        for (let x = 0; x < line.length; x++) {
+            const char = line[x];
+            const worldX = textStartX + x;
+            const worldY = y;
+
+            if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                const topScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                if (topScreenPos.x > -effectiveCharWidth * 2 && topScreenPos.x < cssWidth + effectiveCharWidth &&
+                    topScreenPos.y > -effectiveCharHeight * 2 && topScreenPos.y < cssHeight + effectiveCharHeight) {
+
+                    if (char && char.trim() !== '') {
+                        // Apply background highlight for host text with fade-in
+                        const bgColorWithAlpha = (() => {
+                            const color = engine.backgroundColor || '#000000'; // Fallback to black
+                            if (color.startsWith('#')) {
+                                const hex = color.replace('#', '');
+                                const r = parseInt(hex.substring(0, 2), 16);
+                                const g = parseInt(hex.substring(2, 4), 16);
+                                const b = parseInt(hex.substring(4, 6), 16);
+                                return `rgba(${r}, ${g}, ${b}, ${fadeProgress})`;
+                            } else if (color.startsWith('rgb')) {
+                                return color.replace(/rgba?\(([^)]+)\)/, (_: string, values: string) => {
+                                    const parts = values.split(',').map((v: string) => v.trim());
+                                    return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${fadeProgress})`;
+                                });
+                            }
+                            return color;
+                        })();
+                        ctx.fillStyle = bgColorWithAlpha;
+                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+
+                        // Render the character with host color and fade-in
+                        const hostColorWithAlpha = (() => {
+                            if (hostColor.startsWith('#')) {
+                                const hex = hostColor.replace('#', '');
+                                const r = parseInt(hex.substring(0, 2), 16);
+                                const g = parseInt(hex.substring(2, 4), 16);
+                                const b = parseInt(hex.substring(4, 6), 16);
+                                return `rgba(${r}, ${g}, ${b}, ${fadeProgress})`;
+                            } else if (hostColor.startsWith('rgb')) {
+                                return hostColor.replace(/rgba?\(([^)]+)\)/, (_: string, values: string) => {
+                                    const parts = values.split(',').map((v: string) => v.trim());
+                                    return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${fadeProgress})`;
+                                });
+                            }
+                            return hostColor;
+                        })();
+                        ctx.fillStyle = hostColorWithAlpha;
+                        renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
+                    }
+                }
+            }
+        }
+        y += GRID_CELL_SPAN;
+    });
+
+    // Render context-specific hints for certain messages
+    const currentMessage = hostDialogue.getCurrentMessage();
+    const isMobile = typeof window !== 'undefined' && 'ontouchstart' in window;
+
+    let hintText: string | null = null;
+
+    // Show hint only for specific message IDs
+    if (currentMessage && !isMobile) {
+        if (currentMessage.id === 'welcome_message' && !currentMessage.expectsInput) {
+            hintText = 'press any key to continue';
+        } else if (currentMessage.id === 'collect_password' && currentMessage.expectsInput) {
+            hintText = 'press Tab to unhide password';
+        }
+    }
+
+    if (hintText) {
+        // Position hint at bottom of viewport, centered horizontally
+        const bottomScreenY = cssHeight - (4 * effectiveCharHeight); // 4 lines from bottom
+        const bottomWorldPos = engine.screenToWorld(cssWidth / 2, bottomScreenY, currentZoom, currentOffset);
+        const hintY = Math.floor(bottomWorldPos.y);
+        const hintStartX = Math.floor(engine.getViewportCenter().x - hintText.length / 2);
+
+        for (let x = 0; x < hintText.length; x++) {
+            const char = hintText[x];
+            const worldX = hintStartX + x;
+            const worldY = hintY;
+
+            if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                    screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+
+                    if (char && char.trim() !== '') {
+                        // Render the hint character in backgroundColor with fade-in
+                        const hintColorWithAlpha = (() => {
+                            const color = engine.backgroundColor || '#000000'; // Fallback to black
+                            if (color.startsWith('#')) {
+                                const hex = color.replace('#', '');
+                                const r = parseInt(hex.substring(0, 2), 16);
+                                const g = parseInt(hex.substring(2, 4), 16);
+                                const b = parseInt(hex.substring(4, 6), 16);
+                                return `rgba(${r}, ${g}, ${b}, ${fadeProgress})`;
+                            } else if (color.startsWith('rgb')) {
+                                return color.replace(/rgba?\(([^)]+)\)/, (_: string, values: string) => {
+                                    const parts = values.split(',').map((v: string) => v.trim());
+                                    return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${fadeProgress})`;
+                                });
+                            }
+                            return color;
+                        })();
+                        ctx.fillStyle = hintColorWithAlpha;
+                        renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
+                    }
+                }
+            }
+        }
+    }
+
+    // Check if host dialogue is off-screen and render arrow if needed
+    const hostCenterScreenPos = engine.worldToScreen(engine.hostData.centerPos.x, engine.hostData.centerPos.y, currentZoom, currentOffset);
+    const isHostVisible = hostCenterScreenPos.x >= 0 && hostCenterScreenPos.x <= cssWidth &&
+                          hostCenterScreenPos.y >= 0 && hostCenterScreenPos.y <= cssHeight;
+
+    if (!isHostVisible) {
+        // Host dialogue is off-screen, draw arrow pointing to it
+        const viewportCenterScreen = {
+            x: cssWidth / 2,
+            y: cssHeight / 2
+        };
+
+        const intersection = getViewportEdgeIntersection(
+            viewportCenterScreen.x, viewportCenterScreen.y,
+            hostCenterScreenPos.x, hostCenterScreenPos.y,
+            cssWidth, cssHeight
+        );
+
+        if (intersection) {
+            const edgeBuffer = ARROW_MARGIN;
+            let adjustedX = intersection.x;
+            let adjustedY = intersection.y;
+
+            // Clamp to viewport bounds with margin
+            adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
+            adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
+
+            // Draw arrow with flickering glow effect (same flicker as text)
+            const glowAlpha = pulseIntensity;
+
+            // Render glow layers for arrow (larger to smaller) - only glow pulses
+            const glowLayers = [
+                { scale: 2.5, alpha: 0.15 * glowAlpha },
+                { scale: 2.0, alpha: 0.25 * glowAlpha },
+                { scale: 1.5, alpha: 0.35 * glowAlpha }
+            ];
+
+            glowLayers.forEach(layer => {
+                const glowColor = `rgba(${bgR}, ${bgG}, ${bgB}, ${layer.alpha})`;
+                ctx.save();
+                ctx.translate(adjustedX, adjustedY);
+                ctx.scale(layer.scale, layer.scale);
+                ctx.translate(-adjustedX, -adjustedY);
+                drawArrow(ctx, adjustedX, adjustedY, intersection.angle, glowColor);
+                ctx.restore();
+            });
+
+            // Draw main arrow in solid backgroundColor (no pulsing)
+            drawArrow(ctx, adjustedX, adjustedY, intersection.angle, engine.backgroundColor || '#FFFFFF');
+        }
+    }
+}
+
+// ============================================================================
 
 interface CursorTrailPosition {
     x: number;
@@ -738,47 +1175,46 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         requestAnimationFrame(animateZoom);
     }, [engine]);
 
-        // Host dialogue system for onboarding
+    // Host dialogue system for onboarding
     const hostDialogue = useHostDialogue({
+        // === Dialogue UI ===
         setHostData: engine.setHostData,
         getViewportCenter: engine.getViewportCenter,
         setDialogueText: engine.setDialogueText,
-        onAuthSuccess,
-        onTriggerZoom: handleZoom,
         setHostMode: engine.setHostMode,
         setChatMode: engine.setChatMode,
-        addEphemeralText: engine.addInstantAIResponse ?
-            (pos, char, options) => {
-                // Use addInstantAIResponse to render single character
-                engine.addInstantAIResponse(pos, char, {
+
+        // === App Navigation/Auth ===
+        onAuthSuccess,
+        onTriggerZoom: handleZoom,
+
+        // === Screen Effects ===
+        screenEffects: {
+            setBackgroundColor: (color) => {
+                engine.updateSettings({ backgroundColor: color });
+            },
+            setBackgroundMode: (mode) => {
+                engine.switchBackgroundMode(mode as any, engine.backgroundImage || '', engine.textColor);
+            },
+            setBackgroundImage: (url) => {
+                engine.switchBackgroundMode('image' as any, url, engine.textColor);
+            },
+            setMonogramMode: (mode) => {
+                // TODO: Wire up to monogram system once setMonogramMode is implemented on engine
+                console.log('[BitCanvas] setMonogramMode called with:', mode);
+            },
+            setWorldData: engine.setWorldData,
+            addEphemeralText: engine.addInstantAIResponse ?
+                (pos, char, options) => engine.addInstantAIResponse(pos, char, {
                     fadeDelay: options?.animationDelay || 1500,
                     color: options?.color,
-                    wrapWidth: 1 // Single character
-                });
-            } : undefined,
-        setWorldData: engine.setWorldData,
-        hostBackgroundColor: hostBackgroundColor,
-        isPublicWorld: isPublicWorld,
-        setBackgroundColor: (color: string) => {
-            console.log('[BitCanvas] setBackgroundColor called with:', color);
-            console.log('[BitCanvas] Current engine backgroundColor:', engine.settings.backgroundColor);
-            engine.updateSettings({ backgroundColor: color });
-            console.log('[BitCanvas] Engine backgroundColor after update:', engine.settings.backgroundColor);
+                    wrapWidth: 1
+                }) : undefined
         },
-        setBackgroundMode: (mode: 'color' | 'image' | 'video' | 'transparent') => {
-            console.log('[BitCanvas] setBackgroundMode called with:', mode);
-            console.log('[BitCanvas] Current engine backgroundMode:', engine.backgroundMode);
-            // Background mode is controlled by command system, call switchBackgroundMode
-            engine.switchBackgroundMode(mode as any, engine.backgroundImage || '', engine.textColor);
-            console.log('[BitCanvas] Engine backgroundMode after update:', engine.backgroundMode);
-        },
-        setBackgroundImage: (imageUrl: string) => {
-            console.log('[BitCanvas] setBackgroundImage called with:', imageUrl);
-            console.log('[BitCanvas] Current engine backgroundImage:', engine.backgroundImage);
-            // Switch to image mode with the provided URL
-            engine.switchBackgroundMode('image' as any, imageUrl, engine.textColor);
-            console.log('[BitCanvas] Engine backgroundImage after update:', engine.backgroundImage);
-        }
+
+        // === Context ===
+        hostBackgroundColor,
+        isPublicWorld
     });
 
     // Handle email verification flow
@@ -2903,370 +3339,28 @@ Camera & Viewport Controls:
         }
 
         // === Render Host Data (Centered at Initial Position) ===
-        if (engine.hostData) {
-            const fadeDuration = 800; // ms
+        renderHostDialogue(ctx, {
+            engine,
+            hostDialogue,
+            cssWidth,
+            cssHeight,
+            effectiveCharWidth,
+            effectiveCharHeight,
+            currentZoom,
+            currentOffset,
+            startWorldX,
+            endWorldX,
+            startWorldY,
+            endWorldY,
+            verticalTextOffset,
+            hostDimBackground,
+            hasHostDimFadedInRef,
+            hostDimFadeStartRef,
+            getViewportEdgeIntersection,
+            renderText,
+            drawArrow
+        });
 
-            // Background dim fade-in (only once when host mode first activates)
-            if (hostDimBackground) {
-                // Initialize dim fade timer on first appearance
-                if (!hasHostDimFadedInRef.current && hostDimFadeStartRef.current === null) {
-                    hostDimFadeStartRef.current = Date.now();
-                }
-
-                let dimProgress = 1.0; // Default to fully dimmed
-                if (hostDimFadeStartRef.current !== null && !hasHostDimFadedInRef.current) {
-                    const dimElapsed = Date.now() - hostDimFadeStartRef.current;
-                    dimProgress = Math.min(1, dimElapsed / fadeDuration);
-                    // Smooth easing (ease-in-out)
-                    dimProgress = dimProgress * dimProgress * (3 - 2 * dimProgress);
-
-                    // Mark as faded in once complete
-                    if (dimProgress >= 1.0) {
-                        hasHostDimFadedInRef.current = true;
-                    }
-                }
-
-                ctx.fillStyle = `rgba(0, 0, 0, ${0.4 * dimProgress})`;
-                ctx.fillRect(0, 0, cssWidth, cssHeight);
-            }
-
-            // Text fade-in (happens on each new message)
-            const textElapsed = engine.hostData.timestamp ? Date.now() - engine.hostData.timestamp : fadeDuration;
-            let fadeProgress = Math.min(1, textElapsed / fadeDuration);
-            // Smooth easing (ease-in-out)
-            fadeProgress = fadeProgress * fadeProgress * (3 - 2 * fadeProgress);
-
-            const hostText = engine.hostData.text;
-            const hostColor = engine.hostData.color || engine.textColor;
-
-            // Intelligent wrap width based on viewport (same logic as addInstantAIResponse)
-            const BASE_FONT_SIZE = 16;
-            const BASE_CHAR_WIDTH = BASE_FONT_SIZE * 0.6;
-            const charWidth = effectiveCharWidth || BASE_CHAR_WIDTH;
-            const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
-            const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
-            const availableWidthChars = Math.floor(viewportWidth / charWidth);
-            const isPortrait = viewportHeight > viewportWidth;
-            const MARGIN_CHARS = isPortrait ? 2 : 8; // Smaller margins on mobile
-            const MAX_WIDTH_CHARS = 60;
-            const wrapWidth = Math.min(MAX_WIDTH_CHARS, availableWidthChars - (2 * MARGIN_CHARS));
-
-            // Text wrapping
-            const wrapText = (text: string, maxWidth: number): string[] => {
-                const paragraphs = text.split('\n');
-                const lines: string[] = [];
-                for (let i = 0; i < paragraphs.length; i++) {
-                    const paragraph = paragraphs[i].trim();
-                    if (paragraph === '') {
-                        lines.push('');
-                        continue;
-                    }
-                    const words = paragraph.split(' ');
-                    let currentLine = '';
-                    for (const word of words) {
-                        const testLine = currentLine ? `${currentLine} ${word}` : word;
-                        if (testLine.length <= maxWidth) {
-                            currentLine = testLine;
-                        } else {
-                            if (currentLine) {
-                                lines.push(currentLine);
-                                currentLine = word;
-                            } else {
-                                lines.push(word.substring(0, maxWidth));
-                                currentLine = word.substring(maxWidth);
-                            }
-                        }
-                    }
-                    if (currentLine) lines.push(currentLine);
-                }
-                return lines;
-            };
-
-            const wrappedLines = wrapText(hostText, wrapWidth);
-            const maxLineWidth = Math.max(...wrappedLines.map(line => line.length));
-            const totalHeight = wrappedLines.length * GRID_CELL_SPAN;
-
-            // Position text: left-aligned on mobile (portrait), centered on desktop
-            let textStartX: number;
-            let textStartY: number;
-
-            if (isPortrait) {
-                // Left-aligned with margin on mobile
-                textStartX = Math.floor(engine.hostData.centerPos.x - (availableWidthChars / 2) + MARGIN_CHARS);
-                textStartY = Math.floor(engine.hostData.centerPos.y - totalHeight / 2);
-            } else {
-                // Centered on desktop
-                textStartX = Math.floor(engine.hostData.centerPos.x - maxLineWidth / 2);
-                textStartY = Math.floor(engine.hostData.centerPos.y - totalHeight / 2);
-            }
-
-            // First pass: Render glow effect with gentle pulse + violent flicker perturbation
-            const GLOW_RADIUS = 2; // How many cells away the glow extends
-
-            // Base: Gentle sine wave pulse
-            const pulseSpeed = 0.001; // Slow, gentle pulse
-            const pulsePhase = (Date.now() * pulseSpeed) % (Math.PI * 2);
-            const basePulse = 0.6 + Math.sin(pulsePhase) * 0.2; // Oscillates 0.4 to 0.8
-
-            // Perturbation: Violent flickering noise (smaller but noticeable)
-            const flickerSpeed = 0.05; // Fast flicker
-            const time = Date.now() * flickerSpeed;
-            const flicker1 = Math.sin(time * 2.3) * 0.5 + 0.5; // Fast variation
-            const flicker2 = Math.sin(time * 4.7) * 0.5 + 0.5; // Rapid jitter
-            const randomNoise = Math.random(); // Random component
-
-            // Combine: base pulse with small violent perturbation layered on top
-            const flickerPerturbation = (flicker1 * 0.08 + flicker2 * 0.05 + randomNoise * 0.07);
-            const pulseIntensity = basePulse + flickerPerturbation;
-
-            // Apply fade-in to glow intensity
-            const glowAlphas = [0.6 * pulseIntensity * fadeProgress, 0.3 * pulseIntensity * fadeProgress]; // Alpha values for distance 1, 2
-
-            // Parse background color for alpha manipulation
-            const bgHex = (engine.backgroundColor || '#FFFFFF').replace('#', '');
-            const bgR = parseInt(bgHex.substring(0, 2), 16);
-            const bgG = parseInt(bgHex.substring(2, 4), 16);
-            const bgB = parseInt(bgHex.substring(4, 6), 16);
-
-            // Collect all text cell positions
-            const textCells = new Set<string>();
-            let y = textStartY;
-            wrappedLines.forEach(line => {
-                for (let x = 0; x < line.length; x++) {
-                    const char = line[x];
-                    if (char && char.trim() !== '') {
-                        textCells.add(`${textStartX + x},${y}`);
-                    }
-                }
-                y += GRID_CELL_SPAN;
-            });
-
-            // Render glow for each text cell
-            textCells.forEach(cellKey => {
-                const [cx, cy] = cellKey.split(',').map(Number);
-
-                // Extended radius for cardinal directions (up, down, left, right)
-                const CARDINAL_EXTENSION = 1; // Extra cell in cardinal directions
-                const maxRadius = GLOW_RADIUS + CARDINAL_EXTENSION;
-
-                // Render glow in surrounding cells
-                for (let dy = -maxRadius; dy <= maxRadius; dy++) {
-                    for (let dx = -maxRadius; dx <= maxRadius; dx++) {
-                        if (dx === 0 && dy === 0) continue; // Skip the text cell itself
-
-                        const glowX = cx + dx;
-                        const glowY = cy + dy;
-
-                        // Skip if this is also a text cell
-                        if (textCells.has(`${glowX},${glowY}`)) continue;
-
-                        // Check if on cardinal direction (straight up/down/left/right)
-                        const isCardinal = (dx === 0 || dy === 0);
-
-                        // Use extended radius for cardinals, normal for diagonals
-                        const effectiveRadius = isCardinal ? maxRadius : GLOW_RADIUS;
-
-                        const distance = Math.max(Math.abs(dx), Math.abs(dy)); // Chebyshev distance
-                        if (distance > effectiveRadius) continue;
-
-                        // Map distance to alpha (use standard glow values, fade for extended)
-                        let alpha;
-                        if (distance <= GLOW_RADIUS) {
-                            alpha = glowAlphas[distance - 1];
-                        } else {
-                            // Extended glow (only happens on cardinals) - very faint
-                            alpha = glowAlphas[GLOW_RADIUS - 1] * 0.3;
-                        }
-                        if (!alpha) continue;
-
-                        if (glowX >= startWorldX - 5 && glowX <= endWorldX + 5 && glowY >= startWorldY - 5 && glowY <= endWorldY + 5) {
-                            const topScreenPos = engine.worldToScreen(glowX, glowY, currentZoom, currentOffset);
-                            if (topScreenPos.x > -effectiveCharWidth * 2 && topScreenPos.x < cssWidth + effectiveCharWidth &&
-                                topScreenPos.y > -effectiveCharHeight * 2 && topScreenPos.y < cssHeight + effectiveCharHeight) {
-
-                                ctx.fillStyle = `rgba(${bgR}, ${bgG}, ${bgB}, ${alpha})`;
-                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-                            }
-                        }
-                    }
-                }
-            });
-
-            // Second pass: Render actual text with full background
-            y = textStartY;
-            wrappedLines.forEach(line => {
-                for (let x = 0; x < line.length; x++) {
-                    const char = line[x];
-                    const worldX = textStartX + x;
-                    const worldY = y;
-
-                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                        const topScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                        if (topScreenPos.x > -effectiveCharWidth * 2 && topScreenPos.x < cssWidth + effectiveCharWidth &&
-                            topScreenPos.y > -effectiveCharHeight * 2 && topScreenPos.y < cssHeight + effectiveCharHeight) {
-
-                            if (char && char.trim() !== '') {
-                                // Apply background highlight for host text with fade-in
-                                const bgColorWithAlpha = (() => {
-                                    const color = engine.backgroundColor || '#000000'; // Fallback to black
-                                    if (color.startsWith('#')) {
-                                        const hex = color.replace('#', '');
-                                        const r = parseInt(hex.substring(0, 2), 16);
-                                        const g = parseInt(hex.substring(2, 4), 16);
-                                        const b = parseInt(hex.substring(4, 6), 16);
-                                        return `rgba(${r}, ${g}, ${b}, ${fadeProgress})`;
-                                    } else if (color.startsWith('rgb')) {
-                                        return color.replace(/rgba?\(([^)]+)\)/, (match, values) => {
-                                            const parts = values.split(',').map((v: string) => v.trim());
-                                            return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${fadeProgress})`;
-                                        });
-                                    }
-                                    return color;
-                                })();
-                                ctx.fillStyle = bgColorWithAlpha;
-                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-
-                                // Render the character with host color and fade-in
-                                const hostColorWithAlpha = (() => {
-                                    if (hostColor.startsWith('#')) {
-                                        const hex = hostColor.replace('#', '');
-                                        const r = parseInt(hex.substring(0, 2), 16);
-                                        const g = parseInt(hex.substring(2, 4), 16);
-                                        const b = parseInt(hex.substring(4, 6), 16);
-                                        return `rgba(${r}, ${g}, ${b}, ${fadeProgress})`;
-                                    } else if (hostColor.startsWith('rgb')) {
-                                        return hostColor.replace(/rgba?\(([^)]+)\)/, (match, values) => {
-                                            const parts = values.split(',').map((v: string) => v.trim());
-                                            return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${fadeProgress})`;
-                                        });
-                                    }
-                                    return hostColor;
-                                })();
-                                ctx.fillStyle = hostColorWithAlpha;
-                                renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
-                            }
-                        }
-                    }
-                }
-                y += GRID_CELL_SPAN;
-            });
-
-            // Render context-specific hints for certain messages
-            const currentMessage = hostDialogue.getCurrentMessage();
-            const isMobile = typeof window !== 'undefined' && 'ontouchstart' in window;
-
-            let hintText: string | null = null;
-
-            // Show hint only for specific message IDs
-            if (currentMessage && !isMobile) {
-                if (currentMessage.id === 'welcome_message' && !currentMessage.expectsInput) {
-                    hintText = 'press any key to continue';
-                } else if (currentMessage.id === 'collect_password' && currentMessage.expectsInput) {
-                    hintText = 'press Tab to unhide password';
-                }
-            }
-
-            if (hintText) {
-                // Position hint at bottom of viewport, centered horizontally
-                const bottomScreenY = cssHeight - (4 * effectiveCharHeight); // 4 lines from bottom
-                const bottomWorldPos = engine.screenToWorld(cssWidth / 2, bottomScreenY, currentZoom, currentOffset);
-                const hintY = Math.floor(bottomWorldPos.y);
-                const hintStartX = Math.floor(engine.getViewportCenter().x - hintText.length / 2);
-
-                for (let x = 0; x < hintText.length; x++) {
-                    const char = hintText[x];
-                    const worldX = hintStartX + x;
-                    const worldY = hintY;
-
-                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                        if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
-                            screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-
-                            if (char && char.trim() !== '') {
-                                // Render the hint character in backgroundColor with fade-in
-                                const hintColorWithAlpha = (() => {
-                                    const color = engine.backgroundColor || '#000000'; // Fallback to black
-                                    if (color.startsWith('#')) {
-                                        const hex = color.replace('#', '');
-                                        const r = parseInt(hex.substring(0, 2), 16);
-                                        const g = parseInt(hex.substring(2, 4), 16);
-                                        const b = parseInt(hex.substring(4, 6), 16);
-                                        return `rgba(${r}, ${g}, ${b}, ${fadeProgress})`;
-                                    } else if (color.startsWith('rgb')) {
-                                        return color.replace(/rgba?\(([^)]+)\)/, (match, values) => {
-                                            const parts = values.split(',').map((v: string) => v.trim());
-                                            return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${fadeProgress})`;
-                                        });
-                                    }
-                                    return color;
-                                })();
-                                ctx.fillStyle = hintColorWithAlpha;
-                                renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Check if host dialogue is off-screen and render arrow if needed
-            const hostCenterScreenPos = engine.worldToScreen(engine.hostData.centerPos.x, engine.hostData.centerPos.y, currentZoom, currentOffset);
-            const isHostVisible = hostCenterScreenPos.x >= 0 && hostCenterScreenPos.x <= cssWidth &&
-                                  hostCenterScreenPos.y >= 0 && hostCenterScreenPos.y <= cssHeight;
-
-            if (!isHostVisible) {
-                // Host dialogue is off-screen, draw arrow pointing to it
-                const viewportCenterScreen = {
-                    x: cssWidth / 2,
-                    y: cssHeight / 2
-                };
-
-                const intersection = getViewportEdgeIntersection(
-                    viewportCenterScreen.x, viewportCenterScreen.y,
-                    hostCenterScreenPos.x, hostCenterScreenPos.y,
-                    cssWidth, cssHeight
-                );
-
-                if (intersection) {
-                    const edgeBuffer = ARROW_MARGIN;
-                    let adjustedX = intersection.x;
-                    let adjustedY = intersection.y;
-
-                    // Clamp to viewport bounds with margin
-                    adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
-                    adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
-
-                    // Draw arrow with flickering glow effect (same flicker as text)
-                    const glowAlpha = pulseIntensity;
-
-                    // Render glow layers for arrow (larger to smaller) - only glow pulses
-                    const glowLayers = [
-                        { scale: 2.5, alpha: 0.15 * glowAlpha },
-                        { scale: 2.0, alpha: 0.25 * glowAlpha },
-                        { scale: 1.5, alpha: 0.35 * glowAlpha }
-                    ];
-
-                    glowLayers.forEach(layer => {
-                        const glowColor = `rgba(${bgR}, ${bgG}, ${bgB}, ${layer.alpha})`;
-                        ctx.save();
-                        ctx.translate(adjustedX, adjustedY);
-                        ctx.scale(layer.scale, layer.scale);
-                        ctx.translate(-adjustedX, -adjustedY);
-                        drawArrow(ctx, adjustedX, adjustedY, intersection.angle, glowColor);
-                        ctx.restore();
-                    });
-
-                    // Draw main arrow in solid backgroundColor (no pulsing)
-                    drawArrow(ctx, adjustedX, adjustedY, intersection.angle, engine.backgroundColor || '#FFFFFF');
-                }
-            }
-        } else {
-            // Reset dim fade tracking when host mode exits
-            if (hasHostDimFadedInRef.current || hostDimFadeStartRef.current !== null) {
-                hostDimFadeStartRef.current = null;
-                hasHostDimFadedInRef.current = false;
-            }
-        }
 
         // === Render Chat Data (Black Background, White Text) ===
         // Check if we need to mask passwords in host mode (only if not toggled to visible)

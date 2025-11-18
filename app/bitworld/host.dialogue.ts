@@ -15,21 +15,30 @@ export interface HostDialogueState {
 }
 
 export interface UseHostDialogueProps {
+  // === Dialogue UI (what makes this system unique) ===
   setHostData: (data: { text: string; color?: string; centerPos: Point; timestamp?: number } | null) => void;
   getViewportCenter: () => Point;
   setDialogueText: (text: string) => void;
-  onAuthSuccess?: (username: string) => void;
-  onTriggerZoom?: (targetZoom: number, centerPos: Point) => void;
   setHostMode?: (mode: { isActive: boolean; currentInputType: any }) => void;
   setChatMode?: (mode: { isActive: boolean; currentInput: string; inputPositions: any[]; isProcessing: boolean }) => void;
-  addEphemeralText?: (pos: Point, char: string, options?: { animationDelay?: number; color?: string; background?: string }) => void;
-  setWorldData?: (updater: (prev: Record<string, any>) => Record<string, any>) => void;
-  hostBackgroundColor?: string; // Host greeting background color to set as initial world bg
-  isPublicWorld?: boolean; // Whether user is signing up in a public world (e.g., /base)
-  setMonogramMode?: (mode: string) => void; // Control monogram display
-  setBackgroundColor?: (color: string) => void; // Control background color
-  setBackgroundMode?: (mode: 'color' | 'image' | 'video' | 'transparent') => void; // Control background mode
-  setBackgroundImage?: (imageUrl: string) => void; // Control background image
+
+  // === App Navigation/Auth ===
+  onAuthSuccess?: (username: string) => void;
+  onTriggerZoom?: (targetZoom: number, centerPos: Point) => void;
+
+  // === Screen Effects (consolidated) ===
+  screenEffects?: {
+    setBackgroundColor?: (color: string) => void;
+    setBackgroundMode?: (mode: 'color' | 'image' | 'video' | 'transparent') => void;
+    setBackgroundImage?: (imageUrl: string) => void;
+    setMonogramMode?: (mode: string) => void;
+    setWorldData?: (updater: (prev: Record<string, any>) => Record<string, any>) => void;
+    addEphemeralText?: (pos: Point, char: string, options?: { animationDelay?: number; color?: string; background?: string }) => void;
+  };
+
+  // === Context ===
+  hostBackgroundColor?: string;
+  isPublicWorld?: boolean;
 }
 
 // Helper to map message IDs to field names
@@ -46,7 +55,75 @@ function getFieldNameFromMessageId(messageId: string): string {
   return fieldMap[messageId] || 'username'; // Default to username for verification flow
 }
 
-export function useHostDialogue({ setHostData, getViewportCenter, setDialogueText, onAuthSuccess, onTriggerZoom, setHostMode, setChatMode, addEphemeralText, setWorldData, hostBackgroundColor, isPublicWorld, setMonogramMode, setBackgroundColor, setBackgroundMode, setBackgroundImage }: UseHostDialogueProps) {
+/**
+ * Single source of truth for screen effect application
+ *
+ * Applies all screen-level effects (monogram, background, world content)
+ * defined in a host message. This consolidates effect logic that was
+ * previously duplicated across multiple call sites.
+ *
+ * @param message - The host message containing effect definitions
+ * @param centerPos - The viewport center position for content spawning
+ * @param props - The host dialogue props containing screen effect callbacks
+ */
+function applyMessageEffects(
+  message: HostMessage,
+  centerPos: Point,
+  props: UseHostDialogueProps
+): void {
+  // Monogram control
+  if (message.monogramMode && props.screenEffects?.setMonogramMode) {
+    props.screenEffects.setMonogramMode(message.monogramMode);
+  }
+
+  // Background color control
+  if (message.backgroundColor && props.screenEffects?.setBackgroundColor) {
+    props.screenEffects.setBackgroundColor(message.backgroundColor);
+  }
+
+  // Background image/mode control
+  if (message.backgroundImage && props.screenEffects?.setBackgroundImage) {
+    props.screenEffects.setBackgroundImage(message.backgroundImage);
+  } else if (message.backgroundMode && props.screenEffects?.setBackgroundMode) {
+    props.screenEffects.setBackgroundMode(message.backgroundMode);
+  }
+
+  // World content spawning
+  if (message.spawnContent && props.screenEffects?.setWorldData) {
+    const content = message.spawnContent(centerPos);
+    const labelKeys = Object.keys(content).filter(k => k.startsWith('label_'));
+
+    props.screenEffects.setWorldData(prev => {
+      const labelsExist = labelKeys.some(key => key in prev);
+      if (labelsExist) return prev;
+      return { ...prev, ...content };
+    });
+  }
+
+  // World content cleanup
+  if (message.despawnLabels && props.screenEffects?.setWorldData) {
+    props.screenEffects.setWorldData(prev => {
+      const newData = { ...prev };
+      Object.keys(newData).forEach(key => {
+        if (key.startsWith('label_')) delete newData[key];
+      });
+      return newData;
+    });
+  }
+}
+
+export function useHostDialogue({
+  setHostData,
+  getViewportCenter,
+  setDialogueText,
+  onAuthSuccess,
+  onTriggerZoom,
+  setHostMode,
+  setChatMode,
+  screenEffects,
+  hostBackgroundColor,
+  isPublicWorld
+}: UseHostDialogueProps) {
   const [state, setState] = useState<HostDialogueState>({
     isActive: false,
     currentFlowId: null,
@@ -79,48 +156,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       timestamp: Date.now()
     });
 
-    // Handle monogram mode from message
-    if (startMessage.monogramMode && setMonogramMode) {
-      console.log('[HostDialogue] startFlow - Setting monogram mode to:', startMessage.monogramMode);
-      setMonogramMode(startMessage.monogramMode);
-    }
-
-    // Handle background color from message
-    if (startMessage.backgroundColor && setBackgroundColor) {
-      console.log('[HostDialogue] startFlow - Setting background color to:', startMessage.backgroundColor);
-      setBackgroundColor(startMessage.backgroundColor);
-    }
-
-    // Handle background image from message (this switches to image mode internally)
-    if (startMessage.backgroundImage && setBackgroundImage) {
-      console.log('[HostDialogue] startFlow - Setting background image to:', startMessage.backgroundImage);
-      setBackgroundImage(startMessage.backgroundImage);
-    }
-    // Only set background mode separately if no image is specified
-    else if (startMessage.backgroundMode && setBackgroundMode) {
-      console.log('[HostDialogue] startFlow - Setting background mode to:', startMessage.backgroundMode);
-      setBackgroundMode(startMessage.backgroundMode);
-    }
-
-    // Spawn staged content if defined (only if not already spawned)
-    if (startMessage.spawnContent && setWorldData) {
-      const content = startMessage.spawnContent(centerPos);
-
-      // Check if labels already exist (don't duplicate)
-      const labelKeys = Object.keys(content).filter(k => k.startsWith('label_'));
-
-      setWorldData(prev => {
-        const labelsExist = labelKeys.some(key => key in prev);
-        if (labelsExist) {
-          return prev;
-        }
-
-        return {
-          ...prev,
-          ...content
-        };
-      });
-    }
+    // Apply all screen effects from message
+    applyMessageEffects(startMessage, centerPos, { setHostData, getViewportCenter, setDialogueText, onAuthSuccess, onTriggerZoom, setHostMode, setChatMode, screenEffects, hostBackgroundColor, isPublicWorld });
 
     // Activate host mode
     if (setHostMode) {
@@ -148,7 +185,7 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       collectedData: {},
       isProcessing: false
     });
-  }, [setHostData, getViewportCenter, setWorldData, setHostMode, setChatMode, setMonogramMode, setBackgroundColor, setBackgroundMode, setBackgroundImage]);
+  }, [setHostData, getViewportCenter, setHostMode, setChatMode, screenEffects]);
 
   // Manual advance through non-input messages (removed auto-advance)
   const advanceToNextMessage = useCallback(() => {
@@ -166,23 +203,14 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
     if (!currentMessage.expectsInput && currentMessage.nextMessageId) {
       const nextMessage = flow.messages[currentMessage.nextMessageId!];
       if (nextMessage) {
-        // Special handling for transition_to_welcome - process monogram change then switch to welcome flow
+        // Special handling for transition_to_welcome - process effects then switch to welcome flow
         if (currentMessage.nextMessageId === 'transition_to_welcome') {
-          // Apply monogram mode from transition message before switching flows
-          if (nextMessage.monogramMode && setMonogramMode) {
-            setMonogramMode(nextMessage.monogramMode);
-          }
-          // Apply background image if specified (this switches to image mode internally)
-          if (nextMessage.backgroundImage && setBackgroundImage) {
-            setBackgroundImage(nextMessage.backgroundImage);
-          }
-          // Only set background mode separately if no image is specified
-          else if (nextMessage.backgroundMode && setBackgroundMode) {
-            setBackgroundMode(nextMessage.backgroundMode);
-          }
-          // Only restore background color to host color if message doesn't override it
-          else if (hostBackgroundColor && setBackgroundColor) {
-            setBackgroundColor(hostBackgroundColor);
+          const centerPos = getViewportCenter();
+          // Apply effects from transition message before switching flows
+          applyMessageEffects(nextMessage, centerPos, { setHostData, getViewportCenter, setDialogueText, onAuthSuccess, onTriggerZoom, setHostMode, setChatMode, screenEffects, hostBackgroundColor, isPublicWorld });
+          // Restore background color to host color if message doesn't override it
+          if (!nextMessage.backgroundColor && !nextMessage.backgroundImage && !nextMessage.backgroundMode && hostBackgroundColor && screenEffects?.setBackgroundColor) {
+            screenEffects.setBackgroundColor(hostBackgroundColor);
           }
           startFlow('welcome');
           return;
@@ -196,58 +224,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           timestamp: Date.now()
         });
 
-        // Handle monogram mode from message
-        if (nextMessage.monogramMode && setMonogramMode) {
-          setMonogramMode(nextMessage.monogramMode);
-        }
-
-        // Handle background color from message
-        if (nextMessage.backgroundColor && setBackgroundColor) {
-          setBackgroundColor(nextMessage.backgroundColor);
-        }
-
-        // Handle background image from message (this switches to image mode internally)
-        if (nextMessage.backgroundImage && setBackgroundImage) {
-          setBackgroundImage(nextMessage.backgroundImage);
-        }
-        // Only set background mode separately if no image is specified
-        else if (nextMessage.backgroundMode && setBackgroundMode) {
-          setBackgroundMode(nextMessage.backgroundMode);
-        }
-
-        // Despawn labels if requested
-        if (nextMessage.despawnLabels && setWorldData) {
-          setWorldData(prev => {
-            const newData = { ...prev };
-            // Remove all label_ keys
-            Object.keys(newData).forEach(key => {
-              if (key.startsWith('label_')) {
-                delete newData[key];
-              }
-            });
-            return newData;
-          });
-        }
-
-        // Spawn staged content if defined (only if not already spawned)
-        if (nextMessage.spawnContent && setWorldData) {
-          const content = nextMessage.spawnContent(centerPos);
-
-          // Check if labels already exist (don't duplicate)
-          const labelKeys = Object.keys(content).filter(k => k.startsWith('label_'));
-
-          setWorldData(prev => {
-            const labelsExist = labelKeys.some(key => key in prev);
-            if (labelsExist) {
-              return prev;
-            }
-
-            return {
-              ...prev,
-              ...content
-            };
-          });
-        }
+        // Apply all screen effects from message
+        applyMessageEffects(nextMessage, centerPos, { setHostData, getViewportCenter, setDialogueText, onAuthSuccess, onTriggerZoom, setHostMode, setChatMode, screenEffects, hostBackgroundColor, isPublicWorld });
 
         setState(prev => ({
           ...prev,
@@ -255,7 +233,7 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
         }));
       }
     }
-  }, [state, setHostData, getViewportCenter, setWorldData, setMonogramMode, setBackgroundColor, setBackgroundMode, setBackgroundImage, startFlow, hostBackgroundColor]);
+  }, [state, setHostData, getViewportCenter, screenEffects, startFlow, hostBackgroundColor]);
 
   // Go back to previous message
   const goBackToPreviousMessage = useCallback(() => {
@@ -468,8 +446,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
             setHostData(null);
 
             // Clean up all labels spawned during dialogue
-            if (setWorldData) {
-              setWorldData(prev => {
+            if (screenEffects?.setWorldData) {
+              screenEffects.setWorldData(prev => {
                 const newData = { ...prev };
                 Object.keys(newData).forEach(key => {
                   if (key.startsWith('label_')) {
@@ -744,8 +722,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
         setHostData(null);
 
         // Clean up all labels spawned during dialogue
-        if (setWorldData) {
-          setWorldData(prev => {
+        if (screenEffects?.setWorldData) {
+          screenEffects.setWorldData(prev => {
             const newData = { ...prev };
             Object.keys(newData).forEach(key => {
               if (key.startsWith('label_')) {
@@ -939,8 +917,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           setHostData(null);
 
           // Clean up all labels spawned during dialogue
-          if (setWorldData) {
-            setWorldData(prev => {
+          if (screenEffects?.setWorldData) {
+            screenEffects.setWorldData(prev => {
               const newData = { ...prev };
               Object.keys(newData).forEach(key => {
                 if (key.startsWith('label_')) {
@@ -1032,8 +1010,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
           setTimeout(() => {
             setHostData(null);
             
-            if (setWorldData) {
-              setWorldData(prev => {
+            if (screenEffects?.setWorldData) {
+              screenEffects.setWorldData(prev => {
                 const newData = { ...prev };
                 Object.keys(newData).forEach(key => {
                   if (key.startsWith('label_')) {
@@ -1085,8 +1063,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
       setHostData(null);
 
       // Clean up all labels spawned during dialogue
-      if (setWorldData) {
-        setWorldData(prev => {
+      if (screenEffects?.setWorldData) {
+        screenEffects.setWorldData(prev => {
           const newData = { ...prev };
           Object.keys(newData).forEach(key => {
             if (key.startsWith('label_')) {
@@ -1142,8 +1120,8 @@ export function useHostDialogue({ setHostData, getViewportCenter, setDialogueTex
         setHostData(null);
 
         // Clean up all labels spawned during dialogue
-        if (setWorldData) {
-          setWorldData(prev => {
+        if (screenEffects?.setWorldData) {
+          screenEffects.setWorldData(prev => {
             const newData = { ...prev };
             Object.keys(newData).forEach(key => {
               if (key.startsWith('label_')) {
