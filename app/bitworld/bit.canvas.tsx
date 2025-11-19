@@ -95,6 +95,13 @@ interface Note {
     // Legacy support: top-level properties for backward compatibility
     imageData?: ImageAttachment;
     mailData?: {};
+
+    // Text content data (for notes that own their text)
+    data?: Record<string, string | { char: string; style?: { color?: string; background?: string } }>;
+
+    // Scrolling support (terminal-style viewport)
+    visibleHeight?: number;   // How many lines to show (viewport size)
+    scrollOffset?: number;    // Which content line is at top of viewport
 }
 
 // ============================================================================
@@ -575,6 +582,48 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
                     if (screenPos.x >= -effectiveCharWidth && screenPos.x <= cssWidth &&
                         screenPos.y >= -effectiveCharHeight && screenPos.y <= cssHeight) {
                         ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                    }
+                }
+            }
+        }
+
+        // Render text content from note.data if it exists (with scrolling support)
+        if (note.data && contentType === 'text') {
+            const verticalTextOffset = 2; // Same offset used in main rendering
+            const scrollOffset = note.scrollOffset || 0;
+            const visibleHeight = note.visibleHeight || (endY - startY + 1);
+
+            ctx.font = `${context.engine.getEffectiveCharDims(currentZoom).fontSize}px ${context.engine.settings?.fontFamily || 'monospace'}`;
+            ctx.textBaseline = 'top';
+
+            for (const coordKey in note.data) {
+                const [xStr, yStr] = coordKey.split(',');
+                const worldX = parseInt(xStr, 10);
+                const worldY = parseInt(yStr, 10);
+
+                // Calculate which content line this character is on (relative to note startY)
+                const contentLine = worldY - startY;
+
+                // Calculate which viewport line this should appear on (accounting for scroll)
+                const viewportLine = contentLine - scrollOffset;
+
+                // Only render if within visible viewport window
+                if (viewportLine >= 0 && viewportLine < visibleHeight && worldX >= startX && worldX <= endX) {
+                    const charData = note.data[coordKey];
+                    const char = typeof charData === 'string' ? charData : charData.char;
+                    const style = typeof charData === 'object' && charData.style ? charData.style : undefined;
+
+                    // Render at viewport position, not content position
+                    const renderY = startY + viewportLine;
+                    const bottomScreenPos = engine.worldToScreen(worldX, renderY, currentZoom, currentOffset);
+                    const topScreenPos = engine.worldToScreen(worldX, renderY - 1, currentZoom, currentOffset);
+
+                    if (topScreenPos.x >= -effectiveCharWidth && topScreenPos.x <= cssWidth &&
+                        topScreenPos.y >= -effectiveCharHeight && bottomScreenPos.y <= cssHeight) {
+
+                        // Render character with style if present
+                        ctx.fillStyle = style?.color || engine.textColor;
+                        ctx.fillText(char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
                     }
                 }
             }
@@ -5643,7 +5692,7 @@ Camera & Viewport Controls:
                 canvasWidth: cssWidth,
                 canvasHeight: cssHeight,
                 ctx,
-                labels: engine.getSortedLabels(engine.navSortMode, engine.navOriginPosition),
+                labels: engine.getSortedChips(engine.navSortMode, engine.navOriginPosition),
                 originPosition: engine.navOriginPosition,
                 uniqueColors: engine.getUniqueColors(),
                 activeFilters: engine.navColorFilters,

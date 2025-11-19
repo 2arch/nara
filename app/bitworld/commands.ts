@@ -643,6 +643,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         const timestamp = Date.now();
+
+        // Calculate visible height for notes (default: full height, can be scrolled later)
+        const noteHeight = existingSelection.endY - existingSelection.startY + 1;
+
         const regionData = {
             startX: existingSelection.startX,
             endX: existingSelection.endX,
@@ -651,7 +655,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             timestamp,
             ...options.additionalData,
             // Initialize empty data storage for note content
-            ...(regionType === 'note' ? { data: {} } : {})
+            ...(regionType === 'note' ? {
+                data: {},
+                visibleHeight: noteHeight,  // Default to showing all lines
+                scrollOffset: 0             // Start at top
+            } : {})
         };
 
         const key = `${regionType}_${existingSelection.startX},${existingSelection.startY}_${timestamp}`;

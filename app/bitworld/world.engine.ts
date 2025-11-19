@@ -9224,6 +9224,42 @@ export function useWorldEngine({
 
                 return; // Don't pan world
             }
+
+            // Check if mouse is over a note with scrolling enabled
+            const noteAtPos = findTextNoteContainingPoint(worldPos.x, worldPos.y, worldData);
+            if (noteAtPos && noteAtPos.data.data && noteAtPos.data.visibleHeight !== undefined) {
+                // Scroll the note content instead of panning world
+                const noteData = noteAtPos.data;
+                const scrollSpeed = 1; // Lines per scroll tick (notes scroll slower than lists)
+                const scrollDelta = Math.sign(deltaY) * scrollSpeed;
+
+                // Calculate total content height from note.data
+                let maxContentY = noteData.startY;
+                for (const coordKey in noteData.data) {
+                    const [, yStr] = coordKey.split(',');
+                    const y = parseInt(yStr, 10);
+                    if (y > maxContentY) maxContentY = y;
+                }
+                const totalContentLines = maxContentY - noteData.startY + 1;
+
+                // Calculate max scroll offset
+                const maxScroll = Math.max(0, totalContentLines - noteData.visibleHeight);
+
+                // Update scroll offset with bounds checking
+                const currentScrollOffset = noteData.scrollOffset || 0;
+                const newScrollOffset = Math.max(0, Math.min(maxScroll, currentScrollOffset + scrollDelta));
+
+                // Only update if scroll offset actually changed
+                if (newScrollOffset !== currentScrollOffset) {
+                    const updatedNoteData = { ...noteData, scrollOffset: newScrollOffset };
+                    setWorldData(prev => ({
+                        ...prev,
+                        [noteAtPos.key]: JSON.stringify(updatedNoteData)
+                    }));
+                }
+
+                return; // Don't pan world
+            }
         }
 
         if (ctrlOrMetaKey) {
