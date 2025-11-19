@@ -3304,19 +3304,19 @@ Camera & Viewport Controls:
                         const packColor = color || engine.textColor;
                         const { collapsed } = chipData;
 
-                        if (collapsed) {
-                            // Collapsed: draw a border outline around the pack region
-                            const topLeftScreen = engine.worldToScreen(startX, startY - 1, currentZoom, currentOffset);
-                            const bottomRightScreen = engine.worldToScreen(endX, endY, currentZoom, currentOffset);
+                        // Always draw border outline for pack chips
+                        const topLeftScreen = engine.worldToScreen(startX, startY - 1, currentZoom, currentOffset);
+                        const bottomRightScreen = engine.worldToScreen(endX, endY, currentZoom, currentOffset);
 
-                            const width = bottomRightScreen.x - topLeftScreen.x + effectiveCharWidth;
-                            const height = bottomRightScreen.y - topLeftScreen.y + effectiveCharHeight;
+                        const width = bottomRightScreen.x - topLeftScreen.x + effectiveCharWidth;
+                        const height = bottomRightScreen.y - topLeftScreen.y + effectiveCharHeight;
 
-                            ctx.strokeStyle = packColor;
-                            ctx.lineWidth = 2;
-                            ctx.strokeRect(topLeftScreen.x, topLeftScreen.y, width, height);
-                        } else {
-                            // Expanded: render with note-style opaque background (subtle tint)
+                        ctx.strokeStyle = packColor;
+                        ctx.lineWidth = collapsed ? 2 : 1; // Thicker border when collapsed
+                        ctx.strokeRect(topLeftScreen.x, topLeftScreen.y, width, height);
+
+                        // When expanded, also show subtle background tint
+                        if (!collapsed) {
                             for (let y = startY; y <= endY; y += GRID_CELL_SPAN) {
                                 for (let x = startX; x <= endX; x++) {
                                     const bottomScreenPos = engine.worldToScreen(x, y, currentZoom, currentOffset);
