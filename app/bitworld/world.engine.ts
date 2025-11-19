@@ -688,8 +688,8 @@ export function useWorldEngine({
             return { x: data.startX, y: data.startY };
         }
 
-        // Note/List/Mail data with coordinates in value - try to parse
-        if (key.startsWith('note_') || key.startsWith('list_') || key.startsWith('mail_')) {
+        // Note/List/Mail/Chip data with coordinates in value - try to parse
+        if (key.startsWith('note_') || key.startsWith('list_') || key.startsWith('mail_') || key.startsWith('chip_')) {
             try {
                 const parsed = JSON.parse(data as string);
                 if (parsed.startX !== undefined && parsed.startY !== undefined) {
