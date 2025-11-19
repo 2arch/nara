@@ -1007,6 +1007,27 @@ export function useWorldEngine({
         return chips;
     }, [worldData]);
 
+    // Helper to extract text from a selection region
+    const extractTextFromSelection = useCallback((bounds: { startX: number, endX: number, startY: number, endY: number }) => {
+        let selectedText = '';
+        for (let y = bounds.startY; y <= bounds.endY; y++) {
+            let line = '';
+            for (let x = bounds.startX; x <= bounds.endX; x++) {
+                const cellKey = `${x},${y}`;
+                const cellData = worldData[cellKey];
+                // Extract character from cell data
+                if (!cellData) {
+                    line += '';
+                } else if (typeof cellData === 'string') {
+                    line += cellData;
+                } else if (typeof cellData === 'object' && 'char' in cellData) {
+                    line += cellData.char;
+                }
+            }
+            selectedText += line.trimEnd() + ' ';
+        }
+        return selectedText.trim();
+    }, [worldData]);
 
     // Tape recording callback setter
     const setTapeRecordingCallback = useCallback((callback: () => Promise<void> | void) => {
@@ -2786,6 +2807,31 @@ export function useWorldEngine({
         return null;
     };
 
+    // Helper to find specifically text-type notes (not image/mail/list)
+    const findTextNoteContainingPoint = (x: number, y: number, currentWorldData: WorldData): { key: string; data: any } | null => {
+        for (const key in currentWorldData) {
+            if (key.startsWith('note_')) {
+                try {
+                    const noteData = typeof currentWorldData[key] === 'string'
+                        ? JSON.parse(currentWorldData[key] as string)
+                        : currentWorldData[key];
+
+                    // Only return text-type notes (or notes without contentType which default to text)
+                    const isTextNote = !noteData.contentType || noteData.contentType === 'text';
+
+                    // Check if point is inside this note
+                    if (isTextNote && x >= noteData.startX && x <= noteData.endX &&
+                        y >= noteData.startY && y <= noteData.endY) {
+                        return { key, data: noteData };
+                    }
+                } catch (e) {
+                    // Skip invalid note data
+                }
+            }
+        }
+        return null;
+    };
+
     // === Helper Functions (Largely unchanged, but use state variables) ===
     const worldToScreen = useCallback((worldX: number, worldY: number, currentZoom: number, currentOffset: Point): Point => {
         const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(currentZoom);
@@ -4503,129 +4549,112 @@ export function useWorldEngine({
                     setLightModeData(newLightData);
                     setDialogueWithRevert(`Generated ${placedLabels.length} waypoints. Press Escape to clear.`, setDialogueText);
 
-                } else if (exec.command === 'task') {
-                    // /task command - create a toggleable task from selection
-                    if (selectionStart && selectionEnd) {
-                        const hasSelection = selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y;
-
-                        if (hasSelection) {
-                            const normalized = getNormalizedSelection();
-                            if (normalized) {
-                                // Get color argument (no default - let it adapt dynamically)
-                                let hexColor: string | undefined = undefined;
-
-                                if (exec.args.length > 0) {
-                                    const highlightColor = exec.args[0];
-                                    // Resolve color name to hex
-                                    hexColor = (COLOR_MAP[highlightColor.toLowerCase()] || highlightColor).toUpperCase();
-
-                                    // Validate hex color
-                                    if (!/^#[0-9A-F]{6}$/i.test(hexColor)) {
-                                        setDialogueWithRevert(`Invalid color: ${highlightColor}. Use hex code or name.`, setDialogueText);
-                                        return true;
-                                    }
-                                }
-
-                                // Create task data using unified label schema
-                                const labelKey = `label_${normalized.startX},${normalized.startY}_${Date.now()}`;
-                                const labelData: any = {
-                                    type: 'task',
-                                    x: normalized.startX,
-                                    y: normalized.startY,
-                                    startX: normalized.startX,
-                                    endX: normalized.endX,
-                                    startY: normalized.startY,
-                                    endY: normalized.endY,
-                                    completed: false,
-                                    timestamp: Date.now()
-                                };
-
-                                // Only save color if explicitly provided
-                                if (hexColor) {
-                                    labelData.color = hexColor;
-                                }
-
-                                // Store task in worldData
-                                setWorldData(prev => ({
-                                    ...prev,
-                                    [labelKey]: JSON.stringify(labelData)
-                                }));
-
-                                const width = normalized.endX - normalized.startX + 1;
-                                const height = normalized.endY - normalized.startY + 1;
-                                setDialogueWithRevert(`Task created (${width}×${height}). Click to toggle completion.`, setDialogueText);
-
-                                // Clear selection
-                                setSelectionStart(null);
-                                setSelectionEnd(null);
-                            }
-                        } else {
-                            setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
-                        }
-                    } else {
+                } else if (exec.command === 'chip' || exec.command === 'task' || exec.command === 'link') {
+                    // Unified chip creation - handles waypoint, task, and link chips
+                    if (!selectionStart || !selectionEnd) {
                         setDialogueWithRevert("Make a selection first", setDialogueText);
+                        return true;
                     }
-                } else if (exec.command === 'link') {
-                    // /link command - create a clickable link from selection
-                    if (selectionStart && selectionEnd) {
-                        const hasSelection = selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y;
 
-                        if (hasSelection) {
-                            const normalized = getNormalizedSelection();
-                            if (normalized && exec.args.length > 0) {
-                                const url = exec.args[0];
+                    const hasSelection = selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y;
+                    if (!hasSelection) {
+                        setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
+                        return true;
+                    }
 
-                                // Basic URL validation
-                                let validUrl = url;
-                                if (!url.match(/^https?:\/\//i)) {
-                                    validUrl = 'https://' + url;
-                                }
+                    const normalized = getNormalizedSelection();
+                    if (!normalized) {
+                        return true;
+                    }
 
-                                // Create link data using unified label schema
-                                const labelKey = `label_${normalized.startX},${normalized.startY}_${Date.now()}`;
-                                const labelData: any = {
-                                    type: 'link',
-                                    x: normalized.startX,
-                                    y: normalized.startY,
-                                    startX: normalized.startX,
-                                    endX: normalized.endX,
-                                    startY: normalized.startY,
-                                    endY: normalized.endY,
-                                    url: validUrl,
-                                    timestamp: Date.now()
-                                };
+                    // Validate specific command requirements
+                    if (exec.command === 'link' && exec.args.length === 0) {
+                        setDialogueWithRevert("Usage: /link [url] [color]", setDialogueText);
+                        return true;
+                    }
 
-                                // Get optional color argument
-                                if (exec.args.length > 1) {
-                                    const colorArg = exec.args[1];
-                                    const hexColor = (COLOR_MAP[colorArg.toLowerCase()] || colorArg).toUpperCase();
-                                    if (/^#[0-9A-F]{6}$/i.test(hexColor)) {
-                                        labelData.color = hexColor;
-                                    }
-                                }
+                    // Create base chip data
+                    const chipKey = `chip_${normalized.startX},${normalized.startY}_${Date.now()}`;
+                    const baseChipData = {
+                        x: normalized.startX,
+                        y: normalized.startY,
+                        startX: normalized.startX,
+                        endX: normalized.endX,
+                        startY: normalized.startY,
+                        endY: normalized.endY,
+                        timestamp: Date.now()
+                    };
 
-                                // Store link in worldData
-                                setWorldData(prev => ({
-                                    ...prev,
-                                    [labelKey]: JSON.stringify(labelData)
-                                }));
+                    let chipData: any = { ...baseChipData };
+                    let successMessage = '';
 
-                                const width = normalized.endX - normalized.startX + 1;
-                                const height = normalized.endY - normalized.startY + 1;
-                                setDialogueWithRevert(`Link created (${width}×${height}). Click to open.`, setDialogueText);
-
-                                // Clear selection
-                                setSelectionStart(null);
-                                setSelectionEnd(null);
-                            } else {
-                                setDialogueWithRevert("Usage: /link [url] [color]", setDialogueText);
-                            }
-                        } else {
-                            setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
+                    // Add type-specific data
+                    if (exec.command === 'chip') {
+                        // Waypoint chip - extract text from selection
+                        const selectedText = extractTextFromSelection(normalized);
+                        if (!selectedText) {
+                            setDialogueWithRevert("Selection is empty", setDialogueText);
+                            return true;
                         }
-                    } else {
-                        setDialogueWithRevert("Make a selection first", setDialogueText);
+                        chipData.text = selectedText;
+                        chipData.color = '#000000';
+                        chipData.background = '#FFFFFF';
+                        successMessage = `Chip "${selectedText}" created`;
+                    } else if (exec.command === 'task') {
+                        // Task chip
+                        chipData.type = 'task';
+                        chipData.completed = false;
+
+                        // Parse optional color argument
+                        if (exec.args.length > 0) {
+                            const highlightColor = exec.args[0];
+                            const hexColor = (COLOR_MAP[highlightColor.toLowerCase()] || highlightColor).toUpperCase();
+                            if (!/^#[0-9A-F]{6}$/i.test(hexColor)) {
+                                setDialogueWithRevert(`Invalid color: ${highlightColor}. Use hex code or name.`, setDialogueText);
+                                return true;
+                            }
+                            chipData.color = hexColor;
+                        }
+
+                        const width = normalized.endX - normalized.startX + 1;
+                        const height = normalized.endY - normalized.startY + 1;
+                        successMessage = `Task created (${width}×${height}). Click to toggle completion.`;
+                    } else if (exec.command === 'link') {
+                        // Link chip
+                        const url = exec.args[0];
+                        let validUrl = url;
+                        if (!url.match(/^https?:\/\//i)) {
+                            validUrl = 'https://' + url;
+                        }
+
+                        chipData.type = 'link';
+                        chipData.url = validUrl;
+
+                        // Parse optional color argument
+                        if (exec.args.length > 1) {
+                            const colorArg = exec.args[1];
+                            const hexColor = (COLOR_MAP[colorArg.toLowerCase()] || colorArg).toUpperCase();
+                            if (/^#[0-9A-F]{6}$/i.test(hexColor)) {
+                                chipData.color = hexColor;
+                            }
+                        }
+
+                        const width = normalized.endX - normalized.startX + 1;
+                        const height = normalized.endY - normalized.startY + 1;
+                        successMessage = `Link created (${width}×${height}). Click to open.`;
                     }
+
+                    // Store chip in worldData
+                    setWorldData(prev => ({
+                        ...prev,
+                        [chipKey]: JSON.stringify(chipData)
+                    }));
+
+                    setDialogueWithRevert(successMessage, setDialogueText);
+
+                    // Clear selection
+                    setSelectionStart(null);
+                    setSelectionEnd(null);
                 } else if (exec.command === 'margin') {
                     // /margin command - create a margin note for selected text
                     console.log('[/margin] Command triggered in world engine');
@@ -7921,7 +7950,21 @@ export function useWorldEngine({
                         } else if (noteRegion && cursorPos.x > noteRegion.startX) {
                             // We're within a note region but not at the start - do normal backspace
                             const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
-                            if (worldData[deleteKey]) {
+
+                            // Check if this is a text note with embedded data
+                            const containingNote = findTextNoteContainingPoint(cursorPos.x - 1, cursorPos.y, worldData);
+
+                            if (containingNote && containingNote.data.data) {
+                                // Delete from note's data field
+                                nextWorldData = { ...worldData };
+                                const noteData = containingNote.data;
+                                if (noteData.data && noteData.data[deleteKey]) {
+                                    delete noteData.data[deleteKey];
+                                    nextWorldData[containingNote.key] = JSON.stringify(noteData);
+                                    worldDataChanged = true;
+                                }
+                            } else if (worldData[deleteKey]) {
+                                // Delete from global worldData (legacy/backward compat)
                                 nextWorldData = { ...worldData };
                                 delete nextWorldData[deleteKey];
                                 worldDataChanged = true;
@@ -8627,10 +8670,15 @@ export function useWorldEngine({
                 // Air mode (default): Normal text input to worldData
                 nextWorldData = { ...dataToDeleteFrom }; // Start with data after potential deletion
                 const currentKey = `${cursorAfterDelete.x},${cursorAfterDelete.y}`;
-                
+
+                // Check if we're inside a text note
+                const containingNote = findTextNoteContainingPoint(cursorAfterDelete.x, cursorAfterDelete.y, nextWorldData);
+
                 // Check if current text style is different from global defaults
                 const hasCustomStyle = currentTextStyle.color !== textColor || currentTextStyle.background !== undefined;
-                
+
+                // Prepare character data
+                let charData: string | StyledCharacter;
                 if (hasCustomStyle) {
                     // Store styled character (filter out undefined values for Firebase)
                     const style: { color?: string; background?: string } = {
@@ -8639,15 +8687,29 @@ export function useWorldEngine({
                     if (currentTextStyle.background !== undefined) {
                         style.background = currentTextStyle.background;
                     }
-                    
+
                     const styledChar: StyledCharacter = {
                         char: key,
                         style: style
                     };
-                    nextWorldData[currentKey] = styledChar;
+                    charData = styledChar;
                 } else {
                     // Store plain character (backward compatibility)
-                    nextWorldData[currentKey] = key;
+                    charData = key;
+                }
+
+                // Write to note.data if inside a note, otherwise to global worldData
+                if (containingNote) {
+                    // Write to note's data field
+                    const noteData = containingNote.data;
+                    if (!noteData.data) {
+                        noteData.data = {};
+                    }
+                    noteData.data[currentKey] = charData;
+                    nextWorldData[containingNote.key] = JSON.stringify(noteData);
+                } else {
+                    // Write to global worldData
+                    nextWorldData[currentKey] = charData;
                 }
 
                 worldDataChanged = true; // Mark that synchronous data change occurred

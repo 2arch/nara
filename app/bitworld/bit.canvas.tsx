@@ -2365,20 +2365,20 @@ Camera & Viewport Controls:
         const tasksIndex = new Map<string, boolean>();
         const completedTasksIndex = new Map<string, boolean>();
 
-        for (const { data: chipData } of getEntitiesByPrefix(engine.worldData, 'chip_')) {
-            if (chipData.type === 'task') {
-                if (!chipData.completed) {
+        for (const { data: labelData } of getEntitiesByPrefix(engine.worldData, 'label_')) {
+            if (labelData.type === 'task') {
+                if (!labelData.completed) {
                     // Index every position within active task bounds
-                    for (let y = chipData.startY; y <= chipData.endY; y++) {
-                        for (let x = chipData.startX; x <= chipData.endX; x++) {
+                    for (let y = labelData.startY; y <= labelData.endY; y++) {
+                        for (let x = labelData.startX; x <= labelData.endX; x++) {
                             const key = `${x},${y}`;
                             tasksIndex.set(key, true);
                         }
                     }
                 } else {
                     // Index every position within completed task bounds
-                    for (let y = chipData.startY; y <= chipData.endY; y++) {
-                        for (let x = chipData.startX; x <= chipData.endX; x++) {
+                    for (let y = labelData.startY; y <= labelData.endY; y++) {
+                        for (let x = labelData.startX; x <= labelData.endX; x++) {
                             const key = `${x},${y}`;
                             completedTasksIndex.set(key, true);
                         }
@@ -2846,7 +2846,7 @@ Camera & Viewport Controls:
 
         // Update tasks index if task data has changed (check values, not just keys)
         const taskEntries = Object.entries(engine.worldData).filter(([k, v]) => {
-            if (!k.startsWith('chip_')) return false;
+            if (!k.startsWith('label_')) return false;
             try {
                 const data = JSON.parse(v as string);
                 return data.type === 'task';
@@ -3142,38 +3142,38 @@ Camera & Viewport Controls:
             }
         }
 
-        // === Unified Chip Rendering with Viewport Culling ===
-        // Query visible chips using spatial index
-        const visibleChipsForRendering = engine.queryVisibleEntities(
+        // === Unified Label Rendering with Viewport Culling ===
+        // Query visible labels using spatial index
+        const visibleLabelsForRendering = engine.queryVisibleEntities(
             startWorldX - 5,
             startWorldY - 5,
             endWorldX + 5,
             endWorldY + 5
         );
 
-        for (const key of visibleChipsForRendering) {
-            if (!key.startsWith('chip_')) continue;
+        for (const key of visibleLabelsForRendering) {
+            if (!key.startsWith('label_')) continue;
 
             try {
-                const chipData = JSON.parse(engine.worldData[key] as string);
-                const { type, startX, endX, startY, endY, x, y, color } = chipData;
+                const labelData = JSON.parse(engine.worldData[key] as string);
+                const { type, startX, endX, startY, endY, x, y, color } = labelData;
 
-                // Additional bounds check for 2D chips (tasks/links that might span beyond their anchor point)
-                const chipMinX = startX ?? x;
-                const chipMaxX = endX ?? x;
-                const chipMinY = startY ?? y;
-                const chipMaxY = endY ?? y;
+                // Additional bounds check for 2D labels (tasks/links that might span beyond their anchor point)
+                const labelMinX = startX ?? x;
+                const labelMaxX = endX ?? x;
+                const labelMinY = startY ?? y;
+                const labelMaxY = endY ?? y;
 
-                if (chipMaxX < startWorldX - 5 || chipMinX > endWorldX + 5 ||
-                    chipMaxY < startWorldY - 5 || chipMinY > endWorldY + 5) {
-                    continue; // Skip chips outside viewport
+                if (labelMaxX < startWorldX - 5 || labelMinX > endWorldX + 5 ||
+                    labelMaxY < startWorldY - 5 || labelMinY > endWorldY + 5) {
+                    continue; // Skip labels outside viewport
                 }
 
                 // Type-based rendering
                 switch (type) {
                     case 'task': {
                         const taskColor = color || engine.textColor;
-                        const { completed } = chipData;
+                        const { completed } = labelData;
 
                         if (!completed) {
                             // Render task highlight (skip when monogram is enabled)
@@ -3432,8 +3432,8 @@ Camera & Viewport Controls:
 
         ctx.fillStyle = engine.textColor;
         for (const key in engine.worldData) {
-            // Skip block, chip, and image data - we render those separately
-            if (key.startsWith('block_') || key.startsWith('chip_') || key.startsWith('image_')) continue;
+            // Skip block, label, and image data - we render those separately
+            if (key.startsWith('block_') || key.startsWith('label_') || key.startsWith('image_')) continue;
 
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10);
@@ -3837,10 +3837,10 @@ Camera & Viewport Controls:
                 }
             }
         } else {
-            // Normal chip rendering when search is not active
+            // Normal label rendering when search is not active
             for (const key in engine.worldData) {
-                if (key.startsWith('chip_')) {
-                    const coordsStr = key.substring('chip_'.length);
+                if (key.startsWith('label_')) {
+                    const coordsStr = key.substring('label_'.length);
                     const [xStr, yStr] = coordsStr.split(',');
                     const worldX = parseInt(xStr, 10);
                     const worldY = parseInt(yStr, 10);
@@ -4684,28 +4684,28 @@ Camera & Viewport Controls:
             // Only check for label/task overlap if we started on a character (optimization)
             let overlapsLabelOrTask = false;
             if (startedOnChar) {
-                // Check if selection actually overlaps with any chip or task bounds
+                // Check if selection actually overlaps with any label or task bounds
                 for (const key in engine.worldData) {
-                    if (key.startsWith('chip_')) {
+                    if (key.startsWith('label_')) {
                         try {
-                            const chipData = JSON.parse(engine.worldData[key] as string);
-                            const coordsStr = key.substring('chip_'.length);
+                            const labelData = JSON.parse(engine.worldData[key] as string);
+                            const coordsStr = key.substring('label_'.length);
                             const [lxStr, lyStr] = coordsStr.split(',');
                             const lx = parseInt(lxStr, 10);
                             const ly = parseInt(lyStr, 10);
-                            const chipWidth = chipData.text?.length || 0;
-                            const chipEndX = lx + chipWidth - 1;
+                            const labelWidth = labelData.text?.length || 0;
+                            const labelEndX = lx + labelWidth - 1;
                             // Check for actual 2D overlap (both X and Y)
-                            const xOverlap = !(maxX < lx || minX > chipEndX);
+                            const xOverlap = !(maxX < lx || minX > labelEndX);
                             const yOverlap = !(maxY < ly || minY > ly);
                             if (xOverlap && yOverlap) {
                                 overlapsLabelOrTask = true;
                                 break;
                             }
                         } catch (e) {}
-                    } else if (key.startsWith('chip_')) {
-                        const chipData = JSON.parse(engine.worldData[key] as string);
-                        if (chipData.type !== 'task') continue;
+                    } else if (key.startsWith('label_')) {
+                        const labelData = JSON.parse(engine.worldData[key] as string);
+                        if (labelData.type !== 'task') continue;
                         try {
                             const taskData = JSON.parse(engine.worldData[key] as string);
                             // Check for actual 2D overlap (both X and Y)
@@ -5643,7 +5643,7 @@ Camera & Viewport Controls:
                 canvasWidth: cssWidth,
                 canvasHeight: cssHeight,
                 ctx,
-                labels: engine.getSortedChips(engine.navSortMode, engine.navOriginPosition),
+                labels: engine.getSortedLabels(engine.navSortMode, engine.navOriginPosition),
                 originPosition: engine.navOriginPosition,
                 uniqueColors: engine.getUniqueColors(),
                 activeFilters: engine.navColorFilters,
@@ -6303,10 +6303,10 @@ Camera & Viewport Controls:
 
             // Check tasks
             if (!isOverLink) {
-                for (const { data: chipData } of getEntitiesByPrefix(engine.worldData, 'chip_')) {
-                    if (chipData.type === 'task' &&
-                        baseX >= chipData.startX && baseX <= chipData.endX &&
-                        baseY >= chipData.startY && baseY <= chipData.endY) {
+                for (const { data: labelData } of getEntitiesByPrefix(engine.worldData, 'label_')) {
+                    if (labelData.type === 'task' &&
+                        baseX >= labelData.startX && baseX <= labelData.endX &&
+                        baseY >= labelData.startY && baseY <= labelData.endY) {
                         isOverTask = true;
                         break;
                     }

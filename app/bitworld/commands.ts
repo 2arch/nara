@@ -649,7 +649,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             startY: existingSelection.startY,
             endY: existingSelection.endY,
             timestamp,
-            ...options.additionalData
+            ...options.additionalData,
+            // Initialize empty data storage for note content
+            ...(regionType === 'note' ? { data: {} } : {})
         };
 
         const key = `${regionType}_${existingSelection.startX},${existingSelection.startY}_${timestamp}`;
@@ -3293,68 +3295,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     // Clear selection
                     setSelectionStart(null);
                     setSelectionEnd(null);
-                } else {
-                    setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
-                }
-            } else {
-                setDialogueWithRevert("Make a selection first", setDialogueText);
-            }
-        } else if (commandName === 'chip') {
-            // Check if there's a selection to create chip from
-            const existingSelection = getNormalizedSelection?.();
-            if (existingSelection) {
-                const hasMeaningfulSelection =
-                    existingSelection.startX !== existingSelection.endX ||
-                    existingSelection.startY !== existingSelection.endY;
-
-                if (hasMeaningfulSelection && setWorldData && worldData && setSelectionStart && setSelectionEnd) {
-                    // Extract text from selection
-                    const minX = existingSelection.startX;
-                    const maxX = existingSelection.endX;
-                    const minY = existingSelection.startY;
-                    const maxY = existingSelection.endY;
-
-                    // Helper to extract character from cell data
-                    const getCharacter = (cellData: any): string => {
-                        if (!cellData) return '';
-                        if (typeof cellData === 'string') return cellData;
-                        if (typeof cellData === 'object' && 'char' in cellData) return cellData.char;
-                        return '';
-                    };
-
-                    // Extract text from selection
-                    let selectedText = '';
-                    for (let y = minY; y <= maxY; y++) {
-                        let line = '';
-                        for (let x = minX; x <= maxX; x++) {
-                            const cellKey = `${x},${y}`;
-                            line += getCharacter(worldData[cellKey]);
-                        }
-                        selectedText += line.trimEnd() + ' ';
-                    }
-                    selectedText = selectedText.trim();
-
-                    if (selectedText) {
-                        // Create chip at selection start position
-                        const chipKey = `chip_${minX},${minY}`;
-                        const newChip = {
-                            text: selectedText,
-                            color: '#000000', // Default black text
-                            background: '#FFFFFF' // Default white background
-                        };
-
-                        const newWorldData = { ...worldData };
-                        newWorldData[chipKey] = JSON.stringify(newChip);
-                        setWorldData(newWorldData);
-
-                        setDialogueWithRevert(`Chip "${selectedText}" created`, setDialogueText);
-
-                        // Clear selection after creating chip
-                        setSelectionStart(null);
-                        setSelectionEnd(null);
-                    } else {
-                        setDialogueWithRevert("Selection is empty", setDialogueText);
-                    }
                 } else {
                     setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
                 }
