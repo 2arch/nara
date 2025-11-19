@@ -610,16 +610,18 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
             const maxVisibleContentY = startY + scrollOffset + visibleHeight - 1;
 
             for (const coordKey in note.data) {
-                // Early parse to check Y bounds (skip X parsing if Y is out of range)
+                // Parse relative coordinates (note.data now uses relative coords with origin at 0,0)
                 const commaIndex = coordKey.indexOf(',');
                 if (commaIndex === -1) continue;
 
-                const worldY = parseInt(coordKey.substring(commaIndex + 1), 10);
+                const relativeY = parseInt(coordKey.substring(commaIndex + 1), 10);
+                const worldY = startY + relativeY; // Convert to world coordinates
 
                 // Fast Y culling - skip if outside visible content range
                 if (worldY < minVisibleContentY || worldY > maxVisibleContentY) continue;
 
-                const worldX = parseInt(coordKey.substring(0, commaIndex), 10);
+                const relativeX = parseInt(coordKey.substring(0, commaIndex), 10);
+                const worldX = startX + relativeX; // Convert to world coordinates
 
                 // Fast X culling - skip if outside note bounds
                 if (worldX < startX || worldX > endX) continue;
@@ -6700,14 +6702,15 @@ Camera & Viewport Controls:
                             try {
                                 const noteData = JSON.parse(engine.worldData[selectedNoteKey] as string);
 
-                                // Create new note region with shifted coordinates, preserving patternKey
+                                // Create new note region with shifted coordinates, preserving all note data
+                                // Note: note.data uses relative coordinates, so we only update bounds
                                 const newPlanData = {
+                                    ...noteData, // Preserve all fields including note.data
                                     startX: noteData.startX + distanceX,
                                     endX: noteData.endX + distanceX,
                                     startY: noteData.startY + distanceY,
                                     endY: noteData.endY + distanceY,
-                                    timestamp: Date.now(),
-                                    ...(noteData.patternKey && { patternKey: noteData.patternKey })
+                                    timestamp: Date.now()
                                 };
 
                                 // Delete old note and create new one with shifted position
@@ -7736,14 +7739,14 @@ Camera & Viewport Controls:
                         // Move note
                         try {
                             const noteData = JSON.parse(engine.worldData[selectedNoteKey] as string);
+                            // Note: note.data uses relative coordinates, so we only update bounds
                             const newNoteData = {
+                                ...noteData, // Preserve all fields including note.data
                                 startX: noteData.startX + distanceX,
                                 endX: noteData.endX + distanceX,
                                 startY: noteData.startY + distanceY,
                                 endY: noteData.endY + distanceY,
-                                timestamp: Date.now(),
-                                ...(noteData.patternKey && { patternKey: noteData.patternKey }),
-                                ...(noteData.style && { style: noteData.style })
+                                timestamp: Date.now()
                             };
 
                             const newNoteKey = `note_${newNoteData.startX},${newNoteData.startY}_${Date.now()}`;

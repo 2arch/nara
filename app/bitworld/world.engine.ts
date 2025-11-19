@@ -8067,11 +8067,13 @@ export function useWorldEngine({
                             const containingNote = findTextNoteContainingPoint(cursorPos.x - 1, cursorPos.y, worldData);
 
                             if (containingNote && containingNote.data.data) {
-                                // Delete from note's data field
+                                // Delete from note's data field using relative coordinates
                                 nextWorldData = { ...worldData };
                                 const noteData = containingNote.data;
-                                if (noteData.data && noteData.data[deleteKey]) {
-                                    delete noteData.data[deleteKey];
+                                // Convert absolute world coordinates to relative
+                                const relativeDeleteKey = `${(cursorPos.x - 1) - noteData.startX},${cursorPos.y - noteData.startY}`;
+                                if (noteData.data && noteData.data[relativeDeleteKey]) {
+                                    delete noteData.data[relativeDeleteKey];
                                     nextWorldData[containingNote.key] = JSON.stringify(noteData);
                                     worldDataChanged = true;
                                 }
@@ -8812,12 +8814,14 @@ export function useWorldEngine({
 
                 // Write to note.data if inside a note, otherwise to global worldData
                 if (containingNote) {
-                    // Write to note's data field
+                    // Write to note's data field using relative coordinates
                     const noteData = containingNote.data;
                     if (!noteData.data) {
                         noteData.data = {};
                     }
-                    noteData.data[currentKey] = charData;
+                    // Convert absolute world coordinates to relative (note origin is 0,0)
+                    const relativeKey = `${cursorAfterDelete.x - noteData.startX},${cursorAfterDelete.y - noteData.startY}`;
+                    noteData.data[relativeKey] = charData;
                     nextWorldData[containingNote.key] = JSON.stringify(noteData);
                 } else {
                     // Write to global worldData
@@ -9911,6 +9915,7 @@ export function useWorldEngine({
         }
 
         // Create new note data with updated coordinates
+        // Note: note.data uses relative coordinates, so we only update bounds
         const newNoteData = {
             ...noteData,
             startX: noteData.startX + deltaX,
@@ -9919,23 +9924,6 @@ export function useWorldEngine({
             endY: noteData.endY + deltaY,
             timestamp: Date.now()
         };
-
-        // Transform note.data coordinates if they exist (for text content)
-        if (noteData.data && typeof noteData.data === 'object') {
-            const transformedData: Record<string, any> = {};
-            for (const coordKey in noteData.data) {
-                const [xStr, yStr] = coordKey.split(',');
-                const oldX = parseInt(xStr, 10);
-                const oldY = parseInt(yStr, 10);
-                if (!isNaN(oldX) && !isNaN(oldY)) {
-                    const newX = oldX + deltaX;
-                    const newY = oldY + deltaY;
-                    const newCoordKey = `${newX},${newY}`;
-                    transformedData[newCoordKey] = noteData.data[coordKey];
-                }
-            }
-            newNoteData.data = transformedData;
-        }
 
         // Create new note key based on new position
         const newNoteKey = `note_${newNoteData.startX}_${newNoteData.startY}_${Date.now()}`;
