@@ -3263,29 +3263,30 @@ Camera & Viewport Controls:
                         const { completed } = chipData;
 
                         if (!completed) {
-                            // Render task with cutout text style (like waypoint chips)
-                            if (!monogram.options.enabled) {
-                                for (let y = startY; y <= endY; y += GRID_CELL_SPAN) {
-                                    for (let x = startX; x <= endX; x++) {
-                                        const bottomScreenPos = engine.worldToScreen(x, y, currentZoom, currentOffset);
-                                        const topScreenPos = engine.worldToScreen(x, y - 1, currentZoom, currentOffset);
-                                        if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
-                                            topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
+                            // Render task with cutout text style from internal data
+                            if (!monogram.options.enabled && chipData.data) {
+                                for (const [relativeKey, cellData] of Object.entries(chipData.data)) {
+                                    const [relXStr, relYStr] = relativeKey.split(',');
+                                    const relativeX = parseInt(relXStr, 10);
+                                    const relativeY = parseInt(relYStr, 10);
 
-                                            // Fill background with task color (spanning GRID_CELL_SPAN cells)
-                                            ctx.fillStyle = taskColor;
-                                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                                    const worldX = startX + relativeX;
+                                    const worldY = startY + relativeY;
 
-                                            // Render text with background color (cutout effect)
-                                            const cellKey = `${x},${y}`;
-                                            const cellData = engine.worldData[cellKey];
-                                            if (cellData && !engine.isImageData(cellData)) {
-                                                const char = engine.getCharacter(cellData);
-                                                if (char && char.trim() !== '') {
-                                                    ctx.fillStyle = taskBackground;
-                                                    ctx.fillText(char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
-                                                }
-                                            }
+                                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
+                                        worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                                        const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                                        const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+
+                                        // Fill background with task color
+                                        ctx.fillStyle = taskColor;
+                                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+
+                                        // Render character with background color (cutout effect)
+                                        const char = engine.getCharacter(cellData as string);
+                                        if (char && char.trim() !== '') {
+                                            ctx.fillStyle = taskBackground;
+                                            ctx.fillText(char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
                                         }
                                     }
                                 }
@@ -3311,6 +3312,31 @@ Camera & Viewport Controls:
 
                     case 'link': {
                         const linkColor = color || engine.textColor;
+
+                        // Render link text from internal data if available
+                        if (chipData.data) {
+                            for (const [relativeKey, cellData] of Object.entries(chipData.data)) {
+                                const [relXStr, relYStr] = relativeKey.split(',');
+                                const relativeX = parseInt(relXStr, 10);
+                                const relativeY = parseInt(relYStr, 10);
+
+                                const worldX = startX + relativeX;
+                                const worldY = startY + relativeY;
+
+                                if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
+                                    worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                                    const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                                    const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+
+                                    // Render character from link data
+                                    const char = engine.getCharacter(cellData as string);
+                                    if (char && char.trim() !== '') {
+                                        ctx.fillStyle = linkColor;
+                                        ctx.fillText(char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
+                                    }
+                                }
+                            }
+                        }
 
                         // Render underline for each row
                         for (let y = startY; y <= endY; y++) {

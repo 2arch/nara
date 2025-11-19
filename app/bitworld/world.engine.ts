@@ -4610,11 +4610,7 @@ export function useWorldEngine({
                         return true;
                     }
 
-                    // Validate specific command requirements
-                    if (exec.command === 'link' && exec.args.length === 0) {
-                        setDialogueWithRevert("Usage: /link [url] [color]", setDialogueText);
-                        return true;
-                    }
+                    // Validate specific command requirements (removed - handled later in each chip type)
 
                     // Create base chip data
                     const chipKey = `chip_${normalized.startX},${normalized.startY}_${Date.now()}`;
@@ -4631,16 +4627,8 @@ export function useWorldEngine({
                     let chipData: any = { ...baseChipData };
                     let successMessage = '';
 
-                    // Add type-specific data
-                    if (exec.command === 'chip') {
-                        // Waypoint chip - capture and internalize selected data
-                        const selectedText = extractTextFromSelection(normalized);
-                        if (!selectedText) {
-                            setDialogueWithRevert("Selection is empty", setDialogueText);
-                            return true;
-                        }
-
-                        // Capture all world data within selection using relative coordinates
+                    // Helper: Capture and internalize data from selection
+                    const captureData = () => {
                         const capturedData: Record<string, string> = {};
                         const cellsToRemove: string[] = [];
 
@@ -4649,7 +4637,6 @@ export function useWorldEngine({
                                 const cellKey = `${x},${y}`;
                                 const cellData = worldData[cellKey];
                                 if (cellData !== undefined) {
-                                    // Convert to relative coordinates (chip origin is 0,0)
                                     const relativeX = x - normalized.startX;
                                     const relativeY = y - normalized.startY;
                                     const relativeKey = `${relativeX},${relativeY}`;
@@ -4659,10 +4646,43 @@ export function useWorldEngine({
                             }
                         }
 
-                        chipData.text = selectedText;
-                        chipData.data = capturedData; // Store captured data internally
-                        chipData.color = textColor; // Chip background = text color (red brick)
-                        chipData.background = backgroundColor; // Cutout text = bg color (green cutout)
+                        return { capturedData, cellsToRemove };
+                    };
+
+                    // Helper: Parse chip type from /chip command args
+                    const parseChipType = () => {
+                        if (exec.command !== 'chip' || exec.args.length === 0) return null;
+                        const firstArg = exec.args[0].toLowerCase();
+                        if (['pack', 'link', 'task'].includes(firstArg)) {
+                            return firstArg as 'pack' | 'link' | 'task';
+                        }
+                        return null;
+                    };
+
+                    const chipType = parseChipType();
+                    const actualCommand = chipType || exec.command;
+                    const commandArgs = chipType ? exec.args.slice(1) : exec.args;
+
+                    // Add type-specific data
+                    if (actualCommand === 'chip') {
+                        // Waypoint chip - capture and internalize selected data
+                        const selectedText = extractTextFromSelection(normalized);
+
+                        const { capturedData, cellsToRemove } = captureData();
+
+                        chipData.text = selectedText || commandArgs[0] || 'chip';
+                        chipData.data = capturedData;
+                        chipData.color = textColor;
+                        chipData.background = backgroundColor;
+
+                        // Parse color argument
+                        const colorArg = selectedText ? commandArgs[0] : commandArgs[1];
+                        if (colorArg) {
+                            const hexColor = (COLOR_MAP[colorArg.toLowerCase()] || colorArg).toUpperCase();
+                            if (/^#[0-9A-F]{6}$/i.test(hexColor)) {
+                                chipData.color = hexColor;
+                            }
+                        }
 
                         // Remove captured data from global worldData (internalize it)
                         setWorldData(prev => {
@@ -4672,50 +4692,80 @@ export function useWorldEngine({
                         });
 
                         const cellCount = Object.keys(capturedData).length;
-                        successMessage = `Chip "${selectedText}" created (${cellCount} cells captured)`;
-                    } else if (exec.command === 'task') {
-                        // Task chip
+                        successMessage = `Chip "${chipData.text}" created (${cellCount} cells captured)`;
+                    } else if (actualCommand === 'task') {
+                        // Task chip - capture and internalize data
                         chipData.type = 'task';
                         chipData.completed = false;
 
-                        // Parse optional color argument
-                        if (exec.args.length > 0) {
-                            const highlightColor = exec.args[0];
-                            const hexColor = (COLOR_MAP[highlightColor.toLowerCase()] || highlightColor).toUpperCase();
-                            if (!/^#[0-9A-F]{6}$/i.test(hexColor)) {
-                                setDialogueWithRevert(`Invalid color: ${highlightColor}. Use hex code or name.`, setDialogueText);
-                                return true;
-                            }
-                            chipData.color = hexColor;
-                        }
+                        const selectedText = extractTextFromSelection(normalized);
+                        const { capturedData, cellsToRemove } = captureData();
 
-                        const width = normalized.endX - normalized.startX + 1;
-                        const height = normalized.endY - normalized.startY + 1;
-                        successMessage = `Task created (${width}×${height}). Click to toggle completion.`;
-                    } else if (exec.command === 'link') {
-                        // Link chip
-                        const url = exec.args[0];
-                        let validUrl = url;
-                        if (!url.match(/^https?:\/\//i)) {
-                            validUrl = 'https://' + url;
-                        }
+                        chipData.text = selectedText || commandArgs[0] || 'task';
+                        chipData.data = capturedData;
 
-                        chipData.type = 'link';
-                        chipData.url = validUrl;
-
-                        // Parse optional color argument
-                        if (exec.args.length > 1) {
-                            const colorArg = exec.args[1];
+                        // Parse color argument
+                        const colorArg = selectedText ? commandArgs[0] : commandArgs[1];
+                        if (colorArg) {
                             const hexColor = (COLOR_MAP[colorArg.toLowerCase()] || colorArg).toUpperCase();
                             if (/^#[0-9A-F]{6}$/i.test(hexColor)) {
                                 chipData.color = hexColor;
                             }
                         }
 
-                        const width = normalized.endX - normalized.startX + 1;
-                        const height = normalized.endY - normalized.startY + 1;
-                        successMessage = `Link created (${width}×${height}). Click to open.`;
-                    } else if (exec.command === 'pack') {
+                        // Remove captured data from global worldData (internalize it)
+                        setWorldData(prev => {
+                            const newData = { ...prev };
+                            cellsToRemove.forEach(key => delete newData[key]);
+                            return newData;
+                        });
+
+                        const cellCount = Object.keys(capturedData).length;
+                        successMessage = `Task "${chipData.text}" created (${cellCount} cells). Click to toggle.`;
+                    } else if (actualCommand === 'link') {
+                        // Link chip - capture and internalize data
+                        chipData.type = 'link';
+
+                        const selectedText = extractTextFromSelection(normalized);
+                        const { capturedData, cellsToRemove } = captureData();
+
+                        chipData.text = selectedText || commandArgs[0] || 'link';
+                        chipData.data = capturedData;
+
+                        // Parse URL and color arguments
+                        // If selection exists: /link [url] [color]
+                        // If no selection: /link [text] [url] [color]
+                        const urlArg = selectedText ? commandArgs[0] : commandArgs[1];
+                        const colorArg = selectedText ? commandArgs[1] : commandArgs[2];
+
+                        if (!urlArg) {
+                            setDialogueWithRevert("Usage: /link [url] [color] or /link [text] [url] [color]", setDialogueText);
+                            return true;
+                        }
+
+                        let validUrl = urlArg;
+                        if (!urlArg.match(/^https?:\/\//i)) {
+                            validUrl = 'https://' + urlArg;
+                        }
+                        chipData.url = validUrl;
+
+                        if (colorArg) {
+                            const hexColor = (COLOR_MAP[colorArg.toLowerCase()] || colorArg).toUpperCase();
+                            if (/^#[0-9A-F]{6}$/i.test(hexColor)) {
+                                chipData.color = hexColor;
+                            }
+                        }
+
+                        // Remove captured data from global worldData (internalize it)
+                        setWorldData(prev => {
+                            const newData = { ...prev };
+                            cellsToRemove.forEach(key => delete newData[key]);
+                            return newData;
+                        });
+
+                        const cellCount = Object.keys(capturedData).length;
+                        successMessage = `Link "${chipData.text}" created (${cellCount} cells). Click to open.`;
+                    } else if (actualCommand === 'pack') {
                         // Pack chip - capture and store all world data in selection
                         chipData.type = 'pack';
                         chipData.collapsed = false; // Start expanded
