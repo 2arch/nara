@@ -95,6 +95,7 @@ export interface StyledCharacter {
         color?: string;
         background?: string;
     };
+    scale?: { w: number; h: number }; // Character scale in cells (defaults to {w:1, h:2})
     fadeStart?: number; // Timestamp for fade animation
 }
 
@@ -7521,7 +7522,31 @@ export function useWorldEngine({
                 logger.warn('targetIndent was invalid (NaN/null/undefined), using current cursor X:', cursorPos.x);
             }
             moved = true;
-        } else if (key === 'ArrowUp') {
+        } else if (key === 'ArrowUp' && !isMod && !altKey) {
+            // Check if cursor is inside a scrollable note - if so, scroll instead of moving cursor
+            const noteAtCursor = findTextNoteContainingPoint(cursorPos.x, cursorPos.y, worldData);
+            if (noteAtCursor && noteAtCursor.data.data && noteAtCursor.data.visibleHeight !== undefined) {
+                const noteData = noteAtCursor.data;
+                const currentScrollOffset = noteData.scrollOffset || 0;
+
+                // Can we scroll up? (show earlier content)
+                if (currentScrollOffset > 0) {
+                    // Scroll note up (decrement scrollOffset to show earlier lines)
+                    const newScrollOffset = Math.max(0, currentScrollOffset - 1);
+                    setWorldData(prev => ({
+                        ...prev,
+                        [noteAtCursor.key]: JSON.stringify({
+                            ...noteData,
+                            scrollOffset: newScrollOffset
+                        })
+                    }));
+                    // Don't move cursor - we scrolled the note instead
+                    return true;
+                }
+                // If we can't scroll up anymore, fall through to normal cursor movement
+            }
+
+            // Normal ArrowUp handling (with modifiers or outside scrollable notes)
             if (isMod) {
                 // Cmd+Up: Move to the topmost line with content
                 let topY = cursorPos.y;
@@ -7623,7 +7648,46 @@ export function useWorldEngine({
                 nextCursorPos.y -= GRID_CELL_SPAN; // Move up by grid cell span
             }
             moved = true;
-        } else if (key === 'ArrowDown') {
+        } else if (key === 'ArrowDown' && !isMod && !altKey) {
+            // Check if cursor is inside a scrollable note - if so, scroll instead of moving cursor
+            const noteAtCursor = findTextNoteContainingPoint(cursorPos.x, cursorPos.y, worldData);
+            if (noteAtCursor && noteAtCursor.data.data && noteAtCursor.data.visibleHeight !== undefined) {
+                const noteData = noteAtCursor.data;
+                const currentScrollOffset = noteData.scrollOffset || 0;
+                const visibleHeight = noteData.visibleHeight;
+
+                // Calculate total content height from note.data
+                let maxRelativeY = 0;
+                for (const coordKey in noteData.data) {
+                    const commaIndex = coordKey.indexOf(',');
+                    if (commaIndex !== -1) {
+                        const relativeY = parseInt(coordKey.substring(commaIndex + 1), 10);
+                        if (!isNaN(relativeY) && relativeY > maxRelativeY) {
+                            maxRelativeY = relativeY;
+                        }
+                    }
+                }
+                const totalContentLines = maxRelativeY + 1;
+                const maxScroll = Math.max(0, totalContentLines - visibleHeight);
+
+                // Can we scroll down? (show later content)
+                if (currentScrollOffset < maxScroll) {
+                    // Scroll note down (increment scrollOffset to show later lines)
+                    const newScrollOffset = Math.min(maxScroll, currentScrollOffset + 1);
+                    setWorldData(prev => ({
+                        ...prev,
+                        [noteAtCursor.key]: JSON.stringify({
+                            ...noteData,
+                            scrollOffset: newScrollOffset
+                        })
+                    }));
+                    // Don't move cursor - we scrolled the note instead
+                    return true;
+                }
+                // If we can't scroll down anymore, fall through to normal cursor movement
+            }
+
+            // Normal ArrowDown handling (with modifiers or outside scrollable notes)
             if (isMod) {
                 // Cmd+Down: Move to the bottommost line with content
                 let bottomY = cursorPos.y;
@@ -9403,10 +9467,13 @@ export function useWorldEngine({
         // === Click Mail Send Link ===
         // Check if clicked on "send" link in mail regions
         for (const key in worldData) {
-            if (key.startsWith('mail_')) {
+            if (key.startsWith('note_')) {
                 try {
-                    const mailData = JSON.parse(worldData[key] as string);
-                    const { startX, endX, startY, endY } = mailData;
+                    const noteData = JSON.parse(worldData[key] as string);
+                    // Only handle mail notes
+                    if (noteData.contentType !== 'mail') continue;
+
+                    const { startX, endX, startY, endY } = noteData;
 
                     // "send" text is positioned at bottom-right (endX-3 to endX, at endY)
                     const sendText = 'send';
@@ -9418,45 +9485,50 @@ export function useWorldEngine({
                     if (newCursorPos.x >= sendStartX && newCursorPos.x <= sendEndX &&
                         newCursorPos.y === sendY) {
 
-                        // Parse mail content
+                        // Parse mail content from internalized data
+                        const internalData = noteData.data || {};
                         let toLine = '';
                         let subjectLine = '';
-                        let messageLines: string[] = [];
 
-                        // Extract row 1 (to)
-                        for (let x = startX; x <= endX; x++) {
-                            const row1Key = `${x},${startY}`;
-                            const row1Data = worldData[row1Key];
-                            if (row1Data && !isImageData(row1Data)) {
-                                toLine += getCharacter(row1Data) || '';
+                        const width = endX - startX;
+                        const height = endY - startY;
+
+                        // Extract row 1 (to) - use relative coordinates
+                        for (let relX = 0; relX <= width; relX++) {
+                            const relKey = `${relX},0`;
+                            const cellData = internalData[relKey];
+                            if (cellData && !isImageData(cellData)) {
+                                toLine += getCharacter(cellData) || '';
                             }
+                        }
 
-                            // Extract row 2 (subject)
-                            if (endY >= startY + 1) {
-                                const row2Key = `${x},${startY + 1}`;
-                                const row2Data = worldData[row2Key];
-                                if (row2Data && !isImageData(row2Data)) {
-                                    subjectLine += getCharacter(row2Data) || '';
+                        // Extract row 2 (subject) - use relative coordinates
+                        if (height >= 1) {
+                            for (let relX = 0; relX <= width; relX++) {
+                                const relKey = `${relX},1`;
+                                const cellData = internalData[relKey];
+                                if (cellData && !isImageData(cellData)) {
+                                    subjectLine += getCharacter(cellData) || '';
                                 }
                             }
                         }
 
-                        // Extract message (row 3+)
+                        // Extract message (row 3+) - use relative coordinates
                         // Treat consecutive non-empty lines as continuous text (word-wrapped)
                         // Only break paragraphs on empty lines
                         let currentParagraph = '';
                         const paragraphs: string[] = [];
-                        
-                        for (let y = startY + 2; y <= endY; y++) {
+
+                        for (let relY = 2; relY <= height; relY++) {
                             let rowContent = '';
-                            for (let x = startX; x <= endX; x++) {
-                                const cellKey = `${x},${y}`;
-                                const cellData = worldData[cellKey];
+                            for (let relX = 0; relX <= width; relX++) {
+                                const relKey = `${relX},${relY}`;
+                                const cellData = internalData[relKey];
                                 if (cellData && !isImageData(cellData)) {
                                     rowContent += getCharacter(cellData) || '';
                                 }
                             }
-                            
+
                             const trimmedRow = rowContent.trim();
                             if (trimmedRow) {
                                 // Non-empty line - add to current paragraph with space
@@ -9471,7 +9543,7 @@ export function useWorldEngine({
                                 currentParagraph = '';
                             }
                         }
-                        
+
                         // Add final paragraph if exists
                         if (currentParagraph) {
                             paragraphs.push(currentParagraph);

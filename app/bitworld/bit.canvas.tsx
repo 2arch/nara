@@ -1227,7 +1227,7 @@ const entityFinders: Record<string, EntityFinderConfig> = {
 
 /**
  * Unified entity finder by type and position
- * Replaces findImageAtPosition, findPatternAtPosition, findPlanAtPosition, findMailAtPosition
+ * Replaces findImageAtPosition, findPatternAtPosition, findPlanAtPosition
  *
  * @example
  * const image = findEntityAtPosition(engine.worldData, cursorPos, 'image');
@@ -1304,7 +1304,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     type ResizeHandle = 'top-left' | 'top-right' | 'bottom-right' | 'bottom-left';
     const [resizeState, setResizeState] = useState<{
         active: boolean;
-        type: 'image' | 'note' | 'iframe' | 'mail' | 'pattern' | 'pack' | null;
+        type: 'image' | 'note' | 'iframe' | 'pattern' | 'pack' | null;
         key: string | null;
         handle: ResizeHandle | null;
         originalBounds: { startX: number; startY: number; endX: number; endY: number } | null;
@@ -1318,7 +1318,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         roomIndex: null
     });
 
-    const [selectedMailKey, setSelectedMailKey] = useState<string | null>(null);
     const [selectedChipKey, setSelectedChipKey] = useState<string | null>(null);
 
     const [clipboardFlashBounds, setClipboardFlashBounds] = useState<Map<string, number>>(new Map()); // boundKey -> timestamp
@@ -2557,10 +2556,6 @@ Camera & Viewport Controls:
 
     const findPlanAtPosition = useCallback((pos: Point): { key: string, data: any } | null => {
         return findEntityAtPosition(engine.worldData, pos, 'note');
-    }, [engine]);
-
-    const findMailAtPosition = useCallback((pos: Point): { key: string, data: any } | null => {
-        return findEntityAtPosition(engine.worldData, pos, 'mail');
     }, [engine]);
 
     const findChipAtPosition = useCallback((pos: Point): { key: string, data: any } | null => {
@@ -5091,18 +5086,6 @@ Camera & Viewport Controls:
             }
         }
 
-        // === Render Selected Mail Border ===
-        if (selectedMailKey) {
-            const selectedMailData = safeParseEntityData(engine.worldData, selectedMailKey);
-            if (selectedMailData) {
-                renderEntitySelection(ctx, selectedMailData, {
-                    showBorder: true,
-                    borderColor: 'rgba(255, 193, 7, 0.8)', // Amber color for mail
-                    thumbColor: 'rgba(255, 193, 7, 1)'
-                }, engine, currentZoom, currentOffset);
-            }
-        }
-
         // === Render Clipboard Flash ===
         if (clipboardFlashBounds.size > 0) {
             const recentItem = engine.clipboardItems[0];
@@ -5159,19 +5142,6 @@ Camera & Viewport Controls:
                         );
                     } catch (e) {
                         // Invalid note data, skip preview
-                    }
-                } else if (selectedMailKey) {
-                    // Draw preview for mail region destination
-                    try {
-                        const mailData = JSON.parse(engine.worldData[selectedMailKey] as string);
-                        renderDragPreview(
-                            ctx, mailData, distanceX, distanceY,
-                            'rgba(255, 193, 7, 0.3)', // Amber color for mail
-                            engine, currentZoom, currentOffset,
-                            effectiveCharWidth, effectiveCharHeight, cssWidth, cssHeight
-                        );
-                    } catch (e) {
-                        // Invalid mail data, skip preview
                     }
                 } else {
                     // Check if we have an active selection
@@ -5964,7 +5934,7 @@ Camera & Viewport Controls:
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, engine.faceOrientation, engine.isFaceDetectionEnabled, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, selectedNoteKey, selectedMailKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, enhancedDebugText, showCursor, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateTasksIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
+    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, engine.faceOrientation, engine.isFaceDetectionEnabled, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, selectedNoteKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, enhancedDebugText, showCursor, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateTasksIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
 
 
     // --- Drawing Loop Effect ---
@@ -6079,21 +6049,6 @@ Camera & Viewport Controls:
         // Set flag to prevent trail creation from click movement
         isClickMovementRef.current = true;
 
-        // Check if clicking outside selected mail region - if so, clear it
-        if (selectedMailKey) {
-            const worldPos = engine.screenToWorld(clickX, clickY, engine.zoomLevel, engine.viewOffset);
-            const snappedWorldPos = {
-                x: Math.floor(worldPos.x),
-                y: Math.floor(worldPos.y)
-            };
-            const mailAtClick = findMailAtPosition(snappedWorldPos);
-            
-            // If clicking outside any mail region, or on a different mail region, clear selection
-            if (!mailAtClick || mailAtClick.key !== selectedMailKey) {
-                setSelectedMailKey(null);
-            }
-        }
-
         // Pass to engine's regular click handler
         engine.handleCanvasClick(clickX, clickY, false, e.shiftKey, e.metaKey, e.ctrlKey);
 
@@ -6193,31 +6148,15 @@ Camera & Viewport Controls:
                     // Set flag to prevent trail creation
                     isClickMovementRef.current = true;
                 } else {
-                    // If no text block, image, or note found, check for mail
-                    const mailAtPosition = findMailAtPosition(snappedWorldPos);
-
-                    if (mailAtPosition) {
-                        // Double-click on mail selects it
-                        setSelectedMailKey(mailAtPosition.key);
-                        setSelectedImageKey(null);
-                        setSelectedNoteKey(null);
-                        engine.handleSelectionStart(0, 0);
-                        engine.handleSelectionEnd();
-
-                        // Set flag to prevent trail creation
-                        isClickMovementRef.current = true;
-                    } else {
-                        // Clear any selections if clicking on empty space
-                        setSelectedImageKey(null);
-                        setSelectedNoteKey(null);
-                        setSelectedMailKey(null);
-                    }
+                    // Clear any selections if clicking on empty space
+                    setSelectedImageKey(null);
+                    setSelectedNoteKey(null);
                 }
             }
         }
 
         canvasRef.current?.focus(); // Ensure focus for keyboard
-    }, [engine, findTextBlock, findImageAtPosition, findPlanAtPosition, findMailAtPosition]);
+    }, [engine, findTextBlock, findImageAtPosition, findPlanAtPosition]);
     
     const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -6322,46 +6261,6 @@ Camera & Viewport Controls:
                     }
                 } catch (e) {
                     // Skip invalid note data
-                }
-            }
-
-            // Check mail resize handles
-            if (selectedMailKey) {
-                try {
-                    const selectedMailData = JSON.parse(engine.worldData[selectedMailKey] as string);
-                    const topLeftScreen = engine.worldToScreen(selectedMailData.startX, selectedMailData.startY, engine.zoomLevel, engine.viewOffset);
-                    const bottomRightScreen = engine.worldToScreen(selectedMailData.endX + 1, selectedMailData.endY + 1, engine.zoomLevel, engine.viewOffset);
-
-                    const left = topLeftScreen.x;
-                    const right = bottomRightScreen.x;
-                    const top = topLeftScreen.y;
-                    const bottom = bottomRightScreen.y;
-
-                    // Check each corner handle
-                    let handle: ResizeHandle | null = null;
-                    if (isWithinThumb(x, y, left, top)) handle = 'top-left';
-                    else if (isWithinThumb(x, y, right, top)) handle = 'top-right';
-                    else if (isWithinThumb(x, y, right, bottom)) handle = 'bottom-right';
-                    else if (isWithinThumb(x, y, left, bottom)) handle = 'bottom-left';
-
-                    if (handle) {
-                        setResizeState({
-                            active: true,
-                            type: 'mail',
-                            key: selectedMailKey,
-                            handle,
-                            originalBounds: {
-                                startX: selectedMailData.startX,
-                                startY: selectedMailData.startY,
-                                endX: selectedMailData.endX,
-                                endY: selectedMailData.endY
-                            },
-                            roomIndex: null
-                        });
-                        return; // Early return, don't process other mouse events
-                    }
-                } catch (e) {
-                    // Skip invalid mail data
                 }
             }
 
@@ -6548,14 +6447,12 @@ Camera & Viewport Controls:
                     setSelectedPatternKey(patternAtPosition.key);
                     setSelectedImageKey(null);
                     setSelectedNoteKey(null);
-                    setSelectedMailKey(null);
                     isSelectingMouseDownRef.current = false;
                 } else {
                     // Clear all selections when starting regular selection
                     setSelectedImageKey(null);
                     setSelectedNoteKey(null);
                     setSelectedPatternKey(null);
-                    setSelectedMailKey(null);
 
                     // Regular selection start
                     isSelectingMouseDownRef.current = true; // Track mouse down state
@@ -6565,7 +6462,7 @@ Camera & Viewport Controls:
 
             canvasRef.current?.focus();
         }
-    }, [engine, selectedImageKey, selectedNoteKey, selectedMailKey]);
+    }, [engine, selectedImageKey, selectedNoteKey]);
 
     const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -6741,38 +6638,6 @@ Camera & Viewport Controls:
                     }
                 } catch (e) {
                     // Invalid note data
-                }
-            } else if (resizeState.type === 'mail' && resizeState.key) {
-                try {
-                    const mailData = JSON.parse(engine.worldData[resizeState.key] as string);
-                    const buttonKey = `mailbutton_${resizeState.key}`;
-                    const buttonData = engine.worldData[buttonKey] ? JSON.parse(engine.worldData[buttonKey] as string) : null;
-
-                    engine.setWorldData(prev => {
-                        const updated = {
-                            ...prev,
-                            [resizeState.key!]: JSON.stringify({
-                                ...mailData,
-                                startX: newBounds.startX,
-                                startY: newBounds.startY,
-                                endX: newBounds.endX,
-                                endY: newBounds.endY
-                            })
-                        };
-
-                        // Update button position to stay at bottom-right corner
-                        if (buttonData) {
-                            updated[buttonKey] = JSON.stringify({
-                                ...buttonData,
-                                x: newBounds.endX,
-                                y: newBounds.endY
-                            });
-                        }
-
-                        return updated;
-                    });
-                } catch (e) {
-                    // Invalid mail data
                 }
             } else if (resizeState.type === 'pack' && resizeState.key) {
                 try {
@@ -7028,50 +6893,6 @@ Camera & Viewport Controls:
                                 setSelectedNoteKey(newPlanKey);
                             } catch (e) {
                                 // Invalid note data, skip move
-                            }
-                        } else if (selectedMailKey) {
-                            // Check if we're moving a selected mail region
-                            try {
-                                const mailData = JSON.parse(engine.worldData[selectedMailKey] as string);
-                                const oldButtonKey = `mailbutton_${selectedMailKey}`;
-                                const buttonData = engine.worldData[oldButtonKey] ? JSON.parse(engine.worldData[oldButtonKey] as string) : null;
-
-                                // Create new mail region with shifted coordinates
-                                const newMailData = {
-                                    startX: mailData.startX + distanceX,
-                                    endX: mailData.endX + distanceX,
-                                    startY: mailData.startY + distanceY,
-                                    endY: mailData.endY + distanceY,
-                                    timestamp: Date.now()
-                                };
-
-                                // Delete old mail and create new one with shifted position
-                                const newMailKey = `mail_${newMailData.startX},${newMailData.startY}_${Date.now()}`;
-                                const newButtonKey = `mailbutton_${newMailKey}`;
-
-                                engine.setWorldData(prev => {
-                                    const newData = { ...prev };
-                                    delete newData[selectedMailKey];
-                                    delete newData[oldButtonKey];
-                                    newData[newMailKey] = JSON.stringify(newMailData);
-
-                                    // Move button with the mail region
-                                    if (buttonData) {
-                                        newData[newButtonKey] = JSON.stringify({
-                                            ...buttonData,
-                                            mailKey: newMailKey,
-                                            x: newMailData.endX,
-                                            y: newMailData.endY
-                                        });
-                                    }
-
-                                    return newData;
-                                });
-
-                                // Update selected key to the new mail region
-                                setSelectedMailKey(newMailKey);
-                            } catch (e) {
-                                // Invalid mail data, skip move
                             }
                         } else {
                             // Check if we have an active selection to move
@@ -7577,15 +7398,6 @@ Camera & Viewport Controls:
                 }
             }
 
-            // Check for ANY mail at this position
-            if (!isOverMoveableObject) {
-                const mailAtPos = findMailAtPosition(touchWorldPos);
-                if (mailAtPos) {
-                    isOverMoveableObject = true;
-                    foundMailKey = mailAtPos.key;
-                }
-            }
-
             // Check for ANY chip at this position
             if (!isOverMoveableObject) {
                 const chipAtPos = findChipAtPosition(touchWorldPos);
@@ -7601,18 +7413,11 @@ Camera & Viewport Controls:
                     // Auto-select the object under the touch
                     if (foundNoteKey) {
                         setSelectedNoteKey(foundNoteKey);
-                        setSelectedMailKey(null);
-                        setSelectedPatternKey(null);
-                        setSelectedChipKey(null);
-                    } else if (foundMailKey) {
-                        setSelectedMailKey(foundMailKey);
-                        setSelectedNoteKey(null);
                         setSelectedPatternKey(null);
                         setSelectedChipKey(null);
                     } else if (foundChipKey) {
                         setSelectedChipKey(foundChipKey);
                         setSelectedNoteKey(null);
-                        setSelectedMailKey(null);
                         setSelectedPatternKey(null);
                     }
 
@@ -7780,38 +7585,6 @@ Camera & Viewport Controls:
                     }
                 } catch (e) {
                     // Invalid note data
-                }
-            } else if (resizeState.type === 'mail' && resizeState.key) {
-                try {
-                    const mailData = JSON.parse(engine.worldData[resizeState.key] as string);
-                    const buttonKey = `mailbutton_${resizeState.key}`;
-                    const buttonData = engine.worldData[buttonKey] ? JSON.parse(engine.worldData[buttonKey] as string) : null;
-
-                    engine.setWorldData(prev => {
-                        const updated = {
-                            ...prev,
-                            [resizeState.key!]: JSON.stringify({
-                                ...mailData,
-                                startX: newBounds.startX,
-                                startY: newBounds.startY,
-                                endX: newBounds.endX,
-                                endY: newBounds.endY
-                            })
-                        };
-
-                        // Update button position to stay at bottom-right corner
-                        if (buttonData) {
-                            updated[buttonKey] = JSON.stringify({
-                                ...buttonData,
-                                x: newBounds.endX,
-                                y: newBounds.endY
-                            });
-                        }
-
-                        return updated;
-                    });
-                } catch (e) {
-                    // Invalid mail data
                 }
             } else if (resizeState.type === 'pack' && resizeState.key) {
                 try {
@@ -8139,46 +7912,6 @@ Camera & Viewport Controls:
                         } catch (e) {
                             // Invalid note data
                         }
-                    } else if (selectedMailKey) {
-                        // Move mail
-                        try {
-                            const mailData = JSON.parse(engine.worldData[selectedMailKey] as string);
-                            const oldButtonKey = `mailbutton_${selectedMailKey}`;
-                            const buttonData = engine.worldData[oldButtonKey] ? JSON.parse(engine.worldData[oldButtonKey] as string) : null;
-
-                            const newMailData = {
-                                startX: mailData.startX + distanceX,
-                                endX: mailData.endX + distanceX,
-                                startY: mailData.startY + distanceY,
-                                endY: mailData.endY + distanceY,
-                                timestamp: Date.now()
-                            };
-
-                            const newMailKey = `mail_${newMailData.startX},${newMailData.startY}_${Date.now()}`;
-                            const newButtonKey = `mailbutton_${newMailKey}`;
-
-                            engine.setWorldData(prev => {
-                                const newData = { ...prev };
-                                delete newData[selectedMailKey];
-                                delete newData[oldButtonKey];
-                                newData[newMailKey] = JSON.stringify(newMailData);
-
-                                if (buttonData) {
-                                    newData[newButtonKey] = JSON.stringify({
-                                        ...buttonData,
-                                        mailKey: newMailKey,
-                                        x: newMailData.endX,
-                                        y: newMailData.endY
-                                    });
-                                }
-
-                                return newData;
-                            });
-
-                            setSelectedMailKey(newMailKey);
-                        } catch (e) {
-                            // Invalid mail data
-                        }
                     } else if (selectedChipKey) {
                         // Move chip
                         try {
@@ -8445,7 +8178,7 @@ Camera & Viewport Controls:
 
         touchStartRef.current = null;
         touchHasMovedRef.current = false;
-    }, [engine, handleCanvasClick, findImageAtPosition, selectedNoteKey, setSelectedNoteKey, selectedMailKey, setSelectedMailKey]);
+    }, [engine, handleCanvasClick, findImageAtPosition, selectedNoteKey, setSelectedNoteKey]);
 
     // === IME Composition Handlers ===
     const handleCompositionStart = useCallback((e: React.CompositionEvent<HTMLCanvasElement>) => {
@@ -8641,43 +8374,13 @@ Camera & Viewport Controls:
         // Patterns cannot be deleted directly with backspace
         // They are deleted automatically when all their notes are removed
 
-        // Handle mail region-specific keys before passing to engine
-        if (selectedMailKey && e.key === 'Backspace') {
-            // Check if user is actively typing (has text content at or before cursor)
-            // If so, let backspace delete text instead of the mail
-            const cursorKey = `${engine.cursorPos.x},${engine.cursorPos.y}`;
-            const beforeCursorKey = `${engine.cursorPos.x - 1},${engine.cursorPos.y}`;
-            const hasTextAtCursor = engine.worldData[cursorKey] && typeof engine.worldData[cursorKey] === 'string';
-            const hasTextBeforeCursor = engine.worldData[beforeCursorKey] && typeof engine.worldData[beforeCursorKey] === 'string';
-
-            if (hasTextAtCursor || hasTextBeforeCursor) {
-                // User is typing, let engine handle backspace normally
-                return;
-            }
-
-            // No text content - safe to delete the mail
-            // Delete the selected mail region and its button
-            engine.setWorldData(prev => {
-                const newData = { ...prev };
-                delete newData[selectedMailKey];
-                // Also delete associated send button
-                const buttonKey = `mailbutton_${selectedMailKey}`;
-                delete newData[buttonKey];
-                return newData;
-            });
-            setSelectedMailKey(null); // Clear selection
-            e.preventDefault();
-            e.stopPropagation();
-            return;
-        }
-
         // Let engine handle all key input (including regular typing)
         const preventDefault = await engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey, e.shiftKey, e.altKey);
         if (preventDefault) {
             e.preventDefault();
             e.stopPropagation();
         }
-    }, [engine, handleKeyDownFromController, selectedImageKey, selectedNoteKey, selectedPatternKey, selectedMailKey, hostDialogue]);
+    }, [engine, handleKeyDownFromController, selectedImageKey, selectedNoteKey, selectedPatternKey, hostDialogue]);
 
     const hiddenInputRef = useRef<HTMLInputElement>(null);
 
