@@ -8886,9 +8886,10 @@ export function useWorldEngine({
                     let updatedWorldData = { ...dataToDeleteFrom };
 
                     // If wrapping would exceed bounds, expand or scroll based on display mode
-                    if (nextLineY > noteRegion.endY) {
-                        const displayMode = noteData.displayMode || 'expand';
+                    const displayMode = noteData.displayMode || 'expand';
+                    let shouldScroll = false;
 
+                    if (nextLineY > noteRegion.endY) {
                         if (displayMode === 'expand') {
                             // Expand mode: grow note downward to accommodate new line
                             updatedNoteData.endY = nextLineY;
@@ -8896,6 +8897,7 @@ export function useWorldEngine({
                             // Scroll mode: keep note size, auto-scroll down by GRID_CELL_SPAN
                             const currentScrollOffset = noteData.scrollOffset || 0;
                             updatedNoteData.scrollOffset = currentScrollOffset + GRID_CELL_SPAN;
+                            shouldScroll = true;
                         }
                     }
 
@@ -8958,7 +8960,10 @@ export function useWorldEngine({
                         // Update the note in worldData and move cursor
                         updatedWorldData[noteAtCursor.key] = JSON.stringify(updatedNoteData);
                         setWorldData(updatedWorldData);
-                        setCursorPos({ x: newX, y: nextLineY });
+
+                        // In scroll mode, cursor stays at bottom of note (not world nextLineY)
+                        const cursorY = shouldScroll ? cursorAfterDelete.y : nextLineY;
+                        setCursorPos({ x: newX, y: cursorY });
                         worldDataChanged = true;
 
                         return true;
@@ -8966,7 +8971,10 @@ export function useWorldEngine({
                         // No good wrap point - leave char on current line, just move cursor to next
                         updatedWorldData[noteAtCursor.key] = JSON.stringify(updatedNoteData);
                         setWorldData(updatedWorldData);
-                        setCursorPos({ x: noteRegion.startX, y: nextLineY });
+
+                        // In scroll mode, cursor stays at bottom of note (not world nextLineY)
+                        const cursorY = shouldScroll ? cursorAfterDelete.y : nextLineY;
+                        setCursorPos({ x: noteRegion.startX, y: cursorY });
                         worldDataChanged = true;
                         return true;
                     }
