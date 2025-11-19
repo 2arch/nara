@@ -270,7 +270,8 @@ function calculateScreenBounds(
     currentZoom: number,
     currentOffset: { x: number; y: number }
 ): { topLeft: Point; bottomRight: Point; width: number; height: number } {
-    const topLeft = engine.worldToScreen(bounds.startX, bounds.startY, currentZoom, currentOffset);
+    // Use startY - 1 to get top of character span (characters occupy 2 cells)
+    const topLeft = engine.worldToScreen(bounds.startX, bounds.startY - 1, currentZoom, currentOffset);
     const bottomRight = engine.worldToScreen(bounds.endX + 1, bounds.endY + 1, currentZoom, currentOffset);
 
     return {
