@@ -6467,13 +6467,16 @@ export function useWorldEngine({
             const maxY = Math.floor(Math.max(selectionStart.y, selectionEnd.y));
 
             // Create note region using helper
+            const height = maxY - minY + 1;
             const { noteKey, noteData } = createNote({
                 bounds: {
                     startX: minX,
                     endX: maxX,
                     startY: minY,
                     endY: maxY
-                }
+                },
+                visibleHeight: height,  // Default to showing all lines
+                scrollOffset: 0         // Start at top
             });
 
             // Store note region in worldData with unique key
@@ -6487,7 +6490,7 @@ export function useWorldEngine({
             setSelectionEnd(null);
 
             const width = maxX - minX + 1;
-            const height = maxY - minY + 1;
+            // height already calculated above for visibleHeight
             setDialogueWithRevert(`Plan region saved (${width}×${height})`, setDialogueText);
             return true;
             }
