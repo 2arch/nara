@@ -614,11 +614,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
      * Handles validation, creation, and feedback
      */
     const createRegionFromSelection = useCallback((
-        regionType: 'mail' | 'note',
+        regionType: 'mail' | 'note' | 'list',
         options: {
             successMessage?: (dims: { width: number; height: number }) => string;
             additionalData?: Record<string, any>;
             pendingMessage?: string;
+            contentType?: 'text' | 'mail' | 'list' | 'image';
             additionalWorldDataCallback?: (key: string, selection: any, worldData: WorldData) => WorldData;
         } = {}
     ): boolean => {
@@ -648,50 +649,46 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         // Calculate visible height for notes (default: full height, can be scrolled later)
         const noteHeight = existingSelection.endY - existingSelection.startY + 1;
 
-        // Capture and internalize data for notes
+        // Capture and internalize data for all note types
         let capturedData: Record<string, string> = {};
         const cellsToRemove: string[] = [];
 
-        if (regionType === 'note') {
-            // Capture all world data within selection using relative coordinates
-            for (let y = existingSelection.startY; y <= existingSelection.endY; y++) {
-                for (let x = existingSelection.startX; x <= existingSelection.endX; x++) {
-                    const cellKey = `${x},${y}`;
-                    const cellData = worldData[cellKey];
-                    if (cellData !== undefined) {
-                        // Convert to relative coordinates (note origin is 0,0)
-                        const relativeX = x - existingSelection.startX;
-                        const relativeY = y - existingSelection.startY;
-                        const relativeKey = `${relativeX},${relativeY}`;
-                        capturedData[relativeKey] = typeof cellData === 'string' ? cellData : JSON.stringify(cellData);
-                        cellsToRemove.push(cellKey);
-                    }
+        // Always capture data for notes (including mail and list types)
+        for (let y = existingSelection.startY; y <= existingSelection.endY; y++) {
+            for (let x = existingSelection.startX; x <= existingSelection.endX; x++) {
+                const cellKey = `${x},${y}`;
+                const cellData = worldData[cellKey];
+                if (cellData !== undefined) {
+                    // Convert to relative coordinates (note origin is 0,0)
+                    const relativeX = x - existingSelection.startX;
+                    const relativeY = y - existingSelection.startY;
+                    const relativeKey = `${relativeX},${relativeY}`;
+                    capturedData[relativeKey] = typeof cellData === 'string' ? cellData : JSON.stringify(cellData);
+                    cellsToRemove.push(cellKey);
                 }
             }
         }
 
+        // All regions are now notes with contentType
         const regionData = {
             startX: existingSelection.startX,
             endX: existingSelection.endX,
             startY: existingSelection.startY,
             endY: existingSelection.endY,
             timestamp,
-            ...options.additionalData,
-            // Store captured data for notes
-            ...(regionType === 'note' ? {
-                data: capturedData,
-                visibleHeight: noteHeight,  // Default to showing all lines
-                scrollOffset: 0             // Start at top
-            } : {})
+            contentType: options.contentType || (regionType === 'mail' ? 'mail' : regionType === 'list' ? 'list' : 'text'),
+            data: capturedData,
+            visibleHeight: noteHeight,  // Default to showing all lines
+            scrollOffset: 0,             // Start at top
+            ...options.additionalData
         };
 
-        const key = `${regionType}_${existingSelection.startX},${existingSelection.startY}_${timestamp}`;
+        // Always create as note_ prefix (unified namespace)
+        const key = `note_${existingSelection.startX},${existingSelection.startY}_${timestamp}`;
         let newWorldData = { ...worldData };
 
         // Remove captured data from global worldData (internalize it)
-        if (regionType === 'note') {
-            cellsToRemove.forEach(cellKey => delete newWorldData[cellKey]);
-        }
+        cellsToRemove.forEach(cellKey => delete newWorldData[cellKey]);
 
         newWorldData[key] = JSON.stringify(regionData);
 
