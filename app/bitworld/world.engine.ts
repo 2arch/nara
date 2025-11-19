@@ -9215,14 +9215,16 @@ export function useWorldEngine({
                                     // Restore cell data
                                     if (chipData.packedData) {
                                         for (const [cellKey, cellValue] of Object.entries(chipData.packedData)) {
-                                            newData[cellKey] = cellValue;
+                                            // Cell values are stored as strings (either raw strings or JSON)
+                                            newData[cellKey] = cellValue as string;
                                         }
                                     }
 
                                     // Restore overlapping entities
                                     if (chipData.packedEntities) {
                                         for (const [entityKey, entityValue] of Object.entries(chipData.packedEntities)) {
-                                            newData[entityKey] = entityValue;
+                                            // Entity values are stored as JSON strings
+                                            newData[entityKey] = entityValue as string;
                                         }
                                     }
 

@@ -137,7 +137,7 @@ const AVAILABLE_COMMANDS = [
     // Navigation & View
     'nav', 'search', 'cam', 'indent', 'zoom', 'map',
     // Content Creation
-    'chip', 'task', 'link', 'clip', 'upload', 'pattern', 'connect',
+    'chip', 'task', 'link', 'pack', 'clip', 'upload', 'pattern', 'connect',
     // Special
     'mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help',
     // Styling & Display
@@ -155,7 +155,7 @@ const AVAILABLE_COMMANDS = [
 // Category mapping for visual organization
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map'],
-    'create': ['chip', 'task', 'link', 'clip', 'upload'],
+    'create': ['chip', 'task', 'link', 'pack', 'clip', 'upload'],
     'special': ['mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help'],
     'style': ['bg', 'text', 'font', 'style'],
     'state': ['state', 'random', 'clear', 'replay'],
@@ -180,6 +180,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'chip': 'Create a spatial chip at your current selection. Type /chip \'text\' [color]. Defaults to current text color (accent). Custom colors: /chip \'text\' crimson. Chips show as colored cells with cutout text.',
     'task': 'Create a toggleable task from selected text. Select text, then type /task [color]. Click the highlighted task to toggle completion (adds strikethrough). Click again to un-complete it.',
     'link': 'Create a clickable link from selected text. Select text, then type /link [url]. Click the underlined link to open the URL in a new tab. URLs are auto-detected when pasted.',
+    'pack': 'Pack selected world data into a collapsible chip. Select a region (including notes, text, etc), then type /pack [color]. Click the pack chip to toggle between collapsed (hidden) and expanded (visible) states.',
     'clip': 'Save selected text to your clipboard. Select text, then type /clip to capture it. Access your clips later to paste them anywhere on the canvas.',
     'upload': 'Upload an image to your canvas. Type /upload, then select an image file. The image will be placed at your current cursor position and saved to your canvas.',
     'paint': 'Enter paint mode to draw filled regions on the canvas. Drag to draw a continuous stroke, double-click/double-tap to fill the enclosed area. Press ESC to exit.',
