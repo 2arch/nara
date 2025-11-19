@@ -133,12 +133,11 @@ function parseNoteFromWorldData(key: string, value: any): Note | null {
             baseNote.contentType = data.contentType;
         } else if (key.startsWith('image_')) {
             baseNote.contentType = 'image';
-        } else if (key.startsWith('mail_')) {
-            baseNote.contentType = 'mail';
         } else if (key.startsWith('list_')) {
             baseNote.contentType = 'list';
         } else {
-            baseNote.contentType = 'text';
+            // Use contentType from data, default to 'text'
+            baseNote.contentType = data.contentType || 'text';
         }
 
         // Populate content-specific data based on type
@@ -216,7 +215,7 @@ function findNoteAtPosition(
     for (const key in worldData) {
         // Check all region-spanning note types
         if (key.startsWith('note_') || key.startsWith('image_') ||
-            key.startsWith('mail_') || key.startsWith('list_')) {
+            key.startsWith('list_')) {
 
             const note = parseNoteFromWorldData(key, worldData[key]);
             if (note && isPointInNote(pos, note)) {
@@ -1204,17 +1203,6 @@ const entityFinders: Record<string, EntityFinderConfig> = {
     },
     note: {
         prefix: 'note_',
-        parse: true,
-        getBounds: (data) => ({
-            startX: data.startX,
-            endX: data.endX,
-            startY: data.startY,
-            endY: data.endY
-        }),
-        returnKey: true
-    },
-    mail: {
-        prefix: 'mail_',
         parse: true,
         getBounds: (data) => ({
             startX: data.startX,
@@ -3553,10 +3541,13 @@ Camera & Viewport Controls:
         // Render "send" text with link-style underline at bottom-right of mail regions
         const visibleMail = engine.queryVisibleEntities(startWorldX - 5, startWorldY - 5, endWorldX + 5, endWorldY + 5);
         for (const key of visibleMail) {
-            if (key.startsWith('mail_')) {
+            if (key.startsWith('note_')) {
                 try {
-                    const mailData = JSON.parse(engine.worldData[key] as string);
-                    const { startX, endX, startY, endY } = mailData;
+                    const noteData = JSON.parse(engine.worldData[key] as string);
+                    // Only render send button for mail notes
+                    if (noteData.contentType !== 'mail') continue;
+
+                    const { startX, endX, startY, endY } = noteData;
 
                     // Position "send" at bottom-right corner (endX-3 to endX for 4 chars: "send")
                     const sendText = 'send';
@@ -4569,7 +4560,7 @@ Camera & Viewport Controls:
         // Render all text notes and mail notes (extra buffer for sprite borders)
         const visibleNotes = engine.queryVisibleEntities(startWorldX - 10, startWorldY - 10, endWorldX + 10, endWorldY + 10);
         for (const key of visibleNotes) {
-            if (key.startsWith('note_') || key.startsWith('mail_')) {
+            if (key.startsWith('note_')) {
                 const note = parseNoteFromWorldData(key, engine.worldData[key]);
                 if (note) {
                     renderNote(note, noteRenderCtx);
