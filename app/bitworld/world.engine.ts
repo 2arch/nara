@@ -9147,8 +9147,11 @@ export function useWorldEngine({
                     if (!noteData.data) {
                         noteData.data = {};
                     }
-                    // Convert absolute world coordinates to relative (note origin is 0,0)
-                    const relativeKey = `${cursorAfterDelete.x - noteData.startX},${cursorAfterDelete.y - noteData.startY}`;
+                    // Convert absolute world coordinates to relative (accounting for scroll offset)
+                    const scrollOffset = noteData.scrollOffset || 0;
+                    const relativeX = cursorAfterDelete.x - noteData.startX;
+                    const relativeY = (cursorAfterDelete.y - noteData.startY) + scrollOffset;
+                    const relativeKey = `${relativeX},${relativeY}`;
                     noteData.data[relativeKey] = charData;
                     nextWorldData[containingNote.key] = JSON.stringify(noteData);
                 } else {
