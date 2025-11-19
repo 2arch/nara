@@ -4770,9 +4770,16 @@ export function useWorldEngine({
                         chipData.type = 'pack';
                         chipData.collapsed = false; // Start expanded
 
-                        // Parse optional color argument
-                        if (exec.args.length > 0) {
-                            const colorArg = exec.args[0];
+                        const selectedText = extractTextFromSelection(normalized);
+
+                        // Support text argument like other chips
+                        chipData.text = selectedText || commandArgs[0] || 'pack';
+
+                        // Parse color argument
+                        // If selection exists: /chip pack [color]
+                        // If no selection: /chip pack [text] [color]
+                        const colorArg = selectedText ? commandArgs[0] : commandArgs[1];
+                        if (colorArg) {
                             const hexColor = (COLOR_MAP[colorArg.toLowerCase()] || colorArg).toUpperCase();
                             if (/^#[0-9A-F]{6}$/i.test(hexColor)) {
                                 chipData.color = hexColor;
@@ -4830,7 +4837,7 @@ export function useWorldEngine({
                         const height = normalized.endY - normalized.startY + 1;
                         const cellCount = Object.keys(packedData).length;
                         const entityCount = Object.keys(overlappingEntities).length;
-                        successMessage = `Pack created (${width}×${height}, ${cellCount} cells, ${entityCount} entities). Click to collapse.`;
+                        successMessage = `Pack "${chipData.text}" created (${width}×${height}, ${cellCount} cells, ${entityCount} entities). Click to collapse.`;
                     }
 
                     // Store chip in worldData

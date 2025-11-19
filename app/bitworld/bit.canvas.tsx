@@ -3358,21 +3358,73 @@ Camera & Viewport Controls:
 
                     case 'pack': {
                         const packColor = color || engine.textColor;
+                        const packBackground = engine.backgroundColor || '#000000';
                         const { collapsed } = chipData;
 
-                        // Always draw border outline for pack chips
-                        const topLeftScreen = engine.worldToScreen(startX, startY - 1, currentZoom, currentOffset);
-                        const bottomRightScreen = engine.worldToScreen(endX, endY, currentZoom, currentOffset);
+                        // When collapsed, render text with cutout style like waypoint chips
+                        if (collapsed && chipData.text) {
+                            // Render from internal data if it exists
+                            if (chipData.packedData && Object.keys(chipData.packedData).length > 0) {
+                                for (const [relativeKey, cellData] of Object.entries(chipData.packedData)) {
+                                    const [relXStr, relYStr] = relativeKey.split(',');
+                                    const relativeX = parseInt(relXStr, 10);
+                                    const relativeY = parseInt(relYStr, 10);
 
-                        const width = bottomRightScreen.x - topLeftScreen.x + effectiveCharWidth;
-                        const height = bottomRightScreen.y - topLeftScreen.y + effectiveCharHeight;
+                                    const worldX = startX + relativeX;
+                                    const worldY = startY + relativeY;
 
-                        ctx.strokeStyle = packColor;
-                        ctx.lineWidth = collapsed ? 2 : 1; // Thicker border when collapsed
-                        ctx.strokeRect(topLeftScreen.x, topLeftScreen.y, width, height);
+                                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
+                                        worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                                        const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                                        const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
 
-                        // When expanded, also show subtle background tint
-                        if (!collapsed) {
+                                        // Fill background with pack color
+                                        ctx.fillStyle = packColor;
+                                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+
+                                        // Render character with background color (cutout effect)
+                                        const char = engine.getCharacter(cellData as string);
+                                        if (char && char.trim() !== '') {
+                                            ctx.fillStyle = packBackground;
+                                            ctx.fillText(char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Fallback: render text directly if no packed data
+                                const text = chipData.text;
+                                for (let charIndex = 0; charIndex < text.length; charIndex++) {
+                                    const worldX = startX + charIndex;
+                                    const worldY = startY;
+
+                                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
+                                        worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                                        const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                                        const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+
+                                        // Fill background with pack color
+                                        ctx.fillStyle = packColor;
+                                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+
+                                        // Render character with background color (cutout effect)
+                                        ctx.fillStyle = packBackground;
+                                        ctx.fillText(text[charIndex], topScreenPos.x, topScreenPos.y + verticalTextOffset);
+                                    }
+                                }
+                            }
+                        } else if (!collapsed) {
+                            // When expanded, show border outline and subtle background tint
+                            const topLeftScreen = engine.worldToScreen(startX, startY - 1, currentZoom, currentOffset);
+                            const bottomRightScreen = engine.worldToScreen(endX, endY, currentZoom, currentOffset);
+
+                            const width = bottomRightScreen.x - topLeftScreen.x + effectiveCharWidth;
+                            const height = bottomRightScreen.y - topLeftScreen.y + effectiveCharHeight;
+
+                            ctx.strokeStyle = packColor;
+                            ctx.lineWidth = 1;
+                            ctx.strokeRect(topLeftScreen.x, topLeftScreen.y, width, height);
+
+                            // Show subtle background tint when expanded
                             for (let y = startY; y <= endY; y += GRID_CELL_SPAN) {
                                 for (let x = startX; x <= endX; x++) {
                                     const bottomScreenPos = engine.worldToScreen(x, y, currentZoom, currentOffset);
