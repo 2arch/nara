@@ -9380,94 +9380,17 @@ export function useWorldEngine({
                                 endY: newBounds.endY
                             };
 
-                            // When collapsing, remove packed data from world
-                            // When expanding, restore packed data to world
-                            if (!isCurrentlyCollapsed) {
-                                // Collapsing: remove the packed data from world using relative coordinates
-                                setWorldData(prev => {
-                                    const newData = { ...prev };
+                            // Just toggle the state and bounds - data stays in the pack chip
+                            // Rendering will handle displaying the packed content when expanded
+                            setWorldData(prev => ({
+                                ...prev,
+                                [key]: JSON.stringify(updatedChipData)
+                            }));
 
-                                    // Remove cell data (convert relative → absolute coordinates)
-                                    if (chipData.packedData) {
-                                        for (const relativeKey of Object.keys(chipData.packedData)) {
-                                            // Parse relative coordinates
-                                            const [relXStr, relYStr] = relativeKey.split(',');
-                                            const relX = parseInt(relXStr, 10);
-                                            const relY = parseInt(relYStr, 10);
-
-                                            // Convert to absolute world coordinates using chip's current position
-                                            const absoluteX = chipData.startX + relX;
-                                            const absoluteY = chipData.startY + relY;
-                                            const absoluteKey = `${absoluteX},${absoluteY}`;
-
-                                            delete newData[absoluteKey];
-                                        }
-                                    }
-
-                                    // Remove overlapping entities
-                                    if (chipData.packedEntities) {
-                                        for (const entityKey of Object.keys(chipData.packedEntities)) {
-                                            delete newData[entityKey];
-                                        }
-                                    }
-
-                                    // Update pack chip itself with new bounds
-                                    newData[key] = JSON.stringify(updatedChipData);
-                                    return newData;
-                                });
-                                setDialogueWithRevert(`Pack collapsed`, setDialogueText);
-                            } else {
-                                // Expanding: restore the packed data to world using relative coordinates
-                                setWorldData(prev => {
-                                    const newData = { ...prev };
-
-                                    // Restore cell data (convert relative → absolute coordinates)
-                                    if (chipData.packedData) {
-                                        for (const [relativeKey, cellValue] of Object.entries(chipData.packedData)) {
-                                            // Parse relative coordinates
-                                            const [relXStr, relYStr] = relativeKey.split(',');
-                                            const relX = parseInt(relXStr, 10);
-                                            const relY = parseInt(relYStr, 10);
-
-                                            // Convert to absolute world coordinates using chip's current position
-                                            const absoluteX = chipData.startX + relX;
-                                            const absoluteY = chipData.startY + relY;
-                                            const absoluteKey = `${absoluteX},${absoluteY}`;
-
-                                            // Cell values are stored as strings (either raw strings or JSON)
-                                            newData[absoluteKey] = cellValue as string;
-                                        }
-                                    }
-
-                                    // Restore overlapping entities (convert relative coords back to absolute)
-                                    if (chipData.packedEntities) {
-                                        for (const [entityKey, entityValue] of Object.entries(chipData.packedEntities)) {
-                                            try {
-                                                const relativeEntity = JSON.parse(entityValue as string);
-                                                // Convert relative coordinates back to absolute using chip's current position
-                                                const absoluteEntity = {
-                                                    ...relativeEntity,
-                                                    startX: chipData.startX + relativeEntity.startX,
-                                                    endX: chipData.startX + relativeEntity.endX,
-                                                    startY: chipData.startY + relativeEntity.startY,
-                                                    endY: chipData.startY + relativeEntity.endY,
-                                                    x: relativeEntity.x !== undefined ? chipData.startX + relativeEntity.x : relativeEntity.x,
-                                                    y: relativeEntity.y !== undefined ? chipData.startY + relativeEntity.y : relativeEntity.y
-                                                };
-                                                newData[entityKey] = JSON.stringify(absoluteEntity);
-                                            } catch (e) {
-                                                // Fallback: store as-is if parsing fails
-                                                newData[entityKey] = entityValue as string;
-                                            }
-                                        }
-                                    }
-
-                                    // Update pack chip itself with new bounds
-                                    newData[key] = JSON.stringify(updatedChipData);
-                                    return newData;
-                                });
-                                setDialogueWithRevert(`Pack expanded`, setDialogueText);
-                            }
+                            setDialogueWithRevert(
+                                !isCurrentlyCollapsed ? `Pack collapsed` : `Pack expanded`,
+                                setDialogueText
+                            );
                             return;
                         }
                     }

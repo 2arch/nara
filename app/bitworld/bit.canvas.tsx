@@ -3383,8 +3383,77 @@ Camera & Viewport Controls:
                                 }
                             }
                         } else if (!collapsed) {
-                            // When expanded, show border outline and subtle background tint
-                            // The packed data is restored to worldData and will be rendered normally
+                            // When expanded, render packed data directly from the pack chip
+                            // Render packed cell data from packedData (relative coordinates)
+                            if (chipData.packedData) {
+                                for (const [relativeKey, cellData] of Object.entries(chipData.packedData)) {
+                                    const [relXStr, relYStr] = relativeKey.split(',');
+                                    const relativeX = parseInt(relXStr, 10);
+                                    const relativeY = parseInt(relYStr, 10);
+
+                                    const worldX = startX + relativeX;
+                                    const worldY = startY + relativeY;
+
+                                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
+                                        worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+
+                                        if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                                            screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                                            // Render character from packed data
+                                            const char = engine.getCharacter(cellData as string);
+                                            if (char && char.trim() !== '') {
+                                                ctx.fillStyle = engine.textColor;
+                                                ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Render packed entities (notes, chips) with relative coordinates converted to absolute
+                            if (chipData.packedEntities) {
+                                for (const [entityKey, entityValue] of Object.entries(chipData.packedEntities)) {
+                                    try {
+                                        const relativeEntity = JSON.parse(entityValue as string);
+                                        // Convert relative coordinates to absolute for rendering
+                                        const absoluteStartX = startX + relativeEntity.startX;
+                                        const absoluteStartY = startY + relativeEntity.startY;
+                                        const absoluteEndX = startX + relativeEntity.endX;
+                                        const absoluteEndY = startY + relativeEntity.endY;
+
+                                        // Render note data if it exists
+                                        if (entityKey.startsWith('note_') && relativeEntity.data) {
+                                            for (const [relKey, noteCell] of Object.entries(relativeEntity.data)) {
+                                                const [nRelXStr, nRelYStr] = relKey.split(',');
+                                                const noteRelX = parseInt(nRelXStr, 10);
+                                                const noteRelY = parseInt(nRelYStr, 10);
+
+                                                const noteWorldX = absoluteStartX + noteRelX;
+                                                const noteWorldY = absoluteStartY + noteRelY;
+
+                                                if (noteWorldX >= startWorldX - 5 && noteWorldX <= endWorldX + 5 &&
+                                                    noteWorldY >= startWorldY - 5 && noteWorldY <= endWorldY + 5) {
+                                                    const noteScreenPos = engine.worldToScreen(noteWorldX, noteWorldY, currentZoom, currentOffset);
+
+                                                    if (noteScreenPos.x > -effectiveCharWidth * 2 && noteScreenPos.x < cssWidth + effectiveCharWidth &&
+                                                        noteScreenPos.y > -effectiveCharHeight * 2 && noteScreenPos.y < cssHeight + effectiveCharHeight) {
+                                                        const char = engine.getCharacter(noteCell as string);
+                                                        if (char && char.trim() !== '') {
+                                                            ctx.fillStyle = engine.textColor;
+                                                            ctx.fillText(char, noteScreenPos.x, noteScreenPos.y + verticalTextOffset);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } catch (e) {
+                                        // Skip invalid entity data
+                                    }
+                                }
+                            }
+
+                            // Show border outline and subtle background tint when expanded
                             const topLeftScreen = engine.worldToScreen(startX, startY - 1, currentZoom, currentOffset);
                             const bottomRightScreen = engine.worldToScreen(endX, endY, currentZoom, currentOffset);
 
