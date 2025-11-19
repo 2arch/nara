@@ -8002,6 +8002,18 @@ Camera & Viewport Controls:
                         // Move chip
                         try {
                             const chipData = JSON.parse(engine.worldData[selectedChipKey] as string);
+
+                            // For pack chips, also move the expandedBounds
+                            let expandedBounds = chipData.expandedBounds;
+                            if (chipData.type === 'pack' && expandedBounds) {
+                                expandedBounds = {
+                                    startX: expandedBounds.startX + distanceX,
+                                    endX: expandedBounds.endX + distanceX,
+                                    startY: expandedBounds.startY + distanceY,
+                                    endY: expandedBounds.endY + distanceY
+                                };
+                            }
+
                             const newChipData = {
                                 ...chipData,
                                 startX: chipData.startX + distanceX,
@@ -8010,6 +8022,7 @@ Camera & Viewport Controls:
                                 endY: chipData.endY + distanceY,
                                 x: (chipData.x !== undefined) ? chipData.x + distanceX : undefined,
                                 y: (chipData.y !== undefined) ? chipData.y + distanceY : undefined,
+                                expandedBounds: expandedBounds,
                                 timestamp: Date.now()
                             };
 
