@@ -8877,179 +8877,98 @@ export function useWorldEngine({
                     // We would type past the right edge - wrap to next line
                     const nextLineY = cursorAfterDelete.y + GRID_CELL_SPAN;
 
-                    // Check if wrapping would exceed note's height limit
-                    if (nextLineY <= noteRegion.endY) {
-                        // Simple word wrapping: scan backwards to find the last space, then move everything after it
-                        const currentLineY = cursorAfterDelete.y;
-                        let wrapPoint = noteRegion.startX; // Default to start of line if no space found
+                    // Get the containing note to access its data
+                    const noteAtCursor = findTextNoteContainingPoint(cursorAfterDelete.x, cursorAfterDelete.y, dataToDeleteFrom);
+                    if (!noteAtCursor) return true;
 
-                        // Scan backwards from the boundary to find the last space
-                        for (let x = noteRegion.endX; x >= noteRegion.startX; x--) {
-                            const charKey = `${x},${currentLineY}`;
-                            const charData = dataToDeleteFrom[charKey];
-                            const char = typeof charData === 'string' ? charData :
-                                        (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
+                    const noteData = noteAtCursor.data;
+                    let updatedNoteData = { ...noteData };
+                    let updatedWorldData = { ...dataToDeleteFrom };
 
-                            if (char === ' ') {
-                                wrapPoint = x + 1; // Start wrapping after the space
-                                break;
-                            }
-                        }
+                    // If wrapping would exceed bounds, expand or scroll based on display mode
+                    if (nextLineY > noteRegion.endY) {
+                        const displayMode = noteData.displayMode || 'expand';
 
-                        // Only do word wrapping if we found a space and there's something to wrap
-                        if (wrapPoint > noteRegion.startX && wrapPoint <= cursorAfterDelete.x) {
-                            // Get the containing note to access its data
-                            const containingNote = findTextNoteContainingPoint(cursorAfterDelete.x, cursorAfterDelete.y, dataToDeleteFrom);
-                            if (!containingNote) return true;
-
-                            const noteData = containingNote.data;
-                            if (!noteData.data) noteData.data = {};
-
-                            // Collect all characters from wrap point to cursor (read from note.data with relative coords)
-                            const textToWrap: Array<{x: number, char: string, style?: any}> = [];
-
-                            for (let x = wrapPoint; x <= cursorAfterDelete.x; x++) {
-                                const relativeKey = `${x - noteData.startX},${currentLineY - noteData.startY}`;
-                                const charData = noteData.data[relativeKey];
-                                if (charData) {
-                                    const char = typeof charData === 'string' ? charData :
-                                               (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
-                                    const style = typeof charData === 'object' && 'style' in charData ? charData.style : undefined;
-                                    if (char) {
-                                        textToWrap.push({x, char, style});
-                                    }
-                                }
-                            }
-
-                            // Remove the text from current line in note.data
-                            for (let x = wrapPoint; x <= cursorAfterDelete.x; x++) {
-                                const relativeKey = `${x - noteData.startX},${currentLineY - noteData.startY}`;
-                                delete noteData.data[relativeKey];
-                            }
-
-                            // Add the text to next line in note.data with relative coordinates
-                            let newX = noteRegion.startX;
-                            for (const {char, style} of textToWrap) {
-                                if (char !== ' ') { // Skip spaces when wrapping
-                                    const relativeKey = `${newX - noteData.startX},${nextLineY - noteData.startY}`;
-                                    noteData.data[relativeKey] = style ? {char, style} : char;
-                                    newX++;
-                                }
-                            }
-
-                            // Add the current character being typed to note.data
-                            const relativeKey = `${newX - noteData.startX},${nextLineY - noteData.startY}`;
-                            noteData.data[relativeKey] = key;
-
-                            // Update the note in worldData
-                            const updatedWorldData = { ...dataToDeleteFrom };
-                            updatedWorldData[containingNote.key] = JSON.stringify(noteData);
-                            setWorldData(updatedWorldData);
-                            setCursorPos({ x: newX + 1, y: nextLineY });
-                            worldDataChanged = true;
-
-                            // Skip normal character placement since we handled it above
-                            return true;
+                        if (displayMode === 'expand') {
+                            // Expand mode: grow note downward to accommodate new line
+                            updatedNoteData.endY = nextLineY;
                         } else {
-                            // No good wrap point found - just move to next line
-                            proposedCursorPos = {
-                                x: noteRegion.startX,
-                                y: nextLineY
-                            };
+                            // Scroll mode: keep note size, auto-scroll down by GRID_CELL_SPAN
+                            const currentScrollOffset = noteData.scrollOffset || 0;
+                            updatedNoteData.scrollOffset = currentScrollOffset + GRID_CELL_SPAN;
                         }
-                    } else {
-                        // Wrapping would exceed note's current bounds
-                        const noteAtCursor = findTextNoteContainingPoint(cursorAfterDelete.x, cursorAfterDelete.y, dataToDeleteFrom);
-                        if (noteAtCursor) {
-                            const noteData = noteAtCursor.data;
-                            const displayMode = noteData.displayMode || 'expand'; // Default to expand mode
+                    }
 
-                            let updatedNoteData = { ...noteData };
-                            let updatedWorldData = { ...dataToDeleteFrom };
+                    // Type the current character at cursorAfterDelete.x on this line first
+                    if (!updatedNoteData.data) updatedNoteData.data = {};
+                    const currentCharKey = `${cursorAfterDelete.x - noteData.startX},${cursorAfterDelete.y - noteData.startY}`;
+                    updatedNoteData.data[currentCharKey] = key;
 
-                            if (displayMode === 'expand') {
-                                // Expand mode: grow note downward to accommodate new line
-                                updatedNoteData.endY = nextLineY;
-                                updatedWorldData[noteAtCursor.key] = JSON.stringify(updatedNoteData);
-                            } else {
-                                // Scroll mode: keep note size, auto-scroll down by GRID_CELL_SPAN
-                                const currentScrollOffset = noteData.scrollOffset || 0;
-                                updatedNoteData.scrollOffset = currentScrollOffset + GRID_CELL_SPAN;
-                                updatedWorldData[noteAtCursor.key] = JSON.stringify(updatedNoteData);
-                            }
+                    // Now proceed with word wrapping
+                    const currentLineY = cursorAfterDelete.y;
+                    let wrapPoint = noteRegion.startX;
 
-                            // First, type the current character at cursorAfterDelete.x on this line
-                            if (!updatedNoteData.data) updatedNoteData.data = {};
-                            const currentCharKey = `${cursorAfterDelete.x - noteData.startX},${cursorAfterDelete.y - noteData.startY}`;
-                            updatedNoteData.data[currentCharKey] = key;
+                    // Scan backwards from the boundary to find the last space (including char we just typed)
+                    for (let x = noteRegion.endX; x >= noteRegion.startX; x--) {
+                        const relativeKey = `${x - noteData.startX},${currentLineY - noteData.startY}`;
+                        const charData = updatedNoteData.data?.[relativeKey];
+                        const char = typeof charData === 'string' ? charData :
+                                    (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
 
-                            // Now proceed with word wrapping
-                            const currentLineY = cursorAfterDelete.y;
-                            let wrapPoint = noteRegion.startX;
+                        if (char === ' ') {
+                            wrapPoint = x + 1;
+                            break;
+                        }
+                    }
 
-                            // Scan backwards from the boundary to find the last space (including char we just typed)
-                            for (let x = noteRegion.endX; x >= noteRegion.startX; x--) {
-                                const relativeKey = `${x - noteData.startX},${currentLineY - noteData.startY}`;
-                                const charData = updatedNoteData.data?.[relativeKey];
+                    // Only do word wrapping if we found a space
+                    if (wrapPoint > noteRegion.startX && wrapPoint <= noteRegion.endX) {
+                        // Collect all characters from wrap point to endX (including char we just typed)
+                        const textToWrap: Array<{x: number, char: string, style?: any}> = [];
+
+                        for (let x = wrapPoint; x <= noteRegion.endX; x++) {
+                            const relativeKey = `${x - noteData.startX},${currentLineY - noteData.startY}`;
+                            const charData = updatedNoteData.data?.[relativeKey];
+                            if (charData) {
                                 const char = typeof charData === 'string' ? charData :
-                                            (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
-
-                                if (char === ' ') {
-                                    wrapPoint = x + 1;
-                                    break;
+                                           (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
+                                const style = typeof charData === 'object' && 'style' in charData ? charData.style : undefined;
+                                if (char) {
+                                    textToWrap.push({x, char, style});
                                 }
-                            }
-
-                            // Only do word wrapping if we found a space
-                            if (wrapPoint > noteRegion.startX && wrapPoint <= noteRegion.endX) {
-                                // Collect all characters from wrap point to endX (including char we just typed)
-                                const textToWrap: Array<{x: number, char: string, style?: any}> = [];
-
-                                for (let x = wrapPoint; x <= noteRegion.endX; x++) {
-                                    const relativeKey = `${x - noteData.startX},${currentLineY - noteData.startY}`;
-                                    const charData = updatedNoteData.data?.[relativeKey];
-                                    if (charData) {
-                                        const char = typeof charData === 'string' ? charData :
-                                                   (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
-                                        const style = typeof charData === 'object' && 'style' in charData ? charData.style : undefined;
-                                        if (char) {
-                                            textToWrap.push({x, char, style});
-                                        }
-                                    }
-                                }
-
-                                // Remove the wrapped text from current line in note.data
-                                for (let x = wrapPoint; x <= noteRegion.endX; x++) {
-                                    const relativeKey = `${x - noteData.startX},${currentLineY - noteData.startY}`;
-                                    delete updatedNoteData.data[relativeKey];
-                                }
-
-                                // Add the wrapped text to next line in note.data with relative coordinates
-                                let newX = noteRegion.startX;
-                                for (const {char, style} of textToWrap) {
-                                    if (char !== ' ') {
-                                        const relativeKey = `${newX - noteData.startX},${nextLineY - noteData.startY}`;
-                                        updatedNoteData.data[relativeKey] = style ? {char, style} : char;
-                                        newX++;
-                                    }
-                                }
-
-                                // Update the note in worldData and move cursor
-                                updatedWorldData[noteAtCursor.key] = JSON.stringify(updatedNoteData);
-                                setWorldData(updatedWorldData);
-                                setCursorPos({ x: newX, y: nextLineY });
-                                worldDataChanged = true;
-
-                                return true;
-                            } else {
-                                // No good wrap point - leave char on current line, just move cursor to next
-                                updatedWorldData[noteAtCursor.key] = JSON.stringify(updatedNoteData);
-                                setWorldData(updatedWorldData);
-                                setCursorPos({ x: noteRegion.startX, y: nextLineY });
-                                worldDataChanged = true;
-                                return true;
                             }
                         }
+
+                        // Remove the wrapped text from current line in note.data
+                        for (let x = wrapPoint; x <= noteRegion.endX; x++) {
+                            const relativeKey = `${x - noteData.startX},${currentLineY - noteData.startY}`;
+                            delete updatedNoteData.data[relativeKey];
+                        }
+
+                        // Add the wrapped text to next line in note.data with relative coordinates
+                        let newX = noteRegion.startX;
+                        for (const {char, style} of textToWrap) {
+                            if (char !== ' ') {
+                                const relativeKey = `${newX - noteData.startX},${nextLineY - noteData.startY}`;
+                                updatedNoteData.data[relativeKey] = style ? {char, style} : char;
+                                newX++;
+                            }
+                        }
+
+                        // Update the note in worldData and move cursor
+                        updatedWorldData[noteAtCursor.key] = JSON.stringify(updatedNoteData);
+                        setWorldData(updatedWorldData);
+                        setCursorPos({ x: newX, y: nextLineY });
+                        worldDataChanged = true;
+
+                        return true;
+                    } else {
+                        // No good wrap point - leave char on current line, just move cursor to next
+                        updatedWorldData[noteAtCursor.key] = JSON.stringify(updatedNoteData);
+                        setWorldData(updatedWorldData);
+                        setCursorPos({ x: noteRegion.startX, y: nextLineY });
+                        worldDataChanged = true;
+                        return true;
                     }
                 }
             }
