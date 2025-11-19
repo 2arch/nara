@@ -648,6 +648,28 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         // Calculate visible height for notes (default: full height, can be scrolled later)
         const noteHeight = existingSelection.endY - existingSelection.startY + 1;
 
+        // Capture and internalize data for notes
+        let capturedData: Record<string, string> = {};
+        const cellsToRemove: string[] = [];
+
+        if (regionType === 'note') {
+            // Capture all world data within selection using relative coordinates
+            for (let y = existingSelection.startY; y <= existingSelection.endY; y++) {
+                for (let x = existingSelection.startX; x <= existingSelection.endX; x++) {
+                    const cellKey = `${x},${y}`;
+                    const cellData = worldData[cellKey];
+                    if (cellData !== undefined) {
+                        // Convert to relative coordinates (note origin is 0,0)
+                        const relativeX = x - existingSelection.startX;
+                        const relativeY = y - existingSelection.startY;
+                        const relativeKey = `${relativeX},${relativeY}`;
+                        capturedData[relativeKey] = typeof cellData === 'string' ? cellData : JSON.stringify(cellData);
+                        cellsToRemove.push(cellKey);
+                    }
+                }
+            }
+        }
+
         const regionData = {
             startX: existingSelection.startX,
             endX: existingSelection.endX,
@@ -655,9 +677,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             endY: existingSelection.endY,
             timestamp,
             ...options.additionalData,
-            // Initialize empty data storage for note content
+            // Store captured data for notes
             ...(regionType === 'note' ? {
-                data: {},
+                data: capturedData,
                 visibleHeight: noteHeight,  // Default to showing all lines
                 scrollOffset: 0             // Start at top
             } : {})
@@ -665,6 +687,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         const key = `${regionType}_${existingSelection.startX},${existingSelection.startY}_${timestamp}`;
         let newWorldData = { ...worldData };
+
+        // Remove captured data from global worldData (internalize it)
+        if (regionType === 'note') {
+            cellsToRemove.forEach(cellKey => delete newWorldData[cellKey]);
+        }
+
         newWorldData[key] = JSON.stringify(regionData);
 
         // Allow caller to add additional world data (e.g., mail button)
