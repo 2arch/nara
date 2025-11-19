@@ -8873,7 +8873,7 @@ export function useWorldEngine({
             // Check for note region word wrapping (if not already handled by bounded region)
             if (!worldDataChanged) {
                 const noteRegion = getNoteRegion(dataToDeleteFrom, cursorAfterDelete);
-                if (noteRegion && cursorAfterDelete.x > noteRegion.endX) {
+                if (noteRegion && cursorAfterDelete.x === noteRegion.endX && proposedCursorPos.x > noteRegion.endX) {
                     // We're typing past the right edge of a note region
                     const nextLineY = cursorAfterDelete.y + GRID_CELL_SPAN;
 
