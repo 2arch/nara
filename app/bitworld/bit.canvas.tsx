@@ -604,48 +604,56 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
             ctx.font = `${context.engine.getEffectiveCharDims(currentZoom).fontSize}px ${context.engine.settings?.fontFamily || 'monospace'}`;
             ctx.textBaseline = 'top';
 
-            // Pre-calculate visible Y range for early culling
-            const minVisibleContentY = startY + scrollOffset;
-            const maxVisibleContentY = startY + scrollOffset + visibleHeight - 1;
+            // Calculate visible world coordinate range (viewport culling)
+            const topLeft = engine.screenToWorld(-effectiveCharWidth, -effectiveCharHeight, currentZoom, currentOffset);
+            const bottomRight = engine.screenToWorld(cssWidth + effectiveCharWidth, cssHeight + effectiveCharHeight, currentZoom, currentOffset);
 
-            for (const coordKey in note.data) {
-                // Parse relative coordinates (note.data now uses relative coords with origin at 0,0)
-                const commaIndex = coordKey.indexOf(',');
-                if (commaIndex === -1) continue;
+            // Calculate visible Y range within note content (accounting for scroll)
+            const noteContentStartY = scrollOffset;
+            const noteContentEndY = Math.min(scrollOffset + visibleHeight - 1, endY - startY);
 
-                const relativeY = parseInt(coordKey.substring(commaIndex + 1), 10);
-                const worldY = startY + relativeY; // Convert to world coordinates
+            // Map viewport visible Y range to note content coordinates
+            const minVisibleWorldY = Math.max(startY, topLeft.y);
+            const maxVisibleWorldY = Math.min(startY + noteContentEndY - scrollOffset, bottomRight.y);
 
-                // Fast Y culling - skip if outside visible content range
-                if (worldY < minVisibleContentY || worldY > maxVisibleContentY) continue;
+            // Convert to relative Y range within note content
+            const minContentY = Math.max(noteContentStartY, minVisibleWorldY - startY + scrollOffset);
+            const maxContentY = Math.min(noteContentEndY, maxVisibleWorldY - startY + scrollOffset);
 
-                const relativeX = parseInt(coordKey.substring(0, commaIndex), 10);
-                const worldX = startX + relativeX; // Convert to world coordinates
+            // Calculate visible X range within note bounds
+            const noteWidth = endX - startX;
+            const minVisibleX = Math.max(0, topLeft.x - startX);
+            const maxVisibleX = Math.min(noteWidth, bottomRight.x - startX);
 
-                // Fast X culling - skip if outside note bounds
-                if (worldX < startX || worldX > endX) continue;
-
-                // Calculate viewport position
-                const contentLine = worldY - startY;
-                const viewportLine = contentLine - scrollOffset;
+            // Only iterate through visible region (viewport culling on both axes)
+            for (let relativeY = Math.floor(minContentY); relativeY <= Math.ceil(maxContentY); relativeY++) {
+                const viewportLine = relativeY - scrollOffset;
                 const renderY = startY + viewportLine;
 
-                // Single worldToScreen calculation using renderY directly
-                const topScreenPos = engine.worldToScreen(worldX, renderY - 1, currentZoom, currentOffset);
+                for (let relativeX = Math.floor(minVisibleX); relativeX <= Math.ceil(maxVisibleX); relativeX++) {
+                    const coordKey = `${relativeX},${relativeY}`;
+                    const charData = note.data[coordKey];
 
-                // Screen bounds check
-                if (topScreenPos.x < -effectiveCharWidth || topScreenPos.x > cssWidth ||
-                    topScreenPos.y < -effectiveCharHeight || topScreenPos.y > cssHeight) {
-                    continue;
+                    if (!charData) continue;
+
+                    const worldX = startX + relativeX;
+
+                    // Single worldToScreen calculation using renderY directly
+                    const topScreenPos = engine.worldToScreen(worldX, renderY - 1, currentZoom, currentOffset);
+
+                    // Screen bounds check (should rarely filter now due to culling)
+                    if (topScreenPos.x < -effectiveCharWidth || topScreenPos.x > cssWidth ||
+                        topScreenPos.y < -effectiveCharHeight || topScreenPos.y > cssHeight) {
+                        continue;
+                    }
+
+                    // Render character
+                    const char = typeof charData === 'string' ? charData : charData.char;
+                    const style = typeof charData === 'object' && charData.style ? charData.style : undefined;
+
+                    ctx.fillStyle = style?.color || engine.textColor;
+                    ctx.fillText(char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
                 }
-
-                // Render character
-                const charData = note.data[coordKey];
-                const char = typeof charData === 'string' ? charData : charData.char;
-                const style = typeof charData === 'object' && charData.style ? charData.style : undefined;
-
-                ctx.fillStyle = style?.color || engine.textColor;
-                ctx.fillText(char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
             }
         }
     }
