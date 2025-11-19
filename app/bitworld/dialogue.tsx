@@ -258,12 +258,12 @@ export function useDialogue() {
         ctx.restore();
     }, [calculateDebugLayout]);
 
-    const formatTableOfContents = useCallback((labels: Array<{text: string, x: number, y: number, color: string}>, maxWidth: number, originPosition: {x: number, y: number}, uniqueColors: string[], activeFilters: Set<string>, sortMode: string, availableStates: string[] = [], username?: string, navMode: 'labels' | 'states' | 'bounds' = 'labels', getStatePublishStatus?: (state: string) => boolean, bounds: Array<{startX: number, endX: number, startY: number, endY: number, color: string, title?: string}> = []): string => {
+    const formatTableOfContents = useCallback((labels: Array<{text: string, x: number, y: number, color: string}>, maxWidth: number, originPosition: {x: number, y: number}, uniqueColors: string[], activeFilters: Set<string>, sortMode: string, availableStates: string[] = [], username?: string, navMode: 'chips' | 'states' | 'bounds' = 'chips', getStatePublishStatus?: (state: string) => boolean, bounds: Array<{startX: number, endX: number, startY: number, endY: number, color: string, title?: string}> = []): string => {
         const availableWidth = maxWidth - NAV_MARGIN_CHARS * 2;
         
         // Line 0: "index" with current position coordinates and mode indicator
         const currentPosCoordinates = `(${Math.round(originPosition.x)},${Math.round(originPosition.y)})`;
-        const modeIndicator = navMode === 'labels' ? 'labels' : navMode === 'states' ? 'states' : 'bounds';
+        const modeIndicator = navMode === 'chips' ? 'chips' : navMode === 'states' ? 'states' : 'bounds';
         const indexSpaceWidth = availableWidth - 'index'.length - currentPosCoordinates.length;
         let indexLine = `index ${modeIndicator}`;
         if (indexSpaceWidth > 0) {
@@ -312,7 +312,7 @@ export function useDialogue() {
         // Line 3: Empty space
         lines.push('');
         
-        if (navMode === 'labels') {
+        if (navMode === 'chips') {
             // Show labels only
             const filteredLabels = activeFilters.size === 0 ? labels : labels.filter(label => activeFilters.has(label.color));
             
@@ -463,14 +463,14 @@ export function useDialogue() {
         availableStates?: string[],
         username?: string,
         onStateClick?: (state: string) => void,
-        navMode?: 'labels' | 'states' | 'bounds',
+        navMode?: 'chips' | 'states' | 'bounds',
         onIndexClick?: () => void,
         onPublishClick?: (state: string) => void,
         onNavigateClick?: (state: string) => void,
         getStatePublishStatus?: (state: string) => boolean,
         bounds?: Array<{startX: number, endX: number, startY: number, endY: number, color: string, title?: string}>
     }) => {
-        const { canvasWidth, canvasHeight, ctx, labels, originPosition, uniqueColors, activeFilters, sortMode, onCoordinateClick, onColorFilterClick, onSortModeClick, availableStates = [], username, onStateClick, navMode = 'labels', onIndexClick, onPublishClick, onNavigateClick, getStatePublishStatus, bounds = [] } = props;
+        const { canvasWidth, canvasHeight, ctx, labels, originPosition, uniqueColors, activeFilters, sortMode, onCoordinateClick, onColorFilterClick, onSortModeClick, availableStates = [], username, onStateClick, navMode = 'chips', onIndexClick, onPublishClick, onNavigateClick, getStatePublishStatus, bounds = [] } = props;
         
         // Use fixed dimensions for nav text
         const charHeight = DIALOGUE_FONT_SIZE;
@@ -506,7 +506,7 @@ export function useDialogue() {
             // Track index click region (line index 0)
             if (lineIndex === 0 && onIndexClick) {
                 // Track the "index [mode]" part as clickable (not the coordinates)
-                const modeText = navMode === 'labels' ? 'labels' : 'states';
+                const modeText = navMode === 'chips' ? 'chips' : 'states';
                 const indexText = `index ${modeText}`;
                 buttonRegions.push({
                     type: 'index',
@@ -613,7 +613,7 @@ export function useDialogue() {
                         const y = parseInt(coordMatch[2], 10);
                         const coordWidth = coordMatch[0].length * charWidth;
 
-                        if (navMode === 'labels' && labelIndex < labels.length) {
+                        if (navMode === 'chips' && labelIndex < labels.length) {
                             // This is a regular label coordinate
                             const label = labels[labelIndex];
                             coordinateRegions.push({

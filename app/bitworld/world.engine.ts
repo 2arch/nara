@@ -296,10 +296,10 @@ export interface WorldEngine {
     navOriginPosition: Point;
     navColorFilters: Set<string>;
     navSortMode: 'chronological' | 'closest' | 'farthest';
-    navMode: 'labels' | 'states' | 'bounds';
+    navMode: 'chips' | 'states' | 'bounds';
     toggleNavMode: () => void;
-    getAllLabels: () => Array<{text: string, x: number, y: number, color: string}>;
-    getSortedLabels: (sortMode: 'chronological' | 'closest' | 'farthest', originPos: Point) => Array<{text: string, x: number, y: number, color: string}>;
+    getAllChips: () => Array<{text: string, x: number, y: number, color: string}>;
+    getSortedChips: (sortMode: 'chronological' | 'closest' | 'farthest', originPos: Point) => Array<{text: string, x: number, y: number, color: string}>;
     getUniqueColors: () => string[];
     toggleColorFilter: (color: string) => void;
     cycleSortMode: () => void;
@@ -982,29 +982,29 @@ export function useWorldEngine({
     const [availableStates, setAvailableStates] = useState<string[]>([]);
     const [currentStateName, setCurrentStateName] = useState<string | null>(initialStateName); // Track which state we're currently in
 
-    const getAllLabels = useCallback(() => {
-        const labels: Array<{text: string, x: number, y: number, color: string}> = [];
+    const getAllChips = useCallback(() => {
+        const chips: Array<{text: string, x: number, y: number, color: string}> = [];
         for (const key in worldData) {
-            if (key.startsWith('label_')) {
-                const coordsStr = key.substring('label_'.length);
+            if (key.startsWith('chip_')) {
+                const coordsStr = key.substring('chip_'.length);
                 const [xStr, yStr] = coordsStr.split(',');
                 const x = parseInt(xStr, 10);
                 const y = parseInt(yStr, 10);
                 if (!isNaN(x) && !isNaN(y)) {
                     try {
-                        const labelData = JSON.parse(worldData[key] as string);
-                        const text = labelData.text || '';
-                        const color = labelData.color || '#000000';
+                        const chipData = JSON.parse(worldData[key] as string);
+                        const text = chipData.text || '';
+                        const color = chipData.color || '#000000';
                         if (text.trim()) {
-                            labels.push({ text, x, y, color });
+                            chips.push({ text, x, y, color });
                         }
                     } catch (e) {
-                        // Skip invalid label data
+                        // Skip invalid chip data
                     }
                 }
             }
         }
-        return labels;
+        return chips;
     }, [worldData]);
 
 
@@ -1383,7 +1383,7 @@ export function useWorldEngine({
         isFaceDetectionEnabled,
         faceOrientation,
         setFaceDetectionEnabled,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllLabels, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, triggerUpgradeFlow: () => {
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
         }
@@ -2003,13 +2003,13 @@ export function useWorldEngine({
     // Sort modes: chronological -> closest -> farthest
     type NavSortMode = 'chronological' | 'closest' | 'farthest';
     const [navSortMode, setNavSortMode] = useState<NavSortMode>('chronological');
-    const [navMode, setNavMode] = useState<'labels' | 'states' | 'bounds'>('labels');
+    const [navMode, setNavMode] = useState<'chips' | 'states' | 'bounds'>('chips');
 
     const toggleNavMode = useCallback(() => {
         setNavMode(prev => {
-            if (prev === 'labels') return 'states';
+            if (prev === 'chips') return 'states';
             if (prev === 'states') return 'bounds';
-            return 'labels';
+            return 'chips';
         });
     }, []);
 
@@ -6639,7 +6639,7 @@ export function useWorldEngine({
                         const targetChars = Math.floor(regionWidth * regionHeight * 0.8);
 
                         // Update world context
-                        const currentLabels = getAllLabels();
+                        const currentChips = getAllChips();
                         const currentCompiledText = compiledTextCache;
                         const compiledTextString = Object.entries(currentCompiledText)
                             .sort(([aLine], [bLine]) => parseInt(aLine) - parseInt(bLine))
@@ -6651,7 +6651,7 @@ export function useWorldEngine({
 
                         const worldContext = {
                             compiledText: compiledTextString,
-                            labels: currentLabels,
+                            labels: currentChips,
                             metadata: `Canvas viewport center: ${JSON.stringify(getViewportCenter())}, Current cursor: ${JSON.stringify(cursorPos)}`
                         };
 
@@ -6808,9 +6808,9 @@ export function useWorldEngine({
             // Send to AI if we have text
             if (textToSend.trim()) {
                 setDialogueWithRevert("Processing...", setDialogueText);
-                
+
                 // First update the cached context with current world state
-                const currentLabels = getAllLabels();
+                const currentChips = getAllChips();
                 const currentCompiledText = compiledTextCache;
                 
                 // Convert compiled text cache to string format
@@ -6822,7 +6822,7 @@ export function useWorldEngine({
                 // Prepare world context and chat
                 const worldContext = {
                     compiledText: compiledTextString,
-                    labels: currentLabels,
+                    labels: currentChips,
                     metadata: `Canvas viewport center: ${JSON.stringify(getViewportCenter())}, Current cursor: ${JSON.stringify(cursorPos)}`
                 };
 
@@ -9718,57 +9718,57 @@ export function useWorldEngine({
         });
     }, [getViewportCenter]);
 
-    const getSortedLabels = useCallback((sortMode: NavSortMode, originPos: Point) => {
-        const labels: Array<{text: string, x: number, y: number, color: string, creationIndex: number}> = [];
+    const getSortedChips = useCallback((sortMode: NavSortMode, originPos: Point) => {
+        const chips: Array<{text: string, x: number, y: number, color: string, creationIndex: number}> = [];
         let creationIndex = 0;
-        
-        // Collect labels with creation order (based on key order in worldData)
+
+        // Collect chips with creation order (based on key order in worldData)
         for (const key in worldData) {
-            if (key.startsWith('label_')) {
-                const coordsStr = key.substring('label_'.length);
+            if (key.startsWith('chip_')) {
+                const coordsStr = key.substring('chip_'.length);
                 const [xStr, yStr] = coordsStr.split(',');
                 const x = parseInt(xStr, 10);
                 const y = parseInt(yStr, 10);
                 if (!isNaN(x) && !isNaN(y)) {
                     try {
-                        // Skip image data - only process text/label characters
+                        // Skip image data - only process text/chip characters
                         if (isImageData(worldData[key])) {
                             continue;
                         }
-                        const labelData = JSON.parse(getCharacter(worldData[key]));
-                        const text = labelData.text || '';
-                        const color = labelData.color || '#000000';
+                        const chipData = JSON.parse(getCharacter(worldData[key]));
+                        const text = chipData.text || '';
+                        const color = chipData.color || '#000000';
                         if (text.trim()) {
-                            labels.push({ text, x, y, color, creationIndex: creationIndex++ });
+                            chips.push({ text, x, y, color, creationIndex: creationIndex++ });
                         }
                     } catch (e) {
-                        // Skip invalid label data
+                        // Skip invalid chip data
                     }
                 }
             }
         }
-        
+
         // Sort based on mode
         switch (sortMode) {
             case 'chronological':
-                return labels.sort((a, b) => a.creationIndex - b.creationIndex);
-            
+                return chips.sort((a, b) => a.creationIndex - b.creationIndex);
+
             case 'closest':
-                return labels.sort((a, b) => {
+                return chips.sort((a, b) => {
                     const distA = Math.sqrt(Math.pow(a.x - originPos.x, 2) + Math.pow(a.y - originPos.y, 2));
                     const distB = Math.sqrt(Math.pow(b.x - originPos.x, 2) + Math.pow(b.y - originPos.y, 2));
                     return distA - distB;
                 });
-            
+
             case 'farthest':
-                return labels.sort((a, b) => {
+                return chips.sort((a, b) => {
                     const distA = Math.sqrt(Math.pow(a.x - originPos.x, 2) + Math.pow(a.y - originPos.y, 2));
                     const distB = Math.sqrt(Math.pow(b.x - originPos.x, 2) + Math.pow(b.y - originPos.y, 2));
                     return distB - distA; // Reverse order for farthest first
                 });
-            
+
             default:
-                return labels;
+                return chips;
         }
     }, [worldData]);
 
@@ -9860,8 +9860,8 @@ export function useWorldEngine({
         getViewportCenter,
         getCursorDistanceFromCenter,
         getBlocksInRegion,
-        getAllLabels,
-        getSortedLabels,
+        getAllChips,
+        getSortedChips,
         getUniqueColors,
         toggleColorFilter,
         navColorFilters,

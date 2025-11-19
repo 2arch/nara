@@ -91,7 +91,7 @@ interface UseCommandSystemProps {
     initialBackgroundColor?: string;
     initialTextColor?: string;
     skipInitialBackground?: boolean; // Skip applying initialBackgroundColor (let host flow control it)
-    getAllLabels?: () => Array<{text: string, x: number, y: number, color: string}>;
+    getAllChips?: () => Array<{text: string, x: number, y: number, color: string}>;
     getAllBounds?: () => Array<{startX: number, endX: number, startY: number, endY: number, color: string, title?: string}>;
     availableStates?: string[];
     username?: string;
@@ -137,7 +137,7 @@ const AVAILABLE_COMMANDS = [
     // Navigation & View
     'nav', 'search', 'cam', 'indent', 'zoom', 'map',
     // Content Creation
-    'label', 'task', 'link', 'clip', 'upload', 'pattern', 'connect',
+    'chip', 'task', 'link', 'clip', 'upload', 'pattern', 'connect',
     // Special
     'mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help',
     // Styling & Display
@@ -155,7 +155,7 @@ const AVAILABLE_COMMANDS = [
 // Category mapping for visual organization
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map'],
-    'create': ['label', 'task', 'link', 'clip', 'upload'],
+    'create': ['chip', 'task', 'link', 'clip', 'upload'],
     'special': ['mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help'],
     'style': ['bg', 'text', 'font', 'style'],
     'state': ['state', 'random', 'clear', 'replay'],
@@ -172,12 +172,12 @@ const CAMERA_COMMANDS = ['default', 'focus'];
 
 // Detailed help descriptions for each command
 export const COMMAND_HELP: { [command: string]: string } = {
-    'nav': 'Navigate to saved labels. Type /nav to see all your labels, then select one to jump to that location. Labels act as spatial bookmarks in your canvas.',
+    'nav': 'Navigate to saved chips. Type /nav to see all your chips, then select one to jump to that location. Chips act as spatial bookmarks in your canvas.',
     'search': 'Search through all text on your canvas. Type /search followed by your query to find and navigate to specific content. Useful for finding ideas in large canvases.',
     'map': 'Generate a procedural map of ephemeral labels around your viewport. Creates a tasteful exploration terrain with temporary waypoints that disappear when you press Escape.',
     'cam': 'Control camera behavior. Use /cam focus to enable focus mode, which smoothly follows your cursor. Use /cam default to return to normal panning.',
     'indent': 'Toggle text indentation. This affects how new lines are indented when you press Enter, helping you organize thoughts hierarchically.',
-    'label': 'Create a spatial label at your current selection. Type /label \'text\' [color]. Defaults to current text color (accent). Custom colors: /label \'text\' crimson. Labels show as colored cells with cutout text.',
+    'chip': 'Create a spatial chip at your current selection. Type /chip \'text\' [color]. Defaults to current text color (accent). Custom colors: /chip \'text\' crimson. Chips show as colored cells with cutout text.',
     'task': 'Create a toggleable task from selected text. Select text, then type /task [color]. Click the highlighted task to toggle completion (adds strikethrough). Click again to un-complete it.',
     'link': 'Create a clickable link from selected text. Select text, then type /link [url]. Click the underlined link to open the URL in a new tab. URLs are auto-detected when pasted.',
     'clip': 'Save selected text to your clipboard. Select text, then type /clip to capture it. Access your clips later to paste them anywhere on the canvas.',
@@ -225,7 +225,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllLabels, getAllBounds = () => [], availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, monogramSystem }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllChips, getAllBounds = () => [], availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, monogramSystem }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const previousBackgroundStateRef = useRef<{
@@ -767,11 +767,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (lowerInput === 'nav') {
             const parts = input.toLowerCase().split(' ');
-            const labels = getAllLabels ? getAllLabels() : [];
+            const chips = getAllChips ? getAllChips() : [];
             const bounds = getAllBounds ? getAllBounds() : [];
 
-            // Get label names
-            const labelNames = labels.map(label => label.text.toLowerCase());
+            // Get chip names
+            const chipNames = chips.map(chip => chip.text.toLowerCase());
 
             // Get bound titles (fallback to bound[width] if no title)
             const boundNames = bounds.map(bound => {
@@ -783,8 +783,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 }
             });
 
-            // Combine both labels and bounds
-            const allTargets = [...labelNames, ...boundNames];
+            // Combine both chips and bounds
+            const allTargets = [...chipNames, ...boundNames];
 
             if (parts.length > 1) {
                 const navInput = parts[1];
@@ -855,7 +855,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
         }
 
-        if (lowerInput === 'label') {
+        if (lowerInput === 'chip') {
             const parts = input.split(' ');
 
             if (parts.length > 1) {
@@ -868,7 +868,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         return [input];
                     }
                     // Just typed --distance, show example
-                    return ['label --distance <number>'];
+                    return ['chip --distance <number>'];
                 } else if (parts.length === 2 && secondArg.startsWith("'")) {
                     // Typing quoted text - show as is
                     return [input];
@@ -881,20 +881,20 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         const colorNames = Object.keys(COLOR_MAP);
                         const suggestions = colorNames
                             .filter(color => color.startsWith(colorInput))
-                            .map(color => `label '${quoteMatch[1]}' ${color}`);
+                            .map(color => `chip '${quoteMatch[1]}' ${color}`);
                         return suggestions.length > 0 ? suggestions : [input];
                     } else if (quoteMatch && quoteMatch[1] && input.endsWith("' ")) {
                         // Completed quoted text, show color options
                         const colorNames = Object.keys(COLOR_MAP);
-                        return colorNames.map(color => `label '${quoteMatch[1]}' ${color}`);
+                        return colorNames.map(color => `chip '${quoteMatch[1]}' ${color}`);
                     }
                     return [input];
                 } else {
-                    // Regular label command - show as typed
+                    // Regular chip command - show as typed
                     return [input];
                 }
             }
-            return ['label', 'label --distance', "label 'text'", ...Object.keys(COLOR_MAP).map(color => `label 'text' ${color}`)];
+            return ['chip', 'chip --distance', "chip 'text'", ...Object.keys(COLOR_MAP).map(color => `chip 'text' ${color}`)];
         }
 
         if (lowerInput === 'task') {
@@ -1011,7 +1011,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         return commandList.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
-    }, [getAllLabels, getAllBounds, availableStates, clipboardItems, isReadOnly, userUid, membershipLevel]);
+    }, [getAllChips, getAllBounds, availableStates, clipboardItems, isReadOnly, userUid, membershipLevel]);
 
     // Mode switching functionality
     const switchMode = useCallback((newMode: CanvasMode) => {
@@ -1949,23 +1949,23 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const targetQuery = commandParts.slice(1).join(' ');
 
             if (targetQuery) {
-                // Try to find a matching label first
-                if (getAllLabels) {
-                    const labels = getAllLabels();
-                    const targetLabel = labels.find(label =>
-                        label.text.toLowerCase() === targetQuery.toLowerCase()
+                // Try to find a matching chip first
+                if (getAllChips) {
+                    const chips = getAllChips();
+                    const targetChip = chips.find(chip =>
+                        chip.text.toLowerCase() === targetQuery.toLowerCase()
                     );
 
-                    if (targetLabel) {
+                    if (targetChip) {
                         return {
                             command: 'nav',
-                            args: [targetLabel.x.toString(), targetLabel.y.toString()],
+                            args: [targetChip.x.toString(), targetChip.y.toString()],
                             commandStartPos: commandState.commandStartPos
                         };
                     }
                 }
 
-                // If no label found, try to find a matching bound
+                // If no chip found, try to find a matching bound
                 if (getAllBounds) {
                     const bounds = getAllBounds();
                     const targetBound = bounds.find(bound => {
@@ -3299,8 +3299,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             } else {
                 setDialogueWithRevert("Make a selection first", setDialogueText);
             }
-        } else if (commandName === 'label') {
-            // Check if there's a selection to create label from
+        } else if (commandName === 'chip') {
+            // Check if there's a selection to create chip from
             const existingSelection = getNormalizedSelection?.();
             if (existingSelection) {
                 const hasMeaningfulSelection =
@@ -3335,21 +3335,21 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     selectedText = selectedText.trim();
 
                     if (selectedText) {
-                        // Create label at selection start position
-                        const labelKey = `label_${minX},${minY}`;
-                        const newLabel = {
+                        // Create chip at selection start position
+                        const chipKey = `chip_${minX},${minY}`;
+                        const newChip = {
                             text: selectedText,
                             color: '#000000', // Default black text
                             background: '#FFFFFF' // Default white background
                         };
 
                         const newWorldData = { ...worldData };
-                        newWorldData[labelKey] = JSON.stringify(newLabel);
+                        newWorldData[chipKey] = JSON.stringify(newChip);
                         setWorldData(newWorldData);
 
-                        setDialogueWithRevert(`Label "${selectedText}" created`, setDialogueText);
+                        setDialogueWithRevert(`Chip "${selectedText}" created`, setDialogueText);
 
-                        // Clear selection after creating label
+                        // Clear selection after creating chip
                         setSelectionStart(null);
                         setSelectionEnd(null);
                     } else {
