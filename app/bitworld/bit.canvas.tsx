@@ -177,7 +177,16 @@ function parseNoteFromWorldData(key: string, value: any): Note | null {
 
             case 'text':
             default:
-                // No additional content data needed
+                // Text notes may have embedded data and scrolling
+                if (data.data) {
+                    baseNote.data = data.data;
+                }
+                if (data.visibleHeight !== undefined) {
+                    baseNote.visibleHeight = data.visibleHeight;
+                }
+                if (data.scrollOffset !== undefined) {
+                    baseNote.scrollOffset = data.scrollOffset;
+                }
                 break;
         }
 

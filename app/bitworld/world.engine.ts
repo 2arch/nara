@@ -4592,8 +4592,8 @@ export function useWorldEngine({
                     setLightModeData(newLightData);
                     setDialogueWithRevert(`Generated ${placedLabels.length} waypoints. Press Escape to clear.`, setDialogueText);
 
-                } else if (exec.command === 'chip' || exec.command === 'task' || exec.command === 'link') {
-                    // Unified chip creation - handles waypoint, task, and link chips
+                } else if (exec.command === 'chip' || exec.command === 'task' || exec.command === 'link' || exec.command === 'pack') {
+                    // Unified chip creation - handles waypoint, task, link, and pack chips
                     if (!selectionStart || !selectionEnd) {
                         setDialogueWithRevert("Make a selection first", setDialogueText);
                         return true;
@@ -4685,6 +4685,68 @@ export function useWorldEngine({
                         const width = normalized.endX - normalized.startX + 1;
                         const height = normalized.endY - normalized.startY + 1;
                         successMessage = `Link created (${width}×${height}). Click to open.`;
+                    } else if (exec.command === 'pack') {
+                        // Pack chip - capture and store all world data in selection
+                        chipData.type = 'pack';
+                        chipData.collapsed = false; // Start expanded
+
+                        // Parse optional color argument
+                        if (exec.args.length > 0) {
+                            const colorArg = exec.args[0];
+                            const hexColor = (COLOR_MAP[colorArg.toLowerCase()] || colorArg).toUpperCase();
+                            if (/^#[0-9A-F]{6}$/i.test(hexColor)) {
+                                chipData.color = hexColor;
+                            }
+                        }
+
+                        // Capture all world data within the selection bounds
+                        const packedData: Record<string, string> = {};
+                        for (let y = normalized.startY; y <= normalized.endY; y++) {
+                            for (let x = normalized.startX; x <= normalized.endX; x++) {
+                                const cellKey = `${x},${y}`;
+                                const cellData = worldData[cellKey];
+                                if (cellData !== undefined) {
+                                    // Store the raw data (string or object)
+                                    packedData[cellKey] = typeof cellData === 'string' ? cellData : JSON.stringify(cellData);
+                                }
+                            }
+                        }
+
+                        // Also capture any notes, chips, or other entities that overlap with this region
+                        const overlappingEntities: Record<string, string> = {};
+                        for (const [key, value] of Object.entries(worldData)) {
+                            // Check if this is a structured entity (note, chip, etc)
+                            if (key.startsWith('note_') || key.startsWith('chip_') || key.startsWith('label_')) {
+                                try {
+                                    const entityData = typeof value === 'string' ? JSON.parse(value) : value;
+                                    // Check if entity overlaps with pack region
+                                    if (entityData.startX !== undefined && entityData.endX !== undefined &&
+                                        entityData.startY !== undefined && entityData.endY !== undefined) {
+                                        const overlaps = !(
+                                            entityData.endX < normalized.startX ||
+                                            entityData.startX > normalized.endX ||
+                                            entityData.endY < normalized.startY ||
+                                            entityData.startY > normalized.endY
+                                        );
+                                        if (overlaps) {
+                                            overlappingEntities[key] = typeof value === 'string' ? value : JSON.stringify(value);
+                                        }
+                                    }
+                                } catch (e) {
+                                    // Skip invalid JSON
+                                }
+                            }
+                        }
+
+                        // Store packed data in chip
+                        chipData.packedData = packedData;
+                        chipData.packedEntities = overlappingEntities;
+
+                        const width = normalized.endX - normalized.startX + 1;
+                        const height = normalized.endY - normalized.startY + 1;
+                        const cellCount = Object.keys(packedData).length;
+                        const entityCount = Object.keys(overlappingEntities).length;
+                        successMessage = `Pack created (${width}×${height}, ${cellCount} cells, ${entityCount} entities). Click to collapse.`;
                     }
 
                     // Store chip in worldData
@@ -9073,6 +9135,108 @@ export function useWorldEngine({
                     }
                 } catch (e) {
                     // Skip invalid link data
+                }
+            }
+        }
+
+        // === Click to Toggle/Interact with Chips ===
+        // Handle task, link, and pack chips with unified chip_ prefix
+        for (const key in worldData) {
+            if (key.startsWith('chip_')) {
+                try {
+                    const chipData = JSON.parse(worldData[key] as string);
+                    const { startX, endX, startY, endY, type } = chipData;
+
+                    // Check if click is within chip bounds
+                    if (newCursorPos.x >= startX && newCursorPos.x <= endX &&
+                        newCursorPos.y >= startY && newCursorPos.y <= endY) {
+
+                        // Handle task chips
+                        if (type === 'task') {
+                            const updatedChipData = {
+                                ...chipData,
+                                completed: !chipData.completed
+                            };
+                            setWorldData(prev => ({
+                                ...prev,
+                                [key]: JSON.stringify(updatedChipData)
+                            }));
+                            const status = updatedChipData.completed ? 'completed' : 'reopened';
+                            setDialogueWithRevert(`Task ${status}`, setDialogueText);
+                            return;
+                        }
+
+                        // Handle link chips
+                        if (type === 'link' && chipData.url) {
+                            window.open(chipData.url, '_blank', 'noopener,noreferrer');
+                            setDialogueWithRevert(`Opening link...`, setDialogueText);
+                            return;
+                        }
+
+                        // Handle pack chips
+                        if (type === 'pack') {
+                            const isCurrentlyCollapsed = chipData.collapsed || false;
+                            const updatedChipData = {
+                                ...chipData,
+                                collapsed: !isCurrentlyCollapsed
+                            };
+
+                            // When collapsing, remove packed data from world
+                            // When expanding, restore packed data to world
+                            if (!isCurrentlyCollapsed) {
+                                // Collapsing: remove the packed data from world
+                                setWorldData(prev => {
+                                    const newData = { ...prev };
+
+                                    // Remove cell data
+                                    if (chipData.packedData) {
+                                        for (const cellKey of Object.keys(chipData.packedData)) {
+                                            delete newData[cellKey];
+                                        }
+                                    }
+
+                                    // Remove overlapping entities
+                                    if (chipData.packedEntities) {
+                                        for (const entityKey of Object.keys(chipData.packedEntities)) {
+                                            delete newData[entityKey];
+                                        }
+                                    }
+
+                                    // Update pack chip itself
+                                    newData[key] = JSON.stringify(updatedChipData);
+                                    return newData;
+                                });
+                                setDialogueWithRevert(`Pack collapsed`, setDialogueText);
+                            } else {
+                                // Expanding: restore the packed data to world
+                                setWorldData(prev => {
+                                    const newData = { ...prev };
+
+                                    // Restore cell data
+                                    if (chipData.packedData) {
+                                        for (const [cellKey, cellValue] of Object.entries(chipData.packedData)) {
+                                            newData[cellKey] = cellValue;
+                                        }
+                                    }
+
+                                    // Restore overlapping entities
+                                    if (chipData.packedEntities) {
+                                        for (const [entityKey, entityValue] of Object.entries(chipData.packedEntities)) {
+                                            newData[entityKey] = entityValue;
+                                        }
+                                    }
+
+                                    // Update pack chip itself
+                                    newData[key] = JSON.stringify(updatedChipData);
+                                    return newData;
+                                });
+                                setDialogueWithRevert(`Pack expanded`, setDialogueText);
+                            }
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    // Skip invalid chip data
                 }
             }
         }
