@@ -3355,34 +3355,57 @@ Camera & Viewport Controls:
 
                     default:
                         // Waypoint chips (no type, has text property)
-                        if (chipData.text && chipData.data) {
+                        if (chipData.text) {
                             const chipColor = chipData.color || engine.textColor;
                             const chipBackground = chipData.background || engine.backgroundColor;
 
-                            // Render chip's internal data (stored with relative coordinates)
-                            for (const [relativeKey, cellData] of Object.entries(chipData.data)) {
-                                const [relXStr, relYStr] = relativeKey.split(',');
-                                const relativeX = parseInt(relXStr, 10);
-                                const relativeY = parseInt(relYStr, 10);
+                            // Render chip's internal data if it exists (stored with relative coordinates)
+                            if (chipData.data && Object.keys(chipData.data).length > 0) {
+                                for (const [relativeKey, cellData] of Object.entries(chipData.data)) {
+                                    const [relXStr, relYStr] = relativeKey.split(',');
+                                    const relativeX = parseInt(relXStr, 10);
+                                    const relativeY = parseInt(relYStr, 10);
 
-                                // Convert relative coords to world coords
-                                const worldX = startX + relativeX;
-                                const worldY = startY + relativeY;
+                                    // Convert relative coords to world coords
+                                    const worldX = startX + relativeX;
+                                    const worldY = startY + relativeY;
 
-                                if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
-                                    worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                                    const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                                    const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+                                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
+                                        worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                                        const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                                        const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
 
-                                    // Fill background with chip color (spanning GRID_CELL_SPAN cells)
-                                    ctx.fillStyle = chipColor;
-                                    ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                                        // Fill background with chip color (spanning GRID_CELL_SPAN cells)
+                                        ctx.fillStyle = chipColor;
+                                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
 
-                                    // Render character from chip data with background color (cutout effect)
-                                    const char = engine.getCharacter(cellData as string);
-                                    if (char) {
+                                        // Render character from chip data with background color (cutout effect)
+                                        const char = engine.getCharacter(cellData as string);
+                                        if (char) {
+                                            ctx.fillStyle = chipBackground;
+                                            ctx.fillText(char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Fallback: render text directly if no data captured
+                                const text = chipData.text;
+                                for (let charIndex = 0; charIndex < text.length; charIndex++) {
+                                    const worldX = startX + charIndex;
+                                    const worldY = startY;
+
+                                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
+                                        worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                                        const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                                        const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+
+                                        // Fill background with chip color (spanning GRID_CELL_SPAN cells)
+                                        ctx.fillStyle = chipColor;
+                                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+
+                                        // Render character with background color (cutout effect)
                                         ctx.fillStyle = chipBackground;
-                                        ctx.fillText(char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
+                                        ctx.fillText(text[charIndex], topScreenPos.x, topScreenPos.y + verticalTextOffset);
                                     }
                                 }
                             }
