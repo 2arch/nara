@@ -3259,7 +3259,7 @@ Camera & Viewport Controls:
                 switch (type) {
                     case 'task': {
                         const taskColor = color || engine.textColor;
-                        const taskBackground = engine.backgroundColor;
+                        const taskBackground = engine.backgroundColor || '#000000';
                         const { completed } = chipData;
 
                         if (!completed) {
@@ -3282,7 +3282,7 @@ Camera & Viewport Controls:
                                             if (cellData && !engine.isImageData(cellData)) {
                                                 const char = engine.getCharacter(cellData);
                                                 if (char && char.trim() !== '') {
-                                                    ctx.fillStyle = taskBackground || '#FFFFFF';
+                                                    ctx.fillStyle = taskBackground;
                                                     ctx.fillText(char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
                                                 }
                                             }
