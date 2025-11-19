@@ -4633,16 +4633,46 @@ export function useWorldEngine({
 
                     // Add type-specific data
                     if (exec.command === 'chip') {
-                        // Waypoint chip - extract text from selection
+                        // Waypoint chip - capture and internalize selected data
                         const selectedText = extractTextFromSelection(normalized);
                         if (!selectedText) {
                             setDialogueWithRevert("Selection is empty", setDialogueText);
                             return true;
                         }
+
+                        // Capture all world data within selection using relative coordinates
+                        const capturedData: Record<string, string> = {};
+                        const cellsToRemove: string[] = [];
+
+                        for (let y = normalized.startY; y <= normalized.endY; y++) {
+                            for (let x = normalized.startX; x <= normalized.endX; x++) {
+                                const cellKey = `${x},${y}`;
+                                const cellData = worldData[cellKey];
+                                if (cellData !== undefined) {
+                                    // Convert to relative coordinates (chip origin is 0,0)
+                                    const relativeX = x - normalized.startX;
+                                    const relativeY = y - normalized.startY;
+                                    const relativeKey = `${relativeX},${relativeY}`;
+                                    capturedData[relativeKey] = typeof cellData === 'string' ? cellData : JSON.stringify(cellData);
+                                    cellsToRemove.push(cellKey);
+                                }
+                            }
+                        }
+
                         chipData.text = selectedText;
+                        chipData.data = capturedData; // Store captured data internally
                         chipData.color = textColor; // Chip background = text color (red brick)
                         chipData.background = backgroundColor; // Cutout text = bg color (green cutout)
-                        successMessage = `Chip "${selectedText}" created`;
+
+                        // Remove captured data from global worldData (internalize it)
+                        setWorldData(prev => {
+                            const newData = { ...prev };
+                            cellsToRemove.forEach(key => delete newData[key]);
+                            return newData;
+                        });
+
+                        const cellCount = Object.keys(capturedData).length;
+                        successMessage = `Chip "${selectedText}" created (${cellCount} cells captured)`;
                     } else if (exec.command === 'task') {
                         // Task chip
                         chipData.type = 'task';
