@@ -8943,23 +8943,25 @@ export function useWorldEngine({
                             };
                         }
                     } else {
-                        // Wrapping would exceed note's current bounds - auto-expand the note downward
+                        // Wrapping would exceed note's current bounds
                         const noteAtCursor = findTextNoteContainingPoint(cursorAfterDelete.x, cursorAfterDelete.y, dataToDeleteFrom);
                         if (noteAtCursor) {
                             const noteData = noteAtCursor.data;
-                            const expandedEndY = nextLineY; // Expand to accommodate new line
+                            const displayMode = noteData.displayMode || 'expand'; // Default to expand mode
 
-                            // Update note bounds to include new line
-                            const updatedNoteData = {
-                                ...noteData,
-                                endY: expandedEndY
-                            };
+                            let updatedNoteData = { ...noteData };
+                            let updatedWorldData = { ...dataToDeleteFrom };
 
-                            // Update the note in worldData
-                            const updatedWorldData = {
-                                ...dataToDeleteFrom,
-                                [noteAtCursor.key]: JSON.stringify(updatedNoteData)
-                            };
+                            if (displayMode === 'expand') {
+                                // Expand mode: grow note downward to accommodate new line
+                                updatedNoteData.endY = nextLineY;
+                                updatedWorldData[noteAtCursor.key] = JSON.stringify(updatedNoteData);
+                            } else {
+                                // Scroll mode: keep note size, auto-scroll down
+                                const currentScrollOffset = noteData.scrollOffset || 0;
+                                updatedNoteData.scrollOffset = currentScrollOffset + 1;
+                                updatedWorldData[noteAtCursor.key] = JSON.stringify(updatedNoteData);
+                            }
 
                             // Now proceed with word wrapping
                             const currentLineY = cursorAfterDelete.y;

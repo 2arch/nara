@@ -2321,6 +2321,73 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             } as CommandExecution & { restoreCursor?: boolean };
         }
 
+        if (commandToExecute.startsWith('display')) {
+            // /display command - toggle note display mode (expand vs scroll)
+            // Must be used inside a note region
+            const args = inputParts.slice(1);
+            const mode = args[0] as 'expand' | 'scroll' | undefined;
+            const cursorPos = commandState.commandStartPos;
+
+            if (!worldData || !setWorldData) {
+                clearCommandState();
+                return { command: 'display', args: [], commandStartPos: commandState.commandStartPos };
+            }
+
+            // Find note at cursor position
+            const noteKeys = Object.keys(worldData).filter(k => k.startsWith('note_'));
+            let foundNote = null;
+            let foundKey = null;
+
+            for (const key of noteKeys) {
+                try {
+                    const noteData = JSON.parse(worldData[key] as string);
+                    if (cursorPos.x >= noteData.startX && cursorPos.x <= noteData.endX &&
+                        cursorPos.y >= noteData.startY && cursorPos.y <= noteData.endY) {
+                        foundNote = noteData;
+                        foundKey = key;
+                        break;
+                    }
+                } catch (e) {
+                    // Skip invalid note data
+                }
+            }
+
+            if (!foundNote || !foundKey) {
+                setDialogueText?.("Not inside a note region");
+                clearCommandState();
+                return { command: 'display', args: [], commandStartPos: commandState.commandStartPos };
+            }
+
+            // Toggle or set display mode
+            let newMode: 'expand' | 'scroll';
+            if (mode === 'expand' || mode === 'scroll') {
+                newMode = mode;
+            } else {
+                // Toggle between modes
+                newMode = foundNote.displayMode === 'scroll' ? 'expand' : 'scroll';
+            }
+
+            // Update note with new display mode
+            const updatedNote = {
+                ...foundNote,
+                displayMode: newMode
+            };
+
+            setWorldData({
+                ...worldData,
+                [foundKey]: JSON.stringify(updatedNote)
+            });
+
+            setDialogueText?.(`Display mode: ${newMode}`);
+            clearCommandState();
+
+            return {
+                command: 'display',
+                args: [newMode],
+                commandStartPos: commandState.commandStartPos
+            };
+        }
+
         if (commandToExecute.startsWith('list')) {
             // Clear command mode
             clearCommandState();
