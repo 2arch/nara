@@ -4640,8 +4640,8 @@ export function useWorldEngine({
                             return true;
                         }
                         chipData.text = selectedText;
-                        chipData.color = textColor; // Use current theme text color
-                        chipData.background = backgroundColor; // Use current theme background color
+                        chipData.color = backgroundColor; // Use background color for chip background (stands out)
+                        chipData.background = textColor; // Use text color for cutout text
                         successMessage = `Chip "${selectedText}" created`;
                     } else if (exec.command === 'task') {
                         // Task chip
