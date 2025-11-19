@@ -7534,8 +7534,8 @@ export function useWorldEngine({
 
                 // Only scroll if cursor is at top edge AND there's content above
                 if (isAtTopEdge && currentScrollOffset > 0) {
-                    // Scroll note up (decrement scrollOffsetY by GRID_CELL_SPAN lines)
-                    const newScrollOffset = Math.max(0, currentScrollOffset - 1);
+                    // Scroll note up (decrement scrollOffsetY by GRID_CELL_SPAN)
+                    const newScrollOffset = Math.max(0, currentScrollOffset - GRID_CELL_SPAN);
                     setWorldData(prev => ({
                         ...prev,
                         [noteAtCursor.key]: JSON.stringify({
@@ -7681,8 +7681,8 @@ export function useWorldEngine({
 
                 // Only scroll if cursor is at bottom edge AND there's content below
                 if (isAtBottomEdge && currentScrollOffset < maxScroll) {
-                    // Scroll note down (increment scrollOffsetY by 1 line)
-                    const newScrollOffset = Math.min(maxScroll, currentScrollOffset + 1);
+                    // Scroll note down (increment scrollOffsetY by GRID_CELL_SPAN)
+                    const newScrollOffset = Math.min(maxScroll, currentScrollOffset + GRID_CELL_SPAN);
                     setWorldData(prev => ({
                         ...prev,
                         [noteAtCursor.key]: JSON.stringify({
@@ -8875,7 +8875,7 @@ export function useWorldEngine({
                 const noteRegion = getNoteRegion(dataToDeleteFrom, cursorAfterDelete);
                 if (noteRegion && proposedCursorPos.x > noteRegion.endX) {
                     // We're typing past the right edge of a note region
-                    const nextLineY = cursorAfterDelete.y + 1;
+                    const nextLineY = cursorAfterDelete.y + GRID_CELL_SPAN;
 
                     // Check if wrapping would exceed note's height limit
                     if (nextLineY <= noteRegion.endY) {
@@ -8964,9 +8964,9 @@ export function useWorldEngine({
                                 updatedNoteData.endY = nextLineY;
                                 updatedWorldData[noteAtCursor.key] = JSON.stringify(updatedNoteData);
                             } else {
-                                // Scroll mode: keep note size, auto-scroll down
+                                // Scroll mode: keep note size, auto-scroll down by GRID_CELL_SPAN
                                 const currentScrollOffset = noteData.scrollOffset || 0;
-                                updatedNoteData.scrollOffset = currentScrollOffset + 1;
+                                updatedNoteData.scrollOffset = currentScrollOffset + GRID_CELL_SPAN;
                                 updatedWorldData[noteAtCursor.key] = JSON.stringify(updatedNoteData);
                             }
 
@@ -9829,7 +9829,7 @@ export function useWorldEngine({
             if (noteAtPos && noteAtPos.data.data) {
                 // Scroll the note content instead of panning world
                 const noteData = noteAtPos.data;
-                const scrollSpeed = 1; // Lines per scroll tick (notes scroll slower than lists)
+                const scrollSpeed = GRID_CELL_SPAN; // Scroll by GRID_CELL_SPAN per tick
                 const scrollDelta = Math.sign(deltaY) * scrollSpeed;
 
                 // Viewport height is derived from note bounds

@@ -669,11 +669,19 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         // All regions are now notes with contentType
         // Viewport size is derived from bounds (startX→endX, startY→endY)
         // Content can extend beyond viewport and is scrolled via scrollOffsetX/Y
+
+        // GRID_CELL_SPAN constant (from world.engine.ts)
+        const GRID_CELL_SPAN = 2;
+
+        // Align Y coordinates to GRID_CELL_SPAN boundaries for proper grid alignment
+        const alignedStartY = Math.floor(existingSelection.startY / GRID_CELL_SPAN) * GRID_CELL_SPAN;
+        const alignedEndY = Math.ceil((existingSelection.endY + 1) / GRID_CELL_SPAN) * GRID_CELL_SPAN - 1;
+
         const regionData = {
             startX: existingSelection.startX,
             endX: existingSelection.endX,
-            startY: existingSelection.startY,
-            endY: existingSelection.endY,
+            startY: alignedStartY,
+            endY: alignedEndY,
             timestamp,
             contentType: options.contentType || (regionType === 'mail' ? 'mail' : regionType === 'list' ? 'list' : 'text'),
             data: capturedData,
