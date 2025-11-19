@@ -8903,7 +8903,9 @@ export function useWorldEngine({
 
                     // Type the current character at cursorAfterDelete.x on this line first
                     if (!updatedNoteData.data) updatedNoteData.data = {};
-                    const currentRelativeY = cursorAfterDelete.y - noteData.startY;
+                    // Account for scroll offset when calculating relative Y
+                    const currentScrollOffset = noteData.scrollOffset || 0;
+                    const currentRelativeY = (cursorAfterDelete.y - noteData.startY) + currentScrollOffset;
                     const currentCharKey = `${cursorAfterDelete.x - noteData.startX},${currentRelativeY}`;
                     updatedNoteData.data[currentCharKey] = key;
 
