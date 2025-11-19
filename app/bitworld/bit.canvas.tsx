@@ -1320,6 +1320,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     });
 
     const [selectedMailKey, setSelectedMailKey] = useState<string | null>(null);
+    const [selectedChipKey, setSelectedChipKey] = useState<string | null>(null);
 
     const [clipboardFlashBounds, setClipboardFlashBounds] = useState<Map<string, number>>(new Map()); // boundKey -> timestamp
     const lastCursorPosRef = useRef<Point | null>(null);
@@ -2561,6 +2562,10 @@ Camera & Viewport Controls:
 
     const findMailAtPosition = useCallback((pos: Point): { key: string, data: any } | null => {
         return findEntityAtPosition(engine.worldData, pos, 'mail');
+    }, [engine]);
+
+    const findChipAtPosition = useCallback((pos: Point): { key: string, data: any } | null => {
+        return findEntityAtPosition(engine.worldData, pos, 'chip');
     }, [engine]);
 
     // Helper to get chronological list of note regions and text blocks
@@ -7270,10 +7275,11 @@ Camera & Viewport Controls:
             const touchWorldY = Math.floor(worldPos.y);
             const touchWorldPos = { x: touchWorldX, y: touchWorldY };
 
-            // Check if touch is over a moveable object (selection, image, note, mail)
+            // Check if touch is over a moveable object (selection, image, note, mail, chip)
             let isOverMoveableObject = false;
             let foundNoteKey: string | null = null;
             let foundMailKey: string | null = null;
+            let foundChipKey: string | null = null;
 
             // Check for active selection
             if (engine.selectionStart && engine.selectionEnd) {
@@ -7311,6 +7317,15 @@ Camera & Viewport Controls:
                 }
             }
 
+            // Check for ANY chip at this position
+            if (!isOverMoveableObject) {
+                const chipAtPos = findChipAtPosition(touchWorldPos);
+                if (chipAtPos) {
+                    isOverMoveableObject = true;
+                    foundChipKey = chipAtPos.key;
+                }
+            }
+
             // If touch is over a moveable object, start long press timer
             if (isOverMoveableObject) {
                 longPressTimerRef.current = setTimeout(() => {
@@ -7319,9 +7334,16 @@ Camera & Viewport Controls:
                         setSelectedNoteKey(foundNoteKey);
                         setSelectedMailKey(null);
                         setSelectedPatternKey(null);
+                        setSelectedChipKey(null);
                     } else if (foundMailKey) {
                         setSelectedMailKey(foundMailKey);
                         setSelectedNoteKey(null);
+                        setSelectedPatternKey(null);
+                        setSelectedChipKey(null);
+                    } else if (foundChipKey) {
+                        setSelectedChipKey(foundChipKey);
+                        setSelectedNoteKey(null);
+                        setSelectedMailKey(null);
                         setSelectedPatternKey(null);
                     }
 
@@ -7869,6 +7891,33 @@ Camera & Viewport Controls:
                             setSelectedMailKey(newMailKey);
                         } catch (e) {
                             // Invalid mail data
+                        }
+                    } else if (selectedChipKey) {
+                        // Move chip
+                        try {
+                            const chipData = JSON.parse(engine.worldData[selectedChipKey] as string);
+                            const newChipData = {
+                                ...chipData,
+                                startX: chipData.startX + distanceX,
+                                endX: chipData.endX + distanceX,
+                                startY: chipData.startY + distanceY,
+                                endY: chipData.endY + distanceY,
+                                x: (chipData.x !== undefined) ? chipData.x + distanceX : undefined,
+                                y: (chipData.y !== undefined) ? chipData.y + distanceY : undefined,
+                                timestamp: Date.now()
+                            };
+
+                            const newChipKey = `chip_${newChipData.startX},${newChipData.startY}_${Date.now()}`;
+                            engine.setWorldData(prev => {
+                                const newData = { ...prev };
+                                delete newData[selectedChipKey];
+                                newData[newChipKey] = JSON.stringify(newChipData);
+                                return newData;
+                            });
+
+                            setSelectedChipKey(newChipKey);
+                        } catch (e) {
+                            // Invalid chip data
                         }
                     } else if (engine.selectionStart && engine.selectionEnd) {
                         // Move text selection
