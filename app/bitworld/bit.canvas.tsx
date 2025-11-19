@@ -586,12 +586,13 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
             const planColor = getTextColor(engine, 0.15);
             ctx.fillStyle = planColor;
 
-            for (let worldY = startY; worldY <= endY; worldY++) {
+            for (let worldY = startY; worldY <= endY; worldY += GRID_CELL_SPAN) {
                 for (let worldX = startX; worldX <= endX; worldX++) {
-                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                    if (screenPos.x >= -effectiveCharWidth && screenPos.x <= cssWidth &&
-                        screenPos.y >= -effectiveCharHeight && screenPos.y <= cssHeight) {
-                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                    const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                    const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+                    if (bottomScreenPos.x >= -effectiveCharWidth && bottomScreenPos.x <= cssWidth &&
+                        topScreenPos.y >= -effectiveCharHeight && bottomScreenPos.y <= cssHeight) {
+                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
                     }
                 }
             }
