@@ -1223,6 +1223,17 @@ const entityFinders: Record<string, EntityFinderConfig> = {
             endY: data.endY
         }),
         returnKey: true
+    },
+    chip: {
+        prefix: 'chip_',
+        parse: true,
+        getBounds: (data) => ({
+            startX: data.startX,
+            endX: data.endX,
+            startY: data.startY,
+            endY: data.endY
+        }),
+        returnKey: true
     }
 };
 
