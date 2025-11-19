@@ -1316,7 +1316,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     type ResizeHandle = 'top-left' | 'top-right' | 'bottom-right' | 'bottom-left';
     const [resizeState, setResizeState] = useState<{
         active: boolean;
-        type: 'image' | 'note' | 'iframe' | 'mail' | 'pattern' | null;
+        type: 'image' | 'note' | 'iframe' | 'mail' | 'pattern' | 'pack' | null;
         key: string | null;
         handle: ResizeHandle | null;
         originalBounds: { startX: number; startY: number; endX: number; endY: number } | null;
@@ -6374,6 +6374,49 @@ Camera & Viewport Controls:
                 }
             }
 
+            // Check pack chip resize handles (only when expanded)
+            if (selectedChipKey) {
+                try {
+                    const selectedChipData = JSON.parse(engine.worldData[selectedChipKey] as string);
+                    // Only allow resizing pack chips when expanded
+                    if (selectedChipData.type === 'pack' && !selectedChipData.collapsed) {
+                        const topLeftScreen = engine.worldToScreen(selectedChipData.startX, selectedChipData.startY, engine.zoomLevel, engine.viewOffset);
+                        const bottomRightScreen = engine.worldToScreen(selectedChipData.endX + 1, selectedChipData.endY + 1, engine.zoomLevel, engine.viewOffset);
+
+                        const left = topLeftScreen.x;
+                        const right = bottomRightScreen.x;
+                        const top = topLeftScreen.y;
+                        const bottom = bottomRightScreen.y;
+
+                        // Check each corner handle
+                        let handle: ResizeHandle | null = null;
+                        if (isWithinThumb(x, y, left, top)) handle = 'top-left';
+                        else if (isWithinThumb(x, y, right, top)) handle = 'top-right';
+                        else if (isWithinThumb(x, y, right, bottom)) handle = 'bottom-right';
+                        else if (isWithinThumb(x, y, left, bottom)) handle = 'bottom-left';
+
+                        if (handle) {
+                            setResizeState({
+                                active: true,
+                                type: 'pack',
+                                key: selectedChipKey,
+                                handle,
+                                originalBounds: {
+                                    startX: selectedChipData.startX,
+                                    startY: selectedChipData.startY,
+                                    endX: selectedChipData.endX,
+                                    endY: selectedChipData.endY
+                                },
+                                roomIndex: null
+                            });
+                            return; // Early return, don't process other mouse events
+                        }
+                    }
+                } catch (e) {
+                    // Skip invalid chip data
+                }
+            }
+
             // Check pattern room resize handles (check rooms first, they're inside the pattern)
             if (selectedPatternKey) {
                 try {
@@ -6739,6 +6782,24 @@ Camera & Viewport Controls:
                     });
                 } catch (e) {
                     // Invalid mail data
+                }
+            } else if (resizeState.type === 'pack' && resizeState.key) {
+                try {
+                    const packData = JSON.parse(engine.worldData[resizeState.key] as string);
+
+                    // Update pack chip bounds (content stays at same relative position)
+                    engine.setWorldData(prev => ({
+                        ...prev,
+                        [resizeState.key!]: JSON.stringify({
+                            ...packData,
+                            startX: newBounds.startX,
+                            startY: newBounds.startY,
+                            endX: newBounds.endX,
+                            endY: newBounds.endY
+                        })
+                    }));
+                } catch (e) {
+                    // Invalid pack data
                 }
             } else if (resizeState.type === 'pattern' && resizeState.key) {
                 try {
@@ -7335,6 +7396,48 @@ Camera & Viewport Controls:
                 }
             }
 
+            // Check pack chip resize handles (only when expanded)
+            if (selectedChipKey) {
+                try {
+                    const selectedChipData = JSON.parse(engine.worldData[selectedChipKey] as string);
+                    // Only allow resizing pack chips when expanded
+                    if (selectedChipData.type === 'pack' && !selectedChipData.collapsed) {
+                        const topLeftScreen = engine.worldToScreen(selectedChipData.startX, selectedChipData.startY, engine.zoomLevel, engine.viewOffset);
+                        const bottomRightScreen = engine.worldToScreen(selectedChipData.endX + 1, selectedChipData.endY + 1, engine.zoomLevel, engine.viewOffset);
+
+                        const left = topLeftScreen.x;
+                        const right = bottomRightScreen.x;
+                        const top = topLeftScreen.y;
+                        const bottom = bottomRightScreen.y;
+
+                        let handle: ResizeHandle | null = null;
+                        if (isWithinThumb(x, y, left, top)) handle = 'top-left';
+                        else if (isWithinThumb(x, y, right, top)) handle = 'top-right';
+                        else if (isWithinThumb(x, y, right, bottom)) handle = 'bottom-right';
+                        else if (isWithinThumb(x, y, left, bottom)) handle = 'bottom-left';
+
+                        if (handle) {
+                            setResizeState({
+                                active: true,
+                                type: 'pack',
+                                key: selectedChipKey,
+                                handle,
+                                originalBounds: {
+                                    startX: selectedChipData.startX,
+                                    startY: selectedChipData.startY,
+                                    endX: selectedChipData.endX,
+                                    endY: selectedChipData.endY
+                                },
+                                roomIndex: null
+                            });
+                            return; // Early return - don't process other touch events
+                        }
+                    }
+                } catch (e) {
+                    // Skip invalid chip data
+                }
+            }
+
             // Check pattern room resize handles (check rooms first, they're inside the pattern)
             if (selectedPatternKey) {
                 try {
@@ -7718,6 +7821,24 @@ Camera & Viewport Controls:
                     });
                 } catch (e) {
                     // Invalid mail data
+                }
+            } else if (resizeState.type === 'pack' && resizeState.key) {
+                try {
+                    const packData = JSON.parse(engine.worldData[resizeState.key] as string);
+
+                    // Update pack chip bounds (content stays at same relative position)
+                    engine.setWorldData(prev => ({
+                        ...prev,
+                        [resizeState.key!]: JSON.stringify({
+                            ...packData,
+                            startX: newBounds.startX,
+                            startY: newBounds.startY,
+                            endX: newBounds.endX,
+                            endY: newBounds.endY
+                        })
+                    }));
+                } catch (e) {
+                    // Invalid pack data
                 }
             } else if (resizeState.type === 'pattern' && resizeState.key) {
                 try {
