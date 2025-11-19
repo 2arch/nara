@@ -2435,20 +2435,20 @@ Camera & Viewport Controls:
         const tasksIndex = new Map<string, boolean>();
         const completedTasksIndex = new Map<string, boolean>();
 
-        for (const { data: labelData } of getEntitiesByPrefix(engine.worldData, 'label_')) {
-            if (labelData.type === 'task') {
-                if (!labelData.completed) {
+        for (const { data: chipData } of getEntitiesByPrefix(engine.worldData, 'chip_')) {
+            if (chipData.type === 'task') {
+                if (!chipData.completed) {
                     // Index every position within active task bounds
-                    for (let y = labelData.startY; y <= labelData.endY; y++) {
-                        for (let x = labelData.startX; x <= labelData.endX; x++) {
+                    for (let y = chipData.startY; y <= chipData.endY; y++) {
+                        for (let x = chipData.startX; x <= chipData.endX; x++) {
                             const key = `${x},${y}`;
                             tasksIndex.set(key, true);
                         }
                     }
                 } else {
                     // Index every position within completed task bounds
-                    for (let y = labelData.startY; y <= labelData.endY; y++) {
-                        for (let x = labelData.startX; x <= labelData.endX; x++) {
+                    for (let y = chipData.startY; y <= chipData.endY; y++) {
+                        for (let x = chipData.startX; x <= chipData.endX; x++) {
                             const key = `${x},${y}`;
                             completedTasksIndex.set(key, true);
                         }
@@ -2916,7 +2916,7 @@ Camera & Viewport Controls:
 
         // Update tasks index if task data has changed (check values, not just keys)
         const taskEntries = Object.entries(engine.worldData).filter(([k, v]) => {
-            if (!k.startsWith('label_')) return false;
+            if (!k.startsWith('chip_')) return false;
             try {
                 const data = JSON.parse(v as string);
                 return data.type === 'task';
@@ -3222,28 +3222,28 @@ Camera & Viewport Controls:
         );
 
         for (const key of visibleLabelsForRendering) {
-            if (!key.startsWith('label_')) continue;
+            if (!key.startsWith('chip_')) continue;
 
             try {
-                const labelData = JSON.parse(engine.worldData[key] as string);
-                const { type, startX, endX, startY, endY, x, y, color } = labelData;
+                const chipData = JSON.parse(engine.worldData[key] as string);
+                const { type, startX, endX, startY, endY, x, y, color } = chipData;
 
-                // Additional bounds check for 2D labels (tasks/links that might span beyond their anchor point)
-                const labelMinX = startX ?? x;
-                const labelMaxX = endX ?? x;
-                const labelMinY = startY ?? y;
-                const labelMaxY = endY ?? y;
+                // Additional bounds check for 2D chips (tasks/links/packs that might span beyond their anchor point)
+                const chipMinX = startX ?? x;
+                const chipMaxX = endX ?? x;
+                const chipMinY = startY ?? y;
+                const chipMaxY = endY ?? y;
 
-                if (labelMaxX < startWorldX - 5 || labelMinX > endWorldX + 5 ||
-                    labelMaxY < startWorldY - 5 || labelMinY > endWorldY + 5) {
-                    continue; // Skip labels outside viewport
+                if (chipMaxX < startWorldX - 5 || chipMinX > endWorldX + 5 ||
+                    chipMaxY < startWorldY - 5 || chipMinY > endWorldY + 5) {
+                    continue; // Skip chips outside viewport
                 }
 
                 // Type-based rendering
                 switch (type) {
                     case 'task': {
                         const taskColor = color || engine.textColor;
-                        const { completed } = labelData;
+                        const { completed } = chipData;
 
                         if (!completed) {
                             // Render task highlight (skip when monogram is enabled)
@@ -3295,6 +3295,39 @@ Camera & Viewport Controls:
                                 ctx.moveTo(Math.max(0, leftScreenPos.x), underlineY);
                                 ctx.lineTo(Math.min(cssWidth, rightScreenPos.x), underlineY);
                                 ctx.stroke();
+                            }
+                        }
+                        break;
+                    }
+
+                    case 'pack': {
+                        const packColor = color || engine.textColor;
+                        const { collapsed } = chipData;
+
+                        if (collapsed) {
+                            // Collapsed: draw a border outline around the pack region
+                            const topLeftScreen = engine.worldToScreen(startX, startY - 1, currentZoom, currentOffset);
+                            const bottomRightScreen = engine.worldToScreen(endX, endY, currentZoom, currentOffset);
+
+                            const width = bottomRightScreen.x - topLeftScreen.x + effectiveCharWidth;
+                            const height = bottomRightScreen.y - topLeftScreen.y + effectiveCharHeight;
+
+                            ctx.strokeStyle = packColor;
+                            ctx.lineWidth = 2;
+                            ctx.strokeRect(topLeftScreen.x, topLeftScreen.y, width, height);
+                        } else {
+                            // Expanded: render with note-style opaque background (subtle tint)
+                            for (let y = startY; y <= endY; y += GRID_CELL_SPAN) {
+                                for (let x = startX; x <= endX; x++) {
+                                    const bottomScreenPos = engine.worldToScreen(x, y, currentZoom, currentOffset);
+                                    const topScreenPos = engine.worldToScreen(x, y - 1, currentZoom, currentOffset);
+                                    if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
+                                        topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
+                                        // Use subtle opacity for background tint
+                                        ctx.fillStyle = packColor + '22'; // 22 = ~13% opacity
+                                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                                    }
+                                }
                             }
                         }
                         break;
@@ -3502,8 +3535,8 @@ Camera & Viewport Controls:
 
         ctx.fillStyle = engine.textColor;
         for (const key in engine.worldData) {
-            // Skip block, label, and image data - we render those separately
-            if (key.startsWith('block_') || key.startsWith('label_') || key.startsWith('image_')) continue;
+            // Skip block, chip, and image data - we render those separately
+            if (key.startsWith('block_') || key.startsWith('chip_') || key.startsWith('image_')) continue;
 
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10);
@@ -3906,113 +3939,9 @@ Camera & Viewport Controls:
                     }
                 }
             }
-        } else {
-            // Normal label rendering when search is not active
-            for (const key in engine.worldData) {
-                if (key.startsWith('label_')) {
-                    const coordsStr = key.substring('label_'.length);
-                    const [xStr, yStr] = coordsStr.split(',');
-                    const worldX = parseInt(xStr, 10);
-                    const worldY = parseInt(yStr, 10);
-
-                    try {
-                        const charData = engine.worldData[key];
-                        const charString = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
-                        const labelData = JSON.parse(charString);
-                        const text = labelData.text || '';
-                        const labelColor = labelData.color || engine.textColor; // Default to text color (accent)
-                        const labelWidthInChars = text.length;
-
-                        const isVisible = worldX <= viewBounds.maxX && (worldX + labelWidthInChars) >= viewBounds.minX &&
-                                          worldY >= viewBounds.minY && worldY <= viewBounds.maxY;
-
-                        if (isVisible) {
-                            // Ensure consistent font settings for labels (same as regular text)
-                            ctx.font = `${effectiveFontSize}px ${fontFamily}`;
-                            ctx.textBaseline = 'top';
-
-                            // Render each character of the label individually across cells
-                            for (let charIndex = 0; charIndex < text.length; charIndex++) {
-                                const charWorldX = worldX + charIndex;
-                                const bottomScreenPos = engine.worldToScreen(charWorldX, worldY, currentZoom, currentOffset);
-                                const topScreenPos = engine.worldToScreen(charWorldX, worldY - 1, currentZoom, currentOffset);
-
-                                // Fill background with accent color (spanning GRID_CELL_SPAN cells)
-                                ctx.fillStyle = labelColor;
-                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-
-                                // Render text with background color (cutout effect)
-                                ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
-                                ctx.fillText(text[charIndex], topScreenPos.x, topScreenPos.y + verticalTextOffset);
-                            }
-                        } else {
-                            // Calculate distance from viewport center to label
-                            const viewportCenter = engine.getViewportCenter();
-                            const deltaX = worldX - viewportCenter.x;
-                            const deltaY = worldY - viewportCenter.y;
-                            const distance = Math.round(Math.sqrt(deltaX * deltaX + deltaY * deltaY));
-                            
-                            // Only show waypoint arrow if within proximity threshold
-                            if (distance <= engine.settings.labelProximityThreshold) {
-                                const labelScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                                const intersection = getViewportEdgeIntersection(
-                                    viewportCenterScreen.x, viewportCenterScreen.y,
-                                    labelScreenPos.x, labelScreenPos.y,
-                                    cssWidth, cssHeight
-                                );
-
-                                if (intersection) {
-                                const edgeBuffer = ARROW_MARGIN;
-                                let adjustedX = intersection.x;
-                                let adjustedY = intersection.y;
-                                
-                                adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
-                                adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
-
-                                drawArrow(ctx, adjustedX, adjustedY, intersection.angle, labelColor);
-
-                                // Draw the label text next to the arrow
-                                if (text) {
-
-                                ctx.fillStyle = labelColor;
-                                ctx.font = `${effectiveFontSize}px ${fontFamily}`;
-                                const textOffset = ARROW_SIZE * 1.5;
-                                
-                                let textX = adjustedX - Math.cos(intersection.angle) * textOffset;
-                                let textY = adjustedY - Math.sin(intersection.angle) * textOffset;
-
-                                // Adjust alignment to keep text inside the screen bounds
-                                if (Math.abs(intersection.angle) < Math.PI / 2) {
-                                    ctx.textAlign = 'right';
-                                } else {
-                                    ctx.textAlign = 'left';
-                                }
-
-                                if (intersection.angle > Math.PI / 4 && intersection.angle < 3 * Math.PI / 4) {
-                                    ctx.textBaseline = 'bottom';
-                                } else if (intersection.angle < -Math.PI / 4 && intersection.angle > -3 * Math.PI / 4) {
-                                    ctx.textBaseline = 'top';
-                                } else {
-                                    ctx.textBaseline = 'middle';
-                                }
-
-                                // Add distance indicator only if proximity threshold is not disabled
-                                const distanceText = engine.settings.labelProximityThreshold >= 999999 ? '' : ` [${distance}]`;
-                                ctx.fillText(text + distanceText, textX, textY);
-
-                                // Reset to defaults
-                                ctx.textAlign = 'left';
-                                ctx.textBaseline = 'top';
-                                }
-                            }
-                            }
-                        }
-                    } catch (e) {
-                        console.error(`Error parsing label data for key ${key}:`, e);
-                    }
-                }
-            }
         }
+        // Legacy label rendering removed - labels have been sunset in favor of chip system
+        // (Old waypoint labels with text property are no longer supported)
 
         // === Render Waypoint Arrows for Ephemeral Labels (lightModeData) ===
         // Skip if lightModeData is substantial (likely from staged template, not ephemeral labels)
@@ -4751,38 +4680,19 @@ Camera & Viewport Controls:
             // Include spaces - any character data triggers text-aware mode
             const startedOnChar = startData && !engine.isImageData(startData) && engine.getCharacter(startData) !== '';
 
-            // Only check for label/task overlap if we started on a character (optimization)
-            let overlapsLabelOrTask = false;
+            // Only check for chip overlap if we started on a character (optimization)
+            let overlapsChip = false;
             if (startedOnChar) {
-                // Check if selection actually overlaps with any label or task bounds
+                // Check if selection actually overlaps with any chip bounds
                 for (const key in engine.worldData) {
-                    if (key.startsWith('label_')) {
+                    if (key.startsWith('chip_')) {
                         try {
-                            const labelData = JSON.parse(engine.worldData[key] as string);
-                            const coordsStr = key.substring('label_'.length);
-                            const [lxStr, lyStr] = coordsStr.split(',');
-                            const lx = parseInt(lxStr, 10);
-                            const ly = parseInt(lyStr, 10);
-                            const labelWidth = labelData.text?.length || 0;
-                            const labelEndX = lx + labelWidth - 1;
+                            const chipData = JSON.parse(engine.worldData[key] as string);
                             // Check for actual 2D overlap (both X and Y)
-                            const xOverlap = !(maxX < lx || minX > labelEndX);
-                            const yOverlap = !(maxY < ly || minY > ly);
+                            const xOverlap = !(maxX < chipData.startX || minX > chipData.endX);
+                            const yOverlap = !(maxY < chipData.startY || minY > chipData.endY);
                             if (xOverlap && yOverlap) {
-                                overlapsLabelOrTask = true;
-                                break;
-                            }
-                        } catch (e) {}
-                    } else if (key.startsWith('label_')) {
-                        const labelData = JSON.parse(engine.worldData[key] as string);
-                        if (labelData.type !== 'task') continue;
-                        try {
-                            const taskData = JSON.parse(engine.worldData[key] as string);
-                            // Check for actual 2D overlap (both X and Y)
-                            const xOverlap = !(maxX < taskData.startX || minX > taskData.endX);
-                            const yOverlap = !(maxY < taskData.startY || minY > taskData.endY);
-                            if (xOverlap && yOverlap) {
-                                overlapsLabelOrTask = true;
+                                overlapsChip = true;
                                 break;
                             }
                         } catch (e) {}
@@ -4791,10 +4701,10 @@ Camera & Viewport Controls:
             }
 
             // Use text-aware selection ONLY if:
-            // 1. Selection doesn't overlap with any label/task
+            // 1. Selection doesn't overlap with any chip
             // 2. Started on an actual character
-            // This ensures clicking near labels/tasks falls through to box selection
-            if (!overlapsLabelOrTask && startedOnChar) {
+            // This ensures clicking near chips falls through to box selection
+            if (!overlapsChip && startedOnChar) {
                 // Text-editor-style selection: highlight only cells with characters, line by line
                 // First, find the text block that contains the selection
                 const textBlock = findTextBlockForSelection(
@@ -6362,21 +6272,14 @@ Camera & Viewport Controls:
             let isOverLink = false;
             let isOverTask = false;
 
-            // Check links
-            for (const { data: linkData } of getEntitiesByPrefix(engine.worldData, 'link_')) {
-                if (baseX >= linkData.startX && baseX <= linkData.endX &&
-                    baseY >= linkData.startY && baseY <= linkData.endY) {
-                    isOverLink = true;
-                    break;
-                }
-            }
-
-            // Check tasks
-            if (!isOverLink) {
-                for (const { data: labelData } of getEntitiesByPrefix(engine.worldData, 'label_')) {
-                    if (labelData.type === 'task' &&
-                        baseX >= labelData.startX && baseX <= labelData.endX &&
-                        baseY >= labelData.startY && baseY <= labelData.endY) {
+            // Check chips (links, tasks, packs)
+            for (const { data: chipData } of getEntitiesByPrefix(engine.worldData, 'chip_')) {
+                if (baseX >= chipData.startX && baseX <= chipData.endX &&
+                    baseY >= chipData.startY && baseY <= chipData.endY) {
+                    if (chipData.type === 'link' || chipData.type === 'pack') {
+                        isOverLink = true;
+                        break;
+                    } else if (chipData.type === 'task') {
                         isOverTask = true;
                         break;
                     }

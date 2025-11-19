@@ -4699,15 +4699,19 @@ export function useWorldEngine({
                             }
                         }
 
-                        // Capture all world data within the selection bounds
+                        // Capture all world data within the selection bounds using relative coordinates
                         const packedData: Record<string, string> = {};
                         for (let y = normalized.startY; y <= normalized.endY; y++) {
                             for (let x = normalized.startX; x <= normalized.endX; x++) {
                                 const cellKey = `${x},${y}`;
                                 const cellData = worldData[cellKey];
                                 if (cellData !== undefined) {
+                                    // Convert to relative coordinates (pack origin is 0,0)
+                                    const relativeX = x - normalized.startX;
+                                    const relativeY = y - normalized.startY;
+                                    const relativeKey = `${relativeX},${relativeY}`;
                                     // Store the raw data (string or object)
-                                    packedData[cellKey] = typeof cellData === 'string' ? cellData : JSON.stringify(cellData);
+                                    packedData[relativeKey] = typeof cellData === 'string' ? cellData : JSON.stringify(cellData);
                                 }
                             }
                         }
@@ -9188,14 +9192,24 @@ export function useWorldEngine({
                             // When collapsing, remove packed data from world
                             // When expanding, restore packed data to world
                             if (!isCurrentlyCollapsed) {
-                                // Collapsing: remove the packed data from world
+                                // Collapsing: remove the packed data from world using relative coordinates
                                 setWorldData(prev => {
                                     const newData = { ...prev };
 
-                                    // Remove cell data
+                                    // Remove cell data (convert relative → absolute coordinates)
                                     if (chipData.packedData) {
-                                        for (const cellKey of Object.keys(chipData.packedData)) {
-                                            delete newData[cellKey];
+                                        for (const relativeKey of Object.keys(chipData.packedData)) {
+                                            // Parse relative coordinates
+                                            const [relXStr, relYStr] = relativeKey.split(',');
+                                            const relX = parseInt(relXStr, 10);
+                                            const relY = parseInt(relYStr, 10);
+
+                                            // Convert to absolute world coordinates using chip's current position
+                                            const absoluteX = chipData.startX + relX;
+                                            const absoluteY = chipData.startY + relY;
+                                            const absoluteKey = `${absoluteX},${absoluteY}`;
+
+                                            delete newData[absoluteKey];
                                         }
                                     }
 
@@ -9212,15 +9226,25 @@ export function useWorldEngine({
                                 });
                                 setDialogueWithRevert(`Pack collapsed`, setDialogueText);
                             } else {
-                                // Expanding: restore the packed data to world
+                                // Expanding: restore the packed data to world using relative coordinates
                                 setWorldData(prev => {
                                     const newData = { ...prev };
 
-                                    // Restore cell data
+                                    // Restore cell data (convert relative → absolute coordinates)
                                     if (chipData.packedData) {
-                                        for (const [cellKey, cellValue] of Object.entries(chipData.packedData)) {
+                                        for (const [relativeKey, cellValue] of Object.entries(chipData.packedData)) {
+                                            // Parse relative coordinates
+                                            const [relXStr, relYStr] = relativeKey.split(',');
+                                            const relX = parseInt(relXStr, 10);
+                                            const relY = parseInt(relYStr, 10);
+
+                                            // Convert to absolute world coordinates using chip's current position
+                                            const absoluteX = chipData.startX + relX;
+                                            const absoluteY = chipData.startY + relY;
+                                            const absoluteKey = `${absoluteX},${absoluteY}`;
+
                                             // Cell values are stored as strings (either raw strings or JSON)
-                                            newData[cellKey] = cellValue as string;
+                                            newData[absoluteKey] = cellValue as string;
                                         }
                                     }
 
