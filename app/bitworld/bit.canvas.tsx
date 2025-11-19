@@ -605,36 +605,46 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
             ctx.font = `${context.engine.getEffectiveCharDims(currentZoom).fontSize}px ${context.engine.settings?.fontFamily || 'monospace'}`;
             ctx.textBaseline = 'top';
 
+            // Pre-calculate visible Y range for early culling
+            const minVisibleContentY = startY + scrollOffset;
+            const maxVisibleContentY = startY + scrollOffset + visibleHeight - 1;
+
             for (const coordKey in note.data) {
-                const [xStr, yStr] = coordKey.split(',');
-                const worldX = parseInt(xStr, 10);
-                const worldY = parseInt(yStr, 10);
+                // Early parse to check Y bounds (skip X parsing if Y is out of range)
+                const commaIndex = coordKey.indexOf(',');
+                if (commaIndex === -1) continue;
 
-                // Calculate which content line this character is on (relative to note startY)
+                const worldY = parseInt(coordKey.substring(commaIndex + 1), 10);
+
+                // Fast Y culling - skip if outside visible content range
+                if (worldY < minVisibleContentY || worldY > maxVisibleContentY) continue;
+
+                const worldX = parseInt(coordKey.substring(0, commaIndex), 10);
+
+                // Fast X culling - skip if outside note bounds
+                if (worldX < startX || worldX > endX) continue;
+
+                // Calculate viewport position
                 const contentLine = worldY - startY;
-
-                // Calculate which viewport line this should appear on (accounting for scroll)
                 const viewportLine = contentLine - scrollOffset;
+                const renderY = startY + viewportLine;
 
-                // Only render if within visible viewport window
-                if (viewportLine >= 0 && viewportLine < visibleHeight && worldX >= startX && worldX <= endX) {
-                    const charData = note.data[coordKey];
-                    const char = typeof charData === 'string' ? charData : charData.char;
-                    const style = typeof charData === 'object' && charData.style ? charData.style : undefined;
+                // Single worldToScreen calculation using renderY directly
+                const topScreenPos = engine.worldToScreen(worldX, renderY - 1, currentZoom, currentOffset);
 
-                    // Render at viewport position, not content position
-                    const renderY = startY + viewportLine;
-                    const bottomScreenPos = engine.worldToScreen(worldX, renderY, currentZoom, currentOffset);
-                    const topScreenPos = engine.worldToScreen(worldX, renderY - 1, currentZoom, currentOffset);
-
-                    if (topScreenPos.x >= -effectiveCharWidth && topScreenPos.x <= cssWidth &&
-                        topScreenPos.y >= -effectiveCharHeight && bottomScreenPos.y <= cssHeight) {
-
-                        // Render character with style if present
-                        ctx.fillStyle = style?.color || engine.textColor;
-                        ctx.fillText(char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
-                    }
+                // Screen bounds check
+                if (topScreenPos.x < -effectiveCharWidth || topScreenPos.x > cssWidth ||
+                    topScreenPos.y < -effectiveCharHeight || topScreenPos.y > cssHeight) {
+                    continue;
                 }
+
+                // Render character
+                const charData = note.data[coordKey];
+                const char = typeof charData === 'string' ? charData : charData.char;
+                const style = typeof charData === 'object' && charData.style ? charData.style : undefined;
+
+                ctx.fillStyle = style?.color || engine.textColor;
+                ctx.fillText(char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
             }
         }
     }

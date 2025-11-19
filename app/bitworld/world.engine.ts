@@ -9920,6 +9920,23 @@ export function useWorldEngine({
             timestamp: Date.now()
         };
 
+        // Transform note.data coordinates if they exist (for text content)
+        if (noteData.data && typeof noteData.data === 'object') {
+            const transformedData: Record<string, any> = {};
+            for (const coordKey in noteData.data) {
+                const [xStr, yStr] = coordKey.split(',');
+                const oldX = parseInt(xStr, 10);
+                const oldY = parseInt(yStr, 10);
+                if (!isNaN(oldX) && !isNaN(oldY)) {
+                    const newX = oldX + deltaX;
+                    const newY = oldY + deltaY;
+                    const newCoordKey = `${newX},${newY}`;
+                    transformedData[newCoordKey] = noteData.data[coordKey];
+                }
+            }
+            newNoteData.data = transformedData;
+        }
+
         // Create new note key based on new position
         const newNoteKey = `note_${newNoteData.startX}_${newNoteData.startY}_${Date.now()}`;
 
