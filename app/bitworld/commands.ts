@@ -675,9 +675,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         // GRID_CELL_SPAN constant (from world.engine.ts)
         const GRID_CELL_SPAN = 2;
 
-        // Align Y coordinates to GRID_CELL_SPAN boundaries for proper grid alignment
+        // Align coordinates to GRID_CELL_SPAN boundaries for proper grid alignment
+        // Characters are at Y=0,2,4,6... and each occupies GRID_CELL_SPAN cells
+        // For a character at Y=6, it occupies cells [6,7], so endY should include cell 7
         const alignedStartY = Math.floor(existingSelection.startY / GRID_CELL_SPAN) * GRID_CELL_SPAN;
-        const alignedEndY = Math.ceil((existingSelection.endY + 1) / GRID_CELL_SPAN) * GRID_CELL_SPAN - 1;
+        // endY should extend to the end of the last character span
+        const alignedEndY = Math.floor(existingSelection.endY / GRID_CELL_SPAN) * GRID_CELL_SPAN + (GRID_CELL_SPAN - 1);
 
         const regionData = {
             startX: existingSelection.startX,
