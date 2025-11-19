@@ -8903,8 +8903,12 @@ export function useWorldEngine({
 
                     // Type the current character at cursorAfterDelete.x on this line first
                     if (!updatedNoteData.data) updatedNoteData.data = {};
-                    const currentCharKey = `${cursorAfterDelete.x - noteData.startX},${cursorAfterDelete.y - noteData.startY}`;
+                    const currentRelativeY = cursorAfterDelete.y - noteData.startY;
+                    const currentCharKey = `${cursorAfterDelete.x - noteData.startX},${currentRelativeY}`;
                     updatedNoteData.data[currentCharKey] = key;
+
+                    // Calculate the relative Y for the next line (in content space, not world space)
+                    const nextRelativeY = currentRelativeY + GRID_CELL_SPAN;
 
                     // Now proceed with word wrapping
                     const currentLineY = cursorAfterDelete.y;
@@ -8912,7 +8916,7 @@ export function useWorldEngine({
 
                     // Scan backwards from the boundary to find the last space (including char we just typed)
                     for (let x = noteRegion.endX; x >= noteRegion.startX; x--) {
-                        const relativeKey = `${x - noteData.startX},${currentLineY - noteData.startY}`;
+                        const relativeKey = `${x - noteData.startX},${currentRelativeY}`;
                         const charData = updatedNoteData.data?.[relativeKey];
                         const char = typeof charData === 'string' ? charData :
                                     (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
@@ -8929,7 +8933,7 @@ export function useWorldEngine({
                         const textToWrap: Array<{x: number, char: string, style?: any}> = [];
 
                         for (let x = wrapPoint; x <= noteRegion.endX; x++) {
-                            const relativeKey = `${x - noteData.startX},${currentLineY - noteData.startY}`;
+                            const relativeKey = `${x - noteData.startX},${currentRelativeY}`;
                             const charData = updatedNoteData.data?.[relativeKey];
                             if (charData) {
                                 const char = typeof charData === 'string' ? charData :
@@ -8943,7 +8947,7 @@ export function useWorldEngine({
 
                         // Remove the wrapped text from current line in note.data
                         for (let x = wrapPoint; x <= noteRegion.endX; x++) {
-                            const relativeKey = `${x - noteData.startX},${currentLineY - noteData.startY}`;
+                            const relativeKey = `${x - noteData.startX},${currentRelativeY}`;
                             delete updatedNoteData.data[relativeKey];
                         }
 
@@ -8951,7 +8955,7 @@ export function useWorldEngine({
                         let newX = noteRegion.startX;
                         for (const {char, style} of textToWrap) {
                             if (char !== ' ') {
-                                const relativeKey = `${newX - noteData.startX},${nextLineY - noteData.startY}`;
+                                const relativeKey = `${newX - noteData.startX},${nextRelativeY}`;
                                 updatedNoteData.data[relativeKey] = style ? {char, style} : char;
                                 newX++;
                             }
