@@ -101,7 +101,8 @@ interface Note {
 
     // Scrolling support (terminal-style viewport)
     visibleHeight?: number;   // How many lines to show (viewport size)
-    scrollOffset?: number;    // Which content line is at top of viewport
+    scrollOffset?: number;    // Which content line is at top of viewport (Y axis)
+    scrollOffsetX?: number;   // Which content column is at left of viewport (X axis)
 }
 
 // ============================================================================
