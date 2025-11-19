@@ -4839,6 +4839,7 @@ export function useWorldEngine({
                     }
 
                     // Also capture any notes, chips, or other entities that overlap with this region
+                    // Convert their coordinates to relative (pack origin at 0,0)
                     const overlappingEntities: Record<string, string> = {};
                     const entitiesToRemove: string[] = [];
                     for (const [key, value] of Object.entries(worldData)) {
@@ -4856,7 +4857,17 @@ export function useWorldEngine({
                                         entityData.startY > normalized.endY
                                     );
                                     if (overlaps) {
-                                        overlappingEntities[key] = typeof value === 'string' ? value : JSON.stringify(value);
+                                        // Convert entity coordinates to relative (pack origin at 0,0)
+                                        const relativeEntity = {
+                                            ...entityData,
+                                            startX: entityData.startX - normalized.startX,
+                                            endX: entityData.endX - normalized.startX,
+                                            startY: entityData.startY - normalized.startY,
+                                            endY: entityData.endY - normalized.startY,
+                                            x: entityData.x !== undefined ? entityData.x - normalized.startX : entityData.x,
+                                            y: entityData.y !== undefined ? entityData.y - normalized.startY : entityData.y
+                                        };
+                                        overlappingEntities[key] = JSON.stringify(relativeEntity);
                                         entitiesToRemove.push(key);
                                     }
                                 }
@@ -9428,11 +9439,26 @@ export function useWorldEngine({
                                         }
                                     }
 
-                                    // Restore overlapping entities
+                                    // Restore overlapping entities (convert relative coords back to absolute)
                                     if (chipData.packedEntities) {
                                         for (const [entityKey, entityValue] of Object.entries(chipData.packedEntities)) {
-                                            // Entity values are stored as JSON strings
-                                            newData[entityKey] = entityValue as string;
+                                            try {
+                                                const relativeEntity = JSON.parse(entityValue as string);
+                                                // Convert relative coordinates back to absolute using chip's current position
+                                                const absoluteEntity = {
+                                                    ...relativeEntity,
+                                                    startX: chipData.startX + relativeEntity.startX,
+                                                    endX: chipData.startX + relativeEntity.endX,
+                                                    startY: chipData.startY + relativeEntity.startY,
+                                                    endY: chipData.startY + relativeEntity.endY,
+                                                    x: relativeEntity.x !== undefined ? chipData.startX + relativeEntity.x : relativeEntity.x,
+                                                    y: relativeEntity.y !== undefined ? chipData.startY + relativeEntity.y : relativeEntity.y
+                                                };
+                                                newData[entityKey] = JSON.stringify(absoluteEntity);
+                                            } catch (e) {
+                                                // Fallback: store as-is if parsing fails
+                                                newData[entityKey] = entityValue as string;
+                                            }
                                         }
                                     }
 
