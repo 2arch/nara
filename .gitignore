@@ -49,8 +49,11 @@ yarn-error.log*
 next-env.d.ts
 
 # firebase
-functions/node_modules.env.local
+functions/node_modules
+.env.local
 host-flows-export.json
 
-# functions
-/functionsservice-account-key.json
+# service account keys (sensitive)
+service-account-key.json
+**/service-account-key.json
+functions/service-account-key.json
