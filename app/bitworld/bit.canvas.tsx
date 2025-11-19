@@ -3336,9 +3336,36 @@ Camera & Viewport Controls:
                     case 'landmark':
                         // Landmarks rendered separately in waypoint arrow section
                         break;
+
+                    default:
+                        // Waypoint chips (no type, has text property)
+                        if (chipData.text) {
+                            const chipColor = chipData.color || engine.textColor;
+                            const chipBackground = chipData.background || engine.backgroundColor;
+                            const text = chipData.text;
+
+                            // Render cutout text style
+                            for (let charIndex = 0; charIndex < text.length; charIndex++) {
+                                const charWorldX = startX + charIndex;
+                                if (charWorldX >= startWorldX - 5 && charWorldX <= endWorldX + 5 &&
+                                    startY >= startWorldY - 5 && startY <= endWorldY + 5) {
+                                    const bottomScreenPos = engine.worldToScreen(charWorldX, startY, currentZoom, currentOffset);
+                                    const topScreenPos = engine.worldToScreen(charWorldX, startY - 1, currentZoom, currentOffset);
+
+                                    // Fill background with chip color (spanning GRID_CELL_SPAN cells)
+                                    ctx.fillStyle = chipColor;
+                                    ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+
+                                    // Render text with background color (cutout effect)
+                                    ctx.fillStyle = chipBackground;
+                                    ctx.fillText(text[charIndex], topScreenPos.x, topScreenPos.y + verticalTextOffset);
+                                }
+                            }
+                        }
+                        break;
                 }
             } catch (e) {
-                // Skip invalid label data
+                // Skip invalid chip data
             }
         }
 
@@ -3940,8 +3967,92 @@ Camera & Viewport Controls:
                 }
             }
         }
-        // Legacy label rendering removed - labels have been sunset in favor of chip system
-        // (Old waypoint labels with text property are no longer supported)
+
+        // === Render Waypoint Arrows for Off-Screen Waypoint Chips ===
+        // Render arrows pointing to waypoint chips (those with text property) that are off-screen
+        for (const key in engine.worldData) {
+            if (key.startsWith('chip_')) {
+                try {
+                    const chipData = JSON.parse(engine.worldData[key] as string);
+
+                    // Only render waypoint arrows for chips with text property (waypoint chips)
+                    if (chipData.text && !chipData.type) {
+                        const worldX = chipData.startX || chipData.x;
+                        const worldY = chipData.startY || chipData.y;
+                        const text = chipData.text;
+                        const chipColor = chipData.color || engine.textColor;
+                        const chipWidthInChars = text.length;
+
+                        const isVisible = worldX <= viewBounds.maxX && (worldX + chipWidthInChars) >= viewBounds.minX &&
+                                          worldY >= viewBounds.minY && worldY <= viewBounds.maxY;
+
+                        if (!isVisible) {
+                            // Calculate distance from viewport center to chip
+                            const viewportCenter = engine.getViewportCenter();
+                            const deltaX = worldX - viewportCenter.x;
+                            const deltaY = worldY - viewportCenter.y;
+                            const distance = Math.round(Math.sqrt(deltaX * deltaX + deltaY * deltaY));
+
+                            // Only show waypoint arrow if within proximity threshold
+                            if (distance <= engine.settings.labelProximityThreshold) {
+                                const chipScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                                const intersection = getViewportEdgeIntersection(
+                                    viewportCenterScreen.x, viewportCenterScreen.y,
+                                    chipScreenPos.x, chipScreenPos.y,
+                                    cssWidth, cssHeight
+                                );
+
+                                if (intersection) {
+                                    const edgeBuffer = ARROW_MARGIN;
+                                    let adjustedX = intersection.x;
+                                    let adjustedY = intersection.y;
+
+                                    adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
+                                    adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
+
+                                    drawArrow(ctx, adjustedX, adjustedY, intersection.angle, chipColor);
+
+                                    // Draw the chip text next to the arrow
+                                    if (text) {
+                                        ctx.fillStyle = chipColor;
+                                        ctx.font = `${effectiveFontSize}px ${fontFamily}`;
+                                        const textOffset = ARROW_SIZE * 1.5;
+
+                                        let textX = adjustedX - Math.cos(intersection.angle) * textOffset;
+                                        let textY = adjustedY - Math.sin(intersection.angle) * textOffset;
+
+                                        // Adjust alignment to keep text inside the screen bounds
+                                        if (Math.abs(intersection.angle) < Math.PI / 2) {
+                                            ctx.textAlign = 'right';
+                                        } else {
+                                            ctx.textAlign = 'left';
+                                        }
+
+                                        if (intersection.angle > Math.PI / 4 && intersection.angle < 3 * Math.PI / 4) {
+                                            ctx.textBaseline = 'bottom';
+                                        } else if (intersection.angle < -Math.PI / 4 && intersection.angle > -3 * Math.PI / 4) {
+                                            ctx.textBaseline = 'top';
+                                        } else {
+                                            ctx.textBaseline = 'middle';
+                                        }
+
+                                        // Add distance indicator only if proximity threshold is not disabled
+                                        const distanceText = engine.settings.labelProximityThreshold >= 999999 ? '' : ` [${distance}]`;
+                                        ctx.fillText(text + distanceText, textX, textY);
+
+                                        // Reset to defaults
+                                        ctx.textAlign = 'left';
+                                        ctx.textBaseline = 'top';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Skip invalid chip data
+                }
+            }
+        }
 
         // === Render Waypoint Arrows for Ephemeral Labels (lightModeData) ===
         // Skip if lightModeData is substantial (likely from staged template, not ephemeral labels)
