@@ -7523,15 +7523,18 @@ export function useWorldEngine({
             }
             moved = true;
         } else if (key === 'ArrowUp' && !isMod && !altKey) {
-            // Check if cursor is inside a scrollable note - if so, scroll instead of moving cursor
+            // Check if cursor is inside a scrollable note - if so, scroll at viewport edge
             const noteAtCursor = findTextNoteContainingPoint(cursorPos.x, cursorPos.y, worldData);
             if (noteAtCursor && noteAtCursor.data.data) {
                 const noteData = noteAtCursor.data;
                 const currentScrollOffset = noteData.scrollOffset || 0;
 
-                // Can we scroll up? (show earlier content)
-                if (currentScrollOffset > 0) {
-                    // Scroll note up (decrement scrollOffsetY to show earlier lines)
+                // Check if cursor is at top edge of viewport
+                const isAtTopEdge = cursorPos.y <= noteData.startY;
+
+                // Only scroll if cursor is at top edge AND there's content above
+                if (isAtTopEdge && currentScrollOffset > 0) {
+                    // Scroll note up (decrement scrollOffsetY by GRID_CELL_SPAN lines)
                     const newScrollOffset = Math.max(0, currentScrollOffset - 1);
                     setWorldData(prev => ({
                         ...prev,
@@ -7543,7 +7546,7 @@ export function useWorldEngine({
                     // Don't move cursor - we scrolled the note instead
                     return true;
                 }
-                // If we can't scroll up anymore, fall through to normal cursor movement
+                // Otherwise fall through to normal cursor movement
             }
 
             // Normal ArrowUp handling (with modifiers or outside scrollable notes)
@@ -7649,14 +7652,18 @@ export function useWorldEngine({
             }
             moved = true;
         } else if (key === 'ArrowDown' && !isMod && !altKey) {
-            // Check if cursor is inside a scrollable note - if so, scroll instead of moving cursor
+            // Check if cursor is inside a scrollable note - if so, scroll at viewport edge
             const noteAtCursor = findTextNoteContainingPoint(cursorPos.x, cursorPos.y, worldData);
             if (noteAtCursor && noteAtCursor.data.data) {
                 const noteData = noteAtCursor.data;
                 const currentScrollOffset = noteData.scrollOffset || 0;
 
-                // Viewport height is derived from note bounds
-                const visibleHeight = noteData.endY - noteData.startY + 1;
+                // Viewport height is derived from note bounds (in GRID_CELL_SPAN units)
+                const visibleHeight = Math.floor((noteData.endY - noteData.startY + 1) / GRID_CELL_SPAN);
+
+                // Check if cursor is at bottom edge of viewport
+                const cursorRelativeY = Math.floor((cursorPos.y - noteData.startY) / GRID_CELL_SPAN);
+                const isAtBottomEdge = cursorRelativeY >= visibleHeight - 1;
 
                 // Calculate total content height from note.data
                 let maxRelativeY = 0;
@@ -7672,9 +7679,9 @@ export function useWorldEngine({
                 const totalContentLines = maxRelativeY + 1;
                 const maxScroll = Math.max(0, totalContentLines - visibleHeight);
 
-                // Can we scroll down? (show later content)
-                if (currentScrollOffset < maxScroll) {
-                    // Scroll note down (increment scrollOffsetY to show later lines)
+                // Only scroll if cursor is at bottom edge AND there's content below
+                if (isAtBottomEdge && currentScrollOffset < maxScroll) {
+                    // Scroll note down (increment scrollOffsetY by 1 line)
                     const newScrollOffset = Math.min(maxScroll, currentScrollOffset + 1);
                     setWorldData(prev => ({
                         ...prev,
@@ -7686,7 +7693,7 @@ export function useWorldEngine({
                     // Don't move cursor - we scrolled the note instead
                     return true;
                 }
-                // If we can't scroll down anymore, fall through to normal cursor movement
+                // Otherwise fall through to normal cursor movement
             }
 
             // Normal ArrowDown handling (with modifiers or outside scrollable notes)
