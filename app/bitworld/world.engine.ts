@@ -1029,6 +1029,43 @@ export function useWorldEngine({
         return selectedText.trim();
     }, [worldData]);
 
+    // Helper to create a note region with consistent structure
+    const createNote = useCallback((options: {
+        bounds: { startX: number; endX: number; startY: number; endY: number };
+        contentType?: 'text' | 'image' | 'mail' | 'list';
+        imageData?: { src: string; originalWidth: number; originalHeight: number; isAnimated?: boolean; frameTiming?: any; totalDuration?: number };
+        style?: 'ephemeral';
+        data?: Record<string, any>;
+        patternKey?: string;
+        originPatternKey?: string;
+        visibleHeight?: number;
+        scrollOffset?: number;
+        additionalData?: Record<string, any>;
+    }) => {
+        const { bounds } = options;
+        const timestamp = Date.now();
+        const noteKey = `note_${bounds.startX},${bounds.startY}_${timestamp}`;
+
+        const noteData = {
+            startX: bounds.startX,
+            endX: bounds.endX,
+            startY: bounds.startY,
+            endY: bounds.endY,
+            timestamp,
+            contentType: options.contentType || 'text',
+            data: options.data || {},
+            ...(options.imageData && { imageData: options.imageData }),
+            ...(options.style && { style: options.style }),
+            ...(options.patternKey && { patternKey: options.patternKey }),
+            ...(options.originPatternKey && { originPatternKey: options.originPatternKey }),
+            ...(options.visibleHeight !== undefined && { visibleHeight: options.visibleHeight }),
+            ...(options.scrollOffset !== undefined && { scrollOffset: options.scrollOffset }),
+            ...options.additionalData
+        };
+
+        return { noteKey, noteData };
+    }, []);
+
     // Tape recording callback setter
     const setTapeRecordingCallback = useCallback((callback: () => Promise<void> | void) => {
         tapeRecordingCallbackRef.current = callback;
@@ -3145,18 +3182,20 @@ export function useWorldEngine({
                                 }
 
                                 // Add image as note
-                                const noteData = {
-                                    startX: minX,
-                                    startY: minY,
-                                    endX: minX + cellsWide - 1,
-                                    endY: minY + cellsHigh - 1,
-                                    timestamp: Date.now(),
+                                const { noteKey, noteData } = createNote({
+                                    bounds: {
+                                        startX: minX,
+                                        startY: minY,
+                                        endX: minX + cellsWide - 1,
+                                        endY: minY + cellsHigh - 1
+                                    },
                                     contentType: 'image',
-                                    src: finalImageUrl,
-                                    originalWidth: img.width,
-                                    originalHeight: img.height
-                                };
-                                const noteKey = `note_${minX}_${minY}_${Date.now()}`;
+                                    imageData: {
+                                        src: finalImageUrl,
+                                        originalWidth: img.width,
+                                        originalHeight: img.height
+                                    }
+                                });
                                 newWorldData[noteKey] = JSON.stringify(noteData);
 
                                 setWorldData(newWorldData);
@@ -3658,18 +3697,20 @@ export function useWorldEngine({
                                             delete updatedWorldData[selectedImageKey];
                                         }
 
-                                        const noteData = {
-                                            startX: minX,
-                                            startY: minY,
-                                            endX: minX + cellsWide - 1,
-                                            endY: minY + cellsHigh - 1,
-                                            timestamp: Date.now(),
+                                        const { noteKey, noteData } = createNote({
+                                            bounds: {
+                                                startX: minX,
+                                                startY: minY,
+                                                endX: minX + cellsWide - 1,
+                                                endY: minY + cellsHigh - 1
+                                            },
                                             contentType: 'image',
-                                            src: finalImageUrl,
-                                            originalWidth: img.width,
-                                            originalHeight: img.height
-                                        };
-                                        const noteKey = `note_${minX}_${minY}_${Date.now()}`;
+                                            imageData: {
+                                                src: finalImageUrl,
+                                                originalWidth: img.width,
+                                                originalHeight: img.height
+                                            }
+                                        });
                                         updatedWorldData[noteKey] = JSON.stringify(noteData);
                                         setWorldData(updatedWorldData);
                                         setAiProcessingRegion(null); // Clear visual feedback
@@ -3770,18 +3811,20 @@ export function useWorldEngine({
                                             }
                                         }
 
-                                        const noteData = {
-                                            startX: minX,
-                                            startY: minY,
-                                            endX: minX + cellsWide - 1,
-                                            endY: minY + cellsHigh - 1,
-                                            timestamp: Date.now(),
+                                        const { noteKey, noteData } = createNote({
+                                            bounds: {
+                                                startX: minX,
+                                                startY: minY,
+                                                endX: minX + cellsWide - 1,
+                                                endY: minY + cellsHigh - 1
+                                            },
                                             contentType: 'image',
-                                            src: finalImageUrl,
-                                            originalWidth: img.width,
-                                            originalHeight: img.height
-                                        };
-                                        const noteKey = `note_${minX}_${minY}_${Date.now()}`;
+                                            imageData: {
+                                                src: finalImageUrl,
+                                                originalWidth: img.width,
+                                                originalHeight: img.height
+                                            }
+                                        });
                                         updatedWorldData[noteKey] = JSON.stringify(noteData);
 
                                         setWorldData(updatedWorldData);
@@ -4686,22 +4729,22 @@ export function useWorldEngine({
                                         console.log('[/margin] Margin placement calculated:', marginPlacement);
 
                                         if (marginPlacement) {
-                                            // Create note region data
-                                            const noteRegion = {
-                                                startX: marginPlacement.startX,
-                                                endX: marginPlacement.endX,
-                                                startY: marginPlacement.startY,
-                                                endY: marginPlacement.endY,
-                                                timestamp: Date.now()
-                                            };
+                                            // Create note region using helper
+                                            const { noteKey, noteData } = createNote({
+                                                bounds: {
+                                                    startX: marginPlacement.startX,
+                                                    endX: marginPlacement.endX,
+                                                    startY: marginPlacement.startY,
+                                                    endY: marginPlacement.endY
+                                                }
+                                            });
 
                                             // Store note region in worldData with unique key
-                                            const noteKey = `note_${marginPlacement.startX},${marginPlacement.startY}_${Date.now()}`;
                                             setWorldData(prev => ({
                                                 ...prev,
-                                                [noteKey]: JSON.stringify(noteRegion)
+                                                [noteKey]: JSON.stringify(noteData)
                                             }));
-                                            console.log('[/margin] Note region created with key:', noteKey, noteRegion);
+                                            console.log('[/margin] Note region created with key:', noteKey, noteData);
 
                                             const width = marginPlacement.endX - marginPlacement.startX + 1;
                                             const height = marginPlacement.endY - marginPlacement.startY + 1;
@@ -6359,20 +6402,22 @@ export function useWorldEngine({
                                 lineIndex++;
                             }
 
-                            // Create list metadata
-                            const noteData = {
-                                startX: selection.startX,
-                                startY: selection.startY,
-                                endX: selection.endX,
-                                endY: selection.startY + visibleHeight - 1,
-                                timestamp: Date.now(),
+                            // Create list metadata using helper
+                            const { noteKey, noteData } = createNote({
+                                bounds: {
+                                    startX: selection.startX,
+                                    startY: selection.startY,
+                                    endX: selection.endX,
+                                    endY: selection.startY + visibleHeight - 1
+                                },
                                 contentType: 'list',
                                 visibleHeight: visibleHeight,
                                 scrollOffset: 0,
-                                color: color,
-                                title: title || undefined
-                            };
-                            const noteKey = `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                                additionalData: {
+                                    color: color,
+                                    title: title || undefined
+                                }
+                            });
 
                             // Store list and content
                             let newWorldData = { ...worldData };
@@ -6421,20 +6466,20 @@ export function useWorldEngine({
             const minY = Math.floor(Math.min(selectionStart.y, selectionEnd.y));
             const maxY = Math.floor(Math.max(selectionStart.y, selectionEnd.y));
 
-            // Create note region data
-            const noteRegion = {
-                startX: minX,
-                endX: maxX,
-                startY: minY,
-                endY: maxY,
-                timestamp: Date.now()
-            };
+            // Create note region using helper
+            const { noteKey, noteData } = createNote({
+                bounds: {
+                    startX: minX,
+                    endX: maxX,
+                    startY: minY,
+                    endY: maxY
+                }
+            });
 
             // Store note region in worldData with unique key
-            const noteKey = `note_${minX},${minY}_${Date.now()}`;
             setWorldData(prev => ({
                 ...prev,
-                [noteKey]: JSON.stringify(noteRegion)
+                [noteKey]: JSON.stringify(noteData)
             }));
 
             // Clear the selection after saving
@@ -6602,18 +6647,21 @@ export function useWorldEngine({
                                 // Upload to storage
                                 const storageUrl = await uploadImageToStorage(result.imageData!);
 
-                                // Create note data structure
-                                const noteData = {
-                                    startX: targetRegion.startX,
-                                    startY: targetRegion.startY,
-                                    endX: targetRegion.startX + cellsWide - 1,
-                                    endY: targetRegion.startY + cellsHigh - 1,
-                                    timestamp: Date.now(),
+                                // Create note using helper
+                                const { noteKey, noteData } = createNote({
+                                    bounds: {
+                                        startX: targetRegion.startX,
+                                        startY: targetRegion.startY,
+                                        endX: targetRegion.startX + cellsWide - 1,
+                                        endY: targetRegion.startY + cellsHigh - 1
+                                    },
                                     contentType: 'image',
-                                    src: storageUrl,
-                                    originalWidth: img.width,
-                                    originalHeight: img.height
-                                };
+                                    imageData: {
+                                        src: storageUrl,
+                                        originalWidth: img.width,
+                                        originalHeight: img.height
+                                    }
+                                });
 
                                 // Remove existing image if present
                                 const newWorldData = { ...worldData };
@@ -6632,7 +6680,6 @@ export function useWorldEngine({
                                 }
 
                                 // Add new note
-                                const noteKey = `note_${targetRegion.startX}_${targetRegion.startY}_${Date.now()}`;
                                 newWorldData[noteKey] = JSON.stringify(noteData);
                                 setWorldData(newWorldData);
 
