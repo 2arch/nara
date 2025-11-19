@@ -3259,10 +3259,11 @@ Camera & Viewport Controls:
                 switch (type) {
                     case 'task': {
                         const taskColor = color || engine.textColor;
+                        const taskBackground = engine.backgroundColor;
                         const { completed } = chipData;
 
                         if (!completed) {
-                            // Render task highlight (skip when monogram is enabled)
+                            // Render task with cutout text style (like waypoint chips)
                             if (!monogram.options.enabled) {
                                 for (let y = startY; y <= endY; y += GRID_CELL_SPAN) {
                                     for (let x = startX; x <= endX; x++) {
@@ -3270,8 +3271,21 @@ Camera & Viewport Controls:
                                         const topScreenPos = engine.worldToScreen(x, y - 1, currentZoom, currentOffset);
                                         if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
                                             topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
+
+                                            // Fill background with task color (spanning GRID_CELL_SPAN cells)
                                             ctx.fillStyle = taskColor;
                                             ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+
+                                            // Render text with background color (cutout effect)
+                                            const cellKey = `${x},${y}`;
+                                            const cellData = engine.worldData[cellKey];
+                                            if (cellData && !engine.isImageData(cellData)) {
+                                                const char = engine.getCharacter(cellData);
+                                                if (char && char.trim() !== '') {
+                                                    ctx.fillStyle = taskBackground || '#FFFFFF';
+                                                    ctx.fillText(char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
+                                                }
+                                            }
                                         }
                                     }
                                 }
