@@ -169,6 +169,7 @@ const BG_COMMANDS: string[] = []; // Removed 'clear', 'live', 'web' options
 const FONT_COMMANDS = ['IBM Plex Mono', 'Neureal'];
 const NAV_COMMANDS: string[] = [];
 const CAMERA_COMMANDS = ['default', 'focus'];
+const DISPLAY_COMMANDS = ['expand', 'scroll'];
 
 // Detailed help descriptions for each command
 export const COMMAND_HELP: { [command: string]: string } = {
@@ -186,6 +187,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'paint': 'Enter paint mode to draw filled regions on the canvas. Drag to draw a continuous stroke, double-click/double-tap to fill the enclosed area. Press ESC to exit.',
     'mode': 'Switch canvas modes. /mode default for standard writing, /mode air for ephemeral text that doesn\'t save, /mode chat to talk with AI, /mode note for focused note-taking.',
     'note': 'Quick shortcut to enter note mode. This creates a focused writing space perfect for drafting ideas before placing them on your main canvas.',
+    'display': 'Toggle note display mode. Use inside a note: /display to toggle, /display expand to grow note as you type, /display scroll for terminal-style auto-scrolling. Controls how notes behave when text wraps beyond bounds.',
     'mail': '[SUPER ONLY] Create an email region. Select a rectangular area, type /mail. Row 1 = recipient email, Row 2 = subject line, Row 3+ = message body. Click the send button to deliver the email.',
     'chat': 'Quick shortcut to enter chat mode. Talk with AI to transform, expand, or generate text. The AI can help you develop ideas or create content based on your prompts.',
     'talk': 'Enable face-piloted geometry with different face styles. Type /talk to use default Macintosh face, or /talk [facename] to select a specific face (macintosh, robot, kawaii). Activates your front webcam and tracks your face to control the face in real-time.',
@@ -1009,6 +1011,18 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     .map(camera => `cam ${camera}`);
             }
             return CAMERA_COMMANDS.map(camera => `cam ${camera}`);
+        }
+
+        if (lowerInput === 'display') {
+            const parts = input.toLowerCase().split(' ');
+            if (parts.length > 1) {
+                // Show display subcommands that match the second part
+                const displayInput = parts[1];
+                return DISPLAY_COMMANDS
+                    .filter(mode => mode.startsWith(displayInput))
+                    .map(mode => `display ${mode}`);
+            }
+            return DISPLAY_COMMANDS.map(mode => `display ${mode}`);
         }
 
         if (lowerInput === 'upload') {
