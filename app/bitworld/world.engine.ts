@@ -7525,13 +7525,13 @@ export function useWorldEngine({
         } else if (key === 'ArrowUp' && !isMod && !altKey) {
             // Check if cursor is inside a scrollable note - if so, scroll instead of moving cursor
             const noteAtCursor = findTextNoteContainingPoint(cursorPos.x, cursorPos.y, worldData);
-            if (noteAtCursor && noteAtCursor.data.data && noteAtCursor.data.visibleHeight !== undefined) {
+            if (noteAtCursor && noteAtCursor.data.data) {
                 const noteData = noteAtCursor.data;
                 const currentScrollOffset = noteData.scrollOffset || 0;
 
                 // Can we scroll up? (show earlier content)
                 if (currentScrollOffset > 0) {
-                    // Scroll note up (decrement scrollOffset to show earlier lines)
+                    // Scroll note up (decrement scrollOffsetY to show earlier lines)
                     const newScrollOffset = Math.max(0, currentScrollOffset - 1);
                     setWorldData(prev => ({
                         ...prev,
@@ -7651,10 +7651,12 @@ export function useWorldEngine({
         } else if (key === 'ArrowDown' && !isMod && !altKey) {
             // Check if cursor is inside a scrollable note - if so, scroll instead of moving cursor
             const noteAtCursor = findTextNoteContainingPoint(cursorPos.x, cursorPos.y, worldData);
-            if (noteAtCursor && noteAtCursor.data.data && noteAtCursor.data.visibleHeight !== undefined) {
+            if (noteAtCursor && noteAtCursor.data.data) {
                 const noteData = noteAtCursor.data;
                 const currentScrollOffset = noteData.scrollOffset || 0;
-                const visibleHeight = noteData.visibleHeight;
+
+                // Viewport height is derived from note bounds
+                const visibleHeight = noteData.endY - noteData.startY + 1;
 
                 // Calculate total content height from note.data
                 let maxRelativeY = 0;
@@ -7672,7 +7674,7 @@ export function useWorldEngine({
 
                 // Can we scroll down? (show later content)
                 if (currentScrollOffset < maxScroll) {
-                    // Scroll note down (increment scrollOffset to show later lines)
+                    // Scroll note down (increment scrollOffsetY to show later lines)
                     const newScrollOffset = Math.min(maxScroll, currentScrollOffset + 1);
                     setWorldData(prev => ({
                         ...prev,
@@ -7790,6 +7792,29 @@ export function useWorldEngine({
             }
             moved = true;
         } else if (key === 'ArrowLeft') {
+            // Check if cursor is inside a scrollable note - if so, scroll horizontally instead of moving cursor
+            const noteAtCursor = findTextNoteContainingPoint(cursorPos.x, cursorPos.y, worldData);
+            if (noteAtCursor && noteAtCursor.data.data && !isMod && !altKey) {
+                const noteData = noteAtCursor.data;
+                const currentScrollOffsetX = noteData.scrollOffsetX || 0;
+
+                // Can we scroll left? (show earlier content horizontally)
+                if (currentScrollOffsetX > 0) {
+                    // Scroll note left (decrement scrollOffsetX)
+                    const newScrollOffsetX = Math.max(0, currentScrollOffsetX - 1);
+                    setWorldData(prev => ({
+                        ...prev,
+                        [noteAtCursor.key]: JSON.stringify({
+                            ...noteData,
+                            scrollOffsetX: newScrollOffsetX
+                        })
+                    }));
+                    // Don't move cursor - we scrolled the note instead
+                    return true;
+                }
+                // If we can't scroll left anymore, fall through to normal cursor movement
+            }
+
             if (isMod) {
                 // Cmd+Left: Move to beginning of line (leftmost character position)
                 let leftmostX = 0;
@@ -7865,6 +7890,46 @@ export function useWorldEngine({
             setLastEnterX(null); // Reset Enter X tracking on horizontal movement
             moved = true;
         } else if (key === 'ArrowRight') {
+            // Check if cursor is inside a scrollable note - if so, scroll horizontally instead of moving cursor
+            const noteAtCursor = findTextNoteContainingPoint(cursorPos.x, cursorPos.y, worldData);
+            if (noteAtCursor && noteAtCursor.data.data && !isMod && !altKey) {
+                const noteData = noteAtCursor.data;
+                const currentScrollOffsetX = noteData.scrollOffsetX || 0;
+
+                // Viewport width is derived from note bounds
+                const visibleWidth = noteData.endX - noteData.startX + 1;
+
+                // Calculate total content width from note.data
+                let maxRelativeX = 0;
+                for (const coordKey in noteData.data) {
+                    const commaIndex = coordKey.indexOf(',');
+                    if (commaIndex !== -1) {
+                        const relativeX = parseInt(coordKey.substring(0, commaIndex), 10);
+                        if (!isNaN(relativeX) && relativeX > maxRelativeX) {
+                            maxRelativeX = relativeX;
+                        }
+                    }
+                }
+                const totalContentWidth = maxRelativeX + 1;
+                const maxScrollX = Math.max(0, totalContentWidth - visibleWidth);
+
+                // Can we scroll right? (show later content horizontally)
+                if (currentScrollOffsetX < maxScrollX) {
+                    // Scroll note right (increment scrollOffsetX)
+                    const newScrollOffsetX = Math.min(maxScrollX, currentScrollOffsetX + 1);
+                    setWorldData(prev => ({
+                        ...prev,
+                        [noteAtCursor.key]: JSON.stringify({
+                            ...noteData,
+                            scrollOffsetX: newScrollOffsetX
+                        })
+                    }));
+                    // Don't move cursor - we scrolled the note instead
+                    return true;
+                }
+                // If we can't scroll right anymore, fall through to normal cursor movement
+            }
+
             if (isMod) {
                 // Cmd+Right: Move to end of line (rightmost character position + 1)
                 let rightmostX = cursorPos.x;
@@ -9672,23 +9737,30 @@ export function useWorldEngine({
 
             // Check if mouse is over a note with scrolling enabled
             const noteAtPos = findTextNoteContainingPoint(worldPos.x, worldPos.y, worldData);
-            if (noteAtPos && noteAtPos.data.data && noteAtPos.data.visibleHeight !== undefined) {
+            if (noteAtPos && noteAtPos.data.data) {
                 // Scroll the note content instead of panning world
                 const noteData = noteAtPos.data;
                 const scrollSpeed = 1; // Lines per scroll tick (notes scroll slower than lists)
                 const scrollDelta = Math.sign(deltaY) * scrollSpeed;
 
-                // Calculate total content height from note.data
-                let maxContentY = noteData.startY;
+                // Viewport height is derived from note bounds
+                const visibleHeight = noteData.endY - noteData.startY + 1;
+
+                // Calculate total content height from note.data (using relative coordinates)
+                let maxRelativeY = 0;
                 for (const coordKey in noteData.data) {
-                    const [, yStr] = coordKey.split(',');
-                    const y = parseInt(yStr, 10);
-                    if (y > maxContentY) maxContentY = y;
+                    const commaIndex = coordKey.indexOf(',');
+                    if (commaIndex !== -1) {
+                        const relativeY = parseInt(coordKey.substring(commaIndex + 1), 10);
+                        if (!isNaN(relativeY) && relativeY > maxRelativeY) {
+                            maxRelativeY = relativeY;
+                        }
+                    }
                 }
-                const totalContentLines = maxContentY - noteData.startY + 1;
+                const totalContentLines = maxRelativeY + 1;
 
                 // Calculate max scroll offset
-                const maxScroll = Math.max(0, totalContentLines - noteData.visibleHeight);
+                const maxScroll = Math.max(0, totalContentLines - visibleHeight);
 
                 // Update scroll offset with bounds checking
                 const currentScrollOffset = noteData.scrollOffset || 0;

@@ -598,8 +598,14 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
         // Render text content from note.data if it exists (with scrolling support)
         if (note.data && contentType === 'text') {
             const verticalTextOffset = 2; // Same offset used in main rendering
-            const scrollOffset = note.scrollOffset || 0;
-            const visibleHeight = note.visibleHeight || (endY - startY + 1);
+
+            // Viewport size is derived from note bounds (what's visible on screen)
+            const visibleWidth = endX - startX + 1;
+            const visibleHeight = endY - startY + 1;
+
+            // Scroll offsets control which part of the content is visible
+            const scrollOffsetY = note.scrollOffset || 0;
+            const scrollOffsetX = note.scrollOffsetX || 0;
 
             ctx.font = `${context.engine.getEffectiveCharDims(currentZoom).fontSize}px ${context.engine.settings?.fontFamily || 'monospace'}`;
             ctx.textBaseline = 'top';
@@ -608,35 +614,43 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
             const topLeft = engine.screenToWorld(-effectiveCharWidth, -effectiveCharHeight, currentZoom, currentOffset);
             const bottomRight = engine.screenToWorld(cssWidth + effectiveCharWidth, cssHeight + effectiveCharHeight, currentZoom, currentOffset);
 
-            // Calculate visible Y range within note content (accounting for scroll)
-            const noteContentStartY = scrollOffset;
-            const noteContentEndY = Math.min(scrollOffset + visibleHeight - 1, endY - startY);
+            // Calculate visible Y range within note content (accounting for vertical scroll)
+            const noteContentStartY = scrollOffsetY;
+            const noteContentEndY = scrollOffsetY + visibleHeight - 1;
 
             // Map viewport visible Y range to note content coordinates
             const minVisibleWorldY = Math.max(startY, topLeft.y);
-            const maxVisibleWorldY = Math.min(startY + noteContentEndY - scrollOffset, bottomRight.y);
+            const maxVisibleWorldY = Math.min(startY + visibleHeight - 1, bottomRight.y);
 
             // Convert to relative Y range within note content
-            const minContentY = Math.max(noteContentStartY, minVisibleWorldY - startY + scrollOffset);
-            const maxContentY = Math.min(noteContentEndY, maxVisibleWorldY - startY + scrollOffset);
+            const minContentY = Math.max(noteContentStartY, minVisibleWorldY - startY + scrollOffsetY);
+            const maxContentY = Math.min(noteContentEndY, maxVisibleWorldY - startY + scrollOffsetY);
 
-            // Calculate visible X range within note bounds
-            const noteWidth = endX - startX;
-            const minVisibleX = Math.max(0, topLeft.x - startX);
-            const maxVisibleX = Math.min(noteWidth, bottomRight.x - startX);
+            // Calculate visible X range within note content (accounting for horizontal scroll)
+            const noteContentStartX = scrollOffsetX;
+            const noteContentEndX = scrollOffsetX + visibleWidth - 1;
 
-            // Only iterate through visible region (viewport culling on both axes)
+            // Map viewport visible X range to note content coordinates
+            const minVisibleWorldX = Math.max(startX, topLeft.x);
+            const maxVisibleWorldX = Math.min(startX + visibleWidth - 1, bottomRight.x);
+
+            // Convert to relative X range within note content
+            const minContentX = Math.max(noteContentStartX, minVisibleWorldX - startX + scrollOffsetX);
+            const maxContentX = Math.min(noteContentEndX, maxVisibleWorldX - startX + scrollOffsetX);
+
+            // Only iterate through visible region (viewport culling on both axes with 2D scrolling)
             for (let relativeY = Math.floor(minContentY); relativeY <= Math.ceil(maxContentY); relativeY++) {
-                const viewportLine = relativeY - scrollOffset;
+                const viewportLine = relativeY - scrollOffsetY;
                 const renderY = startY + viewportLine;
 
-                for (let relativeX = Math.floor(minVisibleX); relativeX <= Math.ceil(maxVisibleX); relativeX++) {
+                for (let relativeX = Math.floor(minContentX); relativeX <= Math.ceil(maxContentX); relativeX++) {
                     const coordKey = `${relativeX},${relativeY}`;
                     const charData = note.data[coordKey];
 
                     if (!charData) continue;
 
-                    const worldX = startX + relativeX;
+                    const viewportColumn = relativeX - scrollOffsetX;
+                    const worldX = startX + viewportColumn;
 
                     // Single worldToScreen calculation using renderY directly
                     const topScreenPos = engine.worldToScreen(worldX, renderY - 1, currentZoom, currentOffset);

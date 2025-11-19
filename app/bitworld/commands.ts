@@ -646,9 +646,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         const timestamp = Date.now();
 
-        // Calculate visible height for notes (default: full height, can be scrolled later)
-        const noteHeight = existingSelection.endY - existingSelection.startY + 1;
-
         // Capture and internalize data for all note types
         let capturedData: Record<string, string> = {};
         const cellsToRemove: string[] = [];
@@ -670,6 +667,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         // All regions are now notes with contentType
+        // Viewport size is derived from bounds (startX→endX, startY→endY)
+        // Content can extend beyond viewport and is scrolled via scrollOffsetX/Y
         const regionData = {
             startX: existingSelection.startX,
             endX: existingSelection.endX,
@@ -678,8 +677,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             timestamp,
             contentType: options.contentType || (regionType === 'mail' ? 'mail' : regionType === 'list' ? 'list' : 'text'),
             data: capturedData,
-            visibleHeight: noteHeight,  // Default to showing all lines
-            scrollOffset: 0,             // Start at top
+            scrollOffset: 0,      // Vertical scroll (Y axis)
+            scrollOffsetX: 0,     // Horizontal scroll (X axis)
             ...options.additionalData
         };
 
