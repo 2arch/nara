@@ -8369,7 +8369,9 @@ export function useWorldEngine({
                             if (containingNote && containingNote.data.data) {
                                 const noteData = containingNote.data;
                                 const currentScrollOffset = noteData.scrollOffset || 0;
-                                const prevRelativeY = (prevLineY - noteData.startY) + currentScrollOffset;
+                                // Calculate current line in content space, then subtract to get previous line
+                                const currentRelativeY = (cursorPos.y - noteData.startY) + currentScrollOffset;
+                                const prevRelativeY = currentRelativeY - GRID_CELL_SPAN;
 
                                 // Scan from right to left to find the last character on previous line
                                 let lastCharX = -1;
