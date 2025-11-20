@@ -2,6 +2,7 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { WorldData, Point, WorldEngine, PanStartInfo, StyledCharacter } from './world.engine'; // Adjust path as needed
+import { getCharScale } from './world.engine';
 import { useDialogue, useDebugDialogue } from './dialogue';
 import { useControllerSystem, createCameraController, createGridController, createTapeController, createCommandController } from './controllers';
 import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchicalFrames, HierarchicalFrame, HierarchyLevel, findTextBlockForSelection } from './bit.blocks';
@@ -3188,6 +3189,9 @@ Camera & Viewport Controls:
                     ? charData.style.color
                     : engine.textColor;
 
+                // Get scale for this character
+                const scale = typeof charData === 'object' ? getCharScale(charData) : { w: 1, h: 2 };
+
                 // Calculate opacity if fadeStart is set
                 let opacity = 1.0;
                 if (typeof charData === 'object' && charData.fadeStart) {
@@ -3197,7 +3201,11 @@ Camera & Viewport Controls:
 
                 // Calculate screen positions for character span
                 const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+                const topScreenPos = engine.worldToScreen(worldX, worldY - (scale.h - 1), currentZoom, currentOffset);
+
+                // Calculate total width and height based on scale
+                const charPixelWidth = effectiveCharWidth * scale.w;
+                const charPixelHeight = effectiveCharHeight * scale.h;
 
                 if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
                     topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
@@ -3213,8 +3221,8 @@ Camera & Viewport Controls:
                                     ctx.globalAlpha = opacity;
                                 }
                                 ctx.fillStyle = textBackground;
-                                // Use GRID_CELL_SPAN height to match character height
-                                ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                                // Use scale dimensions
+                                ctx.fillRect(topScreenPos.x, topScreenPos.y, charPixelWidth, charPixelHeight);
                                 if (opacity < 1.0) {
                                     ctx.globalAlpha = 1.0;
                                 }
@@ -3227,7 +3235,31 @@ Camera & Viewport Controls:
                                 ctx.globalAlpha = opacity;
                             }
                             ctx.fillStyle = color; // Use character's color or default
-                            renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
+                            
+                            // Dynamic font size for non-standard scales
+                            let drawFontSize = effectiveFontSize;
+                            let drawOffset = verticalTextOffset;
+                            
+                            if (scale.w !== 1 || scale.h !== 2) {
+                                 const minDim = Math.min(charPixelWidth, charPixelHeight);
+                                 drawFontSize = minDim * 0.75;
+                                 drawOffset = (charPixelHeight - drawFontSize) / 2;
+                                 ctx.font = `${drawFontSize}px ${fontFamily}`;
+                            }
+                            
+                            // Adjust X for centering if wider
+                            let drawX = topScreenPos.x;
+                            if (scale.w > 1) {
+                                 drawX += (charPixelWidth - effectiveCharWidth) / 2;
+                            }
+                            
+                            renderText(ctx, char, drawX, topScreenPos.y + drawOffset);
+                            
+                            // Reset font
+                            if (scale.w !== 1 || scale.h !== 2) {
+                                 ctx.font = `${effectiveFontSize}px ${fontFamily}`;
+                            }
+                            
                             if (opacity < 1.0) {
                                 ctx.globalAlpha = 1.0; // Reset alpha
                             }
@@ -3791,10 +3823,17 @@ Camera & Viewport Controls:
                 const charData = engine.worldData[key];
                 const char = charData && !engine.isImageData(charData) ? engine.getCharacter(charData) : '';
                 const charStyle = charData && !engine.isImageData(charData) ? engine.getCharacterStyle(charData) : undefined;
+                
+                // Get scale for this character
+                const scale = charData ? getCharScale(charData) : { w: 1, h: 2 };
 
-                // Characters span 2 cells: bottom cell at worldY and top cell at worldY-1
+                // Characters span scale.h cells: bottom cell at worldY
                 const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+                const topScreenPos = engine.worldToScreen(worldX, worldY - (scale.h - 1), currentZoom, currentOffset);
+                
+                // Calculate total width and height based on scale
+                const charPixelWidth = effectiveCharWidth * scale.w;
+                const charPixelHeight = effectiveCharHeight * scale.h;
 
                 if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
                     topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
@@ -3807,7 +3846,7 @@ Camera & Viewport Controls:
 
                         if (textBackground) {
                             ctx.fillStyle = textBackground;
-                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, charPixelWidth, charPixelHeight);
                         }
                     }
 
@@ -3835,9 +3874,51 @@ Camera & Viewport Controls:
                         ctx.shadowBlur = 0;
                         ctx.shadowOffsetX = 0;
                         ctx.shadowOffsetY = 0;
+                        
+                        // Dynamic font size for non-standard scales
+                        let drawFontSize = effectiveFontSize;
+                        let drawOffset = verticalTextOffset;
+                        
+                        if (scale.w !== 1 || scale.h !== 2) {
+                             // Simple heuristic for font sizing: fit within 70% of the smallest dimension
+                             // For 1x6 (narrow), width is constraint. For 4x4, height/width are equal.
+                             // Standard 1x2 has 16px char in 19.2px height (ratio ~0.83)
+                             
+                             const minDim = Math.min(charPixelWidth, charPixelHeight);
+                             // Base calculation
+                             drawFontSize = minDim * 0.75;
+                             
+                             // Adjust offset to center vertically
+                             drawOffset = (charPixelHeight - drawFontSize) / 2;
+                             
+                             ctx.font = `${drawFontSize}px ${fontFamily}`;
+                        } else {
+                            // Reset to default if it was changed
+                            if (ctx.font !== `${effectiveFontSize}px ${fontFamily}`) {
+                                ctx.font = `${effectiveFontSize}px ${fontFamily}`;
+                            }
+                        }
+
+                        // Render character centered in cell
+                        // For horizontal centering in wider cells:
+                        const xOffset = (charPixelWidth - (effectiveCharWidth * (drawFontSize/effectiveFontSize))) / 2;
+                        // Actually standard renderText uses left alignment? 
+                        // renderText is: ctx.fillText(char, x, y);
+                        // So we should adjust x if scale.w > 1
+                        
+                        let drawX = topScreenPos.x;
+                        if (scale.w > 1) {
+                             drawX += (charPixelWidth - effectiveCharWidth) / 2; // Center horizontally roughly
+                        }
+                        
                         // Render character with baseline at top cell position
-                        renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
+                        renderText(ctx, char, drawX, topScreenPos.y + drawOffset);
                         ctx.shadowBlur = 0;
+                        
+                        // Reset font for next iteration if needed (though we check above)
+                        if (scale.w !== 1 || scale.h !== 2) {
+                             ctx.font = `${effectiveFontSize}px ${fontFamily}`;
+                        }
                     }
                 }
             }
@@ -5283,9 +5364,14 @@ Camera & Viewport Controls:
                 }
             }
 
-            // Cursor spans 2 cells: bottom cell at cursorPos.y and top cell at cursorPos.y-1
+            // Use current scale for cursor
+            const cursorScale = engine.currentScale || { w: 1, h: 2 };
+            const cursorPixelWidth = effectiveCharWidth * cursorScale.w;
+            const cursorPixelHeight = effectiveCharHeight * cursorScale.h;
+
+            // Cursor spans cursorScale.h cells: bottom cell at cursorPos.y and top cell at cursorPos.y - (h-1)
             const cursorBottomScreenPos = engine.worldToScreen(engine.cursorPos.x, engine.cursorPos.y, currentZoom, currentOffset);
-            const cursorTopScreenPos = engine.worldToScreen(engine.cursorPos.x, engine.cursorPos.y - 1, currentZoom, currentOffset);
+            const cursorTopScreenPos = engine.worldToScreen(engine.cursorPos.x, engine.cursorPos.y - (cursorScale.h - 1), currentZoom, currentOffset);
 
             if (cursorBottomScreenPos.x >= -effectiveCharWidth && cursorBottomScreenPos.x <= cssWidth &&
                 cursorTopScreenPos.y >= -effectiveCharHeight && cursorBottomScreenPos.y <= cssHeight) {
@@ -5307,8 +5393,8 @@ Camera & Viewport Controls:
                     ctx.shadowBlur = 0;
                     ctx.shadowOffsetX = 0;
                     ctx.shadowOffsetY = 0;
-                    // Render cursor spanning GRID_CELL_SPAN cells vertically (from top cell down to bottom cell)
-                    ctx.fillRect(cursorTopScreenPos.x, cursorTopScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                    // Render cursor with dynamic dimensions
+                    ctx.fillRect(cursorTopScreenPos.x, cursorTopScreenPos.y, cursorPixelWidth, cursorPixelHeight);
                     ctx.shadowBlur = 0;
 
                     const charData = engine.worldData[key];
@@ -5316,8 +5402,48 @@ Camera & Viewport Controls:
                         // Don't render the character at cursor position when composing - show preview instead
                         const char = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
                         ctx.fillStyle = CURSOR_TEXT_COLOR;
+                        
+                        // Handle font size for scaled cursor if sitting on scaled char?
+                        // Actually cursor usually sits on empty space or existing char. 
+                        // If sitting on existing char, we should probably match THAT char's scale/font size for the overlay text?
+                        // But for simplicity, let's stick to standard font unless the char itself is scaled.
+                        // Wait, if cursor is 4x4, we want to render the char centered in 4x4? 
+                        // If the char underneath is 1x2, but cursor is 4x4, what happens?
+                        // The plan says: "Cursor adopts current scale mode".
+                        // It doesn't explicitly say how to render the underlying char on the cursor.
+                        // Current code re-renders the char on top of cursor in white.
+                        
+                        // Check if the character UNDER the cursor has a scale
+                        const charScale = charData && !engine.isImageData(charData) ? getCharScale(charData) : { w: 1, h: 2 };
+                        
+                        // We should probably use the character's scale for rendering the character, 
+                        // even if the cursor scale (currentScale) is different.
+                        // However, visually, the cursor block (cursorScale) is drawn.
+                        // If charScale != cursorScale, it might look weird.
+                        
+                        // Let's assume for now we just render the char centered in the cursor block.
+                        
+                        let drawFontSize = effectiveFontSize;
+                        let drawOffset = verticalTextOffset;
+                        let drawX = cursorTopScreenPos.x;
+                        
+                        if (cursorScale.w !== 1 || cursorScale.h !== 2) {
+                             const minDim = Math.min(cursorPixelWidth, cursorPixelHeight);
+                             drawFontSize = minDim * 0.75;
+                             drawOffset = (cursorPixelHeight - drawFontSize) / 2;
+                             ctx.font = `${drawFontSize}px ${fontFamily}`;
+                        }
+                        
+                        if (cursorScale.w > 1) {
+                             drawX += (cursorPixelWidth - effectiveCharWidth) / 2;
+                        }
+
                         // Render character with baseline at top cell position
-                        renderText(ctx, char, cursorTopScreenPos.x, cursorTopScreenPos.y + verticalTextOffset);
+                        renderText(ctx, char, drawX, cursorTopScreenPos.y + drawOffset);
+                        
+                        if (cursorScale.w !== 1 || cursorScale.h !== 2) {
+                             ctx.font = `${effectiveFontSize}px ${fontFamily}`;
+                        }
                     }
 
                     // === Render IME Composition Preview (on cursor) ===

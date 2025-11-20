@@ -125,6 +125,8 @@ interface UseCommandSystemProps {
     cancelComposition?: () => void; // Callback to cancel IME composition
     selectedNoteKey?: string | null; // Currently selected note
     selectedPatternKey?: string | null; // Currently selected pattern
+    currentScale?: { w: number; h: number }; // Current text scale
+    setCurrentScale?: (scale: { w: number; h: number }) => void; // Set current text scale
     monogramSystem?: { // WebGPU monogram background system
         setOptions: (updater: ((prev: any) => any) | any) => void;
         toggleEnabled: () => void;
@@ -150,7 +152,7 @@ const AVAILABLE_COMMANDS = [
     // Special
     'mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help',
     // Styling & Display
-    'bg', 'text', 'font', 'style', 'display',
+    'bg', 'text', 'font', 'style', 'display', 'scale',
     // State Management
     'state', 'random', 'clear', 'replay',
     // Sharing & Publishing
@@ -208,6 +210,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'bg': 'Change background color. Use /bg [color] for solid colors like /bg white, /bg black, /bg sulfur, etc.',
     'text': 'Change text color. Type /text followed by a color name (garden, sky, sunset, etc.). This sets the color for all new text you write on the canvas.',
     'font': 'Change font family. Type /font followed by a font name: "IBM Plex Mono" for a clean monospace font, or "Neureal" for a more stylized aesthetic.',
+    'scale': 'Change text scale. Type /scale followed by dimensions like 1x2 (default), 1x6 (tall), or 4x4 (square). Affects new text you write.',
     'style': 'Apply visual styles to selected notes or patterns. Select a note/pattern or position cursor inside one, then type /style [stylename]. Available: solid (white border), glow (pulsing gray glow), glowing (enhanced bright glow). Example: /style glow',
     'state': 'Save or load canvas states. Type /state to see saved states, /state save [name] to save current canvas, /state load [name] to restore a saved state. Perfect for versioning your work.',
     'random': 'Randomize text styling. Applies random colors and styles to your text for a more organic, playful aesthetic. Great for breaking out of rigid design patterns.',
@@ -239,7 +242,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllChips, getAllBounds = () => [], availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, monogramSystem }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllChips, getAllBounds = () => [], availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, currentScale, setCurrentScale, monogramSystem }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const previousBackgroundStateRef = useRef<{
@@ -515,7 +518,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         // Draw suggestions vertically below
         suggestions.forEach((suggestion, index) => {
-            const suggestionY = startPos.y + GRID_CELL_SPAN + (index * GRID_CELL_SPAN);
+            const spacing = currentScale ? currentScale.h : GRID_CELL_SPAN;
+            const suggestionY = startPos.y + spacing + (index * spacing);
             data = drawTextToGrid(suggestion, startPos.x, suggestionY, data);
         });
 
@@ -2009,6 +2013,35 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             // Clear command mode
             clearCommandState();
             
+            return null;
+        }
+
+        if (commandToExecute.startsWith('scale')) {
+            if (setCurrentScale) {
+                const { arg1 } = parseCurrentInput();
+                
+                if (arg1) {
+                    // Parse format like "1x2", "1x6", "4x4"
+                    const parts = arg1.toLowerCase().split('x');
+                    if (parts.length === 2) {
+                        const w = parseInt(parts[0], 10);
+                        const h = parseInt(parts[1], 10);
+                        
+                        if (!isNaN(w) && !isNaN(h) && w > 0 && h > 0) {
+                            setCurrentScale({ w, h });
+                            setDialogueWithRevert(`Text scale set to ${w}x${h}`, setDialogueText);
+                        } else {
+                            setDialogueWithRevert("Invalid scale format. Use width x height (e.g., 1x2)", setDialogueText);
+                        }
+                    } else {
+                        setDialogueWithRevert("Invalid scale format. Use width x height (e.g., 1x2)", setDialogueText);
+                    }
+                } else {
+                    setDialogueWithRevert("Usage: /scale <width>x<height> (e.g., /scale 1x2)", setDialogueText);
+                }
+            }
+            
+            clearCommandState();
             return null;
         }
 

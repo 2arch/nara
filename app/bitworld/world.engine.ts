@@ -99,6 +99,13 @@ export interface StyledCharacter {
     fadeStart?: number; // Timestamp for fade animation
 }
 
+// Helper to get character scale with default fallback
+export const getCharScale = (data: string | StyledCharacter | ImageData): { w: number, h: number } => {
+    if (typeof data === 'string') return { w: 1, h: 2 };
+    if ('scale' in data && data.scale) return data.scale;
+    return { w: 1, h: 2 };
+};
+
 export interface ImageData {
     type: 'image';
     src: string; // Data URL or blob URL (for GIFs, this is the first frame URL)
@@ -196,6 +203,8 @@ export interface WorldEngine {
     clearSearch: () => void;
     settings: WorldSettings;
     updateSettings: (newSettings: Partial<WorldSettings>) => void;
+    currentScale: { w: number; h: number }; // Current text scale for new input
+    setCurrentScale: (scale: { w: number; h: number }) => void;
     getEffectiveCharDims: (zoom: number) => { width: number; height: number; fontSize: number; };
     screenToWorld: (screenX: number, screenY: number, currentZoom: number, currentOffset: Point) => Point;
     worldToScreen: (worldX: number, worldY: number, currentZoom: number, currentOffset: Point) => Point;
@@ -759,20 +768,24 @@ export function useWorldEngine({
 
     const [cursorPosInternal, setCursorPosInternal] = useState<Point>(initialCursorPos);
 
-    // Wrapper to constrain cursor to even y-coordinates (characters span 2 cells)
+    // Wrapper to constrain cursor to grid-aligned y-coordinates
     const setCursorPos = useCallback((pos: Point | ((prev: Point) => Point)) => {
         setCursorPosInternal(prevPos => {
             const newPos = typeof pos === 'function' ? pos(prevPos) : pos;
-            // Constrain y to grid-aligned positions
-            const constrainedY = Math.round(newPos.y / GRID_CELL_SPAN) * GRID_CELL_SPAN;
+            // Constrain y to grid-aligned positions based on current scale
+            // But also check if we are landing on an existing character with different scale?
+            // For now, respect currentScale as per plan
+            const constrainedY = Math.round(newPos.y / currentScale.h) * currentScale.h;
             return { x: newPos.x, y: constrainedY };
         });
-    }, []);
+    }, [currentScale]);
 
     const cursorPos = cursorPosInternal;
     const cursorPosRef = useRef<Point>(initialCursorPos); // Ref for synchronous cursor position access
     const [viewOffset, setViewOffset] = useState<Point>(initialCenteredOffset);
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
+    const [currentScale, setCurrentScale] = useState<{ w: number; h: number }>({ w: 1, h: 2 }); // Default scale 1x2
+
     const [dialogueText, setDialogueTextState] = useState('');
     const [dialogueTimestamp, setDialogueTimestamp] = useState<number | undefined>(undefined);
     const tapeRecordingCallbackRef = useRef<(() => Promise<void> | void) | null>(null);
@@ -1107,10 +1120,10 @@ export function useWorldEngine({
         if (effectiveCharWidth === 0 || effectiveCharHeight === 0) return currentOffset;
         const worldX = screenX / effectiveCharWidth + currentOffset.x;
         const worldY = screenY / effectiveCharHeight + currentOffset.y;
-        // Round y to nearest grid-aligned position (characters span GRID_CELL_SPAN cells)
-        const roundedY = Math.round(worldY / GRID_CELL_SPAN) * GRID_CELL_SPAN;
+        // Round y to nearest grid-aligned position based on current scale
+        const roundedY = Math.round(worldY / currentScale.h) * currentScale.h;
         return { x: Math.floor(worldX), y: roundedY };
-    }, [getEffectiveCharDims]);
+    }, [getEffectiveCharDims, currentScale]);
 
     // === Viewport Center Calculation ===
     const getViewportCenter = useCallback((): Point => {
@@ -1456,7 +1469,7 @@ export function useWorldEngine({
         isFaceDetectionEnabled,
         faceOrientation,
         setFaceDetectionEnabled,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, triggerUpgradeFlow: () => {
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, currentScale, setCurrentScale, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
         }
@@ -7609,7 +7622,7 @@ export function useWorldEngine({
                 targetIndent = Math.max(focusRegion.startX, Math.min(focusRegion.endX, targetIndent));
             }
 
-            nextCursorPos.y = cursorPos.y + GRID_CELL_SPAN; // Move down by grid cell span
+            nextCursorPos.y = cursorPos.y + currentScale.h; // Move down by current scale
             // Failsafe: if targetIndent is NaN, undefined, or null, use previous cursor X position
             if (targetIndent !== undefined && targetIndent !== null && !isNaN(targetIndent)) {
                 nextCursorPos.x = targetIndent;
@@ -7745,7 +7758,24 @@ export function useWorldEngine({
                     nextCursorPos.y = cursorPos.y - 1;
                 }
             } else {
-                nextCursorPos.y -= GRID_CELL_SPAN; // Move up by grid cell span
+                // Smart movement: Check for character above to determine jump size
+                let foundY = -1;
+                // Look behind up to 10 cells or currentScale.h * 2
+                const searchLimit = Math.max(10, currentScale.h * 2);
+                for (let offset = 1; offset <= searchLimit; offset++) {
+                    const checkY = cursorPos.y - offset;
+                    const key = `${cursorPos.x},${checkY}`;
+                    if (worldData[key] && !isImageData(worldData[key])) {
+                        foundY = checkY;
+                        break;
+                    }
+                }
+
+                if (foundY !== -1) {
+                    nextCursorPos.y = foundY;
+                } else {
+                    nextCursorPos.y -= currentScale.h;
+                }
             }
             moved = true;
         } else if (key === 'ArrowDown' && !isMod && !altKey) {
@@ -7894,7 +7924,24 @@ export function useWorldEngine({
                     nextCursorPos.y = cursorPos.y + GRID_CELL_SPAN;
                 }
             } else {
-                nextCursorPos.y += GRID_CELL_SPAN; // Move down by grid cell span
+                // Smart movement: Check for character ahead to determine jump size
+                let foundY = -1;
+                // Look ahead up to 10 cells or currentScale.h * 2
+                const searchLimit = Math.max(10, currentScale.h * 2);
+                for (let offset = 1; offset <= searchLimit; offset++) {
+                    const checkY = cursorPos.y + offset;
+                    const key = `${cursorPos.x},${checkY}`;
+                    if (worldData[key] && !isImageData(worldData[key])) {
+                        foundY = checkY;
+                        break;
+                    }
+                }
+                
+                if (foundY !== -1) {
+                    nextCursorPos.y = foundY;
+                } else {
+                    nextCursorPos.y += currentScale.h; 
+                }
             }
             moved = true;
         } else if (key === 'ArrowLeft') {
@@ -10734,6 +10781,8 @@ export function useWorldEngine({
         viewOffset,
         cursorPos,
         zoomLevel,
+        currentScale,
+        setCurrentScale,
         backgroundMode,
         backgroundColor,
         backgroundImage,
