@@ -8507,8 +8507,9 @@ export function useWorldEngine({
                                 // Delete from note's data field using relative coordinates
                                 nextWorldData = { ...worldData };
                                 const noteData = containingNote.data;
-                                // Convert absolute world coordinates to relative
-                                const relativeDeleteKey = `${(cursorPos.x - 1) - noteData.startX},${cursorPos.y - noteData.startY}`;
+                                // Convert absolute world coordinates to relative content coordinates
+                                const scrollOffset = noteData.scrollOffset || 0;
+                                const relativeDeleteKey = `${(cursorPos.x - 1) - noteData.startX},${(cursorPos.y - noteData.startY) + scrollOffset}`;
                                 if (noteData.data && noteData.data[relativeDeleteKey]) {
                                     delete noteData.data[relativeDeleteKey];
                                     nextWorldData[containingNote.key] = JSON.stringify(noteData);
