@@ -2967,18 +2967,14 @@ Camera & Viewport Controls:
             return code >= 0xAC00 && code <= 0xD7AF;
         };
 
-        // Helper function to render text with proper scaling for Korean characters
-        const renderText = (ctx: CanvasRenderingContext2D, char: string, x: number, y: number) => {
-            if (isKoreanChar(char)) {
-                // Scale Korean characters to fit monospace cell (about 0.8x)
-                ctx.save();
-                ctx.translate(x, y);
-                ctx.scale(0.8, 1);
-                ctx.fillText(char, 0, 0);
-                ctx.restore();
-            } else {
-                ctx.fillText(char, x, y);
-            }
+        // Helper function to render text with proper scaling for Korean characters and variable scales
+        const renderText = (ctx: CanvasRenderingContext2D, char: string, x: number, y: number, sx: number = 1, sy: number = 1) => {
+            ctx.save();
+            ctx.translate(x, y);
+            const kScale = isKoreanChar(char) ? 0.8 : 1.0;
+            ctx.scale(sx * kScale, sy);
+            ctx.fillText(char, 0, 0);
+            ctx.restore();
         };
 
         // --- Actual Drawing (Copied from previous `draw` function) ---
@@ -3236,29 +3232,11 @@ Camera & Viewport Controls:
                             }
                             ctx.fillStyle = color; // Use character's color or default
                             
-                            // Dynamic font size for non-standard scales
-                            let drawFontSize = effectiveFontSize;
-                            let drawOffset = verticalTextOffset;
+                            // Calculate scale factors
+                            const sx = scale.w;
+                            const sy = scale.h / 2;
                             
-                            if (scale.w !== 1 || scale.h !== 2) {
-                                 const minDim = Math.min(charPixelWidth, charPixelHeight);
-                                 drawFontSize = minDim * 0.75;
-                                 drawOffset = (charPixelHeight - drawFontSize) / 2;
-                                 ctx.font = `${drawFontSize}px ${fontFamily}`;
-                            }
-                            
-                            // Adjust X for centering if wider
-                            let drawX = topScreenPos.x;
-                            if (scale.w > 1) {
-                                 drawX += (charPixelWidth - effectiveCharWidth) / 2;
-                            }
-                            
-                            renderText(ctx, char, drawX, topScreenPos.y + drawOffset);
-                            
-                            // Reset font
-                            if (scale.w !== 1 || scale.h !== 2) {
-                                 ctx.font = `${effectiveFontSize}px ${fontFamily}`;
-                            }
+                            renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset, sx, sy);
                             
                             if (opacity < 1.0) {
                                 ctx.globalAlpha = 1.0; // Reset alpha
@@ -3875,50 +3853,16 @@ Camera & Viewport Controls:
                         ctx.shadowOffsetX = 0;
                         ctx.shadowOffsetY = 0;
                         
-                        // Dynamic font size for non-standard scales
-                        let drawFontSize = effectiveFontSize;
-                        let drawOffset = verticalTextOffset;
+                        // Render character with scaling
+                        // Calculate scale factors relative to standard 1x2 character
+                        // Standard char spans 1 cell width and 2 cell heights
+                        const sx = scale.w;
+                        const sy = scale.h / 2;
                         
-                        if (scale.w !== 1 || scale.h !== 2) {
-                             // Simple heuristic for font sizing: fit within 70% of the smallest dimension
-                             // For 1x6 (narrow), width is constraint. For 4x4, height/width are equal.
-                             // Standard 1x2 has 16px char in 19.2px height (ratio ~0.83)
-                             
-                             const minDim = Math.min(charPixelWidth, charPixelHeight);
-                             // Base calculation
-                             drawFontSize = minDim * 0.75;
-                             
-                             // Adjust offset to center vertically
-                             drawOffset = (charPixelHeight - drawFontSize) / 2;
-                             
-                             ctx.font = `${drawFontSize}px ${fontFamily}`;
-                        } else {
-                            // Reset to default if it was changed
-                            if (ctx.font !== `${effectiveFontSize}px ${fontFamily}`) {
-                                ctx.font = `${effectiveFontSize}px ${fontFamily}`;
-                            }
-                        }
-
-                        // Render character centered in cell
-                        // For horizontal centering in wider cells:
-                        const xOffset = (charPixelWidth - (effectiveCharWidth * (drawFontSize/effectiveFontSize))) / 2;
-                        // Actually standard renderText uses left alignment? 
-                        // renderText is: ctx.fillText(char, x, y);
-                        // So we should adjust x if scale.w > 1
-                        
-                        let drawX = topScreenPos.x;
-                        if (scale.w > 1) {
-                             drawX += (charPixelWidth - effectiveCharWidth) / 2; // Center horizontally roughly
-                        }
-                        
-                        // Render character with baseline at top cell position
-                        renderText(ctx, char, drawX, topScreenPos.y + drawOffset);
+                        // Render character centered in cell (offset handled by translate in renderText)
+                        // We assume drawX is topScreenPos.x (left edge)
+                        renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset, sx, sy);
                         ctx.shadowBlur = 0;
-                        
-                        // Reset font for next iteration if needed (though we check above)
-                        if (scale.w !== 1 || scale.h !== 2) {
-                             ctx.font = `${effectiveFontSize}px ${fontFamily}`;
-                        }
                     }
                 }
             }
@@ -5466,36 +5410,12 @@ Camera & Viewport Controls:
                         // Current code re-renders the char on top of cursor in white.
                         
                         // Check if the character UNDER the cursor has a scale
-                        const charScale = charData && !engine.isImageData(charData) ? getCharScale(charData) : { w: 1, h: 2 };
-                        
-                        // We should probably use the character's scale for rendering the character, 
-                        // even if the cursor scale (currentScale) is different.
-                        // However, visually, the cursor block (cursorScale) is drawn.
-                        // If charScale != cursorScale, it might look weird.
-                        
-                        // Let's assume for now we just render the char centered in the cursor block.
-                        
-                        let drawFontSize = effectiveFontSize;
-                        let drawOffset = verticalTextOffset;
-                        let drawX = cursorTopScreenPos.x;
-                        
-                        if (cursorScale.w !== 1 || cursorScale.h !== 2) {
-                             const minDim = Math.min(cursorPixelWidth, cursorPixelHeight);
-                             drawFontSize = minDim * 0.75;
-                             drawOffset = (cursorPixelHeight - drawFontSize) / 2;
-                             ctx.font = `${drawFontSize}px ${fontFamily}`;
-                        }
-                        
-                        if (cursorScale.w > 1) {
-                             drawX += (cursorPixelWidth - effectiveCharWidth) / 2;
-                        }
+                        // We use the cursor scale for rendering the character on top to match the cursor block
+                        const sx = cursorScale.w;
+                        const sy = cursorScale.h / 2;
 
                         // Render character with baseline at top cell position
-                        renderText(ctx, char, drawX, cursorTopScreenPos.y + drawOffset);
-                        
-                        if (cursorScale.w !== 1 || cursorScale.h !== 2) {
-                             ctx.font = `${effectiveFontSize}px ${fontFamily}`;
-                        }
+                        renderText(ctx, char, cursorTopScreenPos.x, cursorTopScreenPos.y + verticalTextOffset, sx, sy);
                     }
 
                     // === Render IME Composition Preview (on cursor) ===
