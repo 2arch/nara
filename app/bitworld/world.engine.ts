@@ -8359,11 +8359,55 @@ export function useWorldEngine({
                         const noteRegion = getNoteRegion(worldData, cursorPos);
                         if (noteRegion && cursorPos.x === noteRegion.startX && cursorPos.y > noteRegion.startY) {
                             // We're at the start of a line within a note region (but not the first line)
-                            // Move cursor to the end of the previous line within the note
-                            nextCursorPos.x = noteRegion.endX + 1;
-                            nextCursorPos.y = cursorPos.y - 1;
+                            // Reverse wrap: delete last character of previous line and move cursor there
+                            const prevLineY = cursorPos.y - GRID_CELL_SPAN;
+
+                            // Find the rightmost character on the previous line
+                            const containingNote = findTextNoteContainingPoint(cursorPos.x, cursorPos.y, worldData);
+                            if (containingNote && containingNote.data.data) {
+                                const noteData = containingNote.data;
+                                const prevRelativeY = prevLineY - noteData.startY;
+
+                                // Scan from right to left to find the last character on previous line
+                                let lastCharX = -1;
+                                for (let x = noteRegion.endX; x >= noteRegion.startX; x--) {
+                                    const relativeKey = `${x - noteData.startX},${prevRelativeY}`;
+                                    if (noteData.data[relativeKey]) {
+                                        lastCharX = x;
+                                        break;
+                                    }
+                                }
+
+                                // If we found a character, delete it
+                                if (lastCharX >= noteRegion.startX) {
+                                    nextWorldData = { ...worldData };
+                                    const relativeDeleteKey = `${lastCharX - noteData.startX},${prevRelativeY}`;
+                                    delete noteData.data[relativeDeleteKey];
+
+                                    // Check if we need to scroll up (if cursor is at top of viewport in scroll mode)
+                                    const currentScrollOffset = noteData.scrollOffset || 0;
+                                    if (cursorPos.y === noteRegion.startY && currentScrollOffset > 0) {
+                                        // Scroll up by one line
+                                        noteData.scrollOffset = Math.max(0, currentScrollOffset - GRID_CELL_SPAN);
+                                    }
+
+                                    nextWorldData[containingNote.key] = JSON.stringify(noteData);
+                                    worldDataChanged = true;
+
+                                    // Move cursor to where the deleted character was
+                                    nextCursorPos.x = lastCharX;
+                                    nextCursorPos.y = prevLineY;
+                                } else {
+                                    // No character on previous line, just move cursor to start of previous line
+                                    nextCursorPos.x = noteRegion.startX;
+                                    nextCursorPos.y = prevLineY;
+                                }
+                            } else {
+                                // Fallback: move to end of previous line without deleting
+                                nextCursorPos.x = noteRegion.endX + 1;
+                                nextCursorPos.y = prevLineY;
+                            }
                             moved = true;
-                            // Don't delete anything, just move cursor
                         } else if (noteRegion && cursorPos.x > noteRegion.startX) {
                             // We're within a note region but not at the start - do normal backspace
                             const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
