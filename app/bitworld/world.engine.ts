@@ -7676,8 +7676,10 @@ export function useWorldEngine({
                         }
                     }
                 }
-                const totalContentLines = maxRelativeY + 1;
-                const maxScroll = Math.max(0, totalContentLines - visibleHeight);
+                // Convert maxRelativeY (world units) to line count
+                const totalContentLines = Math.floor(maxRelativeY / GRID_CELL_SPAN) + 1;
+                // Calculate max scroll in world units
+                const maxScroll = Math.max(0, (totalContentLines - visibleHeight) * GRID_CELL_SPAN);
 
                 // Only scroll if cursor is at bottom edge AND there's content below
                 if (isAtBottomEdge && currentScrollOffset < maxScroll) {
@@ -8366,7 +8368,8 @@ export function useWorldEngine({
                             const containingNote = findTextNoteContainingPoint(cursorPos.x, cursorPos.y, worldData);
                             if (containingNote && containingNote.data.data) {
                                 const noteData = containingNote.data;
-                                const prevRelativeY = prevLineY - noteData.startY;
+                                const currentScrollOffset = noteData.scrollOffset || 0;
+                                const prevRelativeY = (prevLineY - noteData.startY) + currentScrollOffset;
 
                                 // Scan from right to left to find the last character on previous line
                                 let lastCharX = -1;
@@ -8385,7 +8388,6 @@ export function useWorldEngine({
                                     delete noteData.data[relativeDeleteKey];
 
                                     // Check if we need to scroll up (if cursor is at top of viewport in scroll mode)
-                                    const currentScrollOffset = noteData.scrollOffset || 0;
                                     if (cursorPos.y === noteRegion.startY && currentScrollOffset > 0) {
                                         // Scroll up by one line
                                         noteData.scrollOffset = Math.max(0, currentScrollOffset - GRID_CELL_SPAN);
@@ -9822,8 +9824,9 @@ export function useWorldEngine({
                 const scrollSpeed = GRID_CELL_SPAN; // Scroll by GRID_CELL_SPAN per tick
                 const scrollDelta = Math.sign(deltaY) * scrollSpeed;
 
-                // Viewport height is derived from note bounds
+                // Viewport height is derived from note bounds (in world units)
                 const visibleHeight = noteData.endY - noteData.startY + 1;
+                const visibleHeightLines = Math.floor(visibleHeight / GRID_CELL_SPAN);
 
                 // Calculate total content height from note.data (using relative coordinates)
                 let maxRelativeY = 0;
@@ -9836,10 +9839,11 @@ export function useWorldEngine({
                         }
                     }
                 }
-                const totalContentLines = maxRelativeY + 1;
+                // Convert maxRelativeY (world units) to line count
+                const totalContentLines = Math.floor(maxRelativeY / GRID_CELL_SPAN) + 1;
 
-                // Calculate max scroll offset
-                const maxScroll = Math.max(0, totalContentLines - visibleHeight);
+                // Calculate max scroll offset in world units
+                const maxScroll = Math.max(0, (totalContentLines - visibleHeightLines) * GRID_CELL_SPAN);
 
                 // Update scroll offset with bounds checking
                 const currentScrollOffset = noteData.scrollOffset || 0;
