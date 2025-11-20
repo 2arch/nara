@@ -9001,7 +9001,18 @@ export function useWorldEngine({
 
             // Now type the character - handle different modes
             let proposedCursorPos = { x: cursorAfterDelete.x + 1, y: cursorAfterDelete.y }; // Move cursor right
-            
+
+            // Focus mode: prevent typing beyond region bounds
+            if (isFocusMode && focusRegion) {
+                // For selection-based focus, enforce strict bounds
+                // For note-based focus, allow note to grow (dynamic tracking will update bounds)
+                if (focusRegion.type === 'selection') {
+                    if (proposedCursorPos.x > focusRegion.endX || proposedCursorPos.y > focusRegion.endY) {
+                        // Would exceed selection bounds - don't allow typing
+                        return true;
+                    }
+                }
+            }
 
             // Check for note region word wrapping (if not already handled by bounded region)
             if (!worldDataChanged) {
@@ -9373,6 +9384,12 @@ export function useWorldEngine({
 
         // === Update State ===
         if (moved) {
+            // Constrain cursor to focus region bounds if in focus mode
+            if (isFocusMode && focusRegion) {
+                nextCursorPos.x = Math.max(focusRegion.startX, Math.min(focusRegion.endX, nextCursorPos.x));
+                nextCursorPos.y = Math.max(focusRegion.startY, Math.min(focusRegion.endY, nextCursorPos.y));
+            }
+
             setCursorPos(nextCursorPos);
             // Update ref synchronously so IME composition handlers see the latest position
             cursorPosRef.current = nextCursorPos;
