@@ -767,6 +767,7 @@ export function useWorldEngine({
     }, [worldData, extractCoordinates, worldToChunk]);
 
     const [cursorPosInternal, setCursorPosInternal] = useState<Point>(initialCursorPos);
+    const [currentScale, setCurrentScale] = useState<{ w: number; h: number }>({ w: 1, h: 2 }); // Default scale 1x2
 
     // Wrapper to constrain cursor to grid-aligned y-coordinates
     const setCursorPos = useCallback((pos: Point | ((prev: Point) => Point)) => {
@@ -784,7 +785,6 @@ export function useWorldEngine({
     const cursorPosRef = useRef<Point>(initialCursorPos); // Ref for synchronous cursor position access
     const [viewOffset, setViewOffset] = useState<Point>(initialCenteredOffset);
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
-    const [currentScale, setCurrentScale] = useState<{ w: number; h: number }>({ w: 1, h: 2 }); // Default scale 1x2
 
     const [dialogueText, setDialogueTextState] = useState('');
     const [dialogueTimestamp, setDialogueTimestamp] = useState<number | undefined>(undefined);
