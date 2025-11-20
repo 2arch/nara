@@ -8903,13 +8903,12 @@ export function useWorldEngine({
 
                     // Type the current character at cursorAfterDelete.x on this line first
                     if (!updatedNoteData.data) updatedNoteData.data = {};
-                    // Account for scroll offset when calculating relative Y
-                    const currentScrollOffset = noteData.scrollOffset || 0;
-                    const currentRelativeY = (cursorAfterDelete.y - noteData.startY) + currentScrollOffset;
+                    // Calculate relative Y in viewport space (NOT content space - no scroll offset)
+                    const currentRelativeY = cursorAfterDelete.y - noteData.startY;
                     const currentCharKey = `${cursorAfterDelete.x - noteData.startX},${currentRelativeY}`;
                     updatedNoteData.data[currentCharKey] = key;
 
-                    // Calculate the relative Y for the next line (in content space, not world space)
+                    // Calculate the relative Y for the next line (in viewport space)
                     const nextRelativeY = currentRelativeY + GRID_CELL_SPAN;
 
                     // Now proceed with word wrapping
@@ -9149,10 +9148,9 @@ export function useWorldEngine({
                     if (!noteData.data) {
                         noteData.data = {};
                     }
-                    // Convert absolute world coordinates to relative (accounting for scroll offset)
-                    const scrollOffset = noteData.scrollOffset || 0;
+                    // Convert absolute world coordinates to relative viewport coordinates
                     const relativeX = cursorAfterDelete.x - noteData.startX;
-                    const relativeY = (cursorAfterDelete.y - noteData.startY) + scrollOffset;
+                    const relativeY = cursorAfterDelete.y - noteData.startY;
                     const relativeKey = `${relativeX},${relativeY}`;
                     noteData.data[relativeKey] = charData;
                     nextWorldData[containingNote.key] = JSON.stringify(noteData);
