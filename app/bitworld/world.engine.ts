@@ -1433,6 +1433,10 @@ export function useWorldEngine({
         fullscreenRegion,
         setFullscreenMode,
         exitFullscreenMode,
+        isFocusMode,
+        focusRegion,
+        setFocusMode,
+        exitFocusMode,
         restorePreviousBackground,
         executeCommandString,
         startCommand,
@@ -1558,6 +1562,77 @@ export function useWorldEngine({
             });
         }
     }, [isFullscreenMode, fullscreenRegion, getEffectiveCharDims]);
+
+    // === Focus Mode Auto-Fit ===
+    useEffect(() => {
+        if (isFocusMode && focusRegion) {
+            // Calculate zoom to fit region width and height
+            const regionWidth = focusRegion.endX - focusRegion.startX + 1;
+            const regionHeight = focusRegion.endY - focusRegion.startY + 1;
+            const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
+            const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
+
+            const { width: baseCharWidth, height: baseCharHeight } = getEffectiveCharDims(1.0);
+
+            // Calculate zoom to fit width OR height (whichever is more constraining)
+            const zoomForWidth = viewportWidth / (regionWidth * baseCharWidth);
+            const zoomForHeight = viewportHeight / (regionHeight * baseCharHeight);
+
+            // Use the smaller zoom (ensures entire region fits)
+            const requiredZoom = Math.min(zoomForWidth, zoomForHeight);
+
+            // Clamp zoom to reasonable bounds (0.1 to 5.0)
+            const constrainedZoom = Math.max(0.1, Math.min(5.0, requiredZoom));
+            setZoomLevel(constrainedZoom);
+
+            // Center viewport on region
+            const centerX = (focusRegion.startX + focusRegion.endX) / 2;
+            const centerY = (focusRegion.startY + focusRegion.endY) / 2;
+
+            setViewOffset({
+                x: centerX - (viewportWidth / (2 * baseCharWidth * constrainedZoom)),
+                y: centerY - (viewportHeight / (2 * baseCharHeight * constrainedZoom))
+            });
+        }
+    }, [isFocusMode, focusRegion, getEffectiveCharDims]);
+
+    // === Dynamic Note Tracking for Focus Mode ===
+    useEffect(() => {
+        if (isFocusMode && focusRegion?.type === 'note' && focusRegion.key) {
+            // Check if the focused note still exists and update bounds
+            const noteData = worldData[focusRegion.key];
+            if (noteData) {
+                try {
+                    const parsed = JSON.parse(noteData as string);
+                    const { startX, endX, startY, endY } = parsed;
+
+                    // Update focus region if note bounds changed
+                    if (startX !== focusRegion.startX ||
+                        endX !== focusRegion.endX ||
+                        startY !== focusRegion.startY ||
+                        endY !== focusRegion.endY) {
+
+                        setFocusMode(true, {
+                            type: 'note',
+                            key: focusRegion.key,
+                            startX,
+                            endX,
+                            startY,
+                            endY
+                        });
+                    }
+                } catch (e) {
+                    // Note data invalid - exit focus mode
+                    exitFocusMode();
+                    setDialogueWithRevert("Note deleted - exited focus mode", setDialogueText);
+                }
+            } else {
+                // Note deleted - exit focus mode
+                exitFocusMode();
+                setDialogueWithRevert("Note deleted - exited focus mode", setDialogueText);
+            }
+        }
+    }, [worldData, isFocusMode, focusRegion, setFocusMode, exitFocusMode, setDialogueText]);
 
     // === Ambient Text Compilation System ===
     const [compiledTextCache, setCompiledTextCache] = useState<{ [lineY: number]: string }>({});
@@ -3469,6 +3544,13 @@ export function useWorldEngine({
         if (key === 'Escape' && isMoveMode) {
             exitMoveMode();
             setDialogueWithRevert("Move mode disabled", setDialogueText);
+            return true;
+        }
+
+        // === Focus Mode Exit ===
+        if (key === 'Escape' && isFocusMode) {
+            exitFocusMode();
+            setDialogueWithRevert("Exited focus mode", setDialogueText);
             return true;
         }
 
@@ -9897,6 +9979,40 @@ export function useWorldEngine({
                 setViewOffset({ x: newViewOffsetX, y: newViewOffsetY });
                 return;
             }
+            // Focus mode zoom
+            if (isFocusMode && focusRegion) {
+                const worldPointBeforeZoom = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
+                const delta = deltaY * ZOOM_SENSITIVITY;
+                let newZoom = zoomLevel * (1 - delta);
+
+                // Calculate smart zoom bounds
+                const regionWidth = focusRegion.endX - focusRegion.startX + 1;
+                const regionHeight = focusRegion.endY - focusRegion.startY + 1;
+                const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
+                const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
+                const { width: baseCharWidth, height: baseCharHeight } = getEffectiveCharDims(1.0);
+
+                // Fit zoom based on most constraining dimension
+                const fitZoomWidth = viewportWidth / (regionWidth * baseCharWidth);
+                const fitZoomHeight = viewportHeight / (regionHeight * baseCharHeight);
+                const fitZoom = Math.min(fitZoomWidth, fitZoomHeight);
+
+                // Allow zoom from 50% to 300% of fit (more range than fullscreen)
+                const minZoom = Math.max(MIN_ZOOM, fitZoom * 0.5);
+                const maxZoom = Math.min(MAX_ZOOM, fitZoom * 3.0);
+                newZoom = Math.min(Math.max(newZoom, minZoom), maxZoom);
+
+                const { width: effectiveWidthAfter, height: effectiveHeightAfter } = getEffectiveCharDims(newZoom);
+                if (effectiveWidthAfter === 0 || effectiveHeightAfter === 0) return;
+
+                // Keep mouse point fixed during zoom
+                const newViewOffsetX = worldPointBeforeZoom.x - (canvasRelativeX / effectiveWidthAfter);
+                const newViewOffsetY = worldPointBeforeZoom.y - (canvasRelativeY / effectiveHeightAfter);
+
+                setZoomLevel(newZoom);
+                setViewOffset({ x: newViewOffsetX, y: newViewOffsetY });
+                return;
+            }
 
             const worldPointBeforeZoom = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
             const delta = deltaY * ZOOM_SENSITIVITY;
@@ -9946,11 +10062,45 @@ export function useWorldEngine({
                         y: Math.max(minY, newY)
                     };
                 });
+            }
+            // Focus mode scrolling
+            else if (isFocusMode && focusRegion) {
+                const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
+                const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
+                const viewportWidthInChars = viewportWidth / effectiveCharWidth;
+                const viewportHeightInChars = viewportHeight / effectiveCharHeight;
+
+                const regionWidth = focusRegion.endX - focusRegion.startX + 1;
+                const regionHeight = focusRegion.endY - focusRegion.startY + 1;
+
+                setViewOffset(prev => {
+                    let newX = prev.x + deltaWorldX;
+                    let newY = prev.y + deltaWorldY;
+
+                    // Apply same constraints as handlePanMove
+                    if (regionWidth <= viewportWidthInChars) {
+                        newX = focusRegion.startX - (viewportWidthInChars - regionWidth) / 2;
+                    } else {
+                        const minX = focusRegion.startX;
+                        const maxX = focusRegion.endX - viewportWidthInChars + 1;
+                        newX = Math.max(minX, Math.min(maxX, newX));
+                    }
+
+                    if (regionHeight <= viewportHeightInChars) {
+                        newY = focusRegion.startY - (viewportHeightInChars - regionHeight) / 2;
+                    } else {
+                        const minY = focusRegion.startY;
+                        const maxY = focusRegion.endY - viewportHeightInChars + 1;
+                        newY = Math.max(minY, Math.min(maxY, newY));
+                    }
+
+                    return { x: newX, y: newY };
+                });
             } else {
                 setViewOffset(prev => ({ x: prev.x + deltaWorldX, y: prev.y + deltaWorldY }));
             }
         }
-    }, [zoomLevel, viewOffset, screenToWorld, getEffectiveCharDims, findListAt, worldData, isFullscreenMode, fullscreenRegion]);
+    }, [zoomLevel, viewOffset, screenToWorld, getEffectiveCharDims, findListAt, worldData, isFullscreenMode, fullscreenRegion, isFocusMode, focusRegion]);
 
     const handlePanStart = useCallback((clientX: number, clientY: number): PanStartInfo | null => {
         isPanningRef.current = true;
@@ -9998,6 +10148,42 @@ export function useWorldEngine({
             const minY = fullscreenRegion.startY - verticalMargin;
             newOffset.y = Math.max(minY, newOffset.y);
         }
+        // Apply focus mode constraints
+        else if (isFocusMode && focusRegion) {
+            const { width: effectiveCharWidth, height: effectiveCharHeight } =
+                getEffectiveCharDims(zoomLevel);
+            const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
+            const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
+            const viewportWidthInChars = viewportWidth / effectiveCharWidth;
+            const viewportHeightInChars = viewportHeight / effectiveCharHeight;
+
+            const regionWidth = focusRegion.endX - focusRegion.startX + 1;
+            const regionHeight = focusRegion.endY - focusRegion.startY + 1;
+
+            // No margins for focus mode - strict bounds
+
+            // Constrain X
+            if (regionWidth <= viewportWidthInChars) {
+                // Region fits - center it and lock
+                newOffset.x = focusRegion.startX - (viewportWidthInChars - regionWidth) / 2;
+            } else {
+                // Region larger - allow panning within bounds
+                const minX = focusRegion.startX;
+                const maxX = focusRegion.endX - viewportWidthInChars + 1;
+                newOffset.x = Math.max(minX, Math.min(maxX, newOffset.x));
+            }
+
+            // Constrain Y
+            if (regionHeight <= viewportHeightInChars) {
+                // Region fits - center it and lock
+                newOffset.y = focusRegion.startY - (viewportHeightInChars - regionHeight) / 2;
+            } else {
+                // Region larger - allow panning within bounds
+                const minY = focusRegion.startY;
+                const maxY = focusRegion.endY - viewportHeightInChars + 1;
+                newOffset.y = Math.max(minY, Math.min(maxY, newOffset.y));
+            }
+        }
 
         // Track viewport history with throttling to prevent infinite loops
         if (typeof window !== 'undefined' && effectiveCharWidth > 0 && effectiveCharHeight > 0) {
@@ -10009,7 +10195,7 @@ export function useWorldEngine({
         }
 
         return newOffset;
-    }, [zoomLevel, getEffectiveCharDims, viewOffset, isFullscreenMode, fullscreenRegion]);
+    }, [zoomLevel, getEffectiveCharDims, viewOffset, isFullscreenMode, fullscreenRegion, isFocusMode, focusRegion]);
 
     const handlePanEnd = useCallback((newOffset: Point): void => {
         if (isPanningRef.current) {

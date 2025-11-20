@@ -74,6 +74,15 @@ export interface ModeState {
         startY: number;
         endY?: number; // For lists/finite bounds
     };
+    isFocusMode: boolean; // Whether focus mode is active (constrained to note or selection)
+    focusRegion?: { // The region to constrain viewport to in focus mode
+        type: 'selection' | 'note';
+        key?: string; // Note key if focusing on note
+        startX: number;
+        endX: number;
+        startY: number;
+        endY: number;
+    };
     isFaceDetectionEnabled: boolean; // Whether face-piloted geometry is active
     faceOrientation?: { // Face rotation and expression data from MediaPipe
         rotX: number;
@@ -135,13 +144,13 @@ const READ_ONLY_COMMANDS = ['signin', 'share'];
 // Commands organized by category for logical ordering
 const AVAILABLE_COMMANDS = [
     // Navigation & View
-    'nav', 'search', 'cam', 'indent', 'zoom', 'map',
+    'nav', 'search', 'cam', 'indent', 'zoom', 'map', 'full', 'focus',
     // Content Creation
     'chip', 'task', 'link', 'pack', 'clip', 'upload', 'pattern', 'connect',
     // Special
     'mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help',
     // Styling & Display
-    'bg', 'text', 'font', 'style',
+    'bg', 'text', 'font', 'style', 'display',
     // State Management
     'state', 'random', 'clear', 'replay',
     // Sharing & Publishing
@@ -154,10 +163,10 @@ const AVAILABLE_COMMANDS = [
 
 // Category mapping for visual organization
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
-    'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map'],
+    'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map', 'full', 'focus'],
     'create': ['chip', 'task', 'link', 'pack', 'clip', 'upload'],
     'special': ['mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help'],
-    'style': ['bg', 'text', 'font', 'style'],
+    'style': ['bg', 'text', 'font', 'style', 'display'],
     'state': ['state', 'random', 'clear', 'replay'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
     'account': ['signin', 'signout', 'account', 'upgrade'],
@@ -178,6 +187,8 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'map': 'Generate a procedural map of ephemeral labels around your viewport. Creates a tasteful exploration terrain with temporary waypoints that disappear when you press Escape.',
     'cam': 'Control camera behavior. Use /cam focus to enable focus mode, which smoothly follows your cursor. Use /cam default to return to normal panning.',
     'indent': 'Toggle text indentation. This affects how new lines are indented when you press Enter, helping you organize thoughts hierarchically.',
+    'full': 'Enter fullscreen mode for lists. Position cursor inside a list, type /full to constrain viewport to list bounds with generous margins. Press Escape or /full again to exit.',
+    'focus': 'Constrain viewport to a region. Position cursor in a note OR make a selection, then type /focus. Viewport locks to region bounds (strict, no margins). Great for reliable rendering. Press Escape to exit.',
     'chip': 'Create a spatial chip at your current selection. Type /chip \'text\' [color]. Defaults to current text color (accent). Custom colors: /chip \'text\' crimson. Chips show as colored cells with cutout text.',
     'task': 'Create a toggleable task from selected text. Select text, then type /task [color]. Click the highlighted task to toggle completion (adds strikethrough). Click again to un-complete it.',
     'link': 'Create a clickable link from selected text. Select text, then type /link [url]. Click the underlined link to open the URL in a new tab. URLs are auto-detected when pasted.',
@@ -287,6 +298,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         artifactType: 'images', // Default to image artifacts
         isFullscreenMode: false, // Fullscreen mode not active initially
         fullscreenRegion: undefined, // No fullscreen region initially
+        isFocusMode: false, // Focus mode not active initially
+        focusRegion: undefined, // No focus region initially
         isFaceDetectionEnabled: false, // Face detection not active initially
         faceOrientation: undefined, // No face orientation initially
     });
@@ -2413,6 +2426,86 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             };
         }
 
+        if (commandToExecute.startsWith('focus')) {
+            // /focus command - constrain viewport to note or selection bounds
+            const cursorPos = commandState.commandStartPos;
+
+            // OPTION 1: Try to find note at cursor position
+            let foundRegion = false;
+
+            for (const key in worldData) {
+                if (key.startsWith('note_')) {
+                    try {
+                        const noteData = JSON.parse(worldData[key] as string);
+                        const { startX, endX, startY, endY } = noteData;
+
+                        // Check if cursor is within note bounds
+                        if (cursorPos.x >= startX && cursorPos.x <= endX &&
+                            cursorPos.y >= startY && cursorPos.y <= endY) {
+
+                            // Focus on this note
+                            setModeState(prev => ({
+                                ...prev,
+                                isFocusMode: true,
+                                focusRegion: {
+                                    type: 'note',
+                                    key: key,
+                                    startX,
+                                    endX,
+                                    startY,
+                                    endY
+                                }
+                            }));
+
+                            setDialogueText?.("Focus mode: note - press Esc to exit");
+                            foundRegion = true;
+                            break;
+                        }
+                    } catch (e) {
+                        // Skip invalid note data
+                    }
+                }
+            }
+
+            // OPTION 2: If no note found, try selection
+            if (!foundRegion) {
+                const normalized = getNormalizedSelection?.();
+
+                if (!normalized) {
+                    setDialogueText?.("Position cursor in a note or make a selection first");
+                    clearCommandState();
+                    return null;
+                }
+
+                const hasSelection = (normalized.startX !== normalized.endX) ||
+                                    (normalized.startY !== normalized.endY);
+
+                if (!hasSelection) {
+                    setDialogueText?.("Selection must span more than one cell");
+                    clearCommandState();
+                    return null;
+                }
+
+                // Focus on selection
+                setModeState(prev => ({
+                    ...prev,
+                    isFocusMode: true,
+                    focusRegion: {
+                        type: 'selection',
+                        startX: normalized.startX,
+                        endX: normalized.endX,
+                        startY: normalized.startY,
+                        endY: normalized.endY
+                    }
+                }));
+
+                setDialogueText?.("Focus mode: selection - press Esc to exit");
+            }
+
+            clearCommandState();
+            return null;
+        }
+
         if (commandToExecute.startsWith('list')) {
             // Clear command mode
             clearCommandState();
@@ -3586,6 +3679,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             setModeState(prev => ({ ...prev, isFullscreenMode: enabled, fullscreenRegion: region })),
         exitFullscreenMode: () =>
             setModeState(prev => ({ ...prev, isFullscreenMode: false, fullscreenRegion: undefined })),
+        isFocusMode: modeState.isFocusMode,
+        focusRegion: modeState.focusRegion,
+        setFocusMode: (enabled: boolean, region?: ModeState['focusRegion']) =>
+            setModeState(prev => ({ ...prev, isFocusMode: enabled, focusRegion: region })),
+        exitFocusMode: () =>
+            setModeState(prev => ({ ...prev, isFocusMode: false, focusRegion: undefined })),
         isFaceDetectionEnabled: modeState.isFaceDetectionEnabled,
         faceOrientation: modeState.faceOrientation,
         setFaceDetectionEnabled: (enabled: boolean) =>
