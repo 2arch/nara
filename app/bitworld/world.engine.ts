@@ -3004,13 +3004,34 @@ export function useWorldEngine({
         let newWorldData = { ...worldData };
         let deleted = false;
 
-        // Delete single characters within selection
-        for (let y = selection.startY; y <= selection.endY; y++) {
+        // Delete characters within selection (including multi-cell characters)
+        // Scan selection range AND check below the selection for tall characters
+        // Characters are bottom-anchored, so a char at Y=10 (1x6) spans Y=5..10.
+        // If selection is Y=5..8, we need to check Y=8..8+MaxHeight for anchors.
+        const SCAN_LOOKAHEAD = 20; // Reasonable max height for characters
+        const effectiveMaxY = selection.endY + SCAN_LOOKAHEAD;
+
+        for (let y = selection.startY; y <= effectiveMaxY; y++) {
             for (let x = selection.startX; x <= selection.endX; x++) {
                 const key = `${x},${y}`;
-                if (newWorldData[key]) {
-                    delete newWorldData[key];
-                    deleted = true;
+                const data = newWorldData[key];
+                
+                if (data) {
+                    // If within selection bounds, delete immediately
+                    if (y <= selection.endY) {
+                        delete newWorldData[key];
+                        deleted = true;
+                    } else if (!isImageData(data)) {
+                        // If below selection, check if this character's height extends UP into the selection
+                        const scale = getCharScale(data);
+                        const topY = y - (scale.h - 1);
+                        
+                        // If the top of this character is inside the selection (or above the bottom of selection)
+                        if (topY <= selection.endY) {
+                             delete newWorldData[key];
+                             deleted = true;
+                        }
+                    }
                 }
             }
         }

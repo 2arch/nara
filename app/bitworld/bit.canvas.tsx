@@ -5123,7 +5123,7 @@ Camera & Viewport Controls:
                 const blockMinX = textBlock ? textBlock.minX : minX;
                 const blockMaxX = textBlock ? textBlock.maxX : maxX;
 
-                for (let worldY = minY; worldY <= maxY; worldY += GRID_CELL_SPAN) {
+                for (let worldY = minY; worldY <= maxY; worldY++) {
                     const isFirstLine = worldY === Math.floor(start.y);
                     const isLastLine = worldY === Math.floor(end.y);
 
@@ -5135,6 +5135,7 @@ Camera & Viewport Controls:
                     for (let worldX = blockMinX; worldX <= blockMaxX; worldX++) {
                         const key = `${worldX},${worldY}`;
                         const data = engine.worldData[key];
+                        // Check if there's a character anchored here
                         const hasChar = data && !engine.isImageData(data) && engine.getCharacter(data).trim() !== '';
 
                         if (hasChar) {
@@ -5159,35 +5160,86 @@ Camera & Viewport Controls:
                         }
 
                         // Draw a continuous rectangle for this line segment
-                        // Get top cell position (worldY - 1) to span full character height
-                        const startScreenPos = engine.worldToScreen(drawStartX, worldY, currentZoom, currentOffset);
-                        const topScreenPos = engine.worldToScreen(drawStartX, worldY - 1, currentZoom, currentOffset);
-                        const endScreenPos = engine.worldToScreen(drawEndX + 1, worldY, currentZoom, currentOffset);
-
-                        if (startScreenPos.x < cssWidth && endScreenPos.x >= 0 &&
-                            topScreenPos.y >= -effectiveCharHeight && startScreenPos.y <= cssHeight) {
-                            ctx.fillRect(
-                                startScreenPos.x,
-                                topScreenPos.y,
-                                endScreenPos.x - startScreenPos.x,
-                                effectiveCharHeight * GRID_CELL_SPAN
-                            );
+                        // Get top cell position using character scale
+                        // Since we scan line by line, we might find chars with different scales on the same line.
+                        // Ideally we should draw each char individually? No, text selection implies continuous block.
+                        // We'll assume for the "line highlight" we use the max scale height on this line?
+                        // Or just default to drawing the block for each character?
+                        // Drawing one big rect is cleaner visually.
+                        // Let's iterate and draw individual character highlights to be precise with scales.
+                        
+                        for (let x = drawStartX; x <= drawEndX; x++) {
+                             const key = `${x},${worldY}`;
+                             const data = engine.worldData[key];
+                             if (data && !engine.isImageData(data)) {
+                                 const scale = getCharScale(data);
+                                 const bottomScreenPos = engine.worldToScreen(x, worldY, currentZoom, currentOffset);
+                                 const topScreenPos = engine.worldToScreen(x, worldY - (scale.h - 1), currentZoom, currentOffset);
+                                 
+                                 if (bottomScreenPos.x < cssWidth && bottomScreenPos.x + effectiveCharWidth >= 0 &&
+                                     topScreenPos.y >= -effectiveCharHeight && topScreenPos.y < cssHeight + effectiveCharHeight) {
+                                     ctx.fillRect(
+                                         topScreenPos.x,
+                                         topScreenPos.y,
+                                         effectiveCharWidth * scale.w,
+                                         effectiveCharHeight * scale.h
+                                     );
+                                 }
+                             } else {
+                                 // Empty space between chars (if any) - assume 1x1 or match neighbors?
+                                 // Text aware selection usually skips empty space unless it's a space char.
+                                 // If it's a space char, it has data.
+                                 // If it's truly empty, we shouldn't draw?
+                                 // But visual continuity is nice.
+                                 // Let's stick to drawing only where data exists for "Text Aware".
+                             }
                         }
                     }
                 }
             } else {
                 // Square/block selection mode: fill all cells in the rectangular area
-                for (let worldY = minY; worldY <= maxY; worldY += GRID_CELL_SPAN) {
-                    for (let worldX = minX; worldX <= maxX; worldX++) {
-                        // Get both bottom and top positions to span full character height
-                        const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                        const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
-
-                        // Only draw if cell is visible on screen
-                        if (bottomScreenPos.x >= -effectiveCharWidth && bottomScreenPos.x <= cssWidth &&
-                            topScreenPos.y >= -effectiveCharHeight && bottomScreenPos.y <= cssHeight) {
-                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
-                        }
+                // Simply draw the bounding box of the selection
+                // This handles all scales implicitly because it just highlights the region
+                
+                // Convert world bounds to screen bounds
+                // Top-left is (minX, minY-ish?) 
+                // Actually, selection is in world coordinates (cells).
+                // We want to highlight cells minX..maxX and minY..maxY.
+                // Since Y coordinates are bottom-anchored for characters,
+                // a selection from y=0 to y=2 covers cells at y=0, y=1, y=2.
+                
+                // Iterate and draw 1x1 blocks for maximum precision with mixed scales
+                // Optimization: Draw strips?
+                // For box selection, we just want to highlight the grid.
+                
+                for (let worldY = minY; worldY <= maxY; worldY++) {
+                    const startScreenPos = engine.worldToScreen(minX, worldY, currentZoom, currentOffset);
+                    const endScreenPos = engine.worldToScreen(maxX + 1, worldY, currentZoom, currentOffset);
+                    
+                    // Draw 1-cell high strip
+                    // Note: worldToScreen returns top-left of the cell? 
+                    // No, logic elsewhere uses worldY - 1 for top.
+                    // Let's check worldToScreen again. 
+                    // worldToScreen(x, y) -> (x*w, y*h).
+                    // If y=0, screenY=0.
+                    // If character is at y=0 (bottom), it occupies y=0 and y=-1?
+                    // "Characters span 2 vertically-stacked physical cells"
+                    // "Characters always occupy 2 vertically-stacked physical cells"
+                    // "Characters at worldY render at worldY-1 (top cell)"
+                    // So if I select y=10, I select the cell at y=10.
+                    // If a character is at y=10, it renders at y=9 and y=10.
+                    // My selection highlights y=10.
+                    // If I want to highlight the character, I should probably select y=9 and y=10?
+                    // Standard box selection usually just highlights the abstract grid.
+                    // Let's draw 1x1 cells.
+                    
+                    if (startScreenPos.y >= -effectiveCharHeight && startScreenPos.y <= cssHeight) {
+                        ctx.fillRect(
+                            startScreenPos.x,
+                            startScreenPos.y,
+                            endScreenPos.x - startScreenPos.x,
+                            effectiveCharHeight // 1 cell high
+                        );
                     }
                 }
             }
