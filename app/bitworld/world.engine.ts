@@ -374,6 +374,16 @@ export interface WorldEngine {
     // Spatial indexing for efficient viewport-based rendering
     spatialIndex: React.MutableRefObject<Map<string, Set<string>>>;
     queryVisibleEntities: (startWorldX: number, startWorldY: number, endWorldX: number, endWorldY: number) => Set<string>;
+    // Focus mode for constrained viewport
+    isFocusMode: boolean;
+    focusRegion?: {
+        type: 'selection' | 'note';
+        key?: string;
+        startX: number;
+        endX: number;
+        startY: number;
+        endY: number;
+    };
 }
 
 // --- Hook Input ---
@@ -7594,6 +7604,11 @@ export function useWorldEngine({
             
             logger.debug('Final targetIndent after viewport check:', targetIndent);
 
+            // Focus mode: constrain indent to focus region bounds
+            if (isFocusMode && focusRegion && targetIndent !== undefined && targetIndent !== null) {
+                targetIndent = Math.max(focusRegion.startX, Math.min(focusRegion.endX, targetIndent));
+            }
+
             nextCursorPos.y = cursorPos.y + GRID_CELL_SPAN; // Move down by grid cell span
             // Failsafe: if targetIndent is NaN, undefined, or null, use previous cursor X position
             if (targetIndent !== undefined && targetIndent !== null && !isNaN(targetIndent)) {
@@ -10874,5 +10889,8 @@ export function useWorldEngine({
         // Spatial indexing
         spatialIndex: spatialIndexRef,
         queryVisibleEntities,
+        // Focus mode
+        isFocusMode,
+        focusRegion,
     };
 }

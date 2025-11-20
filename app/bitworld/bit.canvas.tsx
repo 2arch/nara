@@ -3264,6 +3264,14 @@ Camera & Viewport Controls:
                     continue; // Skip chips outside viewport
                 }
 
+                // Focus mode: skip chips outside focus region
+                if (engine.isFocusMode && engine.focusRegion) {
+                    if (chipMaxX < engine.focusRegion.startX || chipMinX > engine.focusRegion.endX ||
+                        chipMaxY < engine.focusRegion.startY || chipMinY > engine.focusRegion.endY) {
+                        continue;
+                    }
+                }
+
                 // Type-based rendering
                 switch (type) {
                     case 'task': {
@@ -3760,6 +3768,14 @@ Camera & Viewport Controls:
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10);
             const worldY = parseInt(yStr, 10);
+
+            // Focus mode: skip rendering content outside focus region
+            if (engine.isFocusMode && engine.focusRegion) {
+                if (worldX < engine.focusRegion.startX || worldX > engine.focusRegion.endX ||
+                    worldY < engine.focusRegion.startY || worldY > engine.focusRegion.endY) {
+                    continue;
+                }
+            }
 
             // Skip positions that are currently being used for IME composition preview
             if (engine.isComposing && engine.compositionStartPos && engine.compositionText) {
@@ -4584,6 +4600,13 @@ Camera & Viewport Controls:
             if (key.startsWith('note_')) {
                 const note = parseNoteFromWorldData(key, engine.worldData[key]);
                 if (note) {
+                    // Focus mode: skip notes outside focus region
+                    if (engine.isFocusMode && engine.focusRegion) {
+                        if (note.endX < engine.focusRegion.startX || note.startX > engine.focusRegion.endX ||
+                            note.endY < engine.focusRegion.startY || note.startY > engine.focusRegion.endY) {
+                            continue;
+                        }
+                    }
                     renderNote(note, noteRenderCtx);
                 }
             }
