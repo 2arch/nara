@@ -8359,19 +8359,21 @@ export function useWorldEngine({
                         } else {
                         // Check if we're within a note region first
                         const noteRegion = getNoteRegion(worldData, cursorPos);
-                        if (noteRegion && cursorPos.x === noteRegion.startX && cursorPos.y > noteRegion.startY) {
-                            // We're at the start of a line within a note region (but not the first line)
-                            // Reverse wrap: delete last character of previous line and move cursor there
-                            const prevLineY = cursorPos.y - GRID_CELL_SPAN;
-
-                            // Find the rightmost character on the previous line
+                        if (noteRegion && cursorPos.x === noteRegion.startX) {
+                            // We're at the start of a line within a note region
+                            // Check if there's a previous line in content space (not just viewport space)
                             const containingNote = findTextNoteContainingPoint(cursorPos.x, cursorPos.y, worldData);
                             if (containingNote && containingNote.data.data) {
                                 const noteData = containingNote.data;
                                 const currentScrollOffset = noteData.scrollOffset || 0;
-                                // Calculate current line in content space, then subtract to get previous line
+                                // Calculate current line in content space
                                 const currentRelativeY = (cursorPos.y - noteData.startY) + currentScrollOffset;
-                                const prevRelativeY = currentRelativeY - GRID_CELL_SPAN;
+
+                                // Only do reverse wrap if there's content above (in content space)
+                                if (currentRelativeY >= GRID_CELL_SPAN) {
+                                    // Reverse wrap: delete last character of previous line and move cursor there
+                                    const prevLineY = cursorPos.y - GRID_CELL_SPAN;
+                                    const prevRelativeY = currentRelativeY - GRID_CELL_SPAN;
 
                                 // Scan from right to left to find the last character on previous line
                                 let lastCharX = -1;
@@ -8409,12 +8411,9 @@ export function useWorldEngine({
                                     nextCursorPos.x = noteRegion.startX;
                                     nextCursorPos.y = prevLineY;
                                 }
-                            } else {
-                                // Fallback: move to end of previous line without deleting
-                                nextCursorPos.x = noteRegion.endX + 1;
-                                nextCursorPos.y = prevLineY;
-                            }
-                            moved = true;
+                                moved = true;
+                                } // End of currentRelativeY >= GRID_CELL_SPAN check
+                            } // End of containingNote check
                         } else if (noteRegion && cursorPos.x > noteRegion.startX) {
                             // We're within a note region but not at the start - do normal backspace
                             const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
