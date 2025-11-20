@@ -8390,9 +8390,12 @@ export function useWorldEngine({
                                     delete noteData.data[relativeDeleteKey];
 
                                     // Check if we need to scroll up (if cursor is at top of viewport in scroll mode)
+                                    let cursorYAfterDelete = prevLineY;
                                     if (cursorPos.y === noteRegion.startY && currentScrollOffset > 0) {
                                         // Scroll up by one line
                                         noteData.scrollOffset = Math.max(0, currentScrollOffset - GRID_CELL_SPAN);
+                                        // After scrolling, cursor stays at same world Y (now showing previous content line)
+                                        cursorYAfterDelete = cursorPos.y;
                                     }
 
                                     nextWorldData[containingNote.key] = JSON.stringify(noteData);
@@ -8400,7 +8403,7 @@ export function useWorldEngine({
 
                                     // Move cursor to where the deleted character was
                                     nextCursorPos.x = lastCharX;
-                                    nextCursorPos.y = prevLineY;
+                                    nextCursorPos.y = cursorYAfterDelete;
                                 } else {
                                     // No character on previous line, just move cursor to start of previous line
                                     nextCursorPos.x = noteRegion.startX;
