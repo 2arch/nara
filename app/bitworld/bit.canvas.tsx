@@ -3302,18 +3302,24 @@ Camera & Viewport Controls:
 
                                     if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
                                         worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                                        
+                                        // Get scale for this character
+                                        const scale = getCharScale(cellData as any);
+                                        
                                         const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                                        const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+                                        const topScreenPos = engine.worldToScreen(worldX, worldY - (scale.h - 1), currentZoom, currentOffset);
 
                                         // Fill background with task color
                                         ctx.fillStyle = taskColor;
-                                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth * scale.w, effectiveCharHeight * scale.h);
 
                                         // Render character with background color (cutout effect)
                                         const char = engine.getCharacter(cellData as string);
                                         if (char && char.trim() !== '') {
                                             ctx.fillStyle = taskBackground;
-                                            ctx.fillText(char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
+                                            const sx = scale.w;
+                                            const sy = scale.h / 2;
+                                            renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset, sx, sy);
                                         }
                                     }
                                 }
@@ -3352,14 +3358,20 @@ Camera & Viewport Controls:
 
                                 if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
                                     worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                                    
+                                    // Get scale for this character
+                                    const scale = getCharScale(cellData as any);
+                                    
                                     const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                                    const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+                                    const topScreenPos = engine.worldToScreen(worldX, worldY - (scale.h - 1), currentZoom, currentOffset);
 
                                     // Render character from link data
                                     const char = engine.getCharacter(cellData as string);
                                     if (char && char.trim() !== '') {
                                         ctx.fillStyle = linkColor;
-                                        ctx.fillText(char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
+                                        const sx = scale.w;
+                                        const sy = scale.h / 2;
+                                        renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset, sx, sy);
                                     }
                                 }
                             }
@@ -3423,7 +3435,11 @@ Camera & Viewport Controls:
 
                                     if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
                                         worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                                        
+                                        // Get scale for this character
+                                        const scale = getCharScale(cellData as any);
+                                        
+                                        const screenPos = engine.worldToScreen(worldX, worldY - (scale.h - 1), currentZoom, currentOffset);
 
                                         if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
                                             screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
@@ -3431,7 +3447,9 @@ Camera & Viewport Controls:
                                             const char = engine.getCharacter(cellData as string);
                                             if (char && char.trim() !== '') {
                                                 ctx.fillStyle = engine.textColor;
-                                                ctx.fillText(char, screenPos.x, screenPos.y + verticalTextOffset);
+                                                const sx = scale.w;
+                                                const sy = scale.h / 2;
+                                                renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset, sx, sy);
                                             }
                                         }
                                     }
@@ -3531,18 +3549,24 @@ Camera & Viewport Controls:
 
                                     if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
                                         worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                                        
+                                        // Get scale for this character
+                                        const scale = getCharScale(cellData as any);
+                                        
                                         const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                                        const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+                                        const topScreenPos = engine.worldToScreen(worldX, worldY - (scale.h - 1), currentZoom, currentOffset);
 
                                         // Fill background with chip color (spanning GRID_CELL_SPAN cells)
                                         ctx.fillStyle = chipColor;
-                                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth * scale.w, effectiveCharHeight * scale.h);
 
                                         // Render character from chip data with background color (cutout effect)
                                         const char = engine.getCharacter(cellData as string);
                                         if (char) {
                                             ctx.fillStyle = chipBackground;
-                                            ctx.fillText(char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
+                                            const sx = scale.w;
+                                            const sy = scale.h / 2;
+                                            renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset, sx, sy);
                                         }
                                     }
                                 }
@@ -3853,15 +3877,42 @@ Camera & Viewport Controls:
                         ctx.shadowOffsetX = 0;
                         ctx.shadowOffsetY = 0;
                         
-                        // Render character with scaling
-                        // Calculate scale factors relative to standard 1x2 character
-                        // Standard char spans 1 cell width and 2 cell heights
-                        const sx = scale.w;
-                        const sy = scale.h / 2;
+                        // Calculate dynamic font size based on cell dimensions
+                        const charPixelWidth = effectiveCharWidth * scale.w;
+                        const charPixelHeight = effectiveCharHeight * scale.h;
                         
-                        // Render character centered in cell (offset handled by translate in renderText)
-                        // We assume drawX is topScreenPos.x (left edge)
-                        renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset, sx, sy);
+                        // Default to standard size
+                        let fontSize = effectiveFontSize;
+                        let vOffset = verticalTextOffset;
+                        let sx = 1;
+                        let sy = 1;
+
+                        if (scale.w !== 1 || scale.h !== 2) {
+                            // Dynamic sizing for non-standard scales
+                            // Target: font should fit comfortably in cell (approx 70% of smallest dimension)
+                            let targetSize = Math.min(charPixelWidth * 0.8, charPixelHeight * 0.8);
+                            
+                            // Adjust for aspect ratio (e.g. 1x6 cells)
+                            const aspectRatio = charPixelWidth / charPixelHeight;
+                            if (aspectRatio < 0.3) { // Tall/Narrow
+                                 targetSize = charPixelHeight * 0.5;
+                            } else if (aspectRatio > 3.0) { // Wide/Short
+                                targetSize = charPixelWidth * 0.5;
+                            }
+                            
+                            fontSize = targetSize;
+                            ctx.font = `${fontSize}px ${fontFamily}`;
+                            
+                            // Center vertically
+                            vOffset = (charPixelHeight - fontSize) / 2;
+                        } else {
+                            // Standard 1x2 scale - use standard font/offsets
+                            ctx.font = `${effectiveFontSize}px ${fontFamily}`;
+                        }
+                        
+                        // Render character
+                        // Pass 1,1 for scale as we handled it via font size
+                        renderText(ctx, char, topScreenPos.x, topScreenPos.y + vOffset, 1, 1);
                         ctx.shadowBlur = 0;
                     }
                 }

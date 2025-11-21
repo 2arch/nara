@@ -9347,22 +9347,29 @@ export function useWorldEngine({
 
                 // Check if current text style is different from global defaults
                 const hasCustomStyle = currentTextStyle.color !== textColor || currentTextStyle.background !== undefined;
+                const hasCustomScale = currentScale.w !== 1 || currentScale.h !== 2;
 
                 // Prepare character data
                 let charData: string | StyledCharacter;
-                if (hasCustomStyle) {
-                    // Store styled character (filter out undefined values for Firebase)
-                    const style: { color?: string; background?: string } = {
-                        color: currentTextStyle.color
+                if (hasCustomStyle || hasCustomScale) {
+                    // Store styled/scaled character (filter out undefined values for Firebase)
+                    const styledChar: StyledCharacter = {
+                        char: key
                     };
-                    if (currentTextStyle.background !== undefined) {
-                        style.background = currentTextStyle.background;
+
+                    if (hasCustomStyle) {
+                        styledChar.style = {
+                            color: currentTextStyle.color
+                        };
+                        if (currentTextStyle.background !== undefined) {
+                            styledChar.style.background = currentTextStyle.background;
+                        }
                     }
 
-                    const styledChar: StyledCharacter = {
-                        char: key,
-                        style: style
-                    };
+                    if (hasCustomScale) {
+                        styledChar.scale = { ...currentScale };
+                    }
+
                     charData = styledChar;
                 } else {
                     // Store plain character (backward compatibility)
@@ -10520,10 +10527,32 @@ export function useWorldEngine({
     const placeCharacter = useCallback((char: string, x: number, y: number): void => {
         if (char.length !== 1) return; // Only handle single characters
         const key = `${x},${y}`;
+        
+        // Check for custom scale/style
+        const hasCustomStyle = currentTextStyle.color !== textColor || currentTextStyle.background !== undefined;
+        const hasCustomScale = currentScale.w !== 1 || currentScale.h !== 2;
+        
+        let charData: string | StyledCharacter = char;
+        
+        if (hasCustomStyle || hasCustomScale) {
+            const styledChar: StyledCharacter = { char };
+            
+            if (hasCustomStyle) {
+                styledChar.style = { color: currentTextStyle.color };
+                if (currentTextStyle.background) styledChar.style.background = currentTextStyle.background;
+            }
+            
+            if (hasCustomScale) {
+                styledChar.scale = { ...currentScale };
+            }
+            
+            charData = styledChar;
+        }
+
         const newWorldData = { ...worldData };
-        newWorldData[key] = char;
+        newWorldData[key] = charData;
         setWorldData(newWorldData);
-    }, [worldData]);
+    }, [worldData, currentScale, currentTextStyle, textColor]);
 
     const batchMoveCharacters = useCallback((moves: Array<{fromX: number, fromY: number, toX: number, toY: number, char: string}>): void => {
         const newWorldData = { ...worldData };
