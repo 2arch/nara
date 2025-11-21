@@ -3123,7 +3123,7 @@ function hash2(p: {x: number, y: number}): {x: number, y: number} {
     };
 }
 
-function getVoronoi(x: number, y: number, scale: number): boolean {
+function getVoronoiEdge(x: number, y: number, scale: number, thickness: number = 0.1): number {
     // Coordinate scaling
     const px = x * scale;
     const py = y * scale; 
@@ -3133,7 +3133,8 @@ function getVoronoi(x: number, y: number, scale: number): boolean {
     const fx = px - ix;
     const fy = py - iy;
 
-    let minDist = 8.0;
+    let f1 = 100.0;
+    let f2 = 100.0;
 
     for(let j = -1; j <= 1; j++) {
         for(let i = -1; i <= 1; i++) {
@@ -3141,25 +3142,35 @@ function getVoronoi(x: number, y: number, scale: number): boolean {
             const neighborY = j;
             const p = hash2({x: ix + neighborX, y: iy + neighborY});
             
-            // Static points
-            const staticX = p.x;
-            const staticY = p.y;
+            // Point in neighbor cell (p is 0..1)
+            const pointX = neighborX + p.x;
+            const pointY = neighborY + p.y;
 
-            const diffX = neighborX + staticX - fx;
-            const diffY = neighborY + staticY - fy;
+            const diffX = pointX - fx;
+            const diffY = pointY - fy;
             
-            // Manhattan Distance for "Tech" look
-            const dist = Math.abs(diffX) + Math.abs(diffY);
+            // Euclidean Distance for natural "Cell" look
+            const dist = Math.sqrt(diffX*diffX + diffY*diffY);
 
-            if(dist < minDist) minDist = dist;
+            if(dist < f1) {
+                f2 = f1;
+                f1 = dist;
+            } else if(dist < f2) {
+                f2 = dist;
+            }
         }
     }
     
-    // Threshold for Manhattan distance edges
-    // Center is 0, Edge is higher. 
-    // For Manhattan, max dist in a cell is 1.0 (corner). Center to edge is 0.5.
-    // Let's try > 0.9 for thin lines
-    return minDist > 0.9; 
+    // Edge detection: difference between two closest distances
+    // Small difference = close to boundary
+    const d = f2 - f1;
+    
+    // Inverse smoothstep for edge intensity
+    // Returns 1.0 at edge (d=0), 0.0 when d >= thickness
+    if (d < thickness) {
+        return 1.0 - (d / thickness);
+    }
+    return 0.0; 
 }
 
         // === LAYER 0: BACKGROUND ===
@@ -3189,8 +3200,7 @@ function getVoronoi(x: number, y: number, scale: number): boolean {
                             screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
                             
                             // 1. Global Voronoi (Cyan) - Aligned with bit grid
-                            // Use worldX/Y directly. Scale adjusted for Manhattan
-                            const isGlobal = getVoronoi(worldX, worldY * 0.5, 0.1 * monogram.options.complexity);
+                            const globalEdge = getVoronoiEdge(worldX, worldY * 0.5, 0.1 * monogram.options.complexity, 0.1);
 
                             // 2. Local Voronoi (Magenta) - Screen Space Fixed
                             // Use screen grid coordinates derived from world-to-screen transform
@@ -3198,17 +3208,16 @@ function getVoronoi(x: number, y: number, scale: number): boolean {
                             const screenGridX = Math.floor(screenPos.x / effectiveCharWidth);
                             const screenGridY = Math.floor(screenPos.y / effectiveCharHeight);
                             
-                            const isLocal = getVoronoi(screenGridX, screenGridY, 0.15 * monogram.options.complexity);
+                            const localEdge = getVoronoiEdge(screenGridX, screenGridY, 0.15 * monogram.options.complexity, 0.15);
 
-                            if (isGlobal) {
+                            if (globalEdge > 0) {
                                 ctx.fillStyle = '#00FFFF'; // Cyan
-                                ctx.globalAlpha = 0.6; // Slightly more transparent
+                                ctx.globalAlpha = globalEdge * 0.8;
                                 ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
                             }
-                            if (isLocal) {
+                            if (localEdge > 0) {
                                 ctx.fillStyle = '#FF00FF'; // Magenta
-                                ctx.globalAlpha = 0.6;
-                                // Overlap blending
+                                ctx.globalAlpha = localEdge * 0.8;
                                 ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
                             }
                             ctx.globalAlpha = 1.0;
