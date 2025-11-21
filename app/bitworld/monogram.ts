@@ -5,7 +5,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 
-export type MonogramMode = 'clear' | 'perlin' | 'nara';
+export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'voronoi';
 
 // Trail position interface for interactive monogram trails
 interface MonogramTrailPosition {

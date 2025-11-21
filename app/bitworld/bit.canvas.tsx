@@ -3111,9 +3111,59 @@ Camera & Viewport Controls:
         // Layer 3: UI - Command menu, cursor, dialogues, nav
         // ========================================================================
 
+// Helper functions for CPU-based Voronoi
+function hash2(p: {x: number, y: number}): {x: number, y: number} {
+    // Simple hash function to replace shader hash
+    // Using simple sin-based pseudo-randomness
+    const dot1 = p.x * 127.1 + p.y * 311.7;
+    const dot2 = p.x * 269.5 + p.y * 183.3;
+    return {
+        x: Math.abs(Math.sin(dot1) * 43758.5453) % 1,
+        y: Math.abs(Math.sin(dot2) * 43758.5453) % 1
+    };
+}
+
+function getVoronoi(x: number, y: number, time: number, scale: number): boolean {
+    // Coordinate scaling
+    const px = x * scale;
+    const py = y * scale; // Y is often scaled by 0.5 in our grid, but let's keep square for now or match shader (y*0.5)
+    
+    const ix = Math.floor(px);
+    const iy = Math.floor(py);
+    const fx = px - ix;
+    const fy = py - iy;
+
+    let minDist = 8.0;
+
+    for(let j = -1; j <= 1; j++) {
+        for(let i = -1; i <= 1; i++) {
+            const neighborX = i;
+            const neighborY = j;
+            const p = hash2({x: ix + neighborX, y: iy + neighborY});
+            
+            // Animate points
+            const animX = 0.5 + 0.5 * Math.sin(time * 0.001 + 6.2831 * p.x);
+            const animY = 0.5 + 0.5 * Math.sin(time * 0.001 + 6.2831 * p.y);
+
+            const diffX = neighborX + animX - fx;
+            const diffY = neighborY + animY - fy;
+            const dist = Math.sqrt(diffX * diffX + diffY * diffY);
+
+            if(dist < minDist) minDist = dist;
+        }
+    }
+    
+    // Threshold for edges (cellular look)
+    // Matches the smoothstep(0.4, 0.45, min_dist) from shader logic roughly
+    // We return true if it's an "edge" (high value) or "cell" (low value)?
+    // Shader: smoothstep(0.4, 0.45, min_dist) -> 0 near center, 1 away.
+    // So > 0.4 is "wall".
+    return minDist > 0.4;
+}
+
         // === LAYER 0: BACKGROUND ===
 
-        // === Render Monogram Background (GPU-Accelerated Bitmap) ===
+        // === Render Monogram Background (GPU-Accelerated Bitmap or CPU Voronoi) ===
         if (monogram.options.enabled) {
             let renderedCount = 0;
             let sampleCount = 0;
@@ -3124,39 +3174,77 @@ Camera & Viewport Controls:
             const yEnd = Math.ceil(endWorldY);
             const xStart = Math.floor(startWorldX);
             const xEnd = Math.ceil(endWorldX);
+            const time = Date.now();
 
             for (let worldY = yStart; worldY <= yEnd; worldY++) {
                 for (let worldX = xStart; worldX <= xEnd; worldX++) {
-                    sampleCount++;
-                    // Sample intensity from GPU-computed chunk (already includes character glows)
-                    const intensity = monogram.sampleAt(worldX, worldY);
-
-                    if (intensity === 0) {
-                        zeroIntensityCount++;
-                    }
-
-                    if (intensity <= 0.05) { // Small threshold to skip near-zero values
-                        skippedLowIntensity++;
-                    } else {
+                    
+                    if (monogram.options.mode === 'voronoi') {
+                        // CPU Voronoi Rendering
                         const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
 
                         // Bounds check
                         if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
                             screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                            
+                            // 1. Global Voronoi (Cyan) - Aligned with bit grid
+                            // Use worldX/Y directly. Scale ~0.05
+                            const isGlobal = getVoronoi(worldX, worldY * 0.5, time, 0.05 * monogram.options.complexity);
 
-                            renderedCount++;
-                            // Render perlin noise pattern (GPU already includes character glows in intensity)
-                            ctx.fillStyle = engine.textColor;
-                            ctx.globalAlpha = intensity * 0.5;
-                            ctx.fillRect(
-                                screenPos.x,
-                                screenPos.y,
-                                effectiveCharWidth,
-                                effectiveCharHeight
-                            );
-                            ctx.globalAlpha = 1.0; // Reset alpha
+                            // 2. Local Voronoi (Magenta) - Viewport relative
+                            // Use relative coordinates. Scale ~0.08
+                            // RelX = worldX - currentOffset.x
+                            const relX = worldX - currentOffset.x;
+                            const relY = worldY - currentOffset.y;
+                            const isLocal = getVoronoi(relX, relY * 0.5, time, 0.08 * monogram.options.complexity);
+
+                            if (isGlobal) {
+                                ctx.fillStyle = '#00FFFF'; // Cyan
+                                ctx.globalAlpha = 0.8;
+                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            }
+                            if (isLocal) {
+                                ctx.fillStyle = '#FF00FF'; // Magenta
+                                ctx.globalAlpha = 0.8;
+                                // Overlap blending
+                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            }
+                            ctx.globalAlpha = 1.0;
+                        }
+
+                    } else {
+                        // Original GPU-based sampling (Perlin / Nara)
+                        sampleCount++;
+                        // Sample intensity from GPU-computed chunk (already includes character glows)
+                        const intensity = monogram.sampleAt(worldX, worldY);
+
+                        if (intensity === 0) {
+                            zeroIntensityCount++;
+                        }
+
+                        if (intensity <= 0.05) { // Small threshold to skip near-zero values
+                            skippedLowIntensity++;
                         } else {
-                            skippedOutOfBounds++;
+                            const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+
+                            // Bounds check
+                            if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                                screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+
+                                renderedCount++;
+                                // Render perlin noise pattern (GPU already includes character glows in intensity)
+                                ctx.fillStyle = engine.textColor;
+                                ctx.globalAlpha = intensity * 0.5;
+                                ctx.fillRect(
+                                    screenPos.x,
+                                    screenPos.y,
+                                    effectiveCharWidth,
+                                    effectiveCharHeight
+                                );
+                                ctx.globalAlpha = 1.0; // Reset alpha
+                            } else {
+                                skippedOutOfBounds++;
+                            }
                         }
                     }
                 }
