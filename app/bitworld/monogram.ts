@@ -5,7 +5,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 
-export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'voronoi';
+export type MonogramMode = 'clear' | 'perlin' | 'nara';
 
 // Trail position interface for interactive monogram trails
 interface MonogramTrailPosition {
@@ -123,95 +123,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let index = localY * chunkSize + localX;
     output[index] = finalIntensity;
-}
-`;
-
-// WebGPU Compute Shader - Dual Voronoi Grids (Cyan/Magenta)
-const CHUNK_VORONOI_SHADER = `
-@group(0) @binding(0) var<storage, read_write> output: array<f32>;
-@group(0) @binding(1) var<uniform> params: NaraParams; // Reusing NaraParams for viewport info
-
-struct NaraParams {
-    chunkWorldX: f32,
-    chunkWorldY: f32,
-    chunkSize: f32,
-    time: f32,
-    complexity: f32,
-    centerX: f32,
-    centerY: f32,
-    textureWidth: f32,
-    textureHeight: f32,
-    scale: f32,
-    viewportWidth: f32,
-    viewportHeight: f32,
-}
-
-fn hash2(p: vec2<f32>) -> vec2<f32> {
-    var p2 = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
-    return fract(sin(p2) * 43758.5453);
-}
-
-fn voronoi_edge(p: vec2<f32>) -> f32 {
-    let n = floor(p);
-    let f = fract(p);
-    var min_dist = 8.0;
-
-    for(var j = -1; j <= 1; j++) {
-        for(var i = -1; i <= 1; i++) {
-            let g = vec2<f32>(f32(i), f32(j));
-            let o = hash2(n + g);
-            // Animate the point
-            let p_anim = 0.5 + 0.5 * sin(params.time * 0.5 + 6.2831 * o);
-            let delta = g + p_anim - f;
-            let dist = length(delta);
-            min_dist = min(min_dist, dist);
-        }
-    }
-    // Edge detection: High distance = edge
-    // Smoothstep to make it sharp
-    return smoothstep(0.4, 0.45, min_dist);
-}
-
-@compute @workgroup_size(8, 8)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let localX = global_id.x;
-    let localY = global_id.y;
-    let chunkSize = u32(params.chunkSize);
-
-    if (localX >= chunkSize || localY >= chunkSize) {
-        return;
-    }
-
-    let worldX = params.chunkWorldX + f32(localX);
-    let worldY = params.chunkWorldY + f32(localY);
-
-    // 1. Global Voronoi (Aligned with Bit Grid) - Cyan
-    let scaleGlobal = 0.05 * params.complexity;
-    let globalP = vec2<f32>(worldX, worldY * 0.5) * scaleGlobal;
-    let valGlobal = voronoi_edge(globalP);
-
-    // 2. Local Voronoi (Viewport Relative) - Magenta
-    // Calculate relative coordinates based on centerX/centerY
-    let relX = worldX - params.centerX;
-    let relY = worldY - params.centerY;
-    let scaleLocal = 0.08 * params.complexity;
-    let localP = vec2<f32>(relX, relY * 0.5) * scaleLocal;
-    let valLocal = voronoi_edge(localP);
-
-    // Encoding:
-    // 0.0 = None
-    // 1.0 = Cyan (Global)
-    // 2.0 = Magenta (Local)
-    // 3.0 = Both
-    
-    // Apply threshold to get binary 0/1
-    let hasGlobal = select(0.0, 1.0, valGlobal > 0.1);
-    let hasLocal = select(0.0, 2.0, valLocal > 0.1);
-    
-    let finalValue = hasGlobal + hasLocal;
-
-    let index = localY * chunkSize + localX;
-    output[index] = finalValue * 10.0;
 }
 `;
 
@@ -424,9 +335,6 @@ class MonogramSystem {
     private naraParamsBuffer: GPUBuffer | null = null;
     private naraTexture: GPUTexture | null = null;
     private naraAnchor: { x: number, y: number } | null = null;
-    
-    // Voronoi mode GPU resources
-    private voronoiPipeline: GPUComputePipeline | null = null;
 
     // Trail tracking
     private mouseTrail: MonogramTrailPosition[] = [];
@@ -519,19 +427,6 @@ class MonogramSystem {
                 layout: 'auto',
                 compute: {
                     module: naraShaderModule,
-                    entryPoint: 'main'
-                }
-            });
-            
-            // Create Voronoi pipeline
-            const voronoiShaderModule = this.device.createShaderModule({
-                code: CHUNK_VORONOI_SHADER
-            });
-
-            this.voronoiPipeline = this.device.createComputePipeline({
-                layout: 'auto',
-                compute: {
-                    module: voronoiShaderModule,
                     entryPoint: 'main'
                 }
             });
@@ -699,98 +594,9 @@ class MonogramSystem {
         // Route to appropriate pipeline based on mode
         if (mode === 'nara') {
             return this.computeChunkNara(chunkWorldX, chunkWorldY);
-        } else if (mode === 'voronoi') {
-            return this.computeChunkVoronoi(chunkWorldX, chunkWorldY);
         } else {
             return this.computeChunkPerlin(chunkWorldX, chunkWorldY);
         }
-    }
-
-    private async computeChunkVoronoi(chunkWorldX: number, chunkWorldY: number): Promise<Float32Array> {
-        if (!this.device || !this.voronoiPipeline || !this.naraParamsBuffer) {
-            throw new Error('[Monogram] Voronoi pipeline not initialized');
-        }
-
-        const device = this.device;
-        const bufferSize = this.CHUNK_SIZE * this.CHUNK_SIZE * 4;
-
-        // Set anchor point if needed (reusing NARA anchor logic for consistency)
-        if (!this.naraAnchor && this.lastViewport) {
-            this.naraAnchor = {
-                x: (this.lastViewport.startX + this.lastViewport.endX) / 2,
-                y: (this.lastViewport.startY + this.lastViewport.endY) / 2
-            };
-        }
-
-        const centerX = this.naraAnchor?.x ?? 0;
-        const centerY = this.naraAnchor?.y ?? 0;
-
-        // Calculate viewport dimensions for relative coordinates
-        const viewportWidth = this.lastViewport ? (this.lastViewport.endX - this.lastViewport.startX) : 100;
-        const viewportHeight = this.lastViewport ? (this.lastViewport.endY - this.lastViewport.startY) : 100;
-        
-        // Scale not strictly needed for Voronoi but keeping structure valid
-        const scale = 1.0; 
-        const textureWidth = 0;
-        const textureHeight = 0;
-
-        const outputBuffer = device.createBuffer({
-            size: bufferSize,
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
-        });
-
-        const stagingBuffer = device.createBuffer({
-            size: bufferSize,
-            usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
-        });
-
-        // Populate params buffer (NaraParams structure)
-        const paramsData = new Float32Array([
-            chunkWorldX,
-            chunkWorldY,
-            this.CHUNK_SIZE,
-            this.time,
-            this.options.complexity,
-            centerX,
-            centerY,
-            textureWidth,
-            textureHeight,
-            scale,
-            viewportWidth,
-            viewportHeight
-        ]);
-        device.queue.writeBuffer(this.naraParamsBuffer, 0, paramsData);
-
-        const bindGroup = device.createBindGroup({
-            layout: this.voronoiPipeline.getBindGroupLayout(0),
-            entries: [
-                { binding: 0, resource: { buffer: outputBuffer } },
-                { binding: 1, resource: { buffer: this.naraParamsBuffer } }
-            ]
-        });
-
-        const commandEncoder = device.createCommandEncoder();
-        const computePass = commandEncoder.beginComputePass();
-        computePass.setPipeline(this.voronoiPipeline);
-        computePass.setBindGroup(0, bindGroup);
-        computePass.dispatchWorkgroups(
-            Math.ceil(this.CHUNK_SIZE / 8),
-            Math.ceil(this.CHUNK_SIZE / 8)
-        );
-        computePass.end();
-
-        commandEncoder.copyBufferToBuffer(outputBuffer, 0, stagingBuffer, 0, bufferSize);
-        device.queue.submit([commandEncoder.finish()]);
-
-        await stagingBuffer.mapAsync(GPUMapMode.READ);
-        const result = new Float32Array(stagingBuffer.getMappedRange());
-        const intensities = new Float32Array(result);
-        stagingBuffer.unmap();
-
-        outputBuffer.destroy();
-        stagingBuffer.destroy();
-
-        return intensities;
     }
 
     private async computeChunkPerlin(chunkWorldX: number, chunkWorldY: number): Promise<Float32Array> {

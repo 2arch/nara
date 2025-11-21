@@ -3131,60 +3131,32 @@ Camera & Viewport Controls:
                     // Sample intensity from GPU-computed chunk (already includes character glows)
                     const intensity = monogram.sampleAt(worldX, worldY);
 
-                    if (monogram.options.mode === 'voronoi') {
-                         if (intensity >= 5.0) { // Check for our 10.0/20.0/30.0 values
-                            const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                             // Bounds check
-                            if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
-                                screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-                                
-                                renderedCount++;
-                                // 10 = Global (Cyan), 20 = Local (Magenta), 30 = Both
-                                const hasGlobal = Math.abs(intensity - 10.0) < 1.0 || Math.abs(intensity - 30.0) < 1.0;
-                                const hasLocal = Math.abs(intensity - 20.0) < 1.0 || Math.abs(intensity - 30.0) < 1.0;
+                    if (intensity === 0) {
+                        zeroIntensityCount++;
+                    }
 
-                                if (hasGlobal) {
-                                    ctx.fillStyle = '#00FFFF'; // Cyan
-                                    ctx.globalAlpha = 0.8;
-                                    ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                                }
-                                if (hasLocal) {
-                                    ctx.fillStyle = '#FF00FF'; // Magenta
-                                    ctx.globalAlpha = 0.8;
-                                    // If both, this draws magenta on top of cyan (blending slightly due to alpha)
-                                    ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                                }
-                                ctx.globalAlpha = 1.0;
-                            }
-                         }
+                    if (intensity <= 0.05) { // Small threshold to skip near-zero values
+                        skippedLowIntensity++;
                     } else {
-                        if (intensity === 0) {
-                            zeroIntensityCount++;
-                        }
+                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
 
-                        if (intensity <= 0.05) { // Small threshold to skip near-zero values
-                            skippedLowIntensity++;
+                        // Bounds check
+                        if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                            screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+
+                            renderedCount++;
+                            // Render perlin noise pattern (GPU already includes character glows in intensity)
+                            ctx.fillStyle = engine.textColor;
+                            ctx.globalAlpha = intensity * 0.5;
+                            ctx.fillRect(
+                                screenPos.x,
+                                screenPos.y,
+                                effectiveCharWidth,
+                                effectiveCharHeight
+                            );
+                            ctx.globalAlpha = 1.0; // Reset alpha
                         } else {
-                            const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-
-                            // Bounds check
-                            if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
-                                screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-
-                                renderedCount++;
-                                // Render perlin noise pattern (GPU already includes character glows in intensity)
-                                ctx.fillStyle = engine.textColor;
-                                ctx.globalAlpha = intensity * 0.5;
-                                ctx.fillRect(
-                                    screenPos.x,
-                                    screenPos.y,
-                                    effectiveCharWidth,
-                                    effectiveCharHeight
-                                );
-                                ctx.globalAlpha = 1.0; // Reset alpha
-                            } else {
-                                skippedOutOfBounds++;
-                            }
+                            skippedOutOfBounds++;
                         }
                     }
                 }
