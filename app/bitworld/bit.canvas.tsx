@@ -3196,17 +3196,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
                     if (inBounds) {
                         // === 1. Render Background Mode ===
-                        if (monogram.options.mode === 'voronoi') {
-                            // CPU Voronoi Rendering - Global (Cyan)
-                            const globalEdge = getVoronoiEdge(worldX, worldY * 0.5, 0.1 * monogram.options.complexity, 0.1);
-
-                            if (globalEdge > 0) {
-                                ctx.fillStyle = '#00FFFF'; // Cyan
-                                ctx.globalAlpha = globalEdge * 0.8;
-                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                            }
-                        } else if (monogram.options.mode !== 'clear') {
-                            // Original GPU-based sampling (Perlin / Nara)
+                        // GPU-based sampling (Perlin / Nara / Voronoi)
+                        if (monogram.options.mode !== 'clear') {
                             sampleCount++;
                             // Sample intensity from GPU-computed chunk (already includes character glows)
                             const intensity = monogram.sampleAt(worldX, worldY);
@@ -3219,9 +3210,12 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                                 skippedLowIntensity++;
                             } else {
                                 renderedCount++;
-                                // Render perlin noise pattern
-                                ctx.fillStyle = engine.textColor;
-                                ctx.globalAlpha = intensity * 0.5;
+                                // Render pattern
+                                // Use Cyan for Voronoi mode, standard text color for others
+                                ctx.fillStyle = monogram.options.mode === 'voronoi' ? '#00FFFF' : engine.textColor;
+                                // Use higher alpha for Voronoi edges to make them crisp
+                                ctx.globalAlpha = monogram.options.mode === 'voronoi' ? intensity * 0.8 : intensity * 0.5;
+                                
                                 ctx.fillRect(
                                     screenPos.x,
                                     screenPos.y,

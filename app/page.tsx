@@ -12,7 +12,8 @@ export default function TestEnvironment() {
   const monogram = useMonogram({
     enabled: true,
     speed: 0.5,
-    complexity: 1.0
+    complexity: 1.0,
+    mode: 'voronoi'
   });
 
   // World engine - NO auth, NO user context

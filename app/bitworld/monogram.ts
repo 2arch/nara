@@ -325,6 +325,101 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 `;
 
+// WebGPU Compute Shader - Voronoi mode (Euclidean edge detection)
+const CHUNK_VORONOI_SHADER = `
+@group(0) @binding(0) var<storage, read_write> output: array<f32>;
+@group(0) @binding(1) var<uniform> params: ChunkParams;
+
+struct ChunkParams {
+    chunkWorldX: f32,
+    chunkWorldY: f32,
+    chunkSize: f32,
+    time: f32,
+    complexity: f32,
+}
+
+${PERLIN_UTILS_WGSL}
+
+// Hash function for Voronoi (returns vec2 in 0..1 range)
+fn hash2(p: vec2<f32>) -> vec2<f32> {
+    var p2 = vec2<f32>(
+        dot(p, vec2<f32>(127.1, 311.7)),
+        dot(p, vec2<f32>(269.5, 183.3))
+    );
+    return fract(sin(p2) * 43758.5453);
+}
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let localX = global_id.x;
+    let localY = global_id.y;
+    let chunkSize = u32(params.chunkSize);
+
+    if (localX >= chunkSize || localY >= chunkSize) {
+        return;
+    }
+
+    let worldX = params.chunkWorldX + f32(localX);
+    let worldY = params.chunkWorldY + f32(localY);
+
+    // Voronoi Scale
+    let scale = 0.1 * params.complexity;
+    
+    // Y is scaled by 0.5 to match the aspect ratio of the grid cells (1x2)
+    // but the voronoi logic itself should work in a more uniform space to avoid stretching 
+    // too much, or we can embrace the stretch. CPU logic used worldY * 0.5.
+    let px = worldX * scale;
+    let py = (worldY * 0.5) * scale;
+
+    let ix = floor(px);
+    let iy = floor(py);
+    let fx = fract(px);
+    let fy = fract(py);
+
+    var f1 = 100.0;
+    var f2 = 100.0;
+
+    for (var j = -1; j <= 1; j++) {
+        for (var i = -1; i <= 1; i++) {
+            let neighbor = vec2<f32>(f32(i), f32(j));
+            let p = hash2(vec2<f32>(ix, iy) + neighbor);
+            
+            // Point in neighbor cell
+            // Animate point with time if desired, but request was for static
+            // let p_anim = 0.5 + 0.5 * sin(params.time + 6.2831 * p); 
+            // Static point
+            let point = neighbor + p;
+            
+            let diff = point - vec2<f32>(fx, fy);
+            
+            // Euclidean distance
+            let dist = length(diff);
+
+            if (dist < f1) {
+                f2 = f1;
+                f1 = dist;
+            } else if (dist < f2) {
+                f2 = dist;
+            }
+        }
+    }
+
+    let thickness = 0.1;
+    let d = f2 - f1;
+    var intensity = 0.0;
+
+    if (d < thickness) {
+        intensity = 1.0 - (d / thickness);
+    }
+    
+    // Slight boost to make edges clearer
+    intensity = intensity * 1.0; 
+
+    let index = localY * chunkSize + localX;
+    output[index] = intensity;
+}
+`;
+
 class MonogramSystem {
     private chunks: Map<string, Float32Array> = new Map();
     private device: GPUDevice | null = null;
@@ -337,6 +432,9 @@ class MonogramSystem {
     private naraParamsBuffer: GPUBuffer | null = null;
     private naraTexture: GPUTexture | null = null;
     private naraAnchor: { x: number, y: number } | null = null;
+
+    // Voronoi mode GPU resources
+    private voronoiPipeline: GPUComputePipeline | null = null;
 
     // Trail tracking
     private mouseTrail: MonogramTrailPosition[] = [];
@@ -436,6 +534,19 @@ class MonogramSystem {
             this.naraParamsBuffer = this.device.createBuffer({
                 size: 12 * 4,  // 12 floats: chunkWorldX, chunkWorldY, chunkSize, time, complexity, centerX, centerY, textureWidth, textureHeight, scale, viewportWidth, viewportHeight
                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+            });
+
+            // Create Voronoi pipeline (uses same ChunkParams as Perlin)
+            const voronoiShaderModule = this.device.createShaderModule({
+                code: CHUNK_VORONOI_SHADER
+            });
+
+            this.voronoiPipeline = this.device.createComputePipeline({
+                layout: 'auto',
+                compute: {
+                    module: voronoiShaderModule,
+                    entryPoint: 'main'
+                }
             });
 
             // Generate and upload NARA text texture
@@ -596,9 +707,70 @@ class MonogramSystem {
         // Route to appropriate pipeline based on mode
         if (mode === 'nara') {
             return this.computeChunkNara(chunkWorldX, chunkWorldY);
+        } else if (mode === 'voronoi') {
+            return this.computeChunkVoronoi(chunkWorldX, chunkWorldY);
         } else {
             return this.computeChunkPerlin(chunkWorldX, chunkWorldY);
         }
+    }
+
+    private async computeChunkVoronoi(chunkWorldX: number, chunkWorldY: number): Promise<Float32Array> {
+        if (!this.device || !this.voronoiPipeline || !this.paramsBuffer) {
+            throw new Error('[Monogram] Voronoi pipeline not initialized');
+        }
+
+        const device = this.device;
+        const bufferSize = this.CHUNK_SIZE * this.CHUNK_SIZE * 4;
+
+        const outputBuffer = device.createBuffer({
+            size: bufferSize,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
+        });
+
+        const stagingBuffer = device.createBuffer({
+            size: bufferSize,
+            usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
+        });
+
+        const paramsData = new Float32Array([
+            chunkWorldX,
+            chunkWorldY,
+            this.CHUNK_SIZE,
+            this.time,
+            this.options.complexity
+        ]);
+        device.queue.writeBuffer(this.paramsBuffer, 0, paramsData);
+
+        const bindGroup = device.createBindGroup({
+            layout: this.voronoiPipeline.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: { buffer: outputBuffer } },
+                { binding: 1, resource: { buffer: this.paramsBuffer } }
+            ]
+        });
+
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.voronoiPipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(
+            Math.ceil(this.CHUNK_SIZE / 8),
+            Math.ceil(this.CHUNK_SIZE / 8)
+        );
+        computePass.end();
+
+        commandEncoder.copyBufferToBuffer(outputBuffer, 0, stagingBuffer, 0, bufferSize);
+        device.queue.submit([commandEncoder.finish()]);
+
+        await stagingBuffer.mapAsync(GPUMapMode.READ);
+        const result = new Float32Array(stagingBuffer.getMappedRange());
+        const intensities = new Float32Array(result);
+        stagingBuffer.unmap();
+
+        outputBuffer.destroy();
+        stagingBuffer.destroy();
+
+        return intensities;
     }
 
     private async computeChunkPerlin(chunkWorldX: number, chunkWorldY: number): Promise<Float32Array> {
