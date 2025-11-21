@@ -336,6 +336,9 @@ struct ChunkParams {
     chunkSize: f32,
     time: f32,
     complexity: f32,
+    activeSeedX: f32,
+    activeSeedY: f32,
+    hasActiveSeed: f32,
 }
 
 ${PERLIN_UTILS_WGSL}
@@ -378,6 +381,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     var f1 = 100.0;
     var f2 = 100.0;
+    
+    // Track the closest seed coordinate for filling active cell
+    var closestSeedX = 0.0;
+    var closestSeedY = 0.0;
 
     for (var j = -1; j <= 1; j++) {
         for (var i = -1; i <= 1; i++) {
@@ -398,6 +405,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             if (dist < f1) {
                 f2 = f1;
                 f1 = dist;
+                // Store the global seed ID (cell index)
+                closestSeedX = ix + f32(i);
+                closestSeedY = iy + f32(j);
             } else if (dist < f2) {
                 f2 = dist;
             }
@@ -414,6 +424,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     // Slight boost to make edges clearer
     intensity = intensity * 1.0; 
+    
+    // Fill active cell logic
+    if (params.hasActiveSeed > 0.5) {
+        // Check if this pixel belongs to the active seed
+        // We compare floating point indices with a small epsilon
+        if (abs(closestSeedX - params.activeSeedX) < 0.1 && abs(closestSeedY - params.activeSeedY) < 0.1) {
+             intensity = max(intensity, 0.4); // Fill with 40% intensity
+        }
+    }
 
     let index = localY * chunkSize + localX;
     output[index] = intensity;
@@ -452,6 +471,9 @@ class MonogramSystem {
 
     // Track last viewport for auto-reload on invalidation
     private lastViewport: { startX: number, startY: number, endX: number, endY: number } | null = null;
+    
+    // Interactive Voronoi state
+    private activeSeed: { x: number, y: number } | null = null;
 
     constructor(options: MonogramOptions) {
         this.options = options;
@@ -514,7 +536,7 @@ class MonogramSystem {
             });
 
             this.paramsBuffer = this.device.createBuffer({
-                size: 5 * 4,  // 5 floats: chunkWorldX, chunkWorldY, chunkSize, time, complexity
+                size: 8 * 4,  // 8 floats: chunkWorldX, chunkWorldY, chunkSize, time, complexity, activeSeedX, activeSeedY, hasActiveSeed
                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
             });
 
@@ -615,7 +637,79 @@ class MonogramSystem {
         };
     }
 
+    private getClosestSeed(worldX: number, worldY: number): { x: number, y: number } {
+        // Must match shader logic exactly
+        const complexity = this.options.complexity;
+        const scale = 0.1 * complexity;
+        const px = worldX * scale;
+        const py = (worldY * 0.5) * scale;
+        
+        const ix = Math.floor(px);
+        const iy = Math.floor(py);
+        const fx = px - ix;
+        const fy = py - iy;
+
+        let minDist = 100.0;
+        let seedX = 0;
+        let seedY = 0;
+
+        // Hash function matching shader
+        const hash2 = (x: number, y: number) => {
+            const dot1 = x * 127.1 + y * 311.7;
+            const dot2 = x * 269.5 + y * 183.3;
+            // Simulate GLSL sin/fract
+            const sin1 = Math.sin(dot1) * 43758.5453;
+            const sin2 = Math.sin(dot2) * 43758.5453;
+            return {
+                x: sin1 - Math.floor(sin1),
+                y: sin2 - Math.floor(sin2)
+            };
+        };
+
+        for (let j = -1; j <= 1; j++) {
+            for (let i = -1; i <= 1; i++) {
+                const neighborX = i;
+                const neighborY = j;
+                const p = hash2(ix + neighborX, iy + neighborY);
+                
+                const pointX = neighborX + p.x;
+                const pointY = neighborY + p.y;
+                
+                const diffX = pointX - fx;
+                const diffY = pointY - fy;
+                
+                const dist = Math.sqrt(diffX*diffX + diffY*diffY);
+
+                if (dist < minDist) {
+                    minDist = dist;
+                    seedX = ix + neighborX;
+                    seedY = iy + neighborY;
+                }
+            }
+        }
+        return { x: seedX, y: seedY };
+    }
+
     updateMousePosition(worldX: number, worldY: number) {
+        // 1. Voronoi Interactive Logic
+        if (this.options.mode === 'voronoi') {
+            const newSeed = this.getClosestSeed(worldX, worldY);
+            
+            let changed = false;
+            if (!this.activeSeed) {
+                changed = true;
+            } else if (this.activeSeed.x !== newSeed.x || this.activeSeed.y !== newSeed.y) {
+                changed = true;
+            }
+
+            if (changed) {
+                this.activeSeed = newSeed;
+                // Invalidate all chunks to force re-render with new highlight
+                this.chunks.clear();
+                this.chunkAccessTime.clear();
+            }
+        }
+
         if (!this.options.interactiveTrails) {
             console.log('[Monogram Trail] Interactive trails disabled');
             return;
@@ -737,7 +831,10 @@ class MonogramSystem {
             chunkWorldY,
             this.CHUNK_SIZE,
             this.time,
-            this.options.complexity
+            this.options.complexity,
+            this.activeSeed ? this.activeSeed.x : 0,
+            this.activeSeed ? this.activeSeed.y : 0,
+            this.activeSeed ? 1.0 : 0.0
         ]);
         device.queue.writeBuffer(this.paramsBuffer, 0, paramsData);
 
