@@ -329,6 +329,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 const CHUNK_VORONOI_SHADER = `
 @group(0) @binding(0) var<storage, read_write> output: array<f32>;
 @group(0) @binding(1) var<uniform> params: ChunkParams;
+@group(0) @binding(2) var<storage, read> activeCells: array<vec2<f32>>;
+@group(0) @binding(3) var<uniform> cellParams: CellParams;
 
 struct ChunkParams {
     chunkWorldX: f32,
@@ -339,6 +341,13 @@ struct ChunkParams {
     activeSeedX: f32,
     activeSeedY: f32,
     hasActiveSeed: f32,
+}
+
+struct CellParams {
+    count: u32,
+    _pad1: u32,
+    _pad2: u32,
+    _pad3: u32,
 }
 
 ${PERLIN_UTILS_WGSL}
@@ -425,12 +434,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Slight boost to make edges clearer
     intensity = intensity * 1.0; 
     
-    // Fill active cell logic
+    // 1. Fill hovered cell (lighter)
     if (params.hasActiveSeed > 0.5) {
-        // Check if this pixel belongs to the active seed
-        // We compare floating point indices with a small epsilon
         if (abs(closestSeedX - params.activeSeedX) < 0.1 && abs(closestSeedY - params.activeSeedY) < 0.1) {
-             intensity = max(intensity, 0.4); // Fill with 40% intensity
+             intensity = max(intensity, 0.3); // Hover intensity
+        }
+    }
+
+    // 2. Fill toggled cells (stronger)
+    for (var k = 0u; k < cellParams.count; k++) {
+        let cell = activeCells[k];
+        if (abs(cell.x - closestSeedX) < 0.1 && abs(cell.y - closestSeedY) < 0.1) {
+            intensity = max(intensity, 0.6); // Active intensity
+            break;
         }
     }
 
@@ -454,7 +470,9 @@ class MonogramSystem {
 
     // Voronoi mode GPU resources
     private voronoiPipeline: GPUComputePipeline | null = null;
-
+    private activeCellsBuffer: GPUBuffer | null = null;
+    private cellParamsBuffer: GPUBuffer | null = null;
+    
     // Trail tracking
     private mouseTrail: MonogramTrailPosition[] = [];
     private lastMousePos: { x: number, y: number } | null = null;
@@ -474,6 +492,8 @@ class MonogramSystem {
     
     // Interactive Voronoi state
     private activeSeed: { x: number, y: number } | null = null;
+    private toggledCells: Set<string> = new Set();
+    private readonly MAX_ACTIVE_CELLS = 64;
 
     constructor(options: MonogramOptions) {
         this.options = options;
@@ -569,6 +589,18 @@ class MonogramSystem {
                     module: voronoiShaderModule,
                     entryPoint: 'main'
                 }
+            });
+
+            // Create buffer for active Voronoi cells (list of vec2 seeds)
+            this.activeCellsBuffer = this.device.createBuffer({
+                size: this.MAX_ACTIVE_CELLS * 2 * 4, // 2 floats (x, y) * 4 bytes
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+            });
+
+            // Create buffer for cell params (count)
+            this.cellParamsBuffer = this.device.createBuffer({
+                size: 4 * 4, // 4 u32 (aligned to 16 bytes)
+                usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
             });
 
             // Generate and upload NARA text texture
@@ -690,6 +722,25 @@ class MonogramSystem {
         return { x: seedX, y: seedY };
     }
 
+    toggleCell(worldX: number, worldY: number) {
+        if (this.options.mode !== 'voronoi') return;
+
+        const seed = this.getClosestSeed(worldX, worldY);
+        const key = `${seed.x},${seed.y}`;
+
+        if (this.toggledCells.has(key)) {
+            this.toggledCells.delete(key);
+        } else {
+            if (this.toggledCells.size < this.MAX_ACTIVE_CELLS) {
+                this.toggledCells.add(key);
+            }
+        }
+
+        // Invalidate chunks to force re-render
+        this.chunks.clear();
+        this.chunkAccessTime.clear();
+    }
+
     updateMousePosition(worldX: number, worldY: number) {
         // 1. Voronoi Interactive Logic
         if (this.options.mode === 'voronoi') {
@@ -708,6 +759,9 @@ class MonogramSystem {
                 this.chunks.clear();
                 this.chunkAccessTime.clear();
             }
+
+            // Conflict resolution: disable comet trail logic in Voronoi mode
+            return;
         }
 
         if (!this.options.interactiveTrails) {
@@ -809,7 +863,7 @@ class MonogramSystem {
     }
 
     private async computeChunkVoronoi(chunkWorldX: number, chunkWorldY: number): Promise<Float32Array> {
-        if (!this.device || !this.voronoiPipeline || !this.paramsBuffer) {
+        if (!this.device || !this.voronoiPipeline || !this.paramsBuffer || !this.activeCellsBuffer || !this.cellParamsBuffer) {
             throw new Error('[Monogram] Voronoi pipeline not initialized');
         }
 
@@ -838,11 +892,30 @@ class MonogramSystem {
         ]);
         device.queue.writeBuffer(this.paramsBuffer, 0, paramsData);
 
+        // Upload active cells
+        const cellData = new Float32Array(this.MAX_ACTIVE_CELLS * 2);
+        let idx = 0;
+        this.toggledCells.forEach(key => {
+            if (idx < this.MAX_ACTIVE_CELLS) {
+                const [x, y] = key.split(',').map(Number);
+                cellData[idx * 2 + 0] = x;
+                cellData[idx * 2 + 1] = y;
+                idx++;
+            }
+        });
+        device.queue.writeBuffer(this.activeCellsBuffer, 0, cellData);
+
+        // Upload cell count
+        const countData = new Uint32Array([this.toggledCells.size, 0, 0, 0]);
+        device.queue.writeBuffer(this.cellParamsBuffer, 0, countData);
+
         const bindGroup = device.createBindGroup({
             layout: this.voronoiPipeline.getBindGroupLayout(0),
             entries: [
                 { binding: 0, resource: { buffer: outputBuffer } },
-                { binding: 1, resource: { buffer: this.paramsBuffer } }
+                { binding: 1, resource: { buffer: this.paramsBuffer } },
+                { binding: 2, resource: { buffer: this.activeCellsBuffer } },
+                { binding: 3, resource: { buffer: this.cellParamsBuffer } }
             ]
         });
 
@@ -1263,6 +1336,10 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         console.log('[Monogram Hook] Trail cleared');
     }, []);
 
+    const toggleCell = useCallback((worldX: number, worldY: number) => {
+        systemRef.current?.toggleCell(worldX, worldY);
+    }, []);
+
     // Calculate interactive trail intensity at a given position
     const calculateInteractiveTrail = useCallback((x: number, y: number): number => {
         if (!options.interactiveTrails || mouseTrail.length < 2) return 0;
@@ -1362,6 +1439,7 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         sampleAt,
         isInitialized,
         updateMousePosition,
-        clearTrail
+        clearTrail,
+        toggleCell
     };
 }

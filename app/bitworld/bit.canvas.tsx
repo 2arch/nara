@@ -6277,6 +6277,13 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         const clickX = e.clientX - rect.left;
         const clickY = e.clientY - rect.top;
 
+        // Voronoi Interaction: Toggle cell
+        if (monogram.options.mode === 'voronoi') {
+             const worldPos = engine.screenToWorld(clickX, clickY, engine.zoomLevel, engine.viewOffset);
+             monogram.toggleCell(worldPos.x, worldPos.y);
+             return;
+        }
+
         // Host mode: tap/click to advance to next message (if not expecting input)
         if (engine.hostMode.isActive && hostDialogue.isHostActive) {
             const currentMessage = hostDialogue.getCurrentMessage();
@@ -6349,7 +6356,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 hiddenInputRef.current.focus();
             }
         }
-    }, [engine, canvasSize, router, handleNavClick, handleCoordinateClick, handleColorFilterClick, handleSortModeClick, handleStateClick, handleIndexClick, hostDialogue]);
+    }, [engine, canvasSize, router, handleNavClick, handleCoordinateClick, handleColorFilterClick, handleSortModeClick, handleStateClick, handleIndexClick, hostDialogue, monogram]);
 
     const handleCanvasDoubleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         if (e.button !== 0) return; // Only left clicks
