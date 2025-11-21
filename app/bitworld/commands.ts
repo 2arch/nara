@@ -1076,7 +1076,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (lowerInput === 'monogram') {
             const parts = input.toLowerCase().split(' ');
-            const MONOGRAM_OPTIONS = ['clear', 'perlin', 'nara', 'on', 'off'];
+            const MONOGRAM_OPTIONS = ['clear', 'perlin', 'nara', 'voronoi', 'on', 'off'];
             if (parts.length > 1) {
                 // Show monogram options that match the input
                 const monogramInput = parts[1];
@@ -2633,6 +2633,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     // Set mode to nara (animated text)
                     monogramSystem.setOptions((prev: any) => ({ ...prev, enabled: true, mode: 'nara' }));
                     setDialogueWithRevert('Monogram mode: nara (animated NARA text)', setDialogueText);
+                } else if (option === 'voronoi') {
+                    // Set mode to voronoi (dual grid debug)
+                    monogramSystem.setOptions((prev: any) => ({ ...prev, enabled: true, mode: 'voronoi' }));
+                    setDialogueWithRevert('Monogram mode: voronoi (dual debug grids)', setDialogueText);
                 } else {
                     // Unknown option - toggle instead
                     monogramSystem.toggleEnabled();
