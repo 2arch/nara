@@ -24,6 +24,8 @@ export interface MonogramOptions {
     interactiveTrails?: boolean;
     trailIntensity?: number;
     trailFadeMs?: number;
+    // Interface options
+    showInterfaceVoronoi?: boolean;
 }
 
 // Shared WGSL utility functions for Perlin noise

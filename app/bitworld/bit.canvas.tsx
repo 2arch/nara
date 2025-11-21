@@ -3190,60 +3190,36 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
             for (let worldY = yStart; worldY <= yEnd; worldY++) {
                 for (let worldX = xStart; worldX <= xEnd; worldX++) {
-                    
-                    if (monogram.options.mode === 'voronoi') {
-                        // CPU Voronoi Rendering
-                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                    const inBounds = screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                                   screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight;
 
-                        // Bounds check
-                        if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
-                            screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-                            
-                            // 1. Global Voronoi (Cyan) - Aligned with bit grid
+                    if (inBounds) {
+                        // === 1. Render Background Mode ===
+                        if (monogram.options.mode === 'voronoi') {
+                            // CPU Voronoi Rendering - Global (Cyan)
                             const globalEdge = getVoronoiEdge(worldX, worldY * 0.5, 0.1 * monogram.options.complexity, 0.1);
-
-                            // 2. Local Voronoi (Magenta) - Screen Space Fixed
-                            // Use screen grid coordinates derived from world-to-screen transform
-                            // This ensures it stays fixed relative to the viewport window
-                            const screenGridX = Math.floor(screenPos.x / effectiveCharWidth);
-                            const screenGridY = Math.floor(screenPos.y / effectiveCharHeight);
-                            
-                            const localEdge = getVoronoiEdge(screenGridX, screenGridY, 0.15 * monogram.options.complexity, 0.15);
 
                             if (globalEdge > 0) {
                                 ctx.fillStyle = '#00FFFF'; // Cyan
                                 ctx.globalAlpha = globalEdge * 0.8;
                                 ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
                             }
-                            if (localEdge > 0) {
-                                ctx.fillStyle = '#FF00FF'; // Magenta
-                                ctx.globalAlpha = localEdge * 0.8;
-                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        } else if (monogram.options.mode !== 'clear') {
+                            // Original GPU-based sampling (Perlin / Nara)
+                            sampleCount++;
+                            // Sample intensity from GPU-computed chunk (already includes character glows)
+                            const intensity = monogram.sampleAt(worldX, worldY);
+
+                            if (intensity === 0) {
+                                zeroIntensityCount++;
                             }
-                            ctx.globalAlpha = 1.0;
-                        }
 
-                    } else {
-                        // Original GPU-based sampling (Perlin / Nara)
-                        sampleCount++;
-                        // Sample intensity from GPU-computed chunk (already includes character glows)
-                        const intensity = monogram.sampleAt(worldX, worldY);
-
-                        if (intensity === 0) {
-                            zeroIntensityCount++;
-                        }
-
-                        if (intensity <= 0.05) { // Small threshold to skip near-zero values
-                            skippedLowIntensity++;
-                        } else {
-                            const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-
-                            // Bounds check
-                            if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
-                                screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
-
+                            if (intensity <= 0.05) { // Small threshold to skip near-zero values
+                                skippedLowIntensity++;
+                            } else {
                                 renderedCount++;
-                                // Render perlin noise pattern (GPU already includes character glows in intensity)
+                                // Render perlin noise pattern
                                 ctx.fillStyle = engine.textColor;
                                 ctx.globalAlpha = intensity * 0.5;
                                 ctx.fillRect(
@@ -3252,11 +3228,28 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                                     effectiveCharWidth,
                                     effectiveCharHeight
                                 );
-                                ctx.globalAlpha = 1.0; // Reset alpha
-                            } else {
-                                skippedOutOfBounds++;
                             }
                         }
+
+                        // === 2. Render Interface Overlay (Local Voronoi) ===
+                        if (monogram.options.showInterfaceVoronoi) {
+                             // Local Voronoi (Magenta) - Screen Space Fixed
+                            const screenGridX = Math.floor(screenPos.x / effectiveCharWidth);
+                            const screenGridY = Math.floor(screenPos.y / effectiveCharHeight);
+                            
+                            const localEdge = getVoronoiEdge(screenGridX, screenGridY, 0.15 * monogram.options.complexity, 0.15);
+
+                            if (localEdge > 0) {
+                                ctx.fillStyle = '#FF00FF'; // Magenta
+                                ctx.globalAlpha = localEdge * 0.8;
+                                // Overlap blending
+                                ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            }
+                        }
+                        
+                        ctx.globalAlpha = 1.0;
+                    } else {
+                        skippedOutOfBounds++;
                     }
                 }
             }
