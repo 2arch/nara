@@ -134,7 +134,7 @@ interface UseCommandSystemProps {
             enabled?: boolean;
             speed?: number;
             complexity?: number;
-            mode?: 'clear' | 'perlin' | 'nara';
+            mode?: 'clear' | 'perlin' | 'nara' | 'voronoi';
         };
     };
 }

@@ -418,7 +418,7 @@ interface UseWorldEngineProps {
             enabled?: boolean;
             speed?: number;
             complexity?: number;
-            mode?: 'clear' | 'perlin' | 'nara';
+            mode?: 'clear' | 'perlin' | 'nara' | 'voronoi';
         };
     };
 }
@@ -9083,7 +9083,8 @@ export function useWorldEngine({
             }
 
             // Now type the character - handle different modes
-            let proposedCursorPos = { x: cursorAfterDelete.x + 1, y: cursorAfterDelete.y }; // Move cursor right
+            // Move cursor right by the width of the current scale
+            let proposedCursorPos = { x: cursorAfterDelete.x + currentScale.w, y: cursorAfterDelete.y };
 
             // Focus mode: prevent typing beyond region bounds
             if (isFocusMode && focusRegion) {
