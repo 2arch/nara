@@ -14,6 +14,7 @@ import { createSubtitleCycler, setDialogueWithRevert, abortCurrentAI, isAIActive
 import { logger } from './logger';
 import { useAutoDialogue } from './dialogue';
 import { get } from 'firebase/database';
+import { DataRecorder } from './recorder';
 import { parseGIFFromArrayBuffer, getCurrentFrame, isGIFUrl } from './gif.parser';
 
 // API route helper functions for AI operations
@@ -380,6 +381,7 @@ export interface WorldEngine {
         isTracked?: boolean; // True if from MediaPipe tracking, false if autonomous
     };
     setFaceDetectionEnabled: (enabled: boolean) => void;
+    setFaceOrientation: (orientation: any) => void;
     // Spatial indexing for efficient viewport-based rendering
     spatialIndex: React.MutableRefObject<Map<string, Set<string>>>;
     queryVisibleEntities: (startWorldX: number, startWorldY: number, endWorldX: number, endWorldY: number) => Set<string>;
@@ -393,6 +395,7 @@ export interface WorldEngine {
         startY: number;
         endY: number;
     };
+    recorder: DataRecorder;
 }
 
 // --- Hook Input ---
@@ -1397,6 +1400,8 @@ export function useWorldEngine({
     // === Settings System ===
     const { settings, setSettings, updateSettings } = useWorldSettings();
 
+    const recorder = useMemo(() => new DataRecorder(), []);
+
     // Callback to cancel IME composition (for command system)
     const cancelComposition = useCallback(() => {
         if (isComposingRef.current) {
@@ -1469,7 +1474,8 @@ export function useWorldEngine({
         isFaceDetectionEnabled,
         faceOrientation,
         setFaceDetectionEnabled,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, currentScale, setCurrentScale, triggerUpgradeFlow: () => {
+        setFaceOrientation, // <--- Get this
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, currentScale, setCurrentScale, recorder, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
         }
@@ -11012,11 +11018,13 @@ export function useWorldEngine({
         isFaceDetectionEnabled,
         faceOrientation,
         setFaceDetectionEnabled,
+        setFaceOrientation,
         // Spatial indexing
         spatialIndex: spatialIndexRef,
         queryVisibleEntities,
         // Focus mode
         isFocusMode,
         focusRegion,
+        recorder,
     };
 }

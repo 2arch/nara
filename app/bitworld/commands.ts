@@ -5,6 +5,7 @@ import { generateImage, generateVideo, setDialogueWithRevert } from './ai';
 import { detectImageIntent } from './ai.utils';
 import type { WorldSettings } from './settings';
 import { useFaceDetection, useSmoothFaceOrientation, faceOrientationToRotation } from './face';
+import { DataRecorder } from './recorder';
 
 // Grid cell span constant (characters occupy 2 vertically-stacked cells)
 const GRID_CELL_SPAN = 2;
@@ -137,6 +138,7 @@ interface UseCommandSystemProps {
             mode?: 'clear' | 'perlin' | 'nara' | 'voronoi' | 'face3d';
         };
     };
+    recorder?: DataRecorder;
 }
 
 // --- Command System Constants ---
@@ -157,6 +159,8 @@ const AVAILABLE_COMMANDS = [
     'state', 'random', 'clear', 'replay',
     // Sharing & Publishing
     'publish', 'unpublish', 'share', 'spawn', 'monogram',
+    // Recording
+    'record',
     // Account
     'signin', 'signout', 'account', 'upgrade',
     // Debug
@@ -169,7 +173,7 @@ export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'create': ['chip', 'task', 'link', 'pack', 'clip', 'upload'],
     'special': ['mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help'],
     'style': ['bg', 'text', 'font', 'style', 'display'],
-    'state': ['state', 'random', 'clear', 'replay'],
+    'state': ['state', 'random', 'clear', 'replay', 'record'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
     'account': ['signin', 'signout', 'account', 'upgrade'],
     'debug': ['debug']
@@ -213,6 +217,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'scale': 'Change text scale. Type /scale followed by dimensions like 1x2 (default), 1x6 (tall), or 4x4 (square). Affects new text you write.',
     'style': 'Apply visual styles to selected notes or patterns. Select a note/pattern or position cursor inside one, then type /style [stylename]. Available: solid (white border), glow (pulsing gray glow), glowing (enhanced bright glow). Example: /style glow',
     'state': 'Save or load canvas states. Type /state to see saved states, /state save [name] to save current canvas, /state load [name] to restore a saved state. Perfect for versioning your work.',
+    'record': 'Record and replay sessions. /record start to begin capturing face/cursor data. /record stop [name] to save. /record play to replay the last session in realtime.',
     'random': 'Randomize text styling. Applies random colors and styles to your text for a more organic, playful aesthetic. Great for breaking out of rigid design patterns.',
     'clear': 'Clear all text from the canvas. WARNING: This deletes everything on your current canvas. Use /state save first if you want to preserve your work.',
     'publish': 'Publish your canvas publicly. Makes your canvas accessible at your public URL (nara.ws/username/canvasname). Others can view but not edit.',
@@ -242,7 +247,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllChips, getAllBounds = () => [], availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, currentScale, setCurrentScale, monogramSystem }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllChips, getAllBounds = () => [], availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, currentScale, setCurrentScale, monogramSystem, recorder }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const previousBackgroundStateRef = useRef<{
@@ -2257,6 +2262,78 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             };
         }
 
+        if (commandToExecute.startsWith('record')) {
+            const parts = commandToExecute.split(/\s+/);
+            const action = parts[1];
+
+            clearCommandState();
+
+            if (!recorder) {
+                setDialogueWithRevert("Recorder not initialized", setDialogueText);
+                return null;
+            }
+
+            if (action === 'start') {
+                recorder.start();
+                setDialogueWithRevert("Recording started...", setDialogueText);
+            } else if (action === 'stop') {
+                const session = recorder.stop();
+                if (session) {
+                    // Auto-download
+                    const json = JSON.stringify(session);
+                    const blob = new Blob([json], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${session.name}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    setDialogueWithRevert(`Recording saved: ${session.name}`, setDialogueText);
+                } else {
+                    setDialogueWithRevert("No active recording to stop", setDialogueText);
+                }
+            } else if (action === 'play') {
+                if (recorder.isPlaying) {
+                     recorder.stopPlayback();
+                     setDialogueWithRevert("Playback stopped", setDialogueText);
+                } else {
+                    // If there is a current recording in memory, play it
+                    // Ideally we'd allow loading from file, but for now just play last
+                    // To support loading: /record play [url] or drag/drop?
+                    // For now, assume we just recorded something or loaded it via code/drag.
+                    // Let's check if we can load from the argument if provided?
+                    // No, just play existing memory for now.
+                    recorder.startPlayback();
+                    setDialogueWithRevert("Playback started...", setDialogueText);
+                }
+            } else if (action === 'load') {
+                 // Trigger file input?
+                 const input = document.createElement('input');
+                 input.type = 'file';
+                 input.accept = '.json';
+                 input.onchange = (e) => {
+                     const file = (e.target as HTMLInputElement).files?.[0];
+                     if (file) {
+                         const reader = new FileReader();
+                         reader.onload = (ev) => {
+                             const content = ev.target?.result as string;
+                             if (recorder.importRecording(content)) {
+                                 setDialogueWithRevert(`Loaded recording: ${file.name}`, setDialogueText);
+                             } else {
+                                 setDialogueWithRevert("Failed to load recording", setDialogueText);
+                             }
+                         };
+                         reader.readAsText(file);
+                     }
+                 };
+                 input.click();
+            } else {
+                setDialogueWithRevert("Usage: /record start|stop|play|load", setDialogueText);
+            }
+
+            return null;
+        }
+
         if (commandToExecute.startsWith('replay')) {
             // Parse arguments for speed parameter (default 100ms between characters)
             const parts = commandToExecute.split(/\s+/);
@@ -3796,5 +3873,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         faceOrientation: modeState.faceOrientation,
         setFaceDetectionEnabled: (enabled: boolean) =>
             setModeState(prev => ({ ...prev, isFaceDetectionEnabled: enabled })),
+        setFaceOrientation: (orientation: any) =>
+            setModeState(prev => ({ ...prev, faceOrientation: orientation })),
     };
 }

@@ -6257,12 +6257,37 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
     useEffect(() => {
         let animationFrameId: number;
         const renderLoop = () => {
+            // Data-driven Recording Logic
+            if (engine.recorder) {
+                if (engine.recorder.isRecording) {
+                    engine.recorder.capture(engine);
+                } else if (engine.recorder.isPlaying) {
+                    const frame = engine.recorder.getPlaybackFrame();
+                    if (frame) {
+                        // Apply playback state overrides
+                        // Note: We use the engine setters which trigger React state updates
+                        // This ensures UI consistency but ties framerate to React render speed
+                        // For face tracking, this is already how it works (via face.ts)
+                        if (frame.face) {
+                            if (!engine.isFaceDetectionEnabled) engine.setFaceDetectionEnabled(true);
+                            engine.setFaceOrientation(frame.face);
+                        }
+                        
+                        // Update cursor
+                        engine.setViewOffset(frame.viewOffset);
+                        engine.setZoomLevel(frame.zoomLevel);
+                        // engine.setCursorPos(frame.cursor); // this expects a callback or value
+                        // But wait, setCursorPos is exposed.
+                    }
+                }
+            }
+
             draw();
             animationFrameId = requestAnimationFrame(renderLoop);
         };
         renderLoop();
         return () => cancelAnimationFrame(animationFrameId);
-    }, [draw]); // Rerun if draw changes
+    }, [draw, engine]); // Rerun if draw changes
 
     // Add this effect to handle wheel events with non-passive option
     useEffect(() => {
