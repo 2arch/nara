@@ -218,7 +218,7 @@ export interface WorldEngine {
     setZoomLevel: React.Dispatch<React.SetStateAction<number>>;
     selectionStart: Point | null;
     selectionEnd: Point | null;
-    aiProcessingRegion: { startX: number, endX: number, startY: number, endY: number } | null;
+    processingRegion: { startX: number, endX: number, startY: number, endY: number } | null;
     selectedNoteKey: string | null; // Track selected note region from canvas
     setSelectedNoteKey: React.Dispatch<React.SetStateAction<string | null>>; // Allow canvas to update selected note
     handleSelectionStart: (canvasRelativeX: number, canvasRelativeY: number) => void;
@@ -667,7 +667,7 @@ export function useWorldEngine({
     const [isSelecting, setIsSelecting] = useState(false);
     const [selectionStart, setSelectionStart] = useState<Point | null>(null);
     const [selectionEnd, setSelectionEnd] = useState<Point | null>(null);
-    const [aiProcessingRegion, setAiProcessingRegion] = useState<{ startX: number, endX: number, startY: number, endY: number } | null>(null);
+    const [processingRegion, setProcessingRegion] = useState<{ startX: number, endX: number, startY: number, endY: number } | null>(null);
     const [selectedNoteKey, setSelectedNoteKey] = useState<string | null>(null); // Track selected note region from canvas
 
     // === State ===
@@ -3726,7 +3726,7 @@ export function useWorldEngine({
                             setDialogueWithRevert("Generating image...", setDialogueText);
 
                             // Show visual feedback for image generation
-                            setAiProcessingRegion({ startX: minX, endX: maxX, startY: minY, endY: maxY });
+                            setProcessingRegion({ startX: minX, endX: maxX, startY: minY, endY: maxY });
 
                             // Convert image to base64 if it's a URL (for CORS-safe image-to-image)
                             (async () => {
@@ -3756,13 +3756,13 @@ export function useWorldEngine({
                                         logger.debug('Successfully converted to base64');
                                     } catch (error) {
                                         logger.error('Failed to fetch image for conversion:', error);
-                                        setAiProcessingRegion(null); // Clear visual feedback
+                                        setProcessingRegion(null); // Clear visual feedback
                                         setDialogueWithRevert("Could not load image for editing", setDialogueText);
                                         return true;
                                     }
                                 } else {
                                     logger.error('Invalid image format:', selectedImageData);
-                                    setAiProcessingRegion(null); // Clear visual feedback
+                                    setProcessingRegion(null); // Clear visual feedback
                                     setDialogueWithRevert("Invalid image format", setDialogueText);
                                     return true;
                                 }
@@ -3840,7 +3840,7 @@ export function useWorldEngine({
                                         });
                                         updatedWorldData[noteKey] = JSON.stringify(noteData);
                                         setWorldData(updatedWorldData);
-                                        setAiProcessingRegion(null); // Clear visual feedback
+                                        setProcessingRegion(null); // Clear visual feedback
                                         setDialogueWithRevert("Image transformed", setDialogueText);
 
                                         // Clear selection after processing
@@ -3849,11 +3849,11 @@ export function useWorldEngine({
                                     };
                                     img.src = result.imageData;
                                 } else {
-                                    setAiProcessingRegion(null); // Clear visual feedback
+                                    setProcessingRegion(null); // Clear visual feedback
                                     setDialogueWithRevert("Image generation failed", setDialogueText);
                                 }
                                 }).catch((error) => {
-                                    setAiProcessingRegion(null); // Clear visual feedback
+                                    setProcessingRegion(null); // Clear visual feedback
                                     setDialogueWithRevert(`AI error: ${error.message || 'Could not generate image'}`, setDialogueText);
                                 });
                             })(); // Close async IIFE
@@ -3877,7 +3877,7 @@ export function useWorldEngine({
                             setDialogueWithRevert("Generating image...", setDialogueText);
 
                             // Show visual feedback for image generation
-                            setAiProcessingRegion({ startX: minX, endX: maxX, startY: minY, endY: maxY });
+                            setProcessingRegion({ startX: minX, endX: maxX, startY: minY, endY: maxY });
 
                             callGenerateImageAPI(aiPrompt, undefined, userUid || undefined).then(async (result) => {
                                 // Check if quota exceeded
@@ -3955,7 +3955,7 @@ export function useWorldEngine({
                                         updatedWorldData[noteKey] = JSON.stringify(noteData);
 
                                         setWorldData(updatedWorldData);
-                                        setAiProcessingRegion(null); // Clear visual feedback
+                                        setProcessingRegion(null); // Clear visual feedback
                                         setDialogueWithRevert("Image generated", setDialogueText);
 
                                         // Clear selection after processing
@@ -3964,11 +3964,11 @@ export function useWorldEngine({
                                     };
                                     img.src = finalImageUrl;
                                 } else {
-                                    setAiProcessingRegion(null); // Clear visual feedback
+                                    setProcessingRegion(null); // Clear visual feedback
                                     setDialogueWithRevert("Could not generate image", setDialogueText);
                                 }
                             }).catch((error) => {
-                                setAiProcessingRegion(null); // Clear visual feedback
+                                setProcessingRegion(null); // Clear visual feedback
                                 setDialogueWithRevert(`AI error: ${error.message || 'Could not generate image'}`, setDialogueText);
                             });
 
@@ -4149,7 +4149,7 @@ export function useWorldEngine({
                             const aspectRatio = regionWidth > regionHeight ? '16:9' : regionHeight > regionWidth ? '9:16' : '1:1';
 
                             // Show visual feedback for image generation
-                            setAiProcessingRegion(imageRegion);
+                            setProcessingRegion(imageRegion);
 
                             callGenerateImageAPI(aiPrompt, base64ImageData, userUid || undefined, aspectRatio).then(async (result) => {
                             // Check if quota exceeded
@@ -4216,16 +4216,16 @@ export function useWorldEngine({
                                         };
                                         return updatedWorldData;
                                     });
-                                    setAiProcessingRegion(null); // Clear visual feedback
+                                    setProcessingRegion(null); // Clear visual feedback
                                     setDialogueWithRevert("Image transformed", setDialogueText);
                                 };
                                 img.src = result.imageData;
                             } else {
-                                setAiProcessingRegion(null); // Clear visual feedback
+                                setProcessingRegion(null); // Clear visual feedback
                                 setDialogueWithRevert("Image generation failed", setDialogueText);
                             }
                             }).catch((error) => {
-                                setAiProcessingRegion(null); // Clear visual feedback
+                                setProcessingRegion(null); // Clear visual feedback
                                 setDialogueWithRevert(`AI error: ${error.message || 'Could not generate image'}`, setDialogueText);
                             });
                         })(); // Close async IIFE
@@ -5810,7 +5810,7 @@ export function useWorldEngine({
 
                         // Show pending visual effect on the target region
                         if (uploadBounds) {
-                            setAiProcessingRegion(uploadBounds);
+                            setProcessingRegion(uploadBounds);
                         }
 
                         try {
@@ -6078,7 +6078,7 @@ export function useWorldEngine({
                             logger.error('Error uploading image:', error);
                             setDialogueWithRevert("Error uploading image", setDialogueText);
                         } finally {
-                            setAiProcessingRegion(null); // Clear visual feedback
+                            setProcessingRegion(null); // Clear visual feedback
                             document.body.removeChild(fileInput);
                         }
                     };
@@ -9927,7 +9927,7 @@ export function useWorldEngine({
 
                         // Send email via API
                         setDialogueWithRevert('Sending email...', setDialogueText);
-                        setAiProcessingRegion({ startX, endX, startY, endY });
+                        setProcessingRegion({ startX, endX, startY, endY });
 
                         fetch('/api/mail/send', {
                             method: 'POST',
@@ -9947,7 +9947,7 @@ export function useWorldEngine({
                             console.error(error);
                         })
                         .finally(() => {
-                            setAiProcessingRegion(null);
+                            setProcessingRegion(null);
                         });
 
                         return; // Don't process regular click behavior
@@ -10887,7 +10887,7 @@ export function useWorldEngine({
         setZoomLevel, // Expose zoom setter
         selectionStart,
         selectionEnd,
-        aiProcessingRegion,
+        processingRegion,
         selectedNoteKey, // Expose selected note key for canvas
         setSelectedNoteKey, // Allow canvas to update selected note
         handleSelectionStart,

@@ -4,8 +4,10 @@
 // Integrates seamlessly with bit.canvas rendering loop
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { getMask, type FaceFeature as MaskFaceFeature, type FaceDynamics, type FaceBounds } from './mask';
+import type { FaceOrientation } from './face';
 
-export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'voronoi';
+export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'voronoi' | 'face3d';
 
 // Trail position interface for interactive monogram trails
 interface MonogramTrailPosition {
@@ -26,6 +28,16 @@ export interface MonogramOptions {
     trailFadeMs?: number;
     // Interface options
     showInterfaceVoronoi?: boolean;
+    // Face piloting options
+    faceOrientation?: {
+        rotX: number;
+        rotY: number;
+        rotZ: number;
+        mouthOpen?: number;
+        leftEyeBlink?: number;
+        rightEyeBlink?: number;
+        isTracked?: boolean;
+    };
 }
 
 // Shared WGSL utility functions for Perlin noise
@@ -468,6 +480,193 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 `;
 
+// WebGPU Compute Shader - Face3D mode (Projected 3D Geometry)
+const CHUNK_FACE_SHADER = `
+@group(0) @binding(0) var<storage, read_write> output: array<f32>;
+@group(0) @binding(1) var<uniform> params: FaceParams;
+@group(0) @binding(2) var<storage, read> features: array<FaceFeature>;
+
+struct FaceParams {
+    chunkWorldX: f32,
+    chunkWorldY: f32,
+    chunkSize: f32,
+    time: f32,
+    complexity: f32,
+    
+    // Viewport center
+    centerX: f32,
+    centerY: f32,
+    
+    // Viewport dimensions
+    viewportWidth: f32,
+    viewportHeight: f32,
+    
+    // Rotation (pitch, yaw, roll)
+    rotX: f32,
+    rotY: f32,
+    rotZ: f32,
+    
+    // Feature count
+    featureCount: f32,
+}
+
+struct FaceFeature {
+    // Position (center)
+    cx: f32,
+    cy: f32,
+    cz: f32,
+    
+    // Size
+    width: f32,
+    height: f32,
+    
+    // Padding to align to 16 bytes (vec4 + vec4 layout is safer)
+    _pad1: f32,
+    _pad2: f32,
+    _pad3: f32,
+}
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let localX = global_id.x;
+    let localY = global_id.y;
+    let chunkSize = u32(params.chunkSize);
+
+    if (localX >= chunkSize || localY >= chunkSize) {
+        return;
+    }
+
+    let worldX = params.chunkWorldX + f32(localX);
+    let worldY = params.chunkWorldY + f32(localY);
+    
+    // --- 3D PROJECTION LOGIC ---
+    
+    let faceScale = params.viewportWidth * 0.015 * params.complexity;
+    let centerX = params.centerX;
+    let centerY = params.centerY;
+    
+    // Precompute rotation matrices (simplified)
+    let cosX = cos(params.rotX); let sinX = sin(params.rotX);
+    let cosY = cos(params.rotY); let sinY = sin(params.rotY);
+    let cosZ = cos(params.rotZ); let sinZ = sin(params.rotZ);
+    
+    var finalIntensity = 0.0;
+    
+    // Iterate through features
+    let count = u32(params.featureCount);
+    for (var i = 0u; i < count; i++) {
+        let f = features[i];
+        
+        // Define 4 corners of the quad in local 3D space
+        // (Relative to feature center)
+        let halfW = f.width * 0.5;
+        let halfH = f.height * 0.5;
+        
+        // Local corners
+        // 0: Top-Left (-x, -y)
+        // 1: Top-Right (+x, -y)
+        // 2: Bottom-Right (+x, +y)
+        // 3: Bottom-Left (-x, +y)
+        var p0 = vec3<f32>(f.cx - halfW, f.cy - halfH, f.cz);
+        var p1 = vec3<f32>(f.cx + halfW, f.cy - halfH, f.cz);
+        var p2 = vec3<f32>(f.cx + halfW, f.cy + halfH, f.cz);
+        var p3 = vec3<f32>(f.cx - halfW, f.cy + halfH, f.cz);
+        
+        // Project Points Function (inline)
+        var corners: array<vec3<f32>, 4>;
+        
+        // Process all 4 corners
+        // Note: This loop unrolling is manual because arrays in loops in WGSL can be tricky
+        
+        for (var c = 0; c < 4; c++) {
+            var pt: vec3<f32>;
+            if (c == 0) { pt = p0; }
+            else if (c == 1) { pt = p1; }
+            else if (c == 2) { pt = p2; }
+            else { pt = p3; }
+            
+            // Scale
+            var x = pt.x * faceScale;
+            var y = pt.y * faceScale;
+            var z = pt.z * faceScale;
+            
+            // Rotate X
+            let ry = y * cosX - z * sinX;
+            let rz = y * sinX + z * cosX;
+            y = ry; z = rz;
+            
+            // Rotate Y
+            let rx = x * cosY + z * sinY;
+            z = -x * sinY + z * cosY;
+            x = rx;
+            
+            // Rotate Z
+            let rxx = x * cosZ - y * sinZ;
+            y = x * sinZ + y * cosZ;
+            x = rxx;
+            
+            // Perspective Project
+            let dist = 500.0;
+            let projX = centerX + (x * dist * 0.5) / (dist + z);
+            let projY = centerY + (y * dist * 0.5) / (dist + z);
+            
+            corners[c] = vec3<f32>(projX, projY, z);
+        }
+        
+        // Check point in quad (2D winding number / cross product)
+        // Edges: 0->1, 1->2, 2->3, 3->0
+        var inside = true;
+        var avgDepth = 0.0;
+        
+        for (var j = 0; j < 4; j++) {
+            let pA = corners[j];
+            let pB = corners[(j + 1) % 4];
+            
+            // Cross product (2D)
+            // Edge vector: B - A
+            // Point vector: P - A
+            // CP = (Bx - Ax) * (Py - Ay) - (By - Ay) * (Px - Ax)
+            
+            let cp = (pB.x - pA.x) * (worldY - pA.y) - (pB.y - pA.y) * (worldX - pA.x);
+            
+            // Assuming clockwise winding?
+            // Actually, if the winding is consistent, all CPs should have same sign.
+            // Let's check if any CP is positive (or negative depending on coord system)
+            // Standard screen coords (Y down):
+            // Top-Left -> Top-Right (dx>0, dy=0). Point is below (dy>0). CP = + * + - 0 = +
+            // Top-Right -> Bottom-Right (dx=0, dy>0). Point is left (dx<0). CP = 0 - + * - = +
+            
+            if (cp < 0.0) { inside = false; }
+            avgDepth = avgDepth + pA.z;
+        }
+        
+        if (inside) {
+            avgDepth = avgDepth / 4.0;
+            
+            // Calculate shading based on depth and distance from center
+            let depthFactor = max(0.3, 1.0 - abs(avgDepth) / 100.0);
+            
+            // Center of quad (approx)
+            let qCx = (corners[0].x + corners[2].x) * 0.5;
+            let qCy = (corners[0].y + corners[2].y) * 0.5;
+            let distToCenter = sqrt(pow(worldX - qCx, 2.0) + pow(worldY - qCy, 2.0));
+            
+            // Approx radius
+            let radius = sqrt(pow(corners[1].x - corners[0].x, 2.0) + pow(corners[1].y - corners[0].y, 2.0));
+            
+            let edgeFalloff = min(1.0, distToCenter / (radius * 0.8)); // 0.8 arbitrary scale
+            
+            let intensity = depthFactor * (1.0 - edgeFalloff * 0.4);
+            
+            finalIntensity = max(finalIntensity, intensity);
+        }
+    }
+
+    let index = localY * chunkSize + localX;
+    output[index] = finalIntensity;
+}
+`;
+
 class MonogramSystem {
     private chunks: Map<string, Float32Array> = new Map();
     private device: GPUDevice | null = null;
@@ -485,6 +684,12 @@ class MonogramSystem {
     private voronoiPipeline: GPUComputePipeline | null = null;
     private activeCellsBuffer: GPUBuffer | null = null;
     private cellParamsBuffer: GPUBuffer | null = null;
+    
+    // Face3D mode GPU resources
+    private facePipeline: GPUComputePipeline | null = null;
+    private faceParamsBuffer: GPUBuffer | null = null;
+    private featuresBuffer: GPUBuffer | null = null;
+    private currentFaceOrientation: NonNullable<MonogramOptions['faceOrientation']> | null = null;
     
     // Trail tracking
     private mouseTrail: MonogramTrailPosition[] = [];
@@ -615,6 +820,33 @@ class MonogramSystem {
                 size: 4 * 4, // 4 u32 (aligned to 16 bytes)
                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
             });
+            
+            // Create Face3D pipeline
+            const faceShaderModule = this.device.createShaderModule({
+                code: CHUNK_FACE_SHADER
+            });
+            
+            this.facePipeline = this.device.createComputePipeline({
+                layout: 'auto',
+                compute: {
+                    module: faceShaderModule,
+                    entryPoint: 'main'
+                }
+            });
+            
+            // Face params buffer (viewport, rotation, etc.)
+            this.faceParamsBuffer = this.device.createBuffer({
+                size: 16 * 4, // 16 floats
+                usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+            });
+            
+            // Features buffer (list of quads)
+            // Max 32 features for now (Macintosh mask has ~7)
+            const MAX_FEATURES = 32;
+            this.featuresBuffer = this.device.createBuffer({
+                size: MAX_FEATURES * 8 * 4, // 8 floats per feature
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+            });
 
             // Generate and upload NARA text texture
             const textBitmap = this.generateNaraTextBitmap();
@@ -660,7 +892,7 @@ class MonogramSystem {
             });
 
             this.isInitialized = true;
-            console.log('[Monogram] WebGPU initialized (Perlin + NARA + Trails)');
+            console.log('[Monogram] WebGPU initialized (Perlin + NARA + Voronoi + Face3D)');
             return true;
         } catch (error) {
             console.error('[Monogram] WebGPU init failed:', error);
@@ -784,7 +1016,7 @@ class MonogramSystem {
 
         const currentPos = { x: worldX, y: worldY };
 
-        // Only add to trail if mouse has moved significantly
+        // Only add to trail if mouse has actually moved significantly
         // Lower threshold (0.2) for smoother trails on touch
         if (!this.lastMousePos ||
             Math.abs(currentPos.x - this.lastMousePos.x) > 0.2 ||
@@ -870,6 +1102,8 @@ class MonogramSystem {
             return this.computeChunkNara(chunkWorldX, chunkWorldY);
         } else if (mode === 'voronoi') {
             return this.computeChunkVoronoi(chunkWorldX, chunkWorldY);
+        } else if (mode === 'face3d') {
+            return this.computeChunkFace(chunkWorldX, chunkWorldY);
         } else {
             return this.computeChunkPerlin(chunkWorldX, chunkWorldY);
         }
@@ -1042,18 +1276,6 @@ class MonogramSystem {
         const textureHeight = this.naraTexture.height;
         const scale = (viewportWidth * 0.6) / textureWidth;
 
-        console.log(`[Monogram NARA] Computing chunk at (${chunkWorldX}, ${chunkWorldY}), anchor: (${centerX}, ${centerY}), scale: ${scale}, texture: ${textureWidth}x${textureHeight}, viewport: ${viewportWidth}x${viewportHeight}`);
-
-        // Debug: Trace sample pixel coordinate transformation
-        const sampleWorldX = chunkWorldX + 16;
-        const sampleWorldY = chunkWorldY + 16;
-        const sampleRelX = sampleWorldX - centerX;
-        const sampleRelY = sampleWorldY - centerY;
-        // Rough estimate without distortion
-        const sampleTexX = sampleRelX / scale + textureWidth / 2;
-        const sampleTexY = sampleRelY / scale + textureHeight / 2;
-        console.log(`[Monogram NARA] Sample pixel (16,16): world=(${sampleWorldX},${sampleWorldY}), rel=(${sampleRelX.toFixed(1)},${sampleRelY.toFixed(1)}), tex=(${sampleTexX.toFixed(1)},${sampleTexY.toFixed(1)}) [bounds: 0-${textureWidth}, 0-${textureHeight}]`);
-
         const outputBuffer = device.createBuffer({
             size: bufferSize,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
@@ -1092,10 +1314,6 @@ class MonogramSystem {
         ]);
         device.queue.writeBuffer(this.trailParamsBuffer!, 0, trailParamsData);
 
-        if (trailCount > 0) {
-            console.log(`[Monogram NARA Trail] Params: count=${trailCount}, fadeMs=${trailFadeMs}, intensity=${trailIntensity}, complexity=${this.options.complexity}`);
-        }
-
         const bindGroup = device.createBindGroup({
             layout: this.naraPipeline.getBindGroupLayout(0),
             entries: [
@@ -1125,11 +1343,113 @@ class MonogramSystem {
         const intensities = new Float32Array(result);
         stagingBuffer.unmap();
 
-        // Debug: Check for non-zero values
-        const nonZero = intensities.filter(v => v > 0).length;
-        const sample = Array.from(intensities.slice(0, 10));
-        const max = Math.max(...intensities);
-        console.log(`[Monogram NARA] Chunk result: ${nonZero}/${intensities.length} non-zero, max: ${max.toFixed(3)}, sample:`, sample);
+        outputBuffer.destroy();
+        stagingBuffer.destroy();
+
+        return intensities;
+    }
+    
+    private async computeChunkFace(chunkWorldX: number, chunkWorldY: number): Promise<Float32Array> {
+        if (!this.device || !this.facePipeline || !this.faceParamsBuffer || !this.featuresBuffer) {
+            throw new Error('[Monogram] Face pipeline not initialized');
+        }
+
+        const device = this.device;
+        const bufferSize = this.CHUNK_SIZE * this.CHUNK_SIZE * 4;
+        
+        // Use current viewport center for face anchoring
+        // Default to center of world if no viewport known yet
+        const viewportWidth = this.lastViewport ? (this.lastViewport.endX - this.lastViewport.startX) : 100;
+        const viewportHeight = this.lastViewport ? (this.lastViewport.endY - this.lastViewport.startY) : 100;
+        const centerX = this.lastViewport ? (this.lastViewport.startX + this.lastViewport.endX) / 2 : 0;
+        const centerY = this.lastViewport ? (this.lastViewport.startY + this.lastViewport.endY) / 2 : 0;
+        
+        // Rotation values from tracked data
+        const rotX = this.currentFaceOrientation?.rotX ?? 0.3;
+        const rotY = this.currentFaceOrientation?.rotY ?? 0.3;
+        const rotZ = this.currentFaceOrientation?.rotZ ?? 0.0;
+        
+        // Prepare face features
+        // We regenerate features each frame to handle blinks/mouth movement
+        const mask = getMask('macintosh');
+        const dynamics: FaceDynamics = {
+            mouthOpen: this.currentFaceOrientation?.mouthOpen ?? 0,
+            leftEyeBlink: this.currentFaceOrientation?.leftEyeBlink ?? 0,
+            rightEyeBlink: this.currentFaceOrientation?.rightEyeBlink ?? 0,
+        };
+        const features = mask.getFeaturesWithDynamics(dynamics);
+        
+        // Upload features to GPU
+        const featureData = new Float32Array(32 * 8); // Max 32 features, 8 floats each (padded)
+        features.forEach((f, i) => {
+            if (i >= 32) return;
+            const offset = i * 8;
+            featureData[offset + 0] = f.cx;
+            featureData[offset + 1] = f.cy;
+            featureData[offset + 2] = f.cz;
+            featureData[offset + 3] = f.width;
+            featureData[offset + 4] = f.height;
+            // pad1, pad2, pad3 are left as 0
+        });
+        device.queue.writeBuffer(this.featuresBuffer, 0, featureData);
+
+        const outputBuffer = device.createBuffer({
+            size: bufferSize,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
+        });
+
+        const stagingBuffer = device.createBuffer({
+            size: bufferSize,
+            usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
+        });
+
+        const paramsData = new Float32Array([
+            chunkWorldX,
+            chunkWorldY,
+            this.CHUNK_SIZE,
+            this.time,
+            this.options.complexity,
+            
+            centerX,
+            centerY,
+            viewportWidth,
+            viewportHeight,
+            
+            rotX,
+            rotY,
+            rotZ,
+            
+            features.length,
+            0, 0, 0 // padding
+        ]);
+        device.queue.writeBuffer(this.faceParamsBuffer, 0, paramsData);
+
+        const bindGroup = device.createBindGroup({
+            layout: this.facePipeline.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: { buffer: outputBuffer } },
+                { binding: 1, resource: { buffer: this.faceParamsBuffer } },
+                { binding: 2, resource: { buffer: this.featuresBuffer } },
+            ]
+        });
+
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.facePipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(
+            Math.ceil(this.CHUNK_SIZE / 8),
+            Math.ceil(this.CHUNK_SIZE / 8)
+        );
+        computePass.end();
+
+        commandEncoder.copyBufferToBuffer(outputBuffer, 0, stagingBuffer, 0, bufferSize);
+        device.queue.submit([commandEncoder.finish()]);
+
+        await stagingBuffer.mapAsync(GPUMapMode.READ);
+        const result = new Float32Array(stagingBuffer.getMappedRange());
+        const intensities = new Float32Array(result);
+        stagingBuffer.unmap();
 
         outputBuffer.destroy();
         stagingBuffer.destroy();
@@ -1217,6 +1537,13 @@ class MonogramSystem {
         // Smooth animation: time flows continuously
         // Chunks recompute on-demand with current time (no invalidation needed)
     }
+    
+    updateFaceData(faceData: MonogramOptions['faceOrientation']) {
+        this.currentFaceOrientation = faceData || null;
+        // Invalidate chunks to force immediate re-render with new face data
+        this.chunks.clear();
+        this.chunkAccessTime.clear();
+    }
 
     setOptions(options: Partial<MonogramOptions>) {
         const complexityChanged = options.complexity !== undefined && options.complexity !== this.options.complexity;
@@ -1225,6 +1552,11 @@ class MonogramSystem {
         if (complexityChanged) {
             this.chunks.clear();
             this.chunkAccessTime.clear();
+        }
+        
+        // Update face data if provided in options
+        if (options.faceOrientation) {
+            this.currentFaceOrientation = options.faceOrientation;
         }
     }
 
@@ -1258,7 +1590,8 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         mode: initialOptions?.mode ?? 'nara',
         interactiveTrails: initialOptions?.interactiveTrails ?? true,
         trailIntensity: initialOptions?.trailIntensity ?? 1.0,
-        trailFadeMs: initialOptions?.trailFadeMs ?? 2000
+        trailFadeMs: initialOptions?.trailFadeMs ?? 2000,
+        faceOrientation: initialOptions?.faceOrientation
     });
 
     const systemRef = useRef<MonogramSystem | null>(null);
@@ -1351,6 +1684,21 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
 
     const toggleCell = useCallback((worldX: number, worldY: number) => {
         systemRef.current?.toggleCell(worldX, worldY);
+    }, []);
+    
+    // Explicitly update face data (useful for high-frequency updates outside of options)
+    const setFaceData = useCallback((faceData: FaceOrientation & { mouthOpen?: number, leftEyeBlink?: number, rightEyeBlink?: number, isTracked?: boolean }) => {
+        // Map to Monogram's expected format
+        const orientation = {
+            rotX: faceData.pitch,
+            rotY: faceData.yaw,
+            rotZ: faceData.roll,
+            mouthOpen: faceData.mouthOpen,
+            leftEyeBlink: faceData.leftEyeBlink,
+            rightEyeBlink: faceData.rightEyeBlink,
+            isTracked: faceData.isTracked
+        };
+        systemRef.current?.updateFaceData(orientation);
     }, []);
 
     // Calculate interactive trail intensity at a given position
@@ -1453,6 +1801,7 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         isInitialized,
         updateMousePosition,
         clearTrail,
-        toggleCell
+        toggleCell,
+        setFaceData
     };
 }

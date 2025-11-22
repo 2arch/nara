@@ -1076,7 +1076,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (lowerInput === 'monogram') {
             const parts = input.toLowerCase().split(' ');
-            const MONOGRAM_OPTIONS = ['clear', 'perlin', 'nara', 'on', 'off'];
+            const MONOGRAM_OPTIONS = ['clear', 'perlin', 'nara', 'face', 'on', 'off'];
             if (parts.length > 1) {
                 // Show monogram options that match the input
                 const monogramInput = parts[1];
@@ -2649,43 +2649,76 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         // Handle monogram command (WebGPU background effects)
         if (commandToExecute.startsWith('monogram')) {
-            const { argsArray: args } = parseCurrentInput();
+            const parts = commandToExecute.split(/\s+/);
+            const args = parts.slice(1);
 
-            if (args.length > 0 && monogramSystem) {
-                const option = args[0].toLowerCase();
-
-                if (option === 'on') {
-                    // Enable monogram
-                    monogramSystem.setOptions((prev: any) => ({ ...prev, enabled: true }));
-                    setDialogueWithRevert('Monogram enabled', setDialogueText);
-                } else if (option === 'off') {
-                    // Disable monogram
-                    monogramSystem.setOptions((prev: any) => ({ ...prev, enabled: false }));
-                    setDialogueWithRevert('Monogram disabled', setDialogueText);
-                } else if (option === 'clear') {
-                    // Set mode to clear (glows only)
-                    monogramSystem.setOptions((prev: any) => ({ ...prev, enabled: true, mode: 'clear' }));
-                    setDialogueWithRevert('Monogram mode: clear (character glows only)', setDialogueText);
-                } else if (option === 'perlin') {
-                    // Set mode to perlin (noise + glows)
-                    monogramSystem.setOptions((prev: any) => ({ ...prev, enabled: true, mode: 'perlin' }));
-                    setDialogueWithRevert('Monogram mode: perlin (noise + glows)', setDialogueText);
-                } else if (option === 'nara') {
-                    // Set mode to nara (animated text)
-                    monogramSystem.setOptions((prev: any) => ({ ...prev, enabled: true, mode: 'nara' }));
-                    setDialogueWithRevert('Monogram mode: nara (animated NARA text)', setDialogueText);
+            if (monogramSystem) {
+                if (args.length === 0) {
+                    // Toggle enabled state if no args
+                    monogramSystem.toggleEnabled();
+                    const newState = !monogramSystem.options?.enabled;
+                    setDialogueWithRevert(`Monogram background ${newState ? 'enabled' : 'disabled'}`, setDialogueText);
                 } else {
-                    // Unknown option - toggle instead
-                    monogramSystem.toggleEnabled();
-                    const newState = monogramSystem.options?.enabled ?? false;
-                    setDialogueWithRevert(`Monogram ${newState ? 'enabled' : 'disabled'}`, setDialogueText);
-                }
-            } else {
-                // No args - toggle monogram on/off
-                if (monogramSystem) {
-                    monogramSystem.toggleEnabled();
-                    const newState = monogramSystem.options?.enabled ?? false;
-                    setDialogueWithRevert(`Monogram ${newState ? 'enabled' : 'disabled'}`, setDialogueText);
+                    const option = args[0].toLowerCase();
+                    
+                    if (option === 'on') {
+                        monogramSystem.setOptions({ enabled: true });
+                        setDialogueWithRevert("Monogram background enabled", setDialogueText);
+                    } else if (option === 'off') {
+                        monogramSystem.setOptions({ enabled: false });
+                        setDialogueWithRevert("Monogram background disabled", setDialogueText);
+                    } else if (option === 'face') {
+                        // Activate face mode (same as /talk)
+                        monogramSystem.setOptions({ mode: 'face3d', enabled: true });
+                        
+                        // Trigger camera access for face tracking (same logic as /talk)
+                        const startFaceTracking = async () => {
+                            try {
+                                // Always use front camera for face tracking
+                                const facingMode: 'user' | 'environment' = 'user';
+                                const maskName = 'macintosh'; 
+
+                                // Request webcam access with front camera
+                                const stream = await navigator.mediaDevices.getUserMedia({
+                                    video: {
+                                        width: { ideal: 1920 },
+                                        height: { ideal: 1080 },
+                                        facingMode: { ideal: 'user' }
+                                    },
+                                    audio: false
+                                });
+
+                                // Stop any existing stream
+                                if (backgroundStreamRef.current) {
+                                    backgroundStreamRef.current.getTracks().forEach(track => track.stop());
+                                }
+
+                                // Store stream reference
+                                backgroundStreamRef.current = stream;
+
+                                // Enable face detection
+                                setModeState(prev => ({
+                                    ...prev,
+                                    isFaceDetectionEnabled: true,
+                                    backgroundStream: stream
+                                }));
+
+                                // Show webcam feed as background
+                                switchBackgroundMode('stream');
+
+                                setDialogueWithRevert(`Face-piloted geometry active. Turn your head to pilot the face!`, setDialogueText);
+                            } catch (error) {
+                                console.error('Failed to start face detection:', error);
+                                setDialogueWithRevert("Failed to access camera. Please grant permission.", setDialogueText);
+                            }
+                        };
+                        
+                        startFaceTracking();
+                    } else {
+                        // Set mode (clear, perlin, nara, etc.)
+                        monogramSystem.setOptions({ mode: option, enabled: true });
+                        setDialogueWithRevert(`Monogram mode set to: ${option}`, setDialogueText);
+                    }
                 }
             }
 

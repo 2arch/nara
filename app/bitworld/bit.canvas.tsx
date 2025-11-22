@@ -1927,12 +1927,15 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             }
         };
 
-        for (const { data: imageData } of getEntitiesByPrefix(engine.worldData, 'image_', false)) {
+        // Helper to process image data
+        const processImage = (imageData: any) => {
             if (engine.isImageData(imageData)) {
                 // Preload main image
                 if (!imageCache.current.has(imageData.src)) {
                     const img = new Image();
                     img.src = imageData.src;
+                    // Force re-render when image loads
+                    img.onload = () => setResizeState(prev => ({ ...prev })); 
                     imageCache.current.set(imageData.src, img);
                 }
 
@@ -1940,6 +1943,19 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 if (imageData.isAnimated && imageData.frameTiming && !gifFrameCache.current.has(imageData.src)) {
                     loadGIFFrames(imageData.frameTiming, imageData.src);
                 }
+            }
+        };
+
+        // Scan image_ entities
+        for (const { data: imageData } of getEntitiesByPrefix(engine.worldData, 'image_', false)) {
+            processImage(imageData);
+        }
+
+        // Scan note_ entities with image content
+        for (const { data: noteData } of getEntitiesByPrefix(engine.worldData, 'note_', true)) {
+            if (noteData.contentType === 'image') {
+                if (noteData.imageData) processImage(noteData.imageData);
+                if (noteData.content?.imageData) processImage(noteData.content.imageData);
             }
         }
     }, [engine.worldData, engine.isImageData]);
@@ -1954,6 +1970,21 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Use external monogram if provided, otherwise create internal one
     const internalMonogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0 });
     const monogram = externalMonogram || internalMonogram;
+
+    // Sync face tracking data with monogram system
+    useEffect(() => {
+        if (engine.faceOrientation && monogram.setFaceData) {
+            monogram.setFaceData(engine.faceOrientation);
+        }
+        
+        // Also sync the enabled state and mode if face detection is active
+        if (engine.isFaceDetectionEnabled && monogram.options.mode !== 'face3d') {
+            monogram.setOptions({ mode: 'face3d' });
+        } else if (!engine.isFaceDetectionEnabled && monogram.options.mode === 'face3d') {
+            // Revert to default mode when face detection stops
+            monogram.setOptions({ mode: 'nara' });
+        }
+    }, [engine.faceOrientation, engine.isFaceDetectionEnabled, monogram]);
 
     // Preload monogram chunks when viewport changes
     useEffect(() => {
@@ -5123,9 +5154,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         }
 
         // === Render AI Processing Region ===
-        if (engine.aiProcessingRegion) {
-            const { startX, endX, startY, endY } = engine.aiProcessingRegion;
-
+        if (engine.processingRegion) {
+                const { startX, endX, startY, endY } = engine.processingRegion;
             // Pulse effect using time
             const pulseAlpha = 0.15 + 0.1 * Math.sin(Date.now() / 400);
             const generatingColor = `rgba(${hexToRgb(engine.textColor)}, ${pulseAlpha})`;
@@ -8672,6 +8702,20 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             e.stopPropagation();
         }
     }, [engine, handleKeyDownFromController, selectedImageKey, selectedNoteKey, selectedPatternKey, hostDialogue]);
+
+    // Continuous render loop for processing effects
+    useEffect(() => {
+        if (!engine.processingRegion) return;
+
+        let animationFrameId: number;
+        const animate = () => {
+            setResizeState(prev => ({ ...prev })); // Force re-render
+            animationFrameId = requestAnimationFrame(animate);
+        };
+
+        animationFrameId = requestAnimationFrame(animate);
+        return () => cancelAnimationFrame(animationFrameId);
+    }, [engine.processingRegion]);
 
     const hiddenInputRef = useRef<HTMLInputElement>(null);
 
