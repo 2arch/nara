@@ -12,6 +12,7 @@ import { setDialogueWithRevert } from './ai';
 import { CanvasRecorder } from './tape';
 import { renderStyledRect, getRectStyle, type CellBounds, type BaseRenderContext } from './styles';
 import { useMonogram } from './monogram';
+import { faceOrientationToRotation } from './face';
 
 // --- Constants --- (Copied and relevant ones kept)
 const GRID_COLOR = '#F2F2F233';
@@ -1974,7 +1975,23 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Sync face tracking data with monogram system
     useEffect(() => {
         if (engine.faceOrientation && monogram.setFaceData) {
-            monogram.setFaceData(engine.faceOrientation);
+            const { pitch, yaw, roll, mouthOpen, leftEyeBlink, rightEyeBlink, isTracked } = engine.faceOrientation;
+            const rotation = faceOrientationToRotation({
+                pitch: pitch,
+                yaw: yaw,
+                roll: roll,
+                confidence: 1.0
+            }, true, false, false); // Invert yaw for correct left/right movement
+
+            monogram.setFaceData({
+                rotX: rotation.rotX,
+                rotY: rotation.rotY,
+                rotZ: rotation.rotZ,
+                mouthOpen: mouthOpen,
+                leftEyeBlink: leftEyeBlink,
+                rightEyeBlink: rightEyeBlink,
+                isTracked: isTracked
+            });
         }
         
         // Also sync the enabled state and mode if face detection is active
