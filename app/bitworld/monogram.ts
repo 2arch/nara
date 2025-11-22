@@ -728,9 +728,9 @@ class MonogramSystem {
     // Track last viewport for auto-reload on invalidation
     private lastViewport: { startX: number, startY: number, endX: number, endY: number } | null = null;
 
-    // Fade-in effect for mode transitions
-    private fadeProgress = 0; // Linear progress from 0 to 1
-    private fadeFactor = 0;   // Eased factor applied to intensity
+    // Fade in/out effect for all transitions
+    private fadeFactor = 0;        // Current fade factor (0 to 1)
+    private targetFade = 0;        // Target fade factor (0 or 1)
     private readonly FADE_DURATION = 0.8; // seconds
     
     // Interactive Voronoi state
@@ -1558,7 +1558,7 @@ class MonogramSystem {
         }
 
         const index = localY * this.CHUNK_SIZE + localX;
-        // Apply fade-in effect for smooth transitions
+        // Apply fade in/out effect for smooth transitions
         return chunk[index] * this.fadeFactor;
     }
 
@@ -1567,16 +1567,17 @@ class MonogramSystem {
         // Smooth animation: time flows continuously
         // Chunks recompute on-demand with current time (no invalidation needed)
 
-        // Ease in fade factor for smooth mode transitions
-        if (this.fadeProgress < 1.0) {
-            this.fadeProgress = Math.min(1.0, this.fadeProgress + (deltaTime / this.FADE_DURATION));
-            // Apply ease-out cubic curve for smoother feel
-            this.fadeFactor = this.easeOutCubic(this.fadeProgress);
-        }
-    }
+        // Smoothly interpolate fade factor towards target (handles both fade-in and fade-out)
+        if (Math.abs(this.fadeFactor - this.targetFade) > 0.001) {
+            // Exponential smoothing for buttery smooth fade in/out
+            const smoothing = 1 - Math.pow(0.001, deltaTime / this.FADE_DURATION);
+            this.fadeFactor += (this.targetFade - this.fadeFactor) * smoothing;
 
-    private easeOutCubic(t: number): number {
-        return 1 - Math.pow(1 - t, 3);
+            // Snap to target when very close
+            if (Math.abs(this.fadeFactor - this.targetFade) < 0.001) {
+                this.fadeFactor = this.targetFade;
+            }
+        }
     }
     
     updateFaceData(faceData: MonogramOptions['faceOrientation']) {
@@ -1609,17 +1610,15 @@ class MonogramSystem {
             this.chunks.clear();
             this.chunkAccessTime.clear();
 
-            // Reset fade for smooth transition when mode changes
-            if (modeChanged && this.options.mode !== 'clear') {
-                this.fadeProgress = 0;
-                this.fadeFactor = 0;
+            // Fade in when switching to a visible mode, fade out when switching to clear
+            if (modeChanged) {
+                this.targetFade = this.options.mode === 'clear' ? 0 : 1;
             }
         }
 
-        // Reset fade when enabling from disabled state
-        if (enabledChanged && this.options.enabled && !wasEnabled && this.options.mode !== 'clear') {
-            this.fadeProgress = 0;
-            this.fadeFactor = 0;
+        // Handle enable/disable transitions
+        if (enabledChanged) {
+            this.targetFade = this.options.enabled && this.options.mode !== 'clear' ? 1 : 0;
         }
 
         // Update face data if provided in options
@@ -1629,14 +1628,10 @@ class MonogramSystem {
     }
 
     toggleEnabled() {
-        const wasEnabled = this.options.enabled;
         this.options.enabled = !this.options.enabled;
 
-        // Reset fade when enabling from disabled state
-        if (!wasEnabled && this.options.enabled && this.options.mode !== 'clear') {
-            this.fadeProgress = 0;
-            this.fadeFactor = 0;
-        }
+        // Fade in when enabling, fade out when disabling
+        this.targetFade = this.options.enabled && this.options.mode !== 'clear' ? 1 : 0;
     }
 
     getOptions(): MonogramOptions {
