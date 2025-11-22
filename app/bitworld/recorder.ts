@@ -63,6 +63,7 @@ export class DataRecorder {
         };
 
         console.log(`Recording stopped. Captured ${this.frames.length} frames and ${this.contentChanges.length} content changes.`);
+        console.log('Content changes:', this.contentChanges);
         return this.currentRecording;
     }
 
@@ -99,12 +100,17 @@ export class DataRecorder {
     }
 
     startPlayback() {
-        if (!this.currentRecording) return;
+        if (!this.currentRecording) {
+            console.log('Cannot start playback: no currentRecording');
+            return;
+        }
         this.isPlaying = true;
         this.playbackStart = Date.now();
         this.playbackIndex = 0;
         this.contentChangeIndex = 0;
         console.log('Playback started');
+        console.log(`Recording has ${this.currentRecording.frames.length} frames and ${this.currentRecording.contentChanges.length} content changes`);
+        console.log('Content changes to play:', this.currentRecording.contentChanges);
     }
 
     stopPlayback() {
