@@ -1649,8 +1649,8 @@ class MonogramSystem {
             this.chunkAccessTime.clear();
         }
 
-        // Handle enable/disable transitions
-        if (enabledChanged) {
+        // Handle enable/disable transitions (but don't override cross-fade)
+        if (enabledChanged && !this.pendingMode) {
             this.targetFade = this.options.enabled && this.options.mode !== 'clear' ? 1 : 0;
         }
 
