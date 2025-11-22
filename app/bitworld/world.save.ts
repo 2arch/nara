@@ -21,7 +21,8 @@ export function useWorldSave(
     userUid?: string | null, // Add user UID parameter
     isReadOnly?: boolean, // Read-only flag to prevent write attempts
     localClipboard?: any[], // Clipboard items
-    setLocalClipboard?: React.Dispatch<React.SetStateAction<any[]>> // Clipboard setter
+    setLocalClipboard?: React.Dispatch<React.SetStateAction<any[]>>, // Clipboard setter
+    recorder?: any // DataRecorder instance for recording content changes
 ) {
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -409,6 +410,17 @@ export function useWorldSave(
                                 };
                                 updates[`${replayRefPath}/${replayCounterRef.current}`] = replayEntry;
                                 replayCounterRef.current++;
+                            }
+                        }
+                    }
+
+                    // Record content changes for session recording
+                    if (recorder && recorder.isRecording) {
+                        for (const [fullPath, value] of Object.entries(updates)) {
+                            // Extract the key from the full path
+                            const key = fullPath.split('/').pop();
+                            if (key && !fullPath.includes('/replay/')) { // Skip replay log entries
+                                recorder.recordContentChange(key, value);
                             }
                         }
                     }

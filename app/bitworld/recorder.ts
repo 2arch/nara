@@ -16,11 +16,18 @@ export interface FrameData {
     zoomLevel: number;
 }
 
+export interface ContentChange {
+    timestamp: number;
+    key: string;
+    value: any;
+}
+
 export interface RecordingSession {
     name: string;
     startTime: number;
     duration: number;
     frames: FrameData[];
+    contentChanges: ContentChange[];
 }
 
 export class DataRecorder {
@@ -28,13 +35,16 @@ export class DataRecorder {
     isPlaying: boolean = false;
     currentRecording: RecordingSession | null = null;
     private frames: FrameData[] = [];
+    private contentChanges: ContentChange[] = [];
     private startTime: number = 0;
     private playbackStart: number = 0;
     private playbackIndex: number = 0;
+    private contentChangeIndex: number = 0;
 
     start() {
         this.isRecording = true;
         this.frames = [];
+        this.contentChanges = [];
         this.startTime = Date.now();
         console.log('Recording started');
     }
@@ -43,21 +53,22 @@ export class DataRecorder {
         if (!this.isRecording) return null;
         this.isRecording = false;
         const duration = Date.now() - this.startTime;
-        
+
         this.currentRecording = {
             name: `recording_${this.startTime}`,
             startTime: this.startTime,
             duration,
-            frames: this.frames
+            frames: this.frames,
+            contentChanges: this.contentChanges
         };
-        
-        console.log(`Recording stopped. Captured ${this.frames.length} frames.`);
+
+        console.log(`Recording stopped. Captured ${this.frames.length} frames and ${this.contentChanges.length} content changes.`);
         return this.currentRecording;
     }
 
     capture(engine: any) {
         if (!this.isRecording) return;
-        
+
         const frame: FrameData = {
             timestamp: Date.now() - this.startTime,
             face: engine.faceOrientation ? { ...engine.faceOrientation } : undefined,
@@ -65,13 +76,26 @@ export class DataRecorder {
             viewOffset: { ...engine.viewOffset },
             zoomLevel: engine.zoomLevel
         };
-        
+
         this.frames.push(frame);
+    }
+
+    recordContentChange(key: string, value: any) {
+        if (!this.isRecording) return;
+
+        const change: ContentChange = {
+            timestamp: Date.now() - this.startTime,
+            key,
+            value
+        };
+
+        this.contentChanges.push(change);
     }
 
     loadRecording(session: RecordingSession) {
         this.currentRecording = session;
         this.playbackIndex = 0;
+        this.contentChangeIndex = 0;
     }
 
     startPlayback() {
@@ -79,6 +103,7 @@ export class DataRecorder {
         this.isPlaying = true;
         this.playbackStart = Date.now();
         this.playbackIndex = 0;
+        this.contentChangeIndex = 0;
         console.log('Playback started');
     }
 
@@ -89,21 +114,37 @@ export class DataRecorder {
 
     getPlaybackFrame(): FrameData | null {
         if (!this.isPlaying || !this.currentRecording) return null;
-        
+
         const elapsed = Date.now() - this.playbackStart;
-        
+
         if (elapsed > this.currentRecording.duration) {
             this.stopPlayback();
-            return null; 
+            return null;
         }
-        
+
         // Advance index to find the latest frame that matches current time
-        while(this.playbackIndex < this.currentRecording.frames.length - 1 && 
+        while(this.playbackIndex < this.currentRecording.frames.length - 1 &&
               this.currentRecording.frames[this.playbackIndex + 1].timestamp <= elapsed) {
             this.playbackIndex++;
         }
-        
+
         return this.currentRecording.frames[this.playbackIndex];
+    }
+
+    getPlaybackContentChanges(): ContentChange[] {
+        if (!this.isPlaying || !this.currentRecording) return [];
+
+        const elapsed = Date.now() - this.playbackStart;
+        const changes: ContentChange[] = [];
+
+        // Collect all content changes that should be applied up to current time
+        while(this.contentChangeIndex < this.currentRecording.contentChanges.length &&
+              this.currentRecording.contentChanges[this.contentChangeIndex].timestamp <= elapsed) {
+            changes.push(this.currentRecording.contentChanges[this.contentChangeIndex]);
+            this.contentChangeIndex++;
+        }
+
+        return changes;
     }
     
     // Export recording as JSON string
@@ -116,6 +157,10 @@ export class DataRecorder {
         try {
             const session = JSON.parse(json) as RecordingSession;
             if (session.frames && Array.isArray(session.frames)) {
+                // Ensure backward compatibility with old recordings without contentChanges
+                if (!session.contentChanges) {
+                    session.contentChanges = [];
+                }
                 this.loadRecording(session);
                 return true;
             }

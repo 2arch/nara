@@ -6272,12 +6272,30 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             if (!engine.isFaceDetectionEnabled) engine.setFaceDetectionEnabled(true);
                             engine.setFaceOrientation(frame.face);
                         }
-                        
+
                         // Update cursor
                         engine.setViewOffset(frame.viewOffset);
                         engine.setZoomLevel(frame.zoomLevel);
                         // engine.setCursorPos(frame.cursor); // this expects a callback or value
                         // But wait, setCursorPos is exposed.
+                    }
+
+                    // Apply content changes that should happen at this timestamp
+                    const contentChanges = engine.recorder.getPlaybackContentChanges();
+                    if (contentChanges.length > 0) {
+                        engine.setWorldData((prev) => {
+                            const next = { ...prev };
+                            for (const change of contentChanges) {
+                                if (change.value === null) {
+                                    // Deletion
+                                    delete next[change.key];
+                                } else {
+                                    // Addition or update
+                                    next[change.key] = change.value;
+                                }
+                            }
+                            return next;
+                        });
                     }
                 }
             }

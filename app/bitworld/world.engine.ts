@@ -2203,7 +2203,8 @@ export function useWorldEngine({
         userUid,
         isReadOnly, // Pass read-only flag to prevent write attempts
         clipboardItems, // Clipboard items
-        setClipboardItems // Clipboard setter
+        setClipboardItems, // Clipboard setter
+        recorder // Pass recorder for content change tracking
     ); // Only enable when userUid is available
 
     // === Multiplayer Cursor Sync ===
