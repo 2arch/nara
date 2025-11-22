@@ -125,19 +125,6 @@ export const MacintoshMask: Mask = {
     description: 'Classic Macintosh face with simple iconic features',
 
     baseFeatures: [
-        // --- HEAD BOX GEOMETRY ---
-        // Front Face (Main Screen)
-        { cx: 0, cy: 2, cz: 0, width: 45, height: 58, type: 'faceFront', orientation: 0 },
-        // Right Side Face (+X) - cz is center of depth (15 units back from front)
-        { cx: 22.5, cy: 2, cz: 15, width: 30, height: 58, type: 'faceRight', orientation: 1 },
-        // Left Side Face (-X)
-        { cx: -22.5, cy: 2, cz: 15, width: 30, height: 58, type: 'faceLeft', orientation: 2 },
-        // Top Face (-Y)
-        { cx: 0, cy: -27, cz: 15, width: 45, height: 30, type: 'faceTop', orientation: 3 },
-        // Bottom Face (+Y)
-        { cx: 0, cy: 31, cz: 15, width: 45, height: 30, type: 'faceBottom', orientation: 4 },
-
-        // --- FEATURES (Protruding from Front Face) ---
         // Eyes - simple rectangles
         { cx: -14.3, cy: -9.1, cz: -0.5, width: 5.8, height: 14.6, type: 'leftEye' },
         { cx: 14.3, cy: -9.1, cz: -0.5, width: 5.8, height: 14.6, type: 'rightEye' },
