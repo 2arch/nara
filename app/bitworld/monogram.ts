@@ -519,8 +519,8 @@ struct FaceFeature {
     width: f32,
     height: f32,
     
-    // Padding to align to 16 bytes (vec4 + vec4 layout is safer)
-    _pad1: f32,
+    // Orientation (0=Front, 1=Right, 2=Left, 3=Top, 4=Bottom)
+    orientation: f32,
     _pad2: f32,
     _pad3: f32,
 }
@@ -555,27 +555,56 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let count = u32(params.featureCount);
     for (var i = 0u; i < count; i++) {
         let f = features[i];
+        let orient = u32(f.orientation);
         
-        // Define 4 corners of the quad in local 3D space
-        // (Relative to feature center)
         let halfW = f.width * 0.5;
         let halfH = f.height * 0.5;
         
-        // Local corners
-        // 0: Top-Left (-x, -y)
-        // 1: Top-Right (+x, -y)
-        // 2: Bottom-Right (+x, +y)
-        // 3: Bottom-Left (-x, +y)
-        var p0 = vec3<f32>(f.cx - halfW, f.cy - halfH, f.cz);
-        var p1 = vec3<f32>(f.cx + halfW, f.cy - halfH, f.cz);
-        var p2 = vec3<f32>(f.cx + halfW, f.cy + halfH, f.cz);
-        var p3 = vec3<f32>(f.cx - halfW, f.cy + halfH, f.cz);
+        // Define 4 corners based on orientation
+        var p0: vec3<f32>; var p1: vec3<f32>; var p2: vec3<f32>; var p3: vec3<f32>;
+        
+        if (orient == 1u) { // Right Face (+X normal)
+            // YZ Plane. Winding: FrontTop -> FrontBot -> BackBot -> BackTop
+            // Local Z is width (depth), Y is height
+            p0 = vec3<f32>(0.0, -halfH, -halfW);
+            p1 = vec3<f32>(0.0,  halfH, -halfW);
+            p2 = vec3<f32>(0.0,  halfH,  halfW);
+            p3 = vec3<f32>(0.0, -halfH,  halfW);
+        } else if (orient == 2u) { // Left Face (-X normal)
+            // YZ Plane. Winding: FrontTop -> BackTop -> BackBot -> FrontBot
+            p0 = vec3<f32>(0.0, -halfH, -halfW);
+            p1 = vec3<f32>(0.0, -halfH,  halfW);
+            p2 = vec3<f32>(0.0,  halfH,  halfW);
+            p3 = vec3<f32>(0.0,  halfH, -halfW);
+        } else if (orient == 3u) { // Top Face (-Y normal)
+            // XZ Plane. Winding: BackLeft -> BackRight -> FrontRight -> FrontLeft
+            // Local X is width, Z is height (depth)
+            p0 = vec3<f32>(-halfW, 0.0,  halfH);
+            p1 = vec3<f32>( halfW, 0.0,  halfH);
+            p2 = vec3<f32>( halfW, 0.0, -halfH);
+            p3 = vec3<f32>(-halfW, 0.0, -halfH);
+        } else if (orient == 4u) { // Bottom Face (+Y normal)
+            // XZ Plane. Winding: FrontLeft -> FrontRight -> BackRight -> BackLeft
+            p0 = vec3<f32>(-halfW, 0.0, -halfH);
+            p1 = vec3<f32>( halfW, 0.0, -halfH);
+            p2 = vec3<f32>( halfW, 0.0,  halfH);
+            p3 = vec3<f32>(-halfW, 0.0,  halfH);
+        } else { // Front Face (XY Plane, -Z normal)
+            // Standard winding: TL -> TR -> BR -> BL
+            p0 = vec3<f32>(-halfW, -halfH, 0.0);
+            p1 = vec3<f32>( halfW, -halfH, 0.0);
+            p2 = vec3<f32>( halfW,  halfH, 0.0);
+            p3 = vec3<f32>(-halfW,  halfH, 0.0);
+        }
+
+        // Apply Center Offset
+        p0 = p0 + vec3<f32>(f.cx, f.cy, f.cz);
+        p1 = p1 + vec3<f32>(f.cx, f.cy, f.cz);
+        p2 = p2 + vec3<f32>(f.cx, f.cy, f.cz);
+        p3 = p3 + vec3<f32>(f.cx, f.cy, f.cz);
         
         // Project Points Function (inline)
         var corners: array<vec3<f32>, 4>;
-        
-        // Process all 4 corners
-        // Note: This loop unrolling is manual because arrays in loops in WGSL can be tricky
         
         for (var c = 0; c < 4; c++) {
             var pt: vec3<f32>;
@@ -613,7 +642,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         
         // Check point in quad (2D winding number / cross product)
-        // Edges: 0->1, 1->2, 2->3, 3->0
         var inside = true;
         var avgDepth = 0.0;
         
@@ -621,20 +649,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let pA = corners[j];
             let pB = corners[(j + 1) % 4];
             
-            // Cross product (2D)
-            // Edge vector: B - A
-            // Point vector: P - A
-            // CP = (Bx - Ax) * (Py - Ay) - (By - Ay) * (Px - Ax)
-            
             let cp = (pB.x - pA.x) * (worldY - pA.y) - (pB.y - pA.y) * (worldX - pA.x);
             
-            // Assuming clockwise winding?
-            // Actually, if the winding is consistent, all CPs should have same sign.
-            // Let's check if any CP is positive (or negative depending on coord system)
-            // Standard screen coords (Y down):
-            // Top-Left -> Top-Right (dx>0, dy=0). Point is below (dy>0). CP = + * + - 0 = +
-            // Top-Right -> Bottom-Right (dx=0, dy>0). Point is left (dx<0). CP = 0 - + * - = +
-            
+            // Backface culling: cp < 0.0 means facing away or outside
             if (cp < 0.0) { inside = false; }
             avgDepth = avgDepth + pA.z;
         }
@@ -645,17 +662,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             // Calculate shading based on depth and distance from center
             let depthFactor = max(0.3, 1.0 - abs(avgDepth) / 100.0);
             
-            // Center of quad (approx)
+            // Simple flat shading based on orientation to distinguish faces
+            // Sides are slightly darker to give volume feel
+            var sideShade = 1.0;
+            if (orient != 0u) { sideShade = 0.85; }
+            if (orient == 3u || orient == 4u) { sideShade = 0.7; } // Top/Bottom darker
+            
+            // Soft edge falloff
+            // Center of quad
             let qCx = (corners[0].x + corners[2].x) * 0.5;
             let qCy = (corners[0].y + corners[2].y) * 0.5;
             let distToCenter = sqrt(pow(worldX - qCx, 2.0) + pow(worldY - qCy, 2.0));
-            
-            // Approx radius
             let radius = sqrt(pow(corners[1].x - corners[0].x, 2.0) + pow(corners[1].y - corners[0].y, 2.0));
+            let edgeFalloff = min(1.0, distToCenter / (radius * 0.9));
             
-            let edgeFalloff = min(1.0, distToCenter / (radius * 0.8)); // 0.8 arbitrary scale
-            
-            let intensity = depthFactor * (1.0 - edgeFalloff * 0.4);
+            let intensity = depthFactor * sideShade * (1.0 - edgeFalloff * 0.3);
             
             finalIntensity = max(finalIntensity, intensity);
         }
@@ -1388,7 +1409,11 @@ class MonogramSystem {
             featureData[offset + 2] = f.cz;
             featureData[offset + 3] = f.width;
             featureData[offset + 4] = f.height;
-            // pad1, pad2, pad3 are left as 0
+            // Store orientation in padding field
+            // We need to cast f as any or update type definition in next step
+            const orient = (f as any).orientation ?? 0;
+            featureData[offset + 5] = orient; 
+            // pad2, pad3 left as 0
         });
         device.queue.writeBuffer(this.featuresBuffer, 0, featureData);
 

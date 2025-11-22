@@ -17,9 +17,10 @@ export interface FaceFeature {
     cx: number;      // center x position
     cy: number;      // center y position (base position, may be modulated)
     cz: number;      // center z position (for 3D depth)
-    width: number;   // feature width
-    height: number;  // feature height (base, may be modulated)
+    width: number;   // feature width (or depth for side faces)
+    height: number;  // feature height (or depth for top/bottom faces)
     type: string;    // feature identifier (e.g., 'leftEye', 'mouth')
+    orientation?: number; // 0=Front, 1=Right, 2=Left, 3=Top, 4=Bottom
 }
 
 /**
@@ -124,11 +125,22 @@ export const MacintoshMask: Mask = {
     description: 'Classic Macintosh face with simple iconic features',
 
     baseFeatures: [
-        // Face Plate (Background)
-        { cx: 0, cy: 2, cz: 20, width: 45, height: 58, type: 'facePlate' },
+        // --- HEAD BOX GEOMETRY ---
+        // Front Face (Main Screen)
+        { cx: 0, cy: 2, cz: 0, width: 45, height: 58, type: 'faceFront', orientation: 0 },
+        // Right Side Face (+X) - cz is center of depth (15 units back from front)
+        { cx: 22.5, cy: 2, cz: 15, width: 30, height: 58, type: 'faceRight', orientation: 1 },
+        // Left Side Face (-X)
+        { cx: -22.5, cy: 2, cz: 15, width: 30, height: 58, type: 'faceLeft', orientation: 2 },
+        // Top Face (-Y)
+        { cx: 0, cy: -27, cz: 15, width: 45, height: 30, type: 'faceTop', orientation: 3 },
+        // Bottom Face (+Y)
+        { cx: 0, cy: 31, cz: 15, width: 45, height: 30, type: 'faceBottom', orientation: 4 },
+
+        // --- FEATURES (Protruding from Front Face) ---
         // Eyes - simple rectangles
-        { cx: -14.3, cy: -9.1, cz: 0, width: 5.8, height: 14.6, type: 'leftEye' },
-        { cx: 14.3, cy: -9.1, cz: 0, width: 5.8, height: 14.6, type: 'rightEye' },
+        { cx: -14.3, cy: -9.1, cz: -0.5, width: 5.8, height: 14.6, type: 'leftEye' },
+        { cx: 14.3, cy: -9.1, cz: -0.5, width: 5.8, height: 14.6, type: 'rightEye' },
         // Nose - vertical part
         { cx: 0, cy: 3.9, cz: -10, width: 4.4, height: 10.4, type: 'noseVert' },
         // Nose - horizontal part
