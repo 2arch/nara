@@ -414,16 +414,8 @@ export function useWorldSave(
                         }
                     }
 
-                    // Record content changes for session recording
-                    if (recorder && recorder.isRecording) {
-                        for (const [fullPath, value] of Object.entries(updates)) {
-                            // Extract the key from the full path
-                            const key = fullPath.split('/').pop();
-                            if (key && !fullPath.includes('/replay/')) { // Skip replay log entries
-                                recorder.recordContentChange(key, value);
-                            }
-                        }
-                    }
+                    // Note: Content changes for recording are now captured directly in placeCharacter/deleteCharacter
+                    // for immediate, character-by-character accuracy instead of batched Firebase sync
 
                     await update(ref(database), updates);
 

@@ -6262,6 +6262,11 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 if (engine.recorder.isRecording) {
                     engine.recorder.capture(engine);
                 } else if (engine.recorder.isPlaying) {
+                    // Enable agent to show playback cursor
+                    if (!engine.agentEnabled) {
+                        engine.setAgentEnabled(true);
+                    }
+
                     const frame = engine.recorder.getPlaybackFrame();
                     if (frame) {
                         // Apply playback state overrides
@@ -6294,24 +6299,32 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             const updated = [newTrailPosition, ...prev.filter(pos => pos.timestamp >= cutoffTime)];
                             return updated.slice(0, 20); // Limit trail length
                         });
+                    } else {
+                        // Playback finished - disable agent
+                        if (engine.agentEnabled) {
+                            engine.setAgentEnabled(false);
+                            setAgentTrail([]); // Clear trail
+                        }
                     }
 
                     // Apply content changes that should happen at this timestamp
-                    const contentChanges = engine.recorder.getPlaybackContentChanges();
-                    if (contentChanges.length > 0) {
-                        engine.setWorldData((prev) => {
-                            const next = { ...prev };
-                            for (const change of contentChanges) {
-                                if (change.value === null) {
-                                    // Deletion
-                                    delete next[change.key];
-                                } else {
-                                    // Addition or update
-                                    next[change.key] = change.value;
+                    if (engine.recorder.isPlaying) {
+                        const contentChanges = engine.recorder.getPlaybackContentChanges();
+                        if (contentChanges.length > 0) {
+                            engine.setWorldData((prev) => {
+                                const next = { ...prev };
+                                for (const change of contentChanges) {
+                                    if (change.value === null) {
+                                        // Deletion
+                                        delete next[change.key];
+                                    } else {
+                                        // Addition or update
+                                        next[change.key] = change.value;
+                                    }
                                 }
-                            }
-                            return next;
-                        });
+                                return next;
+                            });
+                        }
                     }
                 }
             }

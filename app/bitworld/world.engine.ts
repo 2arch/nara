@@ -263,6 +263,7 @@ export interface WorldEngine {
     clearLightModeData: () => void;
     // Agent system
     agentEnabled: boolean;
+    setAgentEnabled: React.Dispatch<React.SetStateAction<boolean>>;
     agentPos: Point;
     setAgentPos: React.Dispatch<React.SetStateAction<Point>>;
     agentState: 'idle' | 'typing' | 'moving' | 'walking' | 'selecting';
@@ -10558,7 +10559,12 @@ export function useWorldEngine({
         const newWorldData = { ...worldData };
         delete newWorldData[key];
         setWorldData(newWorldData);
-    }, [worldData]);
+
+        // Record deletion immediately for accurate playback
+        if (recorder.isRecording) {
+            recorder.recordContentChange(key, null);
+        }
+    }, [worldData, recorder]);
 
     const placeCharacter = useCallback((char: string, x: number, y: number): void => {
         if (char.length !== 1) return; // Only handle single characters
@@ -10588,7 +10594,12 @@ export function useWorldEngine({
         const newWorldData = { ...worldData };
         newWorldData[key] = charData;
         setWorldData(newWorldData);
-    }, [worldData, currentScale, currentTextStyle, textColor]);
+
+        // Record character placement immediately for accurate playback
+        if (recorder.isRecording) {
+            recorder.recordContentChange(key, charData);
+        }
+    }, [worldData, currentScale, currentTextStyle, textColor, recorder]);
 
     const batchMoveCharacters = useCallback((moves: Array<{fromX: number, fromY: number, toX: number, toY: number, char: string}>): void => {
         const newWorldData = { ...worldData };
@@ -10971,6 +10982,7 @@ export function useWorldEngine({
         },
         // Agent system
         agentEnabled,
+        setAgentEnabled,
         agentPos,
         setAgentPos,
         agentState,
