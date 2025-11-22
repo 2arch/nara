@@ -9427,9 +9427,21 @@ export function useWorldEngine({
                     const relativeKey = `${relativeX},${relativeY}`;
                     noteData.data[relativeKey] = charData;
                     nextWorldData[containingNote.key] = JSON.stringify(noteData);
+
+                    // Record character placement for playback
+                    if (recorder.isRecording) {
+                        console.log(`[Recording] Placing character '${key}' in note at ${containingNote.key}`, noteData);
+                        recorder.recordContentChange(containingNote.key, JSON.stringify(noteData));
+                    }
                 } else {
                     // Write to global worldData
                     nextWorldData[currentKey] = charData;
+
+                    // Record character placement for playback
+                    if (recorder.isRecording) {
+                        console.log(`[Recording] Placing character '${key}' at ${currentKey}`, charData);
+                        recorder.recordContentChange(currentKey, charData);
+                    }
                 }
 
                 worldDataChanged = true; // Mark that synchronous data change occurred
