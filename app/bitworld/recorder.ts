@@ -137,9 +137,9 @@ export class DataRecorder {
         const elapsed = Date.now() - this.playbackStart;
         const changes: ContentChange[] = [];
 
-        // Collect all content changes that should be applied up to current time
-        while(this.contentChangeIndex < this.currentRecording.contentChanges.length &&
-              this.currentRecording.contentChanges[this.contentChangeIndex].timestamp <= elapsed) {
+        // Apply only one content change per frame for character-by-character playback
+        if (this.contentChangeIndex < this.currentRecording.contentChanges.length &&
+            this.currentRecording.contentChanges[this.contentChangeIndex].timestamp <= elapsed) {
             changes.push(this.currentRecording.contentChanges[this.contentChangeIndex]);
             this.contentChangeIndex++;
         }

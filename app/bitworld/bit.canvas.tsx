@@ -5481,58 +5481,58 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         }
 
         if (showCursor) {
+            // Use current scale for cursor
+            const cursorScale = engine.currentScale || { w: 1, h: 2 };
+            const cursorPixelWidth = effectiveCharWidth * cursorScale.w;
+            const cursorPixelHeight = effectiveCharHeight * cursorScale.h;
+
             // Draw cursor trail (older positions first, for proper layering)
             const now = Date.now();
             for (let i = cursorTrail.length - 1; i >= 0; i--) {
                 const trailPos = cursorTrail[i];
                 const age = now - trailPos.timestamp;
-                
+
                 // Skip positions that are too old
                 if (age > CURSOR_TRAIL_FADE_MS) continue;
-                
+
                 // Skip the current position only if it perfectly matches the cursor
                 // (avoid duplicate rendering at exact same spot)
-                if (age < 20 && 
-                    trailPos.x === engine.cursorPos.x && 
+                if (age < 20 &&
+                    trailPos.x === engine.cursorPos.x &&
                     trailPos.y === engine.cursorPos.y) continue;
-                
+
                 // Skip positions that have chat data (chat data has its own styling)
                 const trailKey = `${trailPos.x},${trailPos.y}`;
                 if (engine.chatData[trailKey]) continue;
-                
+
                 // Calculate opacity based on age (1.0 to 0.0)
                 const opacity = 1 - (age / CURSOR_TRAIL_FADE_MS);
-                
+
                 const trailBottomScreenPos = engine.worldToScreen(
                     trailPos.x, trailPos.y,
                     currentZoom, currentOffset
                 );
                 const trailTopScreenPos = engine.worldToScreen(
-                    trailPos.x, trailPos.y - 1,
+                    trailPos.x, trailPos.y - (cursorScale.h - 1),
                     currentZoom, currentOffset
                 );
 
                 // Only draw if visible on screen
-                if (trailBottomScreenPos.x >= -effectiveCharWidth &&
+                if (trailBottomScreenPos.x >= -cursorPixelWidth &&
                     trailBottomScreenPos.x <= cssWidth &&
-                    trailTopScreenPos.y >= -effectiveCharHeight &&
+                    trailTopScreenPos.y >= -cursorPixelHeight &&
                     trailBottomScreenPos.y <= cssHeight) {
 
-                    // Draw faded cursor rectangle spanning GRID_CELL_SPAN cells
+                    // Draw faded cursor rectangle with proper scaling
                     ctx.fillStyle = `rgba(${hexToRgb(engine.textColor)}, ${opacity})`;
                     ctx.fillRect(
                         trailTopScreenPos.x,
                         trailTopScreenPos.y,
-                        effectiveCharWidth,
-                        effectiveCharHeight * GRID_CELL_SPAN
+                        cursorPixelWidth,
+                        cursorPixelHeight
                     );
                 }
             }
-
-            // Use current scale for cursor
-            const cursorScale = engine.currentScale || { w: 1, h: 2 };
-            const cursorPixelWidth = effectiveCharWidth * cursorScale.w;
-            const cursorPixelHeight = effectiveCharHeight * cursorScale.h;
 
             // Cursor spans cursorScale.h cells: bottom cell at cursorPos.y and top cell at cursorPos.y - (h-1)
             const cursorBottomScreenPos = engine.worldToScreen(engine.cursorPos.x, engine.cursorPos.y, currentZoom, currentOffset);
@@ -5650,6 +5650,11 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 }
             }
 
+            // Use current scale for agent cursor (same as regular cursor)
+            const agentScale = engine.currentScale || { w: 1, h: 2 };
+            const agentPixelWidth = effectiveCharWidth * agentScale.w;
+            const agentPixelHeight = effectiveCharHeight * agentScale.h;
+
             // Draw agent trail (older positions first, for proper layering)
             const now = Date.now();
             for (let i = agentTrail.length - 1; i >= 0; i--) {
@@ -5667,32 +5672,31 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 // Calculate opacity based on age (1.0 to 0.0)
                 const opacity = 1 - (age / CURSOR_TRAIL_FADE_MS);
 
-                const trailScreenPos = engine.worldToScreen(
+                const trailBottomScreenPos = engine.worldToScreen(
                     trailPos.x, trailPos.y,
+                    currentZoom, currentOffset
+                );
+                const trailTopScreenPos = engine.worldToScreen(
+                    trailPos.x, trailPos.y - (agentScale.h - 1),
                     currentZoom, currentOffset
                 );
 
                 // Only draw if visible on screen
-                if (trailScreenPos.x >= -effectiveCharWidth &&
-                    trailScreenPos.x <= cssWidth &&
-                    trailScreenPos.y >= -effectiveCharHeight &&
-                    trailScreenPos.y <= cssHeight) {
+                if (trailTopScreenPos.x >= -agentPixelWidth &&
+                    trailTopScreenPos.x <= cssWidth &&
+                    trailTopScreenPos.y >= -agentPixelHeight &&
+                    trailBottomScreenPos.y <= cssHeight) {
 
-                    // Draw faded pink cursor rectangle
+                    // Draw faded pink cursor rectangle with proper scaling
                     ctx.fillStyle = `rgba(255, 105, 180, ${opacity})`; // Pink with fade
                     ctx.fillRect(
-                        trailScreenPos.x,
-                        trailScreenPos.y,
-                        effectiveCharWidth,
-                        effectiveCharHeight
+                        trailTopScreenPos.x,
+                        trailTopScreenPos.y,
+                        agentPixelWidth,
+                        agentPixelHeight
                     );
                 }
             }
-
-            // Use current scale for agent cursor (same as regular cursor)
-            const agentScale = engine.currentScale || { w: 1, h: 2 };
-            const agentPixelWidth = effectiveCharWidth * agentScale.w;
-            const agentPixelHeight = effectiveCharHeight * agentScale.h;
 
             // Agent cursor spans agentScale.h cells (same logic as regular cursor)
             const agentBottomScreenPos = engine.worldToScreen(engine.agentPos.x, engine.agentPos.y, currentZoom, currentOffset);
