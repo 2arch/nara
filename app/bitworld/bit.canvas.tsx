@@ -5718,7 +5718,12 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 if (charData) {
                     const char = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
                     ctx.fillStyle = '#FFFFFF'; // White text on pink background
-                    renderText(ctx, char, agentTopScreenPos.x, agentTopScreenPos.y + verticalTextOffset);
+
+                    // Use agent scale for rendering the character to match the cursor block
+                    const sx = agentScale.w;
+                    const sy = agentScale.h / 2;
+
+                    renderText(ctx, char, agentTopScreenPos.x, agentTopScreenPos.y + verticalTextOffset, sx, sy);
                 }
             }
         }
