@@ -2307,6 +2307,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                      recorder.stopPlayback();
                      setDialogueWithRevert("Playback stopped", setDialogueText);
                 } else {
+                    // Clear canvas before playback so text can appear fresh
+                    if (setWorldData) {
+                        setWorldData({});
+                    }
                     recorder.startPlayback();
                     setDialogueWithRevert("Playback started...", setDialogueText);
                 }

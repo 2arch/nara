@@ -264,7 +264,9 @@ export interface WorldEngine {
     // Agent system
     agentEnabled: boolean;
     agentPos: Point;
+    setAgentPos: React.Dispatch<React.SetStateAction<Point>>;
     agentState: 'idle' | 'typing' | 'moving' | 'walking' | 'selecting';
+    setAgentState: React.Dispatch<React.SetStateAction<'idle' | 'typing' | 'moving' | 'walking' | 'selecting'>>;
     agentSelectionStart: Point | null;
     agentSelectionEnd: Point | null;
     // Multiplayer cursors
@@ -10970,7 +10972,9 @@ export function useWorldEngine({
         // Agent system
         agentEnabled,
         agentPos,
+        setAgentPos,
         agentState,
+        setAgentState,
         agentSelectionStart,
         agentSelectionEnd,
         // Multiplayer cursors

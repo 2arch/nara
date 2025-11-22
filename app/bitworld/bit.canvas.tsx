@@ -6273,11 +6273,27 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             engine.setFaceOrientation(frame.face);
                         }
 
-                        // Update cursor
+                        // Update view
                         engine.setViewOffset(frame.viewOffset);
                         engine.setZoomLevel(frame.zoomLevel);
-                        // engine.setCursorPos(frame.cursor); // this expects a callback or value
-                        // But wait, setCursorPos is exposed.
+
+                        // Use agent cursor to show playback position (visually distinct from user cursor)
+                        engine.setAgentPos(frame.cursor);
+                        engine.setAgentState('typing'); // Show agent as active
+
+                        // Update agent trail to show playback cursor movement
+                        const now = Date.now();
+                        const newTrailPosition = {
+                            x: frame.cursor.x,
+                            y: frame.cursor.y,
+                            timestamp: now
+                        };
+                        setAgentTrail(prev => {
+                            // Add new position and filter out old ones
+                            const cutoffTime = now - CURSOR_TRAIL_FADE_MS;
+                            const updated = [newTrailPosition, ...prev.filter(pos => pos.timestamp >= cutoffTime)];
+                            return updated.slice(0, 20); // Limit trail length
+                        });
                     }
 
                     // Apply content changes that should happen at this timestamp
