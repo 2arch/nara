@@ -5808,6 +5808,11 @@ export function useWorldEngine({
                         const file = (e.target as HTMLInputElement).files?.[0];
                         if (!file) return;
 
+                        // Show pending visual effect on the target region
+                        if (uploadBounds) {
+                            setAiProcessingRegion(uploadBounds);
+                        }
+
                         try {
                             setDialogueWithRevert(isBitmapMode ? "Processing bitmap..." : "Processing image...", setDialogueText);
 
@@ -6073,6 +6078,7 @@ export function useWorldEngine({
                             logger.error('Error uploading image:', error);
                             setDialogueWithRevert("Error uploading image", setDialogueText);
                         } finally {
+                            setAiProcessingRegion(null); // Clear visual feedback
                             document.body.removeChild(fileInput);
                         }
                     };
