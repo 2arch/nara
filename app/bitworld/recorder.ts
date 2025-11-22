@@ -26,11 +26,11 @@ export interface RecordingSession {
 export class DataRecorder {
     isRecording: boolean = false;
     isPlaying: boolean = false;
+    currentRecording: RecordingSession | null = null;
     private frames: FrameData[] = [];
     private startTime: number = 0;
     private playbackStart: number = 0;
     private playbackIndex: number = 0;
-    private currentRecording: RecordingSession | null = null;
 
     start() {
         this.isRecording = true;

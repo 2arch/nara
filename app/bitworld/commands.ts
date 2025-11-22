@@ -2279,35 +2279,39 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             } else if (action === 'stop') {
                 const session = recorder.stop();
                 if (session) {
-                    // Auto-download
-                    const json = JSON.stringify(session);
+                    setDialogueWithRevert("Recording stopped. Type /record play to replay.", setDialogueText);
+                } else {
+                    setDialogueWithRevert("No active recording to stop", setDialogueText);
+                }
+            } else if (action === 'save') {
+                // Manual save/download command
+                const session = recorder.currentRecording; // We need to expose this or get it from stop() return
+                // But stop() returns it only when called. We need access to the stored one.
+                // Let's assume recorder exposes `currentRecording`. I checked recorder.ts and it's private.
+                // I need to make it public in recorder.ts or use exportRecording().
+                const json = recorder.exportRecording();
+                if (json && json !== 'null') {
                     const blob = new Blob([json], { type: 'application/json' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `${session.name}.json`;
+                    a.download = `nara_recording_${Date.now()}.json`;
                     a.click();
                     URL.revokeObjectURL(url);
-                    setDialogueWithRevert(`Recording saved: ${session.name}`, setDialogueText);
+                    setDialogueWithRevert("Recording saved to file.", setDialogueText);
                 } else {
-                    setDialogueWithRevert("No active recording to stop", setDialogueText);
+                    setDialogueWithRevert("No recording to save.", setDialogueText);
                 }
             } else if (action === 'play') {
                 if (recorder.isPlaying) {
                      recorder.stopPlayback();
                      setDialogueWithRevert("Playback stopped", setDialogueText);
                 } else {
-                    // If there is a current recording in memory, play it
-                    // Ideally we'd allow loading from file, but for now just play last
-                    // To support loading: /record play [url] or drag/drop?
-                    // For now, assume we just recorded something or loaded it via code/drag.
-                    // Let's check if we can load from the argument if provided?
-                    // No, just play existing memory for now.
                     recorder.startPlayback();
                     setDialogueWithRevert("Playback started...", setDialogueText);
                 }
             } else if (action === 'load') {
-                 // Trigger file input?
+                 // Trigger file input
                  const input = document.createElement('input');
                  input.type = 'file';
                  input.accept = '.json';
@@ -2328,7 +2332,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                  };
                  input.click();
             } else {
-                setDialogueWithRevert("Usage: /record start|stop|play|load", setDialogueText);
+                setDialogueWithRevert("Usage: /record start|stop|play|save|load", setDialogueText);
             }
 
             return null;
