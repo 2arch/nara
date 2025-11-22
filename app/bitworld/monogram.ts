@@ -398,12 +398,25 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     for (var j = -1; j <= 1; j++) {
         for (var i = -1; i <= 1; i++) {
             let neighbor = vec2<f32>(f32(i), f32(j));
-            let p = hash2(vec2<f32>(ix, iy) + neighbor);
             
-            // Point in neighbor cell
-            // Animate point with time if desired, but request was for static
-            // let p_anim = 0.5 + 0.5 * sin(params.time + 6.2831 * p); 
-            // Static point
+            // Replaced hash-based placement with Perlin noise placement
+            // This creates a more "organic" distribution where neighbor points
+            // are correlated, rather than white noise chaos.
+            let cellX = ix + neighbor.x;
+            let cellY = iy + neighbor.y;
+            
+            // Use noise to determine offset within the cell
+            // Scale controls "coherence" (lower = groups of cells move together)
+            let noiseScale = 0.35; 
+            
+            // Generate two independent noise values for X and Y offsets
+            let n1 = perlin(cellX * noiseScale, cellY * noiseScale);
+            let n2 = perlin(cellX * noiseScale + 52.1, cellY * noiseScale + 19.4);
+            
+            // Map noise (-1..1) to safe cell offset (0.1 .. 0.9)
+            let p = vec2<f32>(0.5 + 0.4 * n1, 0.5 + 0.4 * n2);
+            
+            // Static point (relative to neighbor cell)
             let point = neighbor + p;
             
             let diff = point - vec2<f32>(fx, fy);
