@@ -1975,23 +1975,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Sync face tracking data with monogram system
     useEffect(() => {
         if (engine.faceOrientation && monogram.setFaceData) {
-            const { pitch, yaw, roll, mouthOpen, leftEyeBlink, rightEyeBlink, isTracked } = engine.faceOrientation;
-            const rotation = faceOrientationToRotation({
-                pitch: pitch,
-                yaw: yaw,
-                roll: roll,
-                confidence: 1.0
-            }, true, false, false); // Invert yaw for correct left/right movement
-
-            monogram.setFaceData({
-                rotX: rotation.rotX,
-                rotY: rotation.rotY,
-                rotZ: rotation.rotZ,
-                mouthOpen: mouthOpen,
-                leftEyeBlink: leftEyeBlink,
-                rightEyeBlink: rightEyeBlink,
-                isTracked: isTracked
-            });
+            // Engine already provides processed rotation
+            monogram.setFaceData(engine.faceOrientation);
         }
         
         // Also sync the enabled state and mode if face detection is active
