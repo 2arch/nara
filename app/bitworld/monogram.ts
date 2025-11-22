@@ -732,6 +732,9 @@ class MonogramSystem {
     private fadeFactor = 0;        // Current fade factor (0 to 1)
     private targetFade = 0;        // Target fade factor (0 or 1)
     private readonly FADE_DURATION = 0.8; // seconds
+
+    // Cross-fade state for monogram-to-monogram transitions
+    private pendingMode: MonogramMode | null = null;
     
     // Interactive Voronoi state
     private activeSeed: { x: number, y: number } | null = null;
@@ -1576,6 +1579,15 @@ class MonogramSystem {
             // Snap to target when very close
             if (Math.abs(this.fadeFactor - this.targetFade) < 0.001) {
                 this.fadeFactor = this.targetFade;
+
+                // Cross-fade: if we just finished fading out and have a pending mode, switch and fade in
+                if (this.fadeFactor === 0 && this.pendingMode !== null) {
+                    this.options.mode = this.pendingMode;
+                    this.pendingMode = null;
+                    this.chunks.clear();
+                    this.chunkAccessTime.clear();
+                    this.targetFade = 1; // Fade in the new mode
+                }
             }
         }
     }
@@ -1604,16 +1616,37 @@ class MonogramSystem {
         const wasEnabled = this.options.enabled;
         const enabledChanged = options.enabled !== undefined && options.enabled !== wasEnabled;
 
-        this.options = { ...this.options, ...options };
+        if (modeChanged && options.mode !== undefined) {
+            const oldMode = this.options.mode;
+            const newMode = options.mode;
+            const oldIsVisible = oldMode !== 'clear';
+            const newIsVisible = newMode !== 'clear';
 
-        if (complexityChanged || modeChanged) {
+            // Cross-fade between visible modes (perlin ↔ nara ↔ voronoi ↔ face3d)
+            if (oldIsVisible && newIsVisible) {
+                this.pendingMode = newMode;
+                this.targetFade = 0; // Fade out current mode first
+                // Don't update options.mode yet - will be set in updateTime after fade-out
+            } else {
+                // Direct transition for clear ↔ visible
+                this.options.mode = newMode;
+                this.targetFade = newIsVisible ? 1 : 0;
+                this.chunks.clear();
+                this.chunkAccessTime.clear();
+            }
+        }
+
+        // Apply other options (skip mode if we're cross-fading)
+        const { mode, ...otherOptions } = options;
+        if (!this.pendingMode) {
+            this.options = { ...this.options, ...options };
+        } else {
+            this.options = { ...this.options, ...otherOptions };
+        }
+
+        if (complexityChanged) {
             this.chunks.clear();
             this.chunkAccessTime.clear();
-
-            // Fade in when switching to a visible mode, fade out when switching to clear
-            if (modeChanged) {
-                this.targetFade = this.options.mode === 'clear' ? 0 : 1;
-            }
         }
 
         // Handle enable/disable transitions
