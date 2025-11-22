@@ -1539,16 +1539,29 @@ class MonogramSystem {
     
     updateFaceData(faceData: MonogramOptions['faceOrientation']) {
         this.currentFaceOrientation = faceData || null;
-        // Invalidate chunks to force immediate re-render with new face data
-        this.chunks.clear();
-        this.chunkAccessTime.clear();
+        // Do NOT clear chunks here - it causes rapid blinking (flicker) as we wait for async GPU compute
+        // Instead, we keep the old chunks visible until the new ones are computed and overwrite them
+        
+        // Trigger immediate re-render of visible area with new face orientation
+        if (this.lastViewport) {
+            this.preloadViewport(
+                this.lastViewport.startX,
+                this.lastViewport.startY,
+                this.lastViewport.endX,
+                this.lastViewport.endY
+            ).catch(e => {
+                // Ignore errors from rapid updates
+            });
+        }
     }
 
     setOptions(options: Partial<MonogramOptions>) {
         const complexityChanged = options.complexity !== undefined && options.complexity !== this.options.complexity;
+        const modeChanged = options.mode !== undefined && options.mode !== this.options.mode;
+        
         this.options = { ...this.options, ...options };
 
-        if (complexityChanged) {
+        if (complexityChanged || modeChanged) {
             this.chunks.clear();
             this.chunkAccessTime.clear();
         }
