@@ -1979,10 +1979,10 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         
         // Also sync the enabled state and mode if face detection is active
         if (engine.isFaceDetectionEnabled && monogram.options.mode !== 'face3d') {
-            monogram.setOptions({ mode: 'face3d' });
+            monogram.setOptions(prev => ({ ...prev, mode: 'face3d' }));
         } else if (!engine.isFaceDetectionEnabled && monogram.options.mode === 'face3d') {
             // Revert to default mode when face detection stops
-            monogram.setOptions({ mode: 'nara' });
+            monogram.setOptions(prev => ({ ...prev, mode: 'nara' }));
         }
     }, [engine.faceOrientation, engine.isFaceDetectionEnabled, monogram]);
 

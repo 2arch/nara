@@ -418,7 +418,7 @@ interface UseWorldEngineProps {
             enabled?: boolean;
             speed?: number;
             complexity?: number;
-            mode?: 'clear' | 'perlin' | 'nara' | 'voronoi';
+            mode?: 'clear' | 'perlin' | 'nara' | 'voronoi' | 'face3d';
         };
     };
 }

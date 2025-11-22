@@ -5,7 +5,6 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { getMask, type FaceFeature as MaskFaceFeature, type FaceDynamics, type FaceBounds } from './mask';
-import type { FaceOrientation } from './face';
 
 export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'voronoi' | 'face3d';
 
@@ -1687,18 +1686,16 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
     }, []);
     
     // Explicitly update face data (useful for high-frequency updates outside of options)
-    const setFaceData = useCallback((faceData: FaceOrientation & { mouthOpen?: number, leftEyeBlink?: number, rightEyeBlink?: number, isTracked?: boolean }) => {
-        // Map to Monogram's expected format
-        const orientation = {
-            rotX: faceData.pitch,
-            rotY: faceData.yaw,
-            rotZ: faceData.roll,
-            mouthOpen: faceData.mouthOpen,
-            leftEyeBlink: faceData.leftEyeBlink,
-            rightEyeBlink: faceData.rightEyeBlink,
-            isTracked: faceData.isTracked
-        };
-        systemRef.current?.updateFaceData(orientation);
+    const setFaceData = useCallback((faceData: { 
+        rotX: number; 
+        rotY: number; 
+        rotZ: number; 
+        mouthOpen?: number; 
+        leftEyeBlink?: number; 
+        rightEyeBlink?: number; 
+        isTracked?: boolean; 
+    }) => {
+        systemRef.current?.updateFaceData(faceData);
     }, []);
 
     // Calculate interactive trail intensity at a given position
