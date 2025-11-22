@@ -1758,7 +1758,48 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             if (!bgArg && worldData) {
                 // Look for an image at the command start position
                 for (const key in worldData) {
-                    if (key.startsWith('image_')) {
+                    // Check for modern Note objects
+                    if (key.startsWith('note_')) {
+                        let note: any;
+                        const rawData = worldData[key];
+                        if (typeof rawData === 'string') {
+                            try {
+                                note = JSON.parse(rawData);
+                            } catch (e) {
+                                continue;
+                            }
+                        } else {
+                            note = rawData;
+                        }
+
+                        if (note && note.contentType === 'image' && note.imageData && note.imageData.src) {
+                            // Check if command was typed over this image note
+                            if (commandState.commandStartPos.x >= note.startX && commandState.commandStartPos.x <= note.endX &&
+                                commandState.commandStartPos.y >= note.startY && commandState.commandStartPos.y <= note.endY) {
+
+                                // Store previous background state
+                                previousBackgroundStateRef.current = {
+                                    mode: modeState.backgroundMode,
+                                    color: modeState.backgroundColor,
+                                    image: modeState.backgroundImage,
+                                    video: modeState.backgroundVideo,
+                                    textColor: modeState.textColor,
+                                    textBackground: modeState.textBackground
+                                };
+
+                                // Set image as background temporarily
+                                switchBackgroundMode('image', note.imageData.src, '#FFFFFF');
+                                setDialogueWithRevert("Press ESC to restore background", setDialogueText);
+
+                                // Clear command mode
+                                clearCommandState();
+
+                                return null;
+                            }
+                        }
+                    } 
+                    // Legacy support for old image_ entities
+                    else if (key.startsWith('image_')) {
                         const imgData = worldData[key];
                         if (imgData && typeof imgData === 'object' && 'type' in imgData && imgData.type === 'image') {
                             const img = imgData as any;

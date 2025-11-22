@@ -5784,6 +5784,12 @@ export function useWorldEngine({
                             return true;
                         }
 
+                        // Check for 1x1 selection (single cell)
+                        if (selection.startX === selection.endX && selection.startY === selection.endY) {
+                            setDialogueWithRevert("Region too small. Please select a larger area for image upload.", setDialogueText);
+                            return true;
+                        }
+
                         // Check if selection exactly matches an existing note
                         targetNote = findNoteAtSelection(selection.startX, selection.startY, selection.endX, selection.endY, worldData);
                         uploadBounds = selection;
@@ -5836,20 +5842,24 @@ export function useWorldEngine({
                                                         // Use targetNote if found, otherwise check for exact match
                                                         const existingNote = targetNote || findNoteAtSelection(uploadBounds.startX, uploadBounds.startY, uploadBounds.endX, uploadBounds.endY, prev);
 
-                                                        const noteData = {
-                                                            startX: uploadBounds.startX,
-                                                            startY: uploadBounds.startY,
-                                                            endX: uploadBounds.endX,
-                                                            endY: uploadBounds.endY,
-                                                            timestamp: existingNote?.data.timestamp || Date.now(),
+                                                        // Create note using helper
+                                                        const { noteKey: generatedKey, noteData } = createNote({
+                                                            bounds: {
+                                                                startX: uploadBounds.startX,
+                                                                startY: uploadBounds.startY,
+                                                                endX: uploadBounds.endX,
+                                                                endY: uploadBounds.endY
+                                                            },
                                                             contentType: 'image',
-                                                            src: storageUrl,
-                                                            originalWidth: img.width,
-                                                            originalHeight: img.height
-                                                        };
+                                                            imageData: {
+                                                                src: storageUrl,
+                                                                originalWidth: img.width,
+                                                                originalHeight: img.height
+                                                            }
+                                                        });
 
-                                                        // Use existing key or create new one
-                                                        const noteKey = existingNote?.key || `note_${uploadBounds.startX},${uploadBounds.startY}_${Date.now()}`;
+                                                        // Use existing key or generated one
+                                                        const noteKey = existingNote?.key || generatedKey;
                                                         const action = existingNote ? 'updated' : 'uploaded';
                                                         setDialogueWithRevert(`Image ${action} to region (${selectionWidth}x${selectionHeight} cells)`, setDialogueText);
 
@@ -5897,25 +5907,28 @@ export function useWorldEngine({
                                             // Use targetNote if found, otherwise check for exact match
                                             const existingNote = targetNote || findNoteAtSelection(uploadBounds.startX, uploadBounds.startY, uploadBounds.endX, uploadBounds.endY, prev);
 
-                                            // Use existing key or create new one
-                                            noteKey = existingNote?.key || `note_${uploadBounds.startX}_${uploadBounds.startY}_${Date.now()}`;
-
-                                            // Show GIF immediately with local data URLs (optimistic)
-                                            const optimisticNoteData = {
-                                                startX: uploadBounds.startX,
-                                                startY: uploadBounds.startY,
-                                                endX: uploadBounds.endX,
-                                                endY: uploadBounds.endY,
-                                                timestamp: existingNote?.data.timestamp || Date.now(),
+                                            // Create note using helper
+                                            const { noteKey: generatedKey, noteData: optimisticNoteData } = createNote({
+                                                bounds: {
+                                                    startX: uploadBounds.startX,
+                                                    startY: uploadBounds.startY,
+                                                    endX: uploadBounds.endX,
+                                                    endY: uploadBounds.endY
+                                                },
                                                 contentType: 'image',
-                                                src: localFrameTiming[0].url,
-                                                originalWidth: parsedGIF.width,
-                                                originalHeight: parsedGIF.height,
-                                                isAnimated: true,
-                                                frameTiming: localFrameTiming,
-                                                totalDuration: parsedGIF.totalDuration,
-                                                animationStartTime: Date.now()
-                                            };
+                                                imageData: {
+                                                    src: localFrameTiming[0].url,
+                                                    originalWidth: parsedGIF.width,
+                                                    originalHeight: parsedGIF.height,
+                                                    isAnimated: true,
+                                                    frameTiming: localFrameTiming,
+                                                    totalDuration: parsedGIF.totalDuration,
+                                                    animationStartTime: Date.now()
+                                                } as any
+                                            });
+
+                                            // Use existing key or generated one
+                                            noteKey = existingNote?.key || generatedKey;
 
                                             const action = existingNote ? 'updated' : 'loaded';
                                             setDialogueWithRevert(`GIF ${action} (${localFrameTiming.length} frames)`, setDialogueText);
@@ -5948,10 +5961,14 @@ export function useWorldEngine({
                                                 if (existing && typeof existing === 'string') {
                                                     try {
                                                         const parsedNote = JSON.parse(existing);
+                                                        // Update fields inside imageData
                                                         const updatedNote = {
                                                             ...parsedNote,
-                                                            src: uploadedFrameTiming[0].url,
-                                                            frameTiming: uploadedFrameTiming
+                                                            imageData: {
+                                                                ...parsedNote.imageData,
+                                                                src: uploadedFrameTiming[0].url,
+                                                                frameTiming: uploadedFrameTiming
+                                                            }
                                                         };
                                                         return {
                                                             ...prev,
@@ -6015,21 +6032,24 @@ export function useWorldEngine({
                                             // Use targetNote if found, otherwise check for exact match
                                             const existingNote = targetNote || findNoteAtSelection(uploadBounds.startX, uploadBounds.startY, uploadBounds.endX, uploadBounds.endY, prev);
 
-                                            // Create note data entry
-                                            const noteData = {
-                                                startX: uploadBounds.startX,
-                                                startY: uploadBounds.startY,
-                                                endX: uploadBounds.endX,
-                                                endY: uploadBounds.endY,
-                                                timestamp: existingNote?.data.timestamp || Date.now(),
+                                            // Create note using helper
+                                            const { noteKey: generatedKey, noteData } = createNote({
+                                                bounds: {
+                                                    startX: uploadBounds.startX,
+                                                    startY: uploadBounds.startY,
+                                                    endX: uploadBounds.endX,
+                                                    endY: uploadBounds.endY
+                                                },
                                                 contentType: 'image',
-                                                src: storageUrl,
-                                                originalWidth: img.width,
-                                                originalHeight: img.height
-                                            };
+                                                imageData: {
+                                                    src: storageUrl,
+                                                    originalWidth: img.width,
+                                                    originalHeight: img.height
+                                                }
+                                            });
 
-                                            // Use existing key or create new one
-                                            const noteKey = existingNote?.key || `note_${uploadBounds.startX}_${uploadBounds.startY}_${Date.now()}`;
+                                            // Use existing key or generated one
+                                            const noteKey = existingNote?.key || generatedKey;
 
                                             const modeText = isBitmapMode ? "Bitmap" : "Image";
                                             const action = existingNote ? 'updated' : 'uploaded';
