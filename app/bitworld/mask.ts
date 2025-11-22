@@ -124,18 +124,20 @@ export const MacintoshMask: Mask = {
     description: 'Classic Macintosh face with simple iconic features',
 
     baseFeatures: [
+        // Face Plate (Background)
+        { cx: 0, cy: 2, cz: 20, width: 45, height: 58, type: 'facePlate' },
         // Eyes - simple rectangles
         { cx: -14.3, cy: -9.1, cz: 0, width: 5.8, height: 14.6, type: 'leftEye' },
         { cx: 14.3, cy: -9.1, cz: 0, width: 5.8, height: 14.6, type: 'rightEye' },
         // Nose - vertical part
-        { cx: 0, cy: 3.9, cz: 0, width: 4.4, height: 10.4, type: 'noseVert' },
+        { cx: 0, cy: 3.9, cz: -10, width: 4.4, height: 10.4, type: 'noseVert' },
         // Nose - horizontal part
-        { cx: 5.2, cy: 9.1, cz: 0, width: 10.4, height: 4.4, type: 'noseHoriz' },
+        { cx: 5.2, cy: 9.1, cz: -10, width: 10.4, height: 4.4, type: 'noseHoriz' },
         // Mouth - horizontal bar
-        { cx: 2.6, cy: 18.2, cz: 0, width: 23.4, height: 4.4, type: 'mouth' },
+        { cx: 2.6, cy: 18.2, cz: -5, width: 23.4, height: 4.4, type: 'mouth' },
         // Mouth corners
-        { cx: -11, cy: 16.2, cz: 0, width: 4.4, height: 4.4, type: 'leftCorner' },
-        { cx: 16.2, cy: 16.2, cz: 0, width: 4.4, height: 4.4, type: 'rightCorner' },
+        { cx: -11, cy: 16.2, cz: -5, width: 4.4, height: 4.4, type: 'leftCorner' },
+        { cx: 16.2, cy: 16.2, cz: -5, width: 4.4, height: 4.4, type: 'rightCorner' },
     ],
 
     getFeaturesWithDynamics(dynamics: FaceDynamics): FaceFeature[] {
