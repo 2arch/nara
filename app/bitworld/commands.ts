@@ -152,7 +152,7 @@ const AVAILABLE_COMMANDS = [
     // Special
     'mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help',
     // Styling & Display
-    'bg', 'text', 'font', 'style', 'display', 'scale', 'interface',
+    'bg', 'text', 'font', 'style', 'display', 'scale',
     // State Management
     'state', 'random', 'clear', 'replay',
     // Sharing & Publishing
@@ -168,7 +168,7 @@ export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map', 'full', 'focus'],
     'create': ['chip', 'task', 'link', 'pack', 'clip', 'upload'],
     'special': ['mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help'],
-    'style': ['bg', 'text', 'font', 'style', 'display', 'interface'],
+    'style': ['bg', 'text', 'font', 'style', 'display'],
     'state': ['state', 'random', 'clear', 'replay'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
     'account': ['signin', 'signout', 'account', 'upgrade'],
@@ -212,7 +212,6 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'font': 'Change font family. Type /font followed by a font name: "IBM Plex Mono" for a clean monospace font, or "Neureal" for a more stylized aesthetic.',
     'scale': 'Change text scale. Type /scale followed by dimensions like 1x2 (default), 1x6 (tall), or 4x4 (square). Affects new text you write.',
     'style': 'Apply visual styles to selected notes or patterns. Select a note/pattern or position cursor inside one, then type /style [stylename]. Available: solid (white border), glow (pulsing gray glow), glowing (enhanced bright glow). Example: /style glow',
-    'interface': 'Toggle the screen-based Voronoi interface layer. Type /interface to toggle the magenta wireframe overlay on/off.',
     'state': 'Save or load canvas states. Type /state to see saved states, /state save [name] to save current canvas, /state load [name] to restore a saved state. Perfect for versioning your work.',
     'random': 'Randomize text styling. Applies random colors and styles to your text for a more organic, playful aesthetic. Great for breaking out of rigid design patterns.',
     'clear': 'Clear all text from the canvas. WARNING: This deletes everything on your current canvas. Use /state save first if you want to preserve your work.',
@@ -1077,7 +1076,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (lowerInput === 'monogram') {
             const parts = input.toLowerCase().split(' ');
-            const MONOGRAM_OPTIONS = ['clear', 'perlin', 'nara', 'voronoi', 'on', 'off'];
+            const MONOGRAM_OPTIONS = ['clear', 'perlin', 'nara', 'on', 'off'];
             if (parts.length > 1) {
                 // Show monogram options that match the input
                 const monogramInput = parts[1];
@@ -2634,10 +2633,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     // Set mode to nara (animated text)
                     monogramSystem.setOptions((prev: any) => ({ ...prev, enabled: true, mode: 'nara' }));
                     setDialogueWithRevert('Monogram mode: nara (animated NARA text)', setDialogueText);
-                } else if (option === 'voronoi') {
-                    // Set mode to voronoi (dual grid debug)
-                    monogramSystem.setOptions((prev: any) => ({ ...prev, enabled: true, mode: 'voronoi' }));
-                    setDialogueWithRevert('Monogram mode: voronoi (dual debug grids)', setDialogueText);
                 } else {
                     // Unknown option - toggle instead
                     monogramSystem.toggleEnabled();
@@ -2657,19 +2652,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             clearCommandState();
 
             return { command: 'monogram', args, commandStartPos: commandState.commandStartPos };
-        }
-
-        // Handle interface command (Toggle Interface Voronoi)
-        if (commandToExecute.startsWith('interface')) {
-            if (monogramSystem) {
-                monogramSystem.setOptions((prev: any) => {
-                    const newState = !prev.showInterfaceVoronoi;
-                    setDialogueWithRevert(`Interface layer ${newState ? 'enabled' : 'disabled'}`, setDialogueText);
-                    return { ...prev, showInterfaceVoronoi: newState };
-                });
-            }
-            clearCommandState();
-            return { command: 'interface', args: [], commandStartPos: commandState.commandStartPos };
         }
 
         if (commandToExecute.startsWith('glitch')) {

@@ -13,7 +13,7 @@ export default function TestEnvironment() {
     enabled: true,
     speed: 0.5,
     complexity: 1.0,
-    mode: 'voronoi'
+    mode: 'nara'
   });
 
   // World engine - NO auth, NO user context
