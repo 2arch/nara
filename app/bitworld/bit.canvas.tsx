@@ -5689,18 +5689,24 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 }
             }
 
-            // Draw current agent position
-            const agentScreenPos = engine.worldToScreen(engine.agentPos.x, engine.agentPos.y, currentZoom, currentOffset);
+            // Use current scale for agent cursor (same as regular cursor)
+            const agentScale = engine.currentScale || { w: 1, h: 2 };
+            const agentPixelWidth = effectiveCharWidth * agentScale.w;
+            const agentPixelHeight = effectiveCharHeight * agentScale.h;
+
+            // Agent cursor spans agentScale.h cells (same logic as regular cursor)
+            const agentBottomScreenPos = engine.worldToScreen(engine.agentPos.x, engine.agentPos.y, currentZoom, currentOffset);
+            const agentTopScreenPos = engine.worldToScreen(engine.agentPos.x, engine.agentPos.y - (agentScale.h - 1), currentZoom, currentOffset);
 
             // Only draw if visible on screen
-            if (agentScreenPos.x >= -effectiveCharWidth &&
-                agentScreenPos.x <= cssWidth &&
-                agentScreenPos.y >= -effectiveCharHeight &&
-                agentScreenPos.y <= cssHeight) {
+            if (agentTopScreenPos.x >= -agentPixelWidth &&
+                agentTopScreenPos.x <= cssWidth &&
+                agentTopScreenPos.y >= -agentPixelHeight &&
+                agentTopScreenPos.y <= cssHeight) {
 
-                // Draw pink cursor for agent
+                // Draw pink cursor for agent with proper scaling
                 ctx.fillStyle = '#FF69B4'; // Hot pink
-                ctx.fillRect(agentScreenPos.x, agentScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                ctx.fillRect(agentTopScreenPos.x, agentTopScreenPos.y, agentPixelWidth, agentPixelHeight);
 
                 // Check if there's a character at agent position and render it in white
                 const agentKey = `${engine.agentPos.x},${engine.agentPos.y}`;
@@ -5708,7 +5714,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 if (charData) {
                     const char = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
                     ctx.fillStyle = '#FFFFFF'; // White text on pink background
-                    renderText(ctx, char, agentScreenPos.x, agentScreenPos.y + verticalTextOffset);
+                    renderText(ctx, char, agentTopScreenPos.x, agentTopScreenPos.y + verticalTextOffset);
                 }
             }
         }
@@ -6311,15 +6317,18 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     if (engine.recorder.isPlaying) {
                         const contentChanges = engine.recorder.getPlaybackContentChanges();
                         if (contentChanges.length > 0) {
+                            console.log(`[Playback] Applying ${contentChanges.length} content changes:`, contentChanges);
                             engine.setWorldData((prev) => {
                                 const next = { ...prev };
                                 for (const change of contentChanges) {
                                     if (change.value === null) {
                                         // Deletion
                                         delete next[change.key];
+                                        console.log(`[Playback] Deleted at ${change.key}`);
                                     } else {
                                         // Addition or update
                                         next[change.key] = change.value;
+                                        console.log(`[Playback] Added/Updated at ${change.key}:`, change.value);
                                     }
                                 }
                                 return next;

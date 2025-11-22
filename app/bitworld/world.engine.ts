@@ -10562,6 +10562,7 @@ export function useWorldEngine({
 
         // Record deletion immediately for accurate playback
         if (recorder.isRecording) {
+            console.log(`[Recording] Deleting character at ${key}`);
             recorder.recordContentChange(key, null);
         }
     }, [worldData, recorder]);
@@ -10597,6 +10598,7 @@ export function useWorldEngine({
 
         // Record character placement immediately for accurate playback
         if (recorder.isRecording) {
+            console.log(`[Recording] Placing character '${char}' at ${key}`, charData);
             recorder.recordContentChange(key, charData);
         }
     }, [worldData, currentScale, currentTextStyle, textColor, recorder]);
