@@ -1560,6 +1560,11 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
         // Zoom handler for host dialogue
     const handleZoom = useCallback((targetZoomMultiplier: number, centerPos: Point) => {
+        // Mark that user overrode viewport during playback
+        if (engine.recorder?.isPlaying) {
+            engine.recorder.userOverrodeViewport = true;
+        }
+
         const startZoom = engine.zoomLevel;
         const targetZoom = startZoom * targetZoomMultiplier;
         const duration = 500; // 500ms animation
@@ -5643,7 +5648,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             screenPos.y >= -effectiveCharHeight &&
                             screenPos.y <= cssHeight) {
 
-                            ctx.fillStyle = 'rgba(255, 105, 180, 0.3)'; // Semi-transparent pink
+                            const rgb = hexToRgb(engine.textColor || '#F2F2F2');
+                            ctx.fillStyle = `rgba(${rgb}, 0.3)`; // Semi-transparent text color
                             ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
                         }
                     }
@@ -5687,8 +5693,9 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     trailTopScreenPos.y >= -agentPixelHeight &&
                     trailBottomScreenPos.y <= cssHeight) {
 
-                    // Draw faded pink cursor rectangle with proper scaling
-                    ctx.fillStyle = `rgba(255, 105, 180, ${opacity})`; // Pink with fade
+                    // Draw faded cursor rectangle with proper scaling (using text color)
+                    const rgb = hexToRgb(engine.textColor || '#F2F2F2');
+                    ctx.fillStyle = `rgba(${rgb}, ${opacity * 0.5})`; // Text color with fade
                     ctx.fillRect(
                         trailTopScreenPos.x,
                         trailTopScreenPos.y,
@@ -5708,16 +5715,16 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 agentTopScreenPos.y >= -agentPixelHeight &&
                 agentTopScreenPos.y <= cssHeight) {
 
-                // Draw pink cursor for agent with proper scaling
-                ctx.fillStyle = '#FF69B4'; // Hot pink
+                // Draw cursor for agent using text color with proper scaling
+                ctx.fillStyle = engine.textColor || '#F2F2F2';
                 ctx.fillRect(agentTopScreenPos.x, agentTopScreenPos.y, agentPixelWidth, agentPixelHeight);
 
-                // Check if there's a character at agent position and render it in white
+                // Check if there's a character at agent position and render it in background color
                 const agentKey = `${engine.agentPos.x},${engine.agentPos.y}`;
                 const charData = engine.worldData[agentKey];
                 if (charData) {
                     const char = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
-                    ctx.fillStyle = '#FFFFFF'; // White text on pink background
+                    ctx.fillStyle = engine.backgroundColor || '#FFFFFF'; // Background color on text-colored cursor
 
                     // Use agent scale for rendering the character to match the cursor block
                     const sx = agentScale.w;
@@ -6293,9 +6300,11 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             engine.setFaceOrientation(frame.face);
                         }
 
-                        // Update view
-                        engine.setViewOffset(frame.viewOffset);
-                        engine.setZoomLevel(frame.zoomLevel);
+                        // Update view (unless user has manually overridden viewport)
+                        if (!engine.recorder.userOverrodeViewport) {
+                            engine.setViewOffset(frame.viewOffset);
+                            engine.setZoomLevel(frame.zoomLevel);
+                        }
 
                         // Use agent cursor to show playback position (visually distinct from user cursor)
                         engine.setAgentPos(frame.cursor);
@@ -6586,6 +6595,11 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             setPanDistance(0);
             lastPanMilestoneRef.current = 0; // Reset milestone tracker
             if (canvasRef.current) canvasRef.current.style.cursor = 'grabbing';
+
+            // Mark that user overrode viewport during playback
+            if (engine.recorder?.isPlaying) {
+                engine.recorder.userOverrodeViewport = true;
+            }
         } else if (e.button === 0) { // Left mouse button
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
@@ -7760,6 +7774,11 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 setIsPanning(true);
                 setPanDistance(0);
                 lastPanMilestoneRef.current = 0;
+
+                // Mark that user overrode viewport during playback
+                if (engine.recorder?.isPlaying) {
+                    engine.recorder.userOverrodeViewport = true;
+                }
             }
 
             // Update last tap tracking

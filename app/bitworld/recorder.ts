@@ -40,6 +40,7 @@ export class DataRecorder {
     private playbackStart: number = 0;
     private playbackIndex: number = 0;
     private contentChangeIndex: number = 0;
+    public userOverrodeViewport: boolean = false; // Track if user manually panned/zoomed during playback
 
     start() {
         this.isRecording = true;
@@ -108,6 +109,7 @@ export class DataRecorder {
         this.playbackStart = Date.now();
         this.playbackIndex = 0;
         this.contentChangeIndex = 0;
+        this.userOverrodeViewport = false; // Reset viewport override flag
         console.log('Playback started');
         console.log(`Recording has ${this.currentRecording.frames.length} frames and ${this.currentRecording.contentChanges.length} content changes`);
         console.log('Content changes to play:', this.currentRecording.contentChanges);
