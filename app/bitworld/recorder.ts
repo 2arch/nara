@@ -146,13 +146,20 @@ export class DataRecorder {
             return null;
         }
 
-        // Advance index to find the latest frame that matches current time
-        while(this.playbackIndex < this.currentRecording.frames.length - 1 &&
-              this.currentRecording.frames[this.playbackIndex + 1].timestamp <= elapsed) {
-            this.playbackIndex++;
+        // Return current frame if we're at or past its timestamp
+        if (this.playbackIndex < this.currentRecording.frames.length &&
+            this.currentRecording.frames[this.playbackIndex].timestamp <= elapsed) {
+            const frame = this.currentRecording.frames[this.playbackIndex];
+            this.playbackIndex++; // Move to next frame for next render
+            return frame;
         }
 
-        return this.currentRecording.frames[this.playbackIndex];
+        // Not ready for next frame yet, return last valid frame (if any)
+        if (this.playbackIndex > 0) {
+            return this.currentRecording.frames[this.playbackIndex - 1];
+        }
+
+        return null;
     }
 
     
