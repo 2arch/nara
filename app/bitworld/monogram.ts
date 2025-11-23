@@ -1650,7 +1650,11 @@ class MonogramSystem {
         }
 
         // Handle enable/disable transitions
-        if (enabledChanged) {
+        // Only process enable/disable if:
+        // 1. No mode change in this same call (modeChanged = false), AND
+        // 2. No pending cross-fade from a previous call (pendingMode = null)
+        // This prevents enable/disable logic from interfering with mode transitions
+        if (enabledChanged && !modeChanged && !this.pendingMode) {
             this.targetFade = this.options.enabled && this.options.mode !== 'clear' ? 1 : 0;
         }
 
@@ -1662,6 +1666,11 @@ class MonogramSystem {
 
     toggleEnabled() {
         this.options.enabled = !this.options.enabled;
+
+        // Cancel any pending cross-fade when toggling
+        if (this.pendingMode) {
+            this.pendingMode = null;
+        }
 
         // Fade in when enabling, fade out when disabling
         this.targetFade = this.options.enabled && this.options.mode !== 'clear' ? 1 : 0;
