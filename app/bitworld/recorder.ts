@@ -84,7 +84,7 @@ export class DataRecorder {
         this.frames.push(frame);
     }
 
-    recordContentChange(key: string, value: any) {
+    recordContentChange(key: string, value: any, engine?: any) {
         if (!this.isRecording) return;
 
         const change: ContentChange = {
@@ -96,15 +96,19 @@ export class DataRecorder {
         // Keep for backward compatibility with old recordings
         this.contentChanges.push(change);
 
-        // Attach to the most recent frame to sync content with cursor position
-        if (this.frames.length > 0) {
-            const lastFrame = this.frames[this.frames.length - 1];
-            // Only attach if this frame doesn't already have a content change
-            // and the timestamp is close (within last 100ms)
-            if (!lastFrame.contentChange && (change.timestamp - lastFrame.timestamp) < 100) {
-                lastFrame.contentChange = change;
-                console.log(`[Recording] Attached content change to frame at cursor (${lastFrame.cursor.x}, ${lastFrame.cursor.y})`);
-            }
+        // Create a new frame snapshot with this content change
+        // This ensures every character gets captured with its exact cursor position
+        if (engine) {
+            const frame: FrameData = {
+                timestamp: change.timestamp,
+                face: engine.faceOrientation ? { ...engine.faceOrientation } : undefined,
+                cursor: { ...engine.cursorPos },
+                viewOffset: { ...engine.viewOffset },
+                zoomLevel: engine.zoomLevel,
+                contentChange: change
+            };
+            this.frames.push(frame);
+            console.log(`[Recording] Created frame for character '${typeof value === 'string' ? value : value?.char}' at (${engine.cursorPos.x}, ${engine.cursorPos.y})`);
         }
     }
 

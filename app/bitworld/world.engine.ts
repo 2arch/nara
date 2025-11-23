@@ -9431,7 +9431,12 @@ export function useWorldEngine({
                     // Record character placement for playback
                     if (recorder.isRecording) {
                         console.log(`[Recording] Placing character '${key}' in note at ${containingNote.key}`, noteData);
-                        recorder.recordContentChange(containingNote.key, JSON.stringify(noteData));
+                        recorder.recordContentChange(containingNote.key, JSON.stringify(noteData), {
+                            cursorPos: cursorAfterDelete,
+                            faceOrientation,
+                            viewOffset,
+                            zoomLevel
+                        });
                     }
                 } else {
                     // Write to global worldData
@@ -9440,7 +9445,12 @@ export function useWorldEngine({
                     // Record character placement for playback
                     if (recorder.isRecording) {
                         console.log(`[Recording] Placing character '${key}' at ${currentKey}`, charData);
-                        recorder.recordContentChange(currentKey, charData);
+                        recorder.recordContentChange(currentKey, charData, {
+                            cursorPos: cursorAfterDelete,
+                            faceOrientation,
+                            viewOffset,
+                            zoomLevel
+                        });
                     }
                 }
 
@@ -10575,9 +10585,14 @@ export function useWorldEngine({
         // Record deletion immediately for accurate playback
         if (recorder.isRecording) {
             console.log(`[Recording] Deleting character at ${key}`);
-            recorder.recordContentChange(key, null);
+            recorder.recordContentChange(key, null, {
+                cursorPos,
+                faceOrientation,
+                viewOffset,
+                zoomLevel
+            });
         }
-    }, [worldData, recorder]);
+    }, [worldData, recorder, cursorPos, faceOrientation, viewOffset, zoomLevel]);
 
     const placeCharacter = useCallback((char: string, x: number, y: number): void => {
         if (char.length !== 1) return; // Only handle single characters
@@ -10611,9 +10626,14 @@ export function useWorldEngine({
         // Record character placement immediately for accurate playback
         if (recorder.isRecording) {
             console.log(`[Recording] Placing character '${char}' at ${key}`, charData);
-            recorder.recordContentChange(key, charData);
+            recorder.recordContentChange(key, charData, {
+                cursorPos: { x, y },
+                faceOrientation,
+                viewOffset,
+                zoomLevel
+            });
         }
-    }, [worldData, currentScale, currentTextStyle, textColor, recorder]);
+    }, [worldData, currentScale, currentTextStyle, textColor, recorder, faceOrientation, viewOffset, zoomLevel]);
 
     const batchMoveCharacters = useCallback((moves: Array<{fromX: number, fromY: number, toX: number, toY: number, char: string}>): void => {
         const newWorldData = { ...worldData };
