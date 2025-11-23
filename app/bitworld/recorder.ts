@@ -14,6 +14,7 @@ export interface FrameData {
     cursor: Point;
     viewOffset: Point;
     zoomLevel: number;
+    contentChange?: ContentChange; // Optional: character placed at this frame
 }
 
 export interface ContentChange {
@@ -35,11 +36,10 @@ export class DataRecorder {
     isPlaying: boolean = false;
     currentRecording: RecordingSession | null = null;
     private frames: FrameData[] = [];
-    private contentChanges: ContentChange[] = [];
+    private contentChanges: ContentChange[] = []; // Kept for backward compatibility with old recordings
     private startTime: number = 0;
     private playbackStart: number = 0;
     private playbackIndex: number = 0;
-    private contentChangeIndex: number = 0;
 
     start() {
         this.isRecording = true;
@@ -64,6 +64,9 @@ export class DataRecorder {
 
         console.log(`Recording stopped. Captured ${this.frames.length} frames and ${this.contentChanges.length} content changes.`);
         console.log('Content changes:', this.contentChanges);
+        console.log('First 5 content changes:', this.contentChanges.slice(0, 5));
+        console.log('Frame timestamps range:', this.frames.length > 0 ? `${this.frames[0].timestamp}ms to ${this.frames[this.frames.length-1].timestamp}ms` : 'no frames');
+        console.log('Content change timestamps range:', this.contentChanges.length > 0 ? `${this.contentChanges[0].timestamp}ms to ${this.contentChanges[this.contentChanges.length-1].timestamp}ms` : 'no changes');
         return this.currentRecording;
     }
 
@@ -90,13 +93,24 @@ export class DataRecorder {
             value
         };
 
+        // Keep for backward compatibility with old recordings
         this.contentChanges.push(change);
+
+        // Attach to the most recent frame to sync content with cursor position
+        if (this.frames.length > 0) {
+            const lastFrame = this.frames[this.frames.length - 1];
+            // Only attach if this frame doesn't already have a content change
+            // and the timestamp is close (within last 100ms)
+            if (!lastFrame.contentChange && (change.timestamp - lastFrame.timestamp) < 100) {
+                lastFrame.contentChange = change;
+                console.log(`[Recording] Attached content change to frame at cursor (${lastFrame.cursor.x}, ${lastFrame.cursor.y})`);
+            }
+        }
     }
 
     loadRecording(session: RecordingSession) {
         this.currentRecording = session;
         this.playbackIndex = 0;
-        this.contentChangeIndex = 0;
     }
 
     startPlayback() {
@@ -107,10 +121,10 @@ export class DataRecorder {
         this.isPlaying = true;
         this.playbackStart = Date.now();
         this.playbackIndex = 0;
-        this.contentChangeIndex = 0;
         console.log('Playback started');
-        console.log(`Recording has ${this.currentRecording.frames.length} frames and ${this.currentRecording.contentChanges.length} content changes`);
-        console.log('Content changes to play:', this.currentRecording.contentChanges);
+        console.log(`Recording has ${this.currentRecording.frames.length} frames`);
+        const framesWithContent = this.currentRecording.frames.filter(f => f.contentChange);
+        console.log(`${framesWithContent.length} frames have content changes`);
     }
 
     stopPlayback() {
@@ -137,22 +151,6 @@ export class DataRecorder {
         return this.currentRecording.frames[this.playbackIndex];
     }
 
-    getPlaybackContentChanges(): ContentChange[] {
-        if (!this.isPlaying || !this.currentRecording) return [];
-
-        const elapsed = Date.now() - this.playbackStart;
-        const changes: ContentChange[] = [];
-
-        // Apply all content changes that are due up to current time (in order)
-        // This ensures playback stays synchronized and doesn't lag behind
-        while (this.contentChangeIndex < this.currentRecording.contentChanges.length &&
-               this.currentRecording.contentChanges[this.contentChangeIndex].timestamp <= elapsed) {
-            changes.push(this.currentRecording.contentChanges[this.contentChangeIndex]);
-            this.contentChangeIndex++;
-        }
-
-        return changes;
-    }
     
     // Export recording as JSON string
     exportRecording(): string {

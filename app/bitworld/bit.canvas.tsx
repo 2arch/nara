@@ -6314,34 +6314,28 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             const updated = [newTrailPosition, ...prev.filter(pos => pos.timestamp >= cutoffTime)];
                             return updated.slice(0, 20); // Limit trail length
                         });
+
+                        // Apply content change if this frame has one
+                        if (frame.contentChange) {
+                            console.log(`[Playback] Frame has content change:`, frame.contentChange);
+                            engine.setWorldData((prev) => {
+                                const next = { ...prev };
+                                const change = frame.contentChange!;
+                                if (change.value === null) {
+                                    delete next[change.key];
+                                    console.log(`[Playback] Deleted at ${change.key}`);
+                                } else {
+                                    next[change.key] = change.value;
+                                    console.log(`[Playback] Added at ${change.key}:`, change.value);
+                                }
+                                return next;
+                            });
+                        }
                     } else {
                         // Playback finished - disable agent
                         if (engine.agentEnabled) {
                             engine.setAgentEnabled(false);
                             setAgentTrail([]); // Clear trail
-                        }
-                    }
-
-                    // Apply content changes that should happen at this timestamp
-                    if (engine.recorder.isPlaying) {
-                        const contentChanges = engine.recorder.getPlaybackContentChanges();
-                        if (contentChanges.length > 0) {
-                            console.log(`[Playback] Applying ${contentChanges.length} content changes:`, contentChanges);
-                            engine.setWorldData((prev) => {
-                                const next = { ...prev };
-                                for (const change of contentChanges) {
-                                    if (change.value === null) {
-                                        // Deletion
-                                        delete next[change.key];
-                                        console.log(`[Playback] Deleted at ${change.key}`);
-                                    } else {
-                                        // Addition or update
-                                        next[change.key] = change.value;
-                                        console.log(`[Playback] Added/Updated at ${change.key}:`, change.value);
-                                    }
-                                }
-                                return next;
-                            });
                         }
                     }
                 }
