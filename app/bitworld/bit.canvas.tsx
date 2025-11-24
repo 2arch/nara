@@ -4104,14 +4104,19 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     char = '•';
                 }
 
+                // Get scale for this character
+                const scale = typeof charData === 'object' ? getCharScale(charData) : { w: 1, h: 2 };
+                const charPixelWidth = effectiveCharWidth * scale.w;
+                const charPixelHeight = effectiveCharHeight * scale.h;
+
                 const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
-                if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth && topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
+                const topScreenPos = engine.worldToScreen(worldX, worldY - (scale.h - 1), currentZoom, currentOffset);
+                if (bottomScreenPos.x > -charPixelWidth * 2 && bottomScreenPos.x < cssWidth + charPixelWidth && topScreenPos.y > -charPixelHeight * 2 && bottomScreenPos.y < cssHeight + charPixelHeight) {
                     if (char) {
-                        // Draw background spanning GRID_CELL_SPAN cells using accent color (skip when monogram is enabled)
+                        // Draw background using scaled dimensions (skip when monogram is enabled)
                         if (!monogram.options.enabled) {
                             ctx.fillStyle = engine.textColor;
-                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, charPixelWidth, charPixelHeight);
                         }
 
                         // Draw text using background color (inverse of accent)
@@ -4127,22 +4132,25 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         // === Render IME Composition Preview for Chat Mode ===
         if (engine.isComposing && engine.compositionText && engine.compositionStartPos && engine.chatMode.isActive) {
             const startPos = engine.compositionStartPos;
+            const scale = engine.currentScale;
+            const charPixelWidth = effectiveCharWidth * scale.w;
+            const charPixelHeight = effectiveCharHeight * scale.h;
 
             for (let i = 0; i < engine.compositionText.length; i++) {
                 const char = engine.compositionText[i];
-                const worldX = startPos.x + i;
+                const worldX = startPos.x + (i * scale.w);
                 const worldY = startPos.y;
 
                 if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 && worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                     const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
 
-                    if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
-                        screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                    if (screenPos.x > -charPixelWidth * 2 && screenPos.x < cssWidth + charPixelWidth &&
+                        screenPos.y > -charPixelHeight * 2 && screenPos.y < cssHeight + charPixelHeight) {
 
                         if (char && char.trim() !== '') {
                             // Draw background using accent color (engine.textColor)
                             ctx.fillStyle = engine.textColor;
-                            ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                            ctx.fillRect(screenPos.x, screenPos.y, charPixelWidth, charPixelHeight);
 
                             // Draw text using background color (inverse of accent)
                             ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
@@ -4152,8 +4160,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
                             ctx.fillRect(
                                 screenPos.x,
-                                screenPos.y + effectiveCharHeight - 2,
-                                effectiveCharWidth,
+                                screenPos.y + charPixelHeight - 2,
+                                charPixelWidth,
                                 2
                             );
                         }
