@@ -213,7 +213,7 @@ fn calculateTrailEffect(worldX: f32, worldY: f32) -> f32 {
 
             // Trail width decreases with age (comet effect)
             let ageFactor = 1.0 - (age / trailParams.trailFadeMs);
-            let trailWidth = 1.5 + trailParams.complexity * 1.5 * ageFactor;
+            let trailWidth = 0.7 + trailParams.complexity * 1.0 * ageFactor;
 
             if (distance <= trailWidth) {
                 // Calculate fade based on distance and age
