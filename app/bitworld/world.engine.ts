@@ -5966,8 +5966,8 @@ export function useWorldEngine({
                         inputPositions: prev.inputPositions
                     }));
 
-                    // Move cursor to next line at start position
-                    setCursorPos({ x: startX, y: cursorPos.y + 1 });
+                    // Move cursor to next line at start position (using scale height)
+                    setCursorPos({ x: startX, y: cursorPos.y + currentScale.h });
                     return true;
                 } else if (metaKey || ctrlKey) {
                     // Cmd+Enter (or Ctrl+Enter): Send chat message and write response directly to canvas

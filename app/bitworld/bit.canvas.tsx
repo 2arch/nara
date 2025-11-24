@@ -4113,15 +4113,13 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 const topScreenPos = engine.worldToScreen(worldX, worldY - (scale.h - 1), currentZoom, currentOffset);
                 if (bottomScreenPos.x > -charPixelWidth * 2 && bottomScreenPos.x < cssWidth + charPixelWidth && topScreenPos.y > -charPixelHeight * 2 && bottomScreenPos.y < cssHeight + charPixelHeight) {
                     if (char) {
-                        // Draw background using scaled dimensions (skip when monogram is enabled)
-                        if (!monogram.options.enabled) {
-                            ctx.fillStyle = engine.textColor;
-                            ctx.fillRect(topScreenPos.x, topScreenPos.y, charPixelWidth, charPixelHeight);
-                        }
+                        // Draw background using scaled dimensions (chat input always has inverted colors)
+                        ctx.fillStyle = engine.textColor;
+                        ctx.fillRect(topScreenPos.x, topScreenPos.y, charPixelWidth, charPixelHeight);
 
                         // Draw text using background color (inverse of accent)
                         if (char.trim() !== '') {
-                            ctx.fillStyle = monogram.options.enabled ? engine.textColor : (engine.backgroundColor || '#FFFFFF');
+                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
                             renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
                         }
                     }
