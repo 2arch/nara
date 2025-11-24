@@ -17,6 +17,7 @@ import { get } from 'firebase/database';
 import { DataRecorder } from './recorder';
 import { parseGIFFromArrayBuffer, getCurrentFrame, isGIFUrl } from './gif.parser';
 import type { AgentState } from './agent';
+import { AgentController } from './agent';
 
 // API route helper functions for AI operations
 const callTransformAPI = async (text: string, instructions: string, userId?: string): Promise<string> => {
@@ -271,6 +272,7 @@ export interface WorldEngine {
     setAgentState: React.Dispatch<React.SetStateAction<AgentState>>;
     agentSelectionStart: Point | null;
     agentSelectionEnd: Point | null;
+    agentController: AgentController; // Agent controller for playback
     // Multiplayer cursors
     multiplayerCursors: MultiplayerCursor[];
     // Host mode for onboarding
@@ -941,6 +943,16 @@ export function useWorldEngine({
     const [agentState, setAgentState] = useState<AgentState>('idle');
     const [agentSelectionStart, setAgentSelectionStart] = useState<Point | null>(null);
     const [agentSelectionEnd, setAgentSelectionEnd] = useState<Point | null>(null);
+
+    // Agent Controller - bridges playback system with engine state
+    const agentController = useMemo(() => new AgentController((state) => {
+        // Sync agent controller state with React state
+        setAgentEnabled(state.enabled);
+        setAgentPos(state.pos);
+        setAgentState(state.state);
+        setAgentSelectionStart(state.selectionStart);
+        setAgentSelectionEnd(state.selectionEnd);
+    }), []);
     
     // === Text Frame and Cluster System ===
     const [textFrames, setTextFrames] = useState<Array<{
@@ -10709,6 +10721,7 @@ export function useWorldEngine({
         setAgentState,
         agentSelectionStart,
         agentSelectionEnd,
+        agentController, // Expose agent controller for playback system
         // Multiplayer cursors
         multiplayerCursors,
         getCharacter,

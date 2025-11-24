@@ -6289,15 +6289,15 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 } else if (engine.recorder.isPlaying) {
                     // Enable agent to show playback cursor
                     if (!engine.agentEnabled) {
-                        engine.setAgentEnabled(true);
+                        engine.agentController.setEnabled(true);
                     }
 
                     const frame = engine.recorder.getPlaybackFrame();
                     if (frame) {
-                        // Apply playback state overrides
-                        // Note: We use the engine setters which trigger React state updates
-                        // This ensures UI consistency but ties framerate to React render speed
-                        // For face tracking, this is already how it works (via face.ts)
+                        // Update agent from playback frame
+                        engine.agentController.updateFromFrame(frame);
+
+                        // Apply playback state overrides (face tracking)
                         if (frame.face) {
                             if (!engine.isFaceDetectionEnabled) engine.setFaceDetectionEnabled(true);
                             engine.setFaceOrientation(frame.face);
@@ -6336,10 +6336,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             engine.setZoomLevel(newZoom);
                         }
 
-                        // Use agent cursor to show playback position (visually distinct from user cursor)
-                        engine.setAgentPos(frame.cursor);
-                        engine.setAgentState('typing'); // Show agent as active
-
                         // Update agent trail to show playback cursor movement
                         const now = Date.now();
                         const newTrailPosition = {
@@ -6356,7 +6352,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     } else {
                         // Playback finished - disable agent and reset viewport smoothing
                         if (engine.agentEnabled) {
-                            engine.setAgentEnabled(false);
+                            engine.agentController.reset();
                             setAgentTrail([]); // Clear trail
                         }
                         playbackViewportRef.current = null; // Reset for next playback
@@ -6366,6 +6362,9 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     if (engine.recorder.isPlaying) {
                         const contentChanges = engine.recorder.getPlaybackContentChanges();
                         if (contentChanges.length > 0) {
+                            // Set agent to typing state during content changes
+                            engine.agentController.setTyping();
+
                             console.log(`[Playback] Applying ${contentChanges.length} content changes:`, contentChanges);
                             engine.setWorldData((prev) => {
                                 const next = { ...prev };
