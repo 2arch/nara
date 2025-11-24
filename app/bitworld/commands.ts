@@ -1504,8 +1504,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
     // Start command mode when '/' is pressed
     const startCommand = useCallback((cursorPos: Point) => {
-        // Record command start for playback
-        recorder?.recordAction('command_start', { pos: cursorPos });
+        // Note: command_start not recorded - command_enter captures full flow for playback
 
         // On mobile: Save current camera mode and switch to focus
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -1578,8 +1577,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
     // Handle character input in command mode
     const addCharacter = useCallback((char: string) => {
-        // Record command input for playback
-        recorder?.recordAction('command_input', { char });
+        // Note: command_input not recorded - command_enter captures full command for playback
 
         setCommandState(prev => {
             const newInput = prev.input + char;
@@ -1597,7 +1595,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 hasNavigated: false // Reset navigation when typing
             };
         });
-    }, [matchCommands, recorder]);
+    }, [matchCommands]);
 
     // Handle backspace in command mode
     const handleBackspace = useCallback((): { shouldExitCommand: boolean; shouldMoveCursor: boolean } => {
@@ -3579,10 +3577,18 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             setCursorPos({ x: cursorPos.x + 1, y: cursorPos.y });
             return true;
         } else if (key === 'Enter') {
-            // Record Enter key for playback
-            recorder?.recordAction('command_enter', {});
-
             const originalPos = commandState.originalCursorPos;
+
+            // Record command_enter with full command and position for playback
+            const fullInput = commandState.input.trim();
+            const commandToRecord = commandState.hasNavigated && commandState.matchedCommands.length > 0
+                ? commandState.matchedCommands[commandState.selectedIndex]
+                : fullInput;
+            recorder?.recordAction('command_enter', {
+                command: commandToRecord,
+                pos: originalPos
+            });
+
             const result = executeCommand(isPermanent);
 
             // Restore camera mode if needed (mobile only)
