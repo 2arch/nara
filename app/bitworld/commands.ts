@@ -1504,6 +1504,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
     // Start command mode when '/' is pressed
     const startCommand = useCallback((cursorPos: Point) => {
+        // Record command start for playback
+        recorder?.recordAction('command_start', { pos: cursorPos });
+
         // On mobile: Save current camera mode and switch to focus
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         if (isMobile) {
@@ -3721,6 +3724,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
     // Helper method to execute a command from a string (for keyboard shortcuts)
     // This executes immediately without opening the command palette
     const executeCommandString = useCallback((commandString: string) => {
+        // Record command execution for playback
+        recorder?.recordAction('command_execute', { command: commandString });
+
         // Parse the command
         const inputParts = commandString.split(/\s+/);
         const commandName = inputParts[0];

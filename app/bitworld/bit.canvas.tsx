@@ -6358,6 +6358,17 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                         playbackViewportRef.current = null; // Reset for next playback
                     }
 
+                    // Apply actions that should happen at this timestamp
+                    if (engine.recorder.isPlaying) {
+                        const actions = engine.recorder.getPlaybackActions();
+                        if (actions.length > 0) {
+                            console.log(`[Playback] Processing ${actions.length} actions:`, actions);
+                            for (const action of actions) {
+                                engine.agentController.processAction(action);
+                            }
+                        }
+                    }
+
                     // Apply content changes that should happen at this timestamp
                     if (engine.recorder.isPlaying) {
                         const contentChanges = engine.recorder.getPlaybackContentChanges();

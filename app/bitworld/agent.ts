@@ -1,5 +1,5 @@
 import { Point } from './world.engine';
-import type { FrameData, ContentChange } from './recorder';
+import type { FrameData, ContentChange, Action } from './recorder';
 
 // ============================================================================
 // AGENT SYSTEM
@@ -64,6 +64,62 @@ export class AgentController {
 
     setIdle() {
         this.visualState.state = 'idle';
+        this.notifyStateChange();
+    }
+
+    setSelecting() {
+        this.visualState.state = 'selecting';
+        this.notifyStateChange();
+    }
+
+    // Update agent selection
+    setSelection(start: Point | null, end: Point | null) {
+        this.visualState.selectionStart = start;
+        this.visualState.selectionEnd = end;
+        if (start && end) {
+            this.visualState.state = 'selecting';
+        }
+        this.notifyStateChange();
+    }
+
+    // Process recorded actions during playback
+    processAction(action: Action) {
+        switch (action.type) {
+            case 'selection_start':
+                this.visualState.pos = action.data.pos;
+                this.visualState.selectionStart = action.data.pos;
+                this.visualState.selectionEnd = action.data.pos;
+                this.visualState.state = 'selecting';
+                break;
+
+            case 'selection_update':
+                this.visualState.pos = action.data.pos;
+                this.visualState.selectionEnd = action.data.pos;
+                break;
+
+            case 'selection_end':
+                this.visualState.selectionStart = action.data.start;
+                this.visualState.selectionEnd = action.data.end;
+                this.visualState.state = 'idle';
+                break;
+
+            case 'selection_clear':
+                this.visualState.selectionStart = null;
+                this.visualState.selectionEnd = null;
+                this.visualState.state = 'idle';
+                break;
+
+            case 'command_start':
+                this.visualState.pos = action.data.pos;
+                this.visualState.state = 'typing';
+                break;
+
+            case 'command_execute':
+                // Agent shows typing state during command execution
+                this.visualState.state = 'typing';
+                break;
+        }
+
         this.notifyStateChange();
     }
 

@@ -10084,14 +10084,20 @@ export function useWorldEngine({
         setSelectionStart(worldPos);
         setSelectionEnd(worldPos);
         setCursorPos(worldPos); // Move cursor to selection start
-    }, [zoomLevel, viewOffset, screenToWorld]);
+
+        // Record action for playback
+        recorder.recordAction('selection_start', { pos: worldPos });
+    }, [zoomLevel, viewOffset, screenToWorld, recorder]);
 
     const handleSelectionMove = useCallback((canvasRelativeX: number, canvasRelativeY: number): void => {
         if (selectionStart) { // This is correct - we want to update only if a selection has started
             const worldPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
             setSelectionEnd(worldPos);
+
+            // Record action for playback
+            recorder.recordAction('selection_update', { pos: worldPos });
         }
-    }, [selectionStart, zoomLevel, viewOffset, screenToWorld]);
+    }, [selectionStart, zoomLevel, viewOffset, screenToWorld, recorder]);
 
     const handleSelectionEnd = useCallback((): void => {
         // Simply mark selection process as ended
@@ -10102,10 +10108,15 @@ export function useWorldEngine({
             setDialogueWithRevert("Press Enter to confirm note region, or Escape to cancel", setDialogueText);
         }
 
+        // Record action for playback
+        if (selectionStart && selectionEnd) {
+            recorder.recordAction('selection_end', { start: selectionStart, end: selectionEnd });
+        }
+
         // We keep the selection intact regardless
         // The selection will be cleared in other functions if needed
         // This allows the selection to persist after mouse up
-    }, [currentMode, selectionStart, selectionEnd, setDialogueText]);
+    }, [currentMode, selectionStart, selectionEnd, setDialogueText, recorder]);
 
     // === IME Composition Handlers ===
     const handleCompositionStart = useCallback((): void => {

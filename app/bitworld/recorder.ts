@@ -24,12 +24,28 @@ export interface ContentChange {
     value: any;
 }
 
+// Action types for high-level user actions (selections, commands, etc.)
+export type ActionType =
+    | 'selection_start'
+    | 'selection_update'
+    | 'selection_end'
+    | 'selection_clear'
+    | 'command_start'
+    | 'command_execute';
+
+export interface Action {
+    timestamp: number;
+    type: ActionType;
+    data: any; // Type-specific data (e.g., Point for selection, string for command)
+}
+
 export interface RecordingSession {
     name: string;
     startTime: number;
     duration: number;
     frames: FrameData[];
     contentChanges: ContentChange[];
+    actions: Action[]; // High-level user actions
 }
 
 export class DataRecorder {
@@ -38,10 +54,12 @@ export class DataRecorder {
     currentRecording: RecordingSession | null = null;
     private frames: FrameData[] = [];
     private contentChanges: ContentChange[] = [];
+    private actions: Action[] = [];
     private startTime: number = 0;
     private playbackStart: number = 0;
     private playbackIndex: number = 0;
     private contentChangeIndex: number = 0;
+    private actionIndex: number = 0; // Track action playback
     public userOverrodeViewport: boolean = false; // Track if user manually panned/zoomed during playback
     private recordingCounter: number = 0; // Auto-incrementing counter for recordings
 
@@ -49,6 +67,7 @@ export class DataRecorder {
         this.isRecording = true;
         this.frames = [];
         this.contentChanges = [];
+        this.actions = [];
         this.startTime = Date.now();
         console.log('Recording started');
     }
@@ -63,11 +82,12 @@ export class DataRecorder {
             startTime: this.startTime,
             duration,
             frames: this.frames,
-            contentChanges: this.contentChanges
+            contentChanges: this.contentChanges,
+            actions: this.actions
         };
 
-        console.log(`Recording stopped. Captured ${this.frames.length} frames and ${this.contentChanges.length} content changes.`);
-        console.log('Content changes:', this.contentChanges);
+        console.log(`Recording stopped. Captured ${this.frames.length} frames, ${this.contentChanges.length} content changes, and ${this.actions.length} actions.`);
+        console.log('Actions:', this.actions);
         return this.currentRecording;
     }
 
@@ -97,10 +117,25 @@ export class DataRecorder {
         this.contentChanges.push(change);
     }
 
+    // Record high-level user actions (selections, commands)
+    recordAction(type: ActionType, data: any) {
+        if (!this.isRecording) return;
+
+        const action: Action = {
+            timestamp: Date.now() - this.startTime,
+            type,
+            data
+        };
+
+        this.actions.push(action);
+        console.log(`[Recording] Action recorded: ${type}`, data);
+    }
+
     loadRecording(session: RecordingSession) {
         this.currentRecording = session;
         this.playbackIndex = 0;
         this.contentChangeIndex = 0;
+        this.actionIndex = 0;
     }
 
     startPlayback() {
@@ -112,10 +147,10 @@ export class DataRecorder {
         this.playbackStart = Date.now();
         this.playbackIndex = 0;
         this.contentChangeIndex = 0;
+        this.actionIndex = 0;
         this.userOverrodeViewport = false; // Reset viewport override flag
         console.log('Playback started');
-        console.log(`Recording has ${this.currentRecording.frames.length} frames and ${this.currentRecording.contentChanges.length} content changes`);
-        console.log('Content changes to play:', this.currentRecording.contentChanges);
+        console.log(`Recording has ${this.currentRecording.frames.length} frames, ${this.currentRecording.contentChanges.length} content changes, and ${this.currentRecording.actions?.length || 0} actions`);
     }
 
     stopPlayback() {
@@ -158,6 +193,24 @@ export class DataRecorder {
 
         return changes;
     }
+
+    // Get actions that should be played back at current time
+    getPlaybackActions(): Action[] {
+        if (!this.isPlaying || !this.currentRecording) return [];
+        if (!this.currentRecording.actions) return []; // Backward compatibility
+
+        const elapsed = Date.now() - this.playbackStart;
+        const actions: Action[] = [];
+
+        // Apply all actions that are due up to current time
+        while (this.actionIndex < this.currentRecording.actions.length &&
+               this.currentRecording.actions[this.actionIndex].timestamp <= elapsed) {
+            actions.push(this.currentRecording.actions[this.actionIndex]);
+            this.actionIndex++;
+        }
+
+        return actions;
+    }
     
     // Export recording as JSON string
     exportRecording(): string {
@@ -169,9 +222,12 @@ export class DataRecorder {
         try {
             const session = JSON.parse(json) as RecordingSession;
             if (session.frames && Array.isArray(session.frames)) {
-                // Ensure backward compatibility with old recordings without contentChanges
+                // Ensure backward compatibility with old recordings
                 if (!session.contentChanges) {
                     session.contentChanges = [];
+                }
+                if (!session.actions) {
+                    session.actions = [];
                 }
                 this.loadRecording(session);
                 return true;
@@ -205,6 +261,7 @@ export class DataRecorder {
                     duration: this.currentRecording.duration.toString(),
                     frames: this.currentRecording.frames.length.toString(),
                     contentChanges: this.currentRecording.contentChanges.length.toString(),
+                    actions: this.currentRecording.actions.length.toString(),
                     createdAt: new Date().toISOString()
                 }
             });
