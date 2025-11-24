@@ -2787,14 +2787,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     const option = args[0].toLowerCase();
                     
                     if (option === 'on') {
-                        monogramSystem.setOptions({ enabled: true });
+                        monogramSystem.setOptions((prev: any) => ({ ...prev, enabled: true }));
                         setDialogueWithRevert("Monogram background enabled", setDialogueText);
                     } else if (option === 'off') {
-                        monogramSystem.setOptions({ enabled: false });
+                        monogramSystem.setOptions((prev: any) => ({ ...prev, enabled: false }));
                         setDialogueWithRevert("Monogram background disabled", setDialogueText);
                     } else if (option === 'face') {
                         // Activate face mode (same as /talk)
-                        monogramSystem.setOptions({ mode: 'face3d', enabled: true });
+                        monogramSystem.setOptions((prev: any) => ({ ...prev, mode: 'face3d', enabled: true }));
                         
                         // Trigger camera access for face tracking (same logic as /talk)
                         const startFaceTracking = async () => {
@@ -2841,7 +2841,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         startFaceTracking();
                     } else {
                         // Set mode (clear, perlin, nara, etc.)
-                        monogramSystem.setOptions({ mode: option, enabled: true });
+                        monogramSystem.setOptions((prev: any) => ({ ...prev, mode: option, enabled: true }));
                         setDialogueWithRevert(`Monogram mode set to: ${option}`, setDialogueText);
                     }
                 }
