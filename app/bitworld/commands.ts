@@ -3583,14 +3583,17 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
             // Record command_enter with full command and position for playback
             // Use the timestamp from when '/' was pressed so it plays back at that moment
+            // Skip recording if this is "record stop" to avoid recording the stop command itself
             const fullInput = commandState.input.trim();
             const commandToRecord = commandState.hasNavigated && commandState.matchedCommands.length > 0
                 ? commandState.matchedCommands[commandState.selectedIndex]
                 : fullInput;
-            recorder?.recordAction('command_enter', {
-                command: commandToRecord,
-                pos: originalPos
-            }, commandState.recordingTimestamp);
+            if (commandToRecord !== 'record stop') {
+                recorder?.recordAction('command_enter', {
+                    command: commandToRecord,
+                    pos: originalPos
+                }, commandState.recordingTimestamp);
+            }
 
             const result = executeCommand(isPermanent);
 
