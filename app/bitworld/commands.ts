@@ -217,7 +217,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'scale': 'Change text scale. Type /scale followed by dimensions like 1x2 (default), 1x6 (tall), or 4x4 (square). Affects new text you write.',
     'style': 'Apply visual styles to selected notes or patterns. Select a note/pattern or position cursor inside one, then type /style [stylename]. Available: solid (white border), glow (pulsing gray glow), glowing (enhanced bright glow). Example: /style glow',
     'state': 'Save or load canvas states. Type /state to see saved states, /state save [name] to save current canvas, /state load [name] to restore a saved state. Perfect for versioning your work.',
-    'record': 'Record and replay sessions. /record start to begin, /record stop to end. /record save <name> saves to Firebase. /record load shows all recordings, /record load <name> plays a recording. /record download saves locally, /record upload loads from file.',
+    'record': 'Record and replay sessions. /record start begins recording, /record stop saves and auto-plays. /record play replays most recent. /record load lists all, /record load <name> plays specific recording.',
     'random': 'Randomize text styling. Applies random colors and styles to your text for a more organic, playful aesthetic. Great for breaking out of rigid design patterns.',
     'clear': 'Clear all text from the canvas. WARNING: This deletes everything on your current canvas. Use /state save first if you want to preserve your work.',
     'publish': 'Publish your canvas publicly. Makes your canvas accessible at your public URL (nara.ws/username/canvasname). Others can view but not edit.',
@@ -2280,27 +2280,37 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             } else if (action === 'stop') {
                 const session = recorder.stop();
                 if (session) {
-                    setDialogueWithRevert("Recording stopped. Type /record save <name> to save to Firebase.", setDialogueText);
+                    // Auto-save with enumerated name and auto-play
+                    setDialogueWithRevert("Saving recording...", setDialogueText);
+                    recorder.getNextRecordingName().then((autoName) => {
+                        recorder.saveToFirebase(autoName).then((result) => {
+                            if (result.success) {
+                                // Clear canvas and auto-play
+                                if (setWorldData) {
+                                    setWorldData({});
+                                }
+                                recorder.startPlayback();
+                                setDialogueWithRevert(`Saved as '${autoName}'. Playing back...`, setDialogueText);
+                            } else {
+                                setDialogueWithRevert(`Failed to save: ${result.error}`, setDialogueText);
+                            }
+                        });
+                    });
                 } else {
                     setDialogueWithRevert("No active recording to stop", setDialogueText);
                 }
-            } else if (action === 'save') {
-                if (!name) {
-                    setDialogueWithRevert("Usage: /record save <name>", setDialogueText);
-                    return null;
-                }
-
-                // Save to Firebase Storage
-                setDialogueWithRevert("Saving recording to Firebase...", setDialogueText);
-                recorder.saveToFirebase(name).then((result) => {
-                    if (result.success) {
-                        setDialogueWithRevert(`Recording saved as '${name}'. Use /record load to see all recordings.`, setDialogueText);
-                    } else {
-                        setDialogueWithRevert(`Failed to save: ${result.error}`, setDialogueText);
+            } else if (action === 'play') {
+                // Play the most recent (current) recording
+                if (recorder.currentRecording) {
+                    // Clear canvas and play
+                    if (setWorldData) {
+                        setWorldData({});
                     }
-                }).catch((error) => {
-                    setDialogueWithRevert(`Error saving recording: ${error.message}`, setDialogueText);
-                });
+                    recorder.startPlayback();
+                    setDialogueWithRevert("Playing most recent recording...", setDialogueText);
+                } else {
+                    setDialogueWithRevert("No recording available. Use /record start to create one.", setDialogueText);
+                }
             } else if (action === 'load') {
                 if (!name) {
                     // List available recordings (like /clip)
@@ -2376,7 +2386,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                  };
                  input.click();
             } else {
-                setDialogueWithRevert("Usage: /record start|stop|save <name>|load [name]|download|upload", setDialogueText);
+                setDialogueWithRevert("Usage: /record start|stop|play|load [name]|download|upload", setDialogueText);
             }
 
             return null;

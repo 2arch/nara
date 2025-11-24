@@ -43,6 +43,7 @@ export class DataRecorder {
     private playbackIndex: number = 0;
     private contentChangeIndex: number = 0;
     public userOverrodeViewport: boolean = false; // Track if user manually panned/zoomed during playback
+    private recordingCounter: number = 0; // Auto-incrementing counter for recordings
 
     start() {
         this.isRecording = true;
@@ -256,10 +257,30 @@ export class DataRecorder {
                 }
             }
 
+            // Sort by name (recording_1, recording_2, etc. will sort naturally)
+            recordings.sort((a, b) => a.name.localeCompare(b.name));
+
             return recordings;
         } catch (error) {
             console.error('Error listing recordings:', error);
             return [];
         }
+    }
+
+    // Get next auto-generated recording name
+    async getNextRecordingName(): Promise<string> {
+        const recordings = await this.listRecordings();
+
+        // Find highest number from existing recordings (e.g., recording_5 -> 5)
+        let maxNum = 0;
+        for (const rec of recordings) {
+            const match = rec.name.match(/^recording_(\d+)$/);
+            if (match) {
+                const num = parseInt(match[1]);
+                if (num > maxNum) maxNum = num;
+            }
+        }
+
+        return `recording_${maxNum + 1}`;
     }
 }
