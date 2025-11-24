@@ -128,28 +128,29 @@ export class AgentController {
                 break;
 
             case 'command_start':
-                this.visualState.pos = action.data.pos;
+                // Recorded but ignored during playback - command_enter handles the full flow
                 this.visualState.state = 'typing';
-                // Actually open the command palette during playback
-                if (this.commandSystem) {
-                    this.commandSystem.startCommand(action.data.pos);
-                }
                 break;
 
             case 'command_input':
-                // Agent types a character into the command input
+                // Recorded but ignored during playback - command_enter handles the full flow
                 this.visualState.state = 'typing';
-                if (this.commandSystem && action.data.char) {
-                    this.commandSystem.addCharacter(action.data.char);
-                }
                 break;
 
             case 'command_enter':
-                // Agent presses Enter to execute the command via the palette
+                // Execute the command via palette - this replaces the full command_start + input sequence
                 this.visualState.state = 'typing';
-                if (this.executeCommandCallback) {
-                    console.log('[Agent] Pressing Enter to execute command');
-                    this.executeCommandCallback();
+                if (this.commandSystem && action.data.command && action.data.pos) {
+                    console.log('[Agent] Executing command via palette:', action.data.command);
+                    this.visualState.pos = action.data.pos;
+                    // Show the palette with full command, then execute
+                    this.commandSystem.startCommandWithInput(action.data.pos, action.data.command);
+                    // Execute after a small delay to allow UI to update
+                    setTimeout(() => {
+                        if (this.executeCommandCallback) {
+                            this.executeCommandCallback();
+                        }
+                    }, 100);
                 }
                 break;
 

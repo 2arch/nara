@@ -3579,10 +3579,18 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             setCursorPos({ x: cursorPos.x + 1, y: cursorPos.y });
             return true;
         } else if (key === 'Enter') {
-            // Record Enter key for playback
-            recorder?.recordAction('command_enter', {});
-
             const originalPos = commandState.originalCursorPos;
+
+            // Record Enter with full command for playback (replaces command_start + command_input sequence)
+            const fullInput = commandState.input.trim();
+            const commandToRecord = commandState.hasNavigated && commandState.matchedCommands.length > 0
+                ? commandState.matchedCommands[commandState.selectedIndex]
+                : fullInput;
+            recorder?.recordAction('command_enter', {
+                command: commandToRecord,
+                pos: originalPos
+            });
+
             const result = executeCommand(isPermanent);
 
             // Restore camera mode if needed (mobile only)
