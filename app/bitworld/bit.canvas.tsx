@@ -5339,33 +5339,21 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 // Optimization: Draw strips?
                 // For box selection, we just want to highlight the grid.
                 
-                for (let worldY = minY; worldY <= maxY; worldY++) {
+                // Use current scale for box selection dimensions
+                const selectionScale = engine.currentScale;
+                const selectionCellHeight = effectiveCharHeight * selectionScale.h;
+
+                for (let worldY = minY; worldY <= maxY; worldY += selectionScale.h) {
                     const startScreenPos = engine.worldToScreen(minX, worldY, currentZoom, currentOffset);
-                    const endScreenPos = engine.worldToScreen(maxX + 1, worldY, currentZoom, currentOffset);
-                    
-                    // Draw 1-cell high strip
-                    // Note: worldToScreen returns top-left of the cell? 
-                    // No, logic elsewhere uses worldY - 1 for top.
-                    // Let's check worldToScreen again. 
-                    // worldToScreen(x, y) -> (x*w, y*h).
-                    // If y=0, screenY=0.
-                    // If character is at y=0 (bottom), it occupies y=0 and y=-1?
-                    // "Characters span 2 vertically-stacked physical cells"
-                    // "Characters always occupy 2 vertically-stacked physical cells"
-                    // "Characters at worldY render at worldY-1 (top cell)"
-                    // So if I select y=10, I select the cell at y=10.
-                    // If a character is at y=10, it renders at y=9 and y=10.
-                    // My selection highlights y=10.
-                    // If I want to highlight the character, I should probably select y=9 and y=10?
-                    // Standard box selection usually just highlights the abstract grid.
-                    // Let's draw 1x1 cells.
-                    
-                    if (startScreenPos.y >= -effectiveCharHeight && startScreenPos.y <= cssHeight) {
+                    const endScreenPos = engine.worldToScreen(maxX + selectionScale.w, worldY, currentZoom, currentOffset);
+                    const topScreenPos = engine.worldToScreen(minX, worldY - (selectionScale.h - 1), currentZoom, currentOffset);
+
+                    if (topScreenPos.y >= -selectionCellHeight && topScreenPos.y <= cssHeight) {
                         ctx.fillRect(
                             startScreenPos.x,
-                            startScreenPos.y,
+                            topScreenPos.y,
                             endScreenPos.x - startScreenPos.x,
-                            effectiveCharHeight // 1 cell high
+                            selectionCellHeight
                         );
                     }
                 }
