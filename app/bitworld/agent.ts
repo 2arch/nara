@@ -38,6 +38,7 @@ export class AgentController {
         executeCommandString: (command: string) => void;
         startCommand: (pos: Point) => void;
         startCommandWithInput: (pos: Point, input: string) => void;
+        addCharacter: (char: string) => void;
     };
     private executeCommandCallback?: () => Promise<any>;
 
@@ -50,6 +51,7 @@ export class AgentController {
         executeCommandString: (command: string) => void;
         startCommand: (pos: Point) => void;
         startCommandWithInput: (pos: Point, input: string) => void;
+        addCharacter: (char: string) => void;
     }, executeCommandCallback?: () => Promise<any>) {
         this.commandSystem = commandSystem;
         this.executeCommandCallback = executeCommandCallback;
@@ -134,21 +136,29 @@ export class AgentController {
                 }
                 break;
 
-            case 'command_execute':
-                // Agent shows typing state during command execution
+            case 'command_input':
+                // Agent types a character into the command input
                 this.visualState.state = 'typing';
-                // Actually execute the command during playback
+                if (this.commandSystem && action.data.char) {
+                    this.commandSystem.addCharacter(action.data.char);
+                }
+                break;
+
+            case 'command_enter':
+                // Agent presses Enter to execute the command via the palette
+                this.visualState.state = 'typing';
+                if (this.executeCommandCallback) {
+                    console.log('[Agent] Pressing Enter to execute command');
+                    this.executeCommandCallback();
+                }
+                break;
+
+            case 'command_execute':
+                // Direct command execution (keyboard shortcuts that bypass palette)
+                this.visualState.state = 'typing';
                 if (this.commandSystem && action.data.command) {
-                    console.log('[Agent] Executing command:', action.data.command);
-                    // Use startCommandWithInput to pre-fill the command, then execute
-                    const pos = this.visualState.pos;
-                    this.commandSystem.startCommandWithInput(pos, action.data.command);
-                    // Execute the command after a small delay to allow state to update
-                    setTimeout(() => {
-                        if (this.executeCommandCallback) {
-                            this.executeCommandCallback();
-                        }
-                    }, 100);
+                    console.log('[Agent] Direct command execution:', action.data.command);
+                    this.commandSystem.executeCommandString(action.data.command);
                 }
                 break;
         }

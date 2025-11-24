@@ -1578,14 +1578,17 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
     // Handle character input in command mode
     const addCharacter = useCallback((char: string) => {
+        // Record command input for playback
+        recorder?.recordAction('command_input', { char });
+
         setCommandState(prev => {
             const newInput = prev.input + char;
             const newMatchedCommands = matchCommands(newInput);
-            
+
             // Update command display at original command start position
             const newCommandData = renderCommandDisplay(newInput, newMatchedCommands, prev.commandStartPos);
             setCommandData(newCommandData);
-            
+
             return {
                 ...prev,
                 input: newInput,
@@ -1594,7 +1597,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 hasNavigated: false // Reset navigation when typing
             };
         });
-    }, [matchCommands]);
+    }, [matchCommands, recorder]);
 
     // Handle backspace in command mode
     const handleBackspace = useCallback((): { shouldExitCommand: boolean; shouldMoveCursor: boolean } => {
@@ -1653,9 +1656,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             : fullInput;
 
         if (!commandToExecute) return null; // Safety check for undefined command
-
-        // Record command execution for playback
-        recorder?.recordAction('command_execute', { command: commandToExecute });
 
         const inputParts = commandToExecute.split(/\s+/);
         const commandName = inputParts[0];
@@ -3579,6 +3579,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             setCursorPos({ x: cursorPos.x + 1, y: cursorPos.y });
             return true;
         } else if (key === 'Enter') {
+            // Record Enter key for playback
+            recorder?.recordAction('command_enter', {});
+
             const originalPos = commandState.originalCursorPos;
             const result = executeCommand(isPermanent);
 
@@ -3909,6 +3912,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         executeCommandString,
         startCommand, // Expose startCommand for keyboard shortcuts
         startCommandWithInput, // Expose for Cmd+F
+        addCharacter, // Expose for agent playback typing
         addComposedText, // Expose for IME composition
         removeCompositionTrigger, // Expose for IME composition start
         isCommandMode: commandState.isActive,

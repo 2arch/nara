@@ -179,6 +179,7 @@ export interface WorldEngine {
         executeCommandString: (command: string) => void;
         startCommand: (cursorPos: Point) => void;
         startCommandWithInput: (cursorPos: Point, input: string) => void;
+        addCharacter: (char: string) => void;
     };
     chatData: WorldData;
     suggestionData: WorldData;
@@ -1456,6 +1457,7 @@ export function useWorldEngine({
         executeCommandString,
         startCommand,
         startCommandWithInput,
+        addCharacter,
         addComposedText,
         removeCompositionTrigger,
         isFaceDetectionEnabled,
@@ -1488,9 +1490,10 @@ export function useWorldEngine({
         agentController.setCommandSystem({
             executeCommandString,
             startCommand,
-            startCommandWithInput
+            startCommandWithInput,
+            addCharacter
         }, executeCommand);
-    }, [executeCommandString, startCommand, startCommandWithInput, executeCommand]);
+    }, [executeCommandString, startCommand, startCommandWithInput, addCharacter, executeCommand]);
 
     // Generate search data when search pattern changes
     useEffect(() => {
@@ -10623,7 +10626,7 @@ export function useWorldEngine({
         worldData,
         commandData,
         commandState,
-        commandSystem: { selectCommand, executeCommandString, startCommand, startCommandWithInput },
+        commandSystem: { selectCommand, executeCommandString, startCommand, startCommandWithInput, addCharacter },
         chatData,
         suggestionData,
         lightModeData,

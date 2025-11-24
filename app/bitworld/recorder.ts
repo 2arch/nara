@@ -31,7 +31,9 @@ export type ActionType =
     | 'selection_end'
     | 'selection_clear'
     | 'command_start'
-    | 'command_execute';
+    | 'command_input'
+    | 'command_enter'
+    | 'command_execute'; // Direct command execution (keyboard shortcuts)
 
 export interface Action {
     timestamp: number;
