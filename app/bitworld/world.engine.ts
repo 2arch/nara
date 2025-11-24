@@ -16,6 +16,7 @@ import { useAutoDialogue } from './dialogue';
 import { get } from 'firebase/database';
 import { DataRecorder } from './recorder';
 import { parseGIFFromArrayBuffer, getCurrentFrame, isGIFUrl } from './gif.parser';
+import type { AgentState } from './agent';
 
 // API route helper functions for AI operations
 const callTransformAPI = async (text: string, instructions: string, userId?: string): Promise<string> => {
@@ -266,8 +267,8 @@ export interface WorldEngine {
     setAgentEnabled: React.Dispatch<React.SetStateAction<boolean>>;
     agentPos: Point;
     setAgentPos: React.Dispatch<React.SetStateAction<Point>>;
-    agentState: 'idle' | 'typing' | 'moving' | 'walking' | 'selecting';
-    setAgentState: React.Dispatch<React.SetStateAction<'idle' | 'typing' | 'moving' | 'walking' | 'selecting'>>;
+    agentState: AgentState;
+    setAgentState: React.Dispatch<React.SetStateAction<AgentState>>;
     agentSelectionStart: Point | null;
     agentSelectionEnd: Point | null;
     // Multiplayer cursors
@@ -937,39 +938,9 @@ export function useWorldEngine({
     // === Agent System ===
     const [agentEnabled, setAgentEnabled] = useState<boolean>(false);
     const [agentPos, setAgentPos] = useState<Point>({ x: 0, y: 0 });
-    const [agentState, setAgentState] = useState<'idle' | 'typing' | 'moving' | 'walking' | 'selecting'>('idle');
-    const [agentIdleTimer, setAgentIdleTimer] = useState<number>(0);
-    const [agentTargetPos, setAgentTargetPos] = useState<Point | null>(null);
-    const [agentStartPos, setAgentStartPos] = useState<Point>({ x: 0, y: 0 }); // Track where agent started for line breaks
+    const [agentState, setAgentState] = useState<AgentState>('idle');
     const [agentSelectionStart, setAgentSelectionStart] = useState<Point | null>(null);
     const [agentSelectionEnd, setAgentSelectionEnd] = useState<Point | null>(null);
-    const lastViewOffsetRef = useRef<Point>(viewOffset);
-
-    
-    // Agent greetings
-    const AGENT_GREETINGS = [
-        'hello',
-        'hi there',
-        'hey',
-        'greetings',
-        'howdy',
-        'sup',
-        'yo',
-        'hiya',
-        'what\'s up',
-        'good to see you'
-    ];
-
-    // Agent commands - simple commands the agent can execute
-    const AGENT_COMMANDS = [
-        '/bg chalk',
-        '/bg sulfur',
-        '/bg garden',
-        '/bg white',
-        '/text chalk',
-        '/text sulfur',
-        '/text garden'
-    ];
     
     // === Text Frame and Cluster System ===
     const [textFrames, setTextFrames] = useState<Array<{
@@ -2544,273 +2515,10 @@ export function useWorldEngine({
         prevCommandStateActiveRef.current = commandState.isActive;
     }, [cursorPos, chatMode.isActive, commandState.isActive, updateCameraTracking]);
 
-    // === Agent Behavior System ===
-    useEffect(() => {
-        if (!agentEnabled) return;
-
-        const agentInterval = setInterval(() => {
-            setAgentIdleTimer(prev => {
-                const newTimer = prev + 1;
-
-                // If moving toward target (viewport relocation), take one step
-                if (agentState === 'moving' && agentTargetPos) {
-                    // Clear any active selection when starting to move
-                    if (agentSelectionStart || agentSelectionEnd) {
-                        setAgentSelectionStart(null);
-                        setAgentSelectionEnd(null);
-                    }
-
-                    setAgentPos(prevPos => {
-                        const dx = agentTargetPos.x - prevPos.x;
-                        const dy = agentTargetPos.y - prevPos.y;
-
-                        // If reached target, stop moving
-                        if (dx === 0 && dy === 0) {
-                            setAgentState('idle');
-                            setAgentTargetPos(null);
-                            return prevPos;
-                        }
-
-                        // Move one step toward target (prioritize horizontal or vertical based on distance)
-                        const stepX = dx !== 0 ? (dx > 0 ? 1 : -1) : 0;
-                        const stepY = dy !== 0 ? (dy > 0 ? 1 : -1) : 0;
-
-                        // Move in one direction at a time (alternate between x and y)
-                        if (Math.abs(dx) >= Math.abs(dy)) {
-                            return { x: prevPos.x + stepX, y: prevPos.y };
-                        } else {
-                            return { x: prevPos.x, y: prevPos.y + stepY };
-                        }
-                    });
-                }
-
-                // Random walking when idle (10% chance each tick to start walking)
-                if (agentState === 'idle' && Math.random() < 0.1) {
-                    // Clear any active selection when starting to walk
-                    if (agentSelectionStart || agentSelectionEnd) {
-                        setAgentSelectionStart(null);
-                        setAgentSelectionEnd(null);
-                    }
-                    setAgentState('walking');
-                    return 0;
-                }
-
-                // If walking, take a step
-                if (agentState === 'walking') {
-                    setAgentPos(prevPos => {
-                        // Random walk: choose random direction
-                        const directions = [
-                            { x: 1, y: 0 },   // right
-                            { x: -1, y: 0 },  // left
-                            { x: 0, y: 1 },   // down
-                            { x: 0, y: -1 },  // up
-                        ];
-                        const dir = directions[Math.floor(Math.random() * directions.length)];
-                        return { x: prevPos.x + dir.x, y: prevPos.y + dir.y };
-                    });
-
-                    // After 3-5 steps, go back to idle
-                    if (newTimer > Math.random() * 2 + 3) {
-                        setAgentState('idle');
-                        return 0;
-                    }
-                }
-
-                // Random chance to say a greeting while idle (1% chance each tick)
-                if (agentState === 'idle' && Math.random() < 0.01) {
-                    // Clear any active selection when starting to type
-                    if (agentSelectionStart || agentSelectionEnd) {
-                        setAgentSelectionStart(null);
-                        setAgentSelectionEnd(null);
-                    }
-
-                    const greeting = AGENT_GREETINGS[Math.floor(Math.random() * AGENT_GREETINGS.length)];
-
-                    // Set to typing state to disable repositioning and walking during typing
-                    setAgentState('typing');
-
-                    // Type out greeting character by character with cursor trail
-                    let charIndex = 0;
-                    // Start typing 2 spaces to the right of current position
-                    const startPos = { x: agentPos.x + 2, y: agentPos.y };
-
-                    const typeInterval = setInterval(() => {
-                        if (charIndex < greeting.length) {
-                            const char = greeting[charIndex];
-                            const charPos = { x: startPos.x + charIndex, y: startPos.y };
-
-                            // Place permanent character with pink bg and white text
-                            const styledChar: StyledCharacter = {
-                                char,
-                                style: {
-                                    color: '#FFFFFF',
-                                    background: '#FF69B4'
-                                }
-                            };
-                            const key = `${charPos.x},${charPos.y}`;
-                            setWorldData(prev => ({ ...prev, [key]: styledChar }));
-
-                            charIndex++;
-
-                            // Move agent cursor to position after the character (like normal typing)
-                            setAgentPos({ x: startPos.x + charIndex, y: startPos.y });
-                        } else {
-                            // Done typing, go back to idle
-                            clearInterval(typeInterval);
-                            setAgentState('idle');
-                        }
-                    }, 100);
-                }
-
-                // Random chance to execute a command while idle (3% chance each tick)
-                if (agentState === 'idle' && Math.random() < 0.03) {
-                    // Clear any active selection when starting to type command
-                    if (agentSelectionStart || agentSelectionEnd) {
-                        setAgentSelectionStart(null);
-                        setAgentSelectionEnd(null);
-                    }
-
-                    const command = AGENT_COMMANDS[Math.floor(Math.random() * AGENT_COMMANDS.length)];
-
-                    // Set to typing state
-                    setAgentState('typing');
-
-                    // Type out command character by character
-                    let charIndex = 0;
-                    const startPos = { x: agentPos.x + 2, y: agentPos.y };
-
-                    const typeInterval = setInterval(() => {
-                        if (charIndex < command.length) {
-                            const char = command[charIndex];
-                            const charPos = { x: startPos.x + charIndex, y: startPos.y };
-
-                            // Place permanent character with pink bg and white text
-                            const styledChar: StyledCharacter = {
-                                char,
-                                style: {
-                                    color: '#FFFFFF',
-                                    background: '#FF69B4'
-                                }
-                            };
-                            const key = `${charPos.x},${charPos.y}`;
-                            setWorldData(prev => ({ ...prev, [key]: styledChar }));
-
-                            charIndex++;
-                            setAgentPos({ x: startPos.x + charIndex, y: startPos.y });
-                        } else {
-                            // Done typing, execute the command
-                            clearInterval(typeInterval);
-
-                            // Parse and execute command
-                            const parts = command.trim().substring(1).split(' '); // Remove '/' and split
-                            const cmd = parts[0];
-                            const args = parts.slice(1);
-
-                            if (cmd === 'bg' && args.length > 0) {
-                                switchBackgroundMode('color', args[0]);
-                            } else if (cmd === 'text' && args.length > 0) {
-                                const colorValue = COLOR_MAP[args[0]] || args[0];
-                                if (updateSettings) {
-                                    updateSettings({ textColor: colorValue });
-                                }
-                            }
-
-                            setAgentState('idle');
-                        }
-                    }, 100);
-                }
-
-                // Random chance to start selecting a region while idle (8% chance)
-                if (agentState === 'idle' && Math.random() < 0.08) {
-                    // Pick a small rectangular region to select
-                    const width = Math.floor(Math.random() * 20) + 10; // 10-30 cells wide
-                    const height = Math.floor(Math.random() * 10) + 5; // 5-15 cells tall
-
-                    const selStart = { x: agentPos.x, y: agentPos.y };
-                    const selEnd = { x: agentPos.x + width, y: agentPos.y + height };
-
-                    // Make selection instant - no gradual expansion
-                    setAgentSelectionStart(selStart);
-                    setAgentSelectionEnd(selEnd);
-                    setAgentState('selecting');
-
-                    return 0; // Reset timer for hold period
-                }
-
-                // If selecting, just hold the selection then clear
-                if (agentState === 'selecting') {
-                    if (newTimer > 10) { // Hold for 1 second
-                        setAgentSelectionStart(null);
-                        setAgentSelectionEnd(null);
-                        setAgentState('idle');
-                        return 0;
-                    }
-                    return newTimer; // Continue incrementing during hold
-                }
-
-                return newTimer;
-            });
-        }, 100); // Tick every 100ms for smooth movement
-
-        return () => clearInterval(agentInterval);
-    }, [agentEnabled, agentState, agentPos, agentTargetPos, switchBackgroundMode, updateSettings, setWorldData]);
-
-    // Agent follows viewport when panning
-    useEffect(() => {
-        if (!agentEnabled) return;
-
-        const viewOffsetDiff = {
-            x: Math.abs(viewOffset.x - lastViewOffsetRef.current.x),
-            y: Math.abs(viewOffset.y - lastViewOffsetRef.current.y)
-        };
-
-        // If viewport has moved significantly (panning occurred)
-        if (viewOffsetDiff.x > 1 || viewOffsetDiff.y > 1) {
-            // Update the last known viewport position
-            lastViewOffsetRef.current = { ...viewOffset };
-
-            // Don't move agent if it's currently typing
-            if (agentState === 'typing') return;
-
-            // Check if agent is off-screen
-            const centerPos = getViewportCenter();
-            const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
-
-            // Calculate viewport dimensions in world coordinates
-            const viewportWidth = window.innerWidth / effectiveCharWidth;
-            const viewportHeight = window.innerHeight / effectiveCharHeight;
-
-            // Calculate viewport bounds
-            const viewportLeft = centerPos.x - viewportWidth / 2;
-            const viewportRight = centerPos.x + viewportWidth / 2;
-            const viewportTop = centerPos.y - viewportHeight / 2;
-            const viewportBottom = centerPos.y + viewportHeight / 2;
-
-            // Check if agent is off-screen
-            const isOffScreen = agentPos.x < viewportLeft || agentPos.x > viewportRight ||
-                                agentPos.y < viewportTop || agentPos.y > viewportBottom;
-
-            // Only relocate if agent is off-screen
-            if (isOffScreen) {
-                // Use smaller dimension to ensure agent stays in visible region
-                const maxRadius = Math.min(viewportWidth, viewportHeight) / 2.5; // Stay within ~40% of viewport
-
-                // Random angle and distance using polar coordinates
-                const angle = Math.random() * Math.PI * 2; // 0 to 2π
-                const distance = Math.random() * maxRadius;
-
-                // Convert polar to cartesian and add to center
-                const newTargetPos = {
-                    x: Math.round(centerPos.x + distance * Math.cos(angle)),
-                    y: Math.round(centerPos.y + distance * Math.sin(angle))
-                };
-
-                // Set target and start moving
-                setAgentTargetPos(newTargetPos);
-                setAgentState('moving');
-            }
-        }
-    }, [agentEnabled, viewOffset, agentState, agentPos, getViewportCenter, getEffectiveCharDims, zoomLevel]);
+    // === Agent System ===
+    // Agent is now controlled externally (by playback system)
+    // No autonomous behaviors - agent is passive until driven by recording playback
+    // Agent position, state, and selections are set directly by playback
 
     // === Bounded Region Detection ===
     // bound_ keys are legacy - always return null
@@ -5479,9 +5187,7 @@ export function useWorldEngine({
                         // Initialize agent at viewport center
                         const centerPos = getViewportCenter();
                         setAgentPos(centerPos);
-                        setAgentStartPos(centerPos); // Set initial start position
                         setAgentState('idle');
-                        setAgentIdleTimer(0);
                         setDialogueWithRevert("Agent enabled", setDialogueText);
                     } else {
                         setDialogueWithRevert("Agent disabled", setDialogueText);
