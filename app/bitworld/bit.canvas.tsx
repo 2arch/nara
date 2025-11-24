@@ -5558,8 +5558,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 cursorTopScreenPos.y >= -effectiveCharHeight && cursorBottomScreenPos.y <= cssHeight) {
                 const key = `${engine.cursorPos.x},${engine.cursorPos.y}`;
 
-                // Don't render cursor if in chat mode or if there's chat/command data at this position
-                if (!engine.chatMode.isActive && !engine.chatData[key] && !engine.commandData[key]) {
+                // Don't render cursor if there's chat/command data at this position
+                if (!engine.chatData[key] && !engine.commandData[key]) {
                     // Determine cursor color based on engine state
                     if (engine.worldPersistenceError) {
                         ctx.fillStyle = CURSOR_COLOR_ERROR;

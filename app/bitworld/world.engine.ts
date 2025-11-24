@@ -5991,7 +5991,7 @@ export function useWorldEngine({
                             // Write response permanently to canvas below the input
                             const responseStartPos = {
                                 x: chatMode.inputPositions[0]?.x || cursorPos.x,
-                                y: (chatMode.inputPositions[chatMode.inputPositions.length - 1]?.y || cursorPos.y) + 2 // Start 2 lines below last input line
+                                y: (chatMode.inputPositions[chatMode.inputPositions.length - 1]?.y || cursorPos.y) + currentScale.h // Start one character height below last input line
                             };
                             
                             // Calculate dynamic wrap width based on input
@@ -6030,17 +6030,27 @@ export function useWorldEngine({
                             };
                             
                             const wrappedLines = wrapText(response, wrapWidth);
-                            
-                            // Write each character permanently to worldData
+
+                            // Write each character permanently to worldData with scale support
                             const newWorldData = { ...worldData };
+                            const hasCustomScale = currentScale.w !== 1 || currentScale.h !== 2;
+
                             for (let lineIndex = 0; lineIndex < wrappedLines.length; lineIndex++) {
                                 const line = wrappedLines[lineIndex];
                                 for (let charIndex = 0; charIndex < line.length; charIndex++) {
                                     const char = line[charIndex];
-                                    const x = responseStartPos.x + charIndex;
-                                    const y = responseStartPos.y + lineIndex;
+                                    const x = responseStartPos.x + (charIndex * currentScale.w);
+                                    const y = responseStartPos.y + (lineIndex * currentScale.h);
                                     const key = `${x},${y}`;
-                                    newWorldData[key] = char;
+
+                                    if (hasCustomScale) {
+                                        newWorldData[key] = {
+                                            char,
+                                            scale: { ...currentScale }
+                                        };
+                                    } else {
+                                        newWorldData[key] = char;
+                                    }
                                 }
                             }
                             setWorldData(newWorldData);
@@ -6089,7 +6099,7 @@ export function useWorldEngine({
                             // Find a good position for the AI response (slightly below current input)
                             const responseStartPos = {
                                 x: chatMode.inputPositions[0]?.x || cursorPos.x,
-                                y: (chatMode.inputPositions[chatMode.inputPositions.length - 1]?.y || cursorPos.y) + 2 // Start 2 lines below last input line
+                                y: (chatMode.inputPositions[chatMode.inputPositions.length - 1]?.y || cursorPos.y) + currentScale.h // Start one character height below last input line
                             };
                             addInstantAIResponse(responseStartPos, response, { queryText: chatMode.currentInput.trim() });
                             
