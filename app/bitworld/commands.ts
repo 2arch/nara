@@ -217,7 +217,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'scale': 'Change text scale. Type /scale followed by dimensions like 1x2 (default), 1x6 (tall), or 4x4 (square). Affects new text you write.',
     'style': 'Apply visual styles to selected notes or patterns. Select a note/pattern or position cursor inside one, then type /style [stylename]. Available: solid (white border), glow (pulsing gray glow), glowing (enhanced bright glow). Example: /style glow',
     'state': 'Save or load canvas states. Type /state to see saved states, /state save [name] to save current canvas, /state load [name] to restore a saved state. Perfect for versioning your work.',
-    'record': 'Record and replay sessions. /record start to begin capturing face/cursor data. /record stop [name] to save. /record play to replay the last session in realtime.',
+    'record': 'Record and replay sessions. /record start to begin, /record stop to end. /record save <name> saves to Firebase. /record load shows all recordings, /record load <name> plays a recording. /record download saves locally, /record upload loads from file.',
     'random': 'Randomize text styling. Applies random colors and styles to your text for a more organic, playful aesthetic. Great for breaking out of rigid design patterns.',
     'clear': 'Clear all text from the canvas. WARNING: This deletes everything on your current canvas. Use /state save first if you want to preserve your work.',
     'publish': 'Publish your canvas publicly. Makes your canvas accessible at your public URL (nara.ws/username/canvasname). Others can view but not edit.',
@@ -2265,6 +2265,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         if (commandToExecute.startsWith('record')) {
             const parts = commandToExecute.split(/\s+/);
             const action = parts[1];
+            const name = parts.slice(2).join(' '); // Recording name (can have spaces)
 
             clearCommandState();
 
@@ -2279,16 +2280,67 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             } else if (action === 'stop') {
                 const session = recorder.stop();
                 if (session) {
-                    setDialogueWithRevert("Recording stopped. Type /record play to replay.", setDialogueText);
+                    setDialogueWithRevert("Recording stopped. Type /record save <name> to save to Firebase.", setDialogueText);
                 } else {
                     setDialogueWithRevert("No active recording to stop", setDialogueText);
                 }
             } else if (action === 'save') {
-                // Manual save/download command
-                const session = recorder.currentRecording; // We need to expose this or get it from stop() return
-                // But stop() returns it only when called. We need access to the stored one.
-                // Let's assume recorder exposes `currentRecording`. I checked recorder.ts and it's private.
-                // I need to make it public in recorder.ts or use exportRecording().
+                if (!name) {
+                    setDialogueWithRevert("Usage: /record save <name>", setDialogueText);
+                    return null;
+                }
+
+                // Save to Firebase Storage
+                setDialogueWithRevert("Saving recording to Firebase...", setDialogueText);
+                recorder.saveToFirebase(name).then((result) => {
+                    if (result.success) {
+                        setDialogueWithRevert(`Recording saved as '${name}'. Use /record load to see all recordings.`, setDialogueText);
+                    } else {
+                        setDialogueWithRevert(`Failed to save: ${result.error}`, setDialogueText);
+                    }
+                }).catch((error) => {
+                    setDialogueWithRevert(`Error saving recording: ${error.message}`, setDialogueText);
+                });
+            } else if (action === 'load') {
+                if (!name) {
+                    // List available recordings (like /clip)
+                    setDialogueWithRevert("Loading recordings list...", setDialogueText);
+                    recorder.listRecordings().then((recordings) => {
+                        if (recordings.length === 0) {
+                            setDialogueWithRevert("No recordings found. Use /record save <name> to save a recording.", setDialogueText);
+                        } else {
+                            const list = recordings.map(r => {
+                                if (r.metadata?.duration) {
+                                    const durationSec = (parseInt(r.metadata.duration) / 1000).toFixed(1);
+                                    return `${r.name} (${durationSec}s)`;
+                                }
+                                return r.name;
+                            }).join(', ');
+                            setDialogueWithRevert(`Available recordings: ${list}`, setDialogueText);
+                        }
+                    });
+                    return null;
+                }
+
+                // Load from Firebase Storage and auto-play (like /clip)
+                setDialogueWithRevert("Loading recording from Firebase...", setDialogueText);
+                recorder.loadFromFirebase(name).then((result) => {
+                    if (result.success) {
+                        // Clear canvas before playback
+                        if (setWorldData) {
+                            setWorldData({});
+                        }
+                        // Auto-play the loaded recording
+                        recorder.startPlayback();
+                        setDialogueWithRevert(`Playing '${name}'...`, setDialogueText);
+                    } else {
+                        setDialogueWithRevert(`Failed to load: ${result.error}`, setDialogueText);
+                    }
+                }).catch((error) => {
+                    setDialogueWithRevert(`Error loading recording: ${error.message}`, setDialogueText);
+                });
+            } else if (action === 'download') {
+                // Download to local file
                 const json = recorder.exportRecording();
                 if (json && json !== 'null') {
                     const blob = new Blob([json], { type: 'application/json' });
@@ -2298,24 +2350,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     a.download = `nara_recording_${Date.now()}.json`;
                     a.click();
                     URL.revokeObjectURL(url);
-                    setDialogueWithRevert("Recording saved to file.", setDialogueText);
+                    setDialogueWithRevert("Recording downloaded to file.", setDialogueText);
                 } else {
-                    setDialogueWithRevert("No recording to save.", setDialogueText);
+                    setDialogueWithRevert("No recording to download.", setDialogueText);
                 }
-            } else if (action === 'play') {
-                if (recorder.isPlaying) {
-                     recorder.stopPlayback();
-                     setDialogueWithRevert("Playback stopped", setDialogueText);
-                } else {
-                    // Clear canvas before playback so text can appear fresh
-                    if (setWorldData) {
-                        setWorldData({});
-                    }
-                    recorder.startPlayback();
-                    setDialogueWithRevert("Playback started...", setDialogueText);
-                }
-            } else if (action === 'load') {
-                 // Trigger file input
+            } else if (action === 'upload') {
+                 // Upload from local file
                  const input = document.createElement('input');
                  input.type = 'file';
                  input.accept = '.json';
@@ -2326,7 +2366,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                          reader.onload = (ev) => {
                              const content = ev.target?.result as string;
                              if (recorder.importRecording(content)) {
-                                 setDialogueWithRevert(`Loaded recording: ${file.name}`, setDialogueText);
+                                 setDialogueWithRevert(`Loaded recording: ${file.name}. Type /record save <name> to save to Firebase.`, setDialogueText);
                              } else {
                                  setDialogueWithRevert("Failed to load recording", setDialogueText);
                              }
@@ -2336,7 +2376,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                  };
                  input.click();
             } else {
-                setDialogueWithRevert("Usage: /record start|stop|play|save|load", setDialogueText);
+                setDialogueWithRevert("Usage: /record start|stop|save <name>|load [name]|download|upload", setDialogueText);
             }
 
             return null;

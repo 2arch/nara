@@ -1380,6 +1380,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Canvas recorder for /tape command
     const recorderRef = useRef<CanvasRecorder | null>(null);
 
+    // Playback viewport smoothing
+    const playbackViewportRef = useRef<{ viewOffset: Point; zoomLevel: number } | null>(null);
+
     // Screenshot state for Open Graph previews
     const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
     const [showScreenshot, setShowScreenshot] = useState<boolean>(false);
@@ -6300,10 +6303,37 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             engine.setFaceOrientation(frame.face);
                         }
 
-                        // Update view (unless user has manually overridden viewport)
+                        // Update view with smooth animation (unless user has manually overridden viewport)
                         if (!engine.recorder.userOverrodeViewport) {
-                            engine.setViewOffset(frame.viewOffset);
-                            engine.setZoomLevel(frame.zoomLevel);
+                            // Initialize playback viewport on first frame
+                            if (!playbackViewportRef.current) {
+                                playbackViewportRef.current = {
+                                    viewOffset: { ...engine.viewOffset },
+                                    zoomLevel: engine.zoomLevel
+                                };
+                            }
+
+                            // Smooth interpolation (lerp) to target viewport
+                            const lerpFactor = 0.15; // Adjust for smoothness (0.1 = smooth, 0.5 = responsive)
+
+                            const currentViewOffset = playbackViewportRef.current.viewOffset;
+                            const targetViewOffset = frame.viewOffset;
+
+                            const newViewOffset = {
+                                x: currentViewOffset.x + (targetViewOffset.x - currentViewOffset.x) * lerpFactor,
+                                y: currentViewOffset.y + (targetViewOffset.y - currentViewOffset.y) * lerpFactor
+                            };
+
+                            const currentZoom = playbackViewportRef.current.zoomLevel;
+                            const targetZoom = frame.zoomLevel;
+                            const newZoom = currentZoom + (targetZoom - currentZoom) * lerpFactor;
+
+                            // Update ref and engine
+                            playbackViewportRef.current.viewOffset = newViewOffset;
+                            playbackViewportRef.current.zoomLevel = newZoom;
+
+                            engine.setViewOffset(newViewOffset);
+                            engine.setZoomLevel(newZoom);
                         }
 
                         // Use agent cursor to show playback position (visually distinct from user cursor)
@@ -6324,11 +6354,12 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             return updated.slice(0, 20); // Limit trail length
                         });
                     } else {
-                        // Playback finished - disable agent
+                        // Playback finished - disable agent and reset viewport smoothing
                         if (engine.agentEnabled) {
                             engine.setAgentEnabled(false);
                             setAgentTrail([]); // Clear trail
                         }
+                        playbackViewportRef.current = null; // Reset for next playback
                     }
 
                     // Apply content changes that should happen at this timestamp

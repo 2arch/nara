@@ -1,4 +1,6 @@
 import { Point } from './world.engine';
+import { storage } from '@/app/firebase';
+import { ref as storageRef, uploadString, getDownloadURL, listAll, getMetadata } from 'firebase/storage';
 
 export interface FrameData {
     timestamp: number;
@@ -177,6 +179,87 @@ export class DataRecorder {
         } catch (e) {
             console.error('Failed to import recording', e);
             return false;
+        }
+    }
+
+    // Save recording to Firebase Storage (global recordings location)
+    async saveToFirebase(name: string): Promise<{ success: boolean; error?: string }> {
+        if (!this.currentRecording) {
+            return { success: false, error: 'No recording to save' };
+        }
+
+        try {
+            const json = this.exportRecording();
+            if (!json || json === 'null') {
+                return { success: false, error: 'No recording data' };
+            }
+
+            // Save to global recordings location
+            const basePath = `recordings/${name}.json`;
+
+            const recordingRef = storageRef(storage, basePath);
+            await uploadString(recordingRef, json, 'raw', {
+                contentType: 'application/json',
+                customMetadata: {
+                    duration: this.currentRecording.duration.toString(),
+                    frames: this.currentRecording.frames.length.toString(),
+                    contentChanges: this.currentRecording.contentChanges.length.toString(),
+                    createdAt: new Date().toISOString()
+                }
+            });
+
+            const url = await getDownloadURL(recordingRef);
+            console.log(`Recording saved to Firebase: ${url}`);
+            return { success: true };
+        } catch (error) {
+            console.error('Error saving recording to Firebase:', error);
+            return { success: false, error: (error as Error).message };
+        }
+    }
+
+    // Load recording from Firebase Storage
+    async loadFromFirebase(name: string): Promise<{ success: boolean; error?: string }> {
+        try {
+            const path = `recordings/${name}.json`;
+            const recordingRef = storageRef(storage, path);
+            const url = await getDownloadURL(recordingRef);
+            const response = await fetch(url);
+            const json = await response.text();
+
+            if (this.importRecording(json)) {
+                console.log(`Recording loaded from Firebase: ${path}`);
+                return { success: true };
+            }
+
+            return { success: false, error: 'Failed to parse recording' };
+        } catch (error) {
+            console.error('Error loading recording from Firebase:', error);
+            return { success: false, error: (error as Error).message };
+        }
+    }
+
+    // List available recordings
+    async listRecordings(): Promise<{ name: string; metadata?: any }[]> {
+        try {
+            const recordings: { name: string; metadata?: any }[] = [];
+
+            // List all global recordings
+            const recordingsRef = storageRef(storage, 'recordings/');
+            const recordingsList = await listAll(recordingsRef);
+            for (const item of recordingsList.items) {
+                const name = item.name.replace('.json', '');
+                try {
+                    const metadata = await getMetadata(item);
+                    recordings.push({ name, metadata: metadata.customMetadata });
+                } catch {
+                    recordings.push({ name });
+                }
+            }
+
+            return recordings;
+        } catch (error) {
+            console.error('Error listing recordings:', error);
+            return [];
         }
     }
 }
