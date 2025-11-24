@@ -146,14 +146,11 @@ export class AgentController {
                 if (this.commandSystem && action.data.command && action.data.pos) {
                     console.log('[Agent] Executing command with palette:', action.data.command);
                     this.visualState.pos = action.data.pos;
-                    // Show palette with full command, then execute
+                    // Show palette with full command and execute immediately
                     this.commandSystem.startCommandWithInput(action.data.pos, action.data.command);
-                    // Execute after small delay to show the palette briefly
-                    setTimeout(() => {
-                        if (this.executeCommandCallback) {
-                            this.executeCommandCallback();
-                        }
-                    }, 100);
+                    if (this.executeCommandCallback) {
+                        this.executeCommandCallback();
+                    }
                 }
                 break;
 
