@@ -6155,14 +6155,30 @@ export function useWorldEngine({
                     inputPositions: [...prev.inputPositions, cursorPos]
                 }));
 
-                // Add to chatData instead of worldData
+                // Add to chatData with scale and style support
+                const hasCustomStyle = currentTextStyle.color !== textColor || !!currentTextStyle.background;
+                const hasCustomScale = currentScale.w !== 1 || currentScale.h !== 2;
+
+                let charData: string | StyledCharacter = key;
+                if (hasCustomStyle || hasCustomScale) {
+                    const styledChar: StyledCharacter = { char: key };
+                    if (hasCustomStyle) {
+                        styledChar.style = { color: currentTextStyle.color };
+                        if (currentTextStyle.background) styledChar.style.background = currentTextStyle.background;
+                    }
+                    if (hasCustomScale) {
+                        styledChar.scale = { ...currentScale };
+                    }
+                    charData = styledChar;
+                }
+
                 setChatData(prev => ({
                     ...prev,
-                    [currentKey]: key
+                    [currentKey]: charData
                 }));
 
-                // Move cursor immediately for chat mode
-                setCursorPos({ x: cursorPos.x + 1, y: cursorPos.y });
+                // Move cursor by character width for chat mode
+                setCursorPos({ x: cursorPos.x + currentScale.w, y: cursorPos.y });
 
                 // Mark that we just typed a character (for IME composition logic)
                 if (key !== ' ') {
@@ -9079,10 +9095,26 @@ export function useWorldEngine({
 
             // Check if chat mode is active first (for host mode compatibility)
             if (chatMode.isActive) {
-                // Add to chat data instead of world data
+                // Add to chat data with scale and style support
+                const hasCustomStyle = currentTextStyle.color !== textColor || !!currentTextStyle.background;
+                const hasCustomScale = currentScale.w !== 1 || currentScale.h !== 2;
+
+                let charData: string | StyledCharacter = key;
+                if (hasCustomStyle || hasCustomScale) {
+                    const styledChar: StyledCharacter = { char: key };
+                    if (hasCustomStyle) {
+                        styledChar.style = { color: currentTextStyle.color };
+                        if (currentTextStyle.background) styledChar.style.background = currentTextStyle.background;
+                    }
+                    if (hasCustomScale) {
+                        styledChar.scale = { ...currentScale };
+                    }
+                    charData = styledChar;
+                }
+
                 setChatData(prev => ({
                     ...prev,
-                    [`${cursorAfterDelete.x},${cursorAfterDelete.y}`]: key
+                    [`${cursorAfterDelete.x},${cursorAfterDelete.y}`]: charData
                 }));
                 setChatMode(prev => ({
                     ...prev,
@@ -9094,7 +9126,23 @@ export function useWorldEngine({
                 addEphemeralText(cursorAfterDelete, key);
                 // Don't modify worldData in air mode
             } else if (currentMode === 'chat') {
-                // Chat mode but not active: activate it
+                // Chat mode but not active: activate it with scale and style support
+                const hasCustomStyle = currentTextStyle.color !== textColor || !!currentTextStyle.background;
+                const hasCustomScale = currentScale.w !== 1 || currentScale.h !== 2;
+
+                let charData: string | StyledCharacter = key;
+                if (hasCustomStyle || hasCustomScale) {
+                    const styledChar: StyledCharacter = { char: key };
+                    if (hasCustomStyle) {
+                        styledChar.style = { color: currentTextStyle.color };
+                        if (currentTextStyle.background) styledChar.style.background = currentTextStyle.background;
+                    }
+                    if (hasCustomScale) {
+                        styledChar.scale = { ...currentScale };
+                    }
+                    charData = styledChar;
+                }
+
                 setChatMode({
                     isActive: true,
                     currentInput: key,
@@ -9102,7 +9150,7 @@ export function useWorldEngine({
                     isProcessing: false
                 });
                 setChatData({
-                    [`${cursorAfterDelete.x},${cursorAfterDelete.y}`]: key
+                    [`${cursorAfterDelete.x},${cursorAfterDelete.y}`]: charData
                 });
                 setDialogueWithRevert("Chat mode activated. Enter: ephemeral response, Cmd+Enter: permanent response, Shift+Enter: new line. Use /exit to leave.", setDialogueText);
             } else {
@@ -10223,20 +10271,37 @@ export function useWorldEngine({
             preCompositionCursorPosRef.current = null;
             return;
         }
-        // Calculate final cursor position after placing all characters
-        const finalCursorPos = { x: startPos.x + text.length, y: startPos.y };
+        // Calculate final cursor position after placing all characters (accounting for scale)
+        const finalCursorPos = { x: startPos.x + (text.length * currentScale.w), y: startPos.y };
 
         // Detect which mode is active and write to appropriate data store
         if (chatMode.isActive && !commandState.isActive) {
-            // Chat mode: write to chatData and update chatMode state
+            // Chat mode: write to chatData with scale and style support
+            const hasCustomStyle = currentTextStyle.color !== textColor || !!currentTextStyle.background;
+            const hasCustomScale = currentScale.w !== 1 || currentScale.h !== 2;
+
             setChatData(prev => {
                 const newChatData = { ...prev };
                 let currentPos = { ...startPos };
 
                 for (const char of text) {
                     const key = `${currentPos.x},${currentPos.y}`;
-                    newChatData[key] = char;
-                    currentPos.x++;
+
+                    let charData: string | StyledCharacter = char;
+                    if (hasCustomStyle || hasCustomScale) {
+                        const styledChar: StyledCharacter = { char };
+                        if (hasCustomStyle) {
+                            styledChar.style = { color: currentTextStyle.color };
+                            if (currentTextStyle.background) styledChar.style.background = currentTextStyle.background;
+                        }
+                        if (hasCustomScale) {
+                            styledChar.scale = { ...currentScale };
+                        }
+                        charData = styledChar;
+                    }
+
+                    newChatData[key] = charData;
+                    currentPos.x += currentScale.w;
                 }
 
                 return newChatData;
@@ -10249,7 +10314,7 @@ export function useWorldEngine({
 
                 for (const char of text) {
                     newPositions.push({ ...currentPos });
-                    currentPos.x++;
+                    currentPos.x += currentScale.w;
                 }
 
                 return {
