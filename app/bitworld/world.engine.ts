@@ -1482,6 +1482,14 @@ export function useWorldEngine({
         }
     } });
 
+    // Wire up agent controller with command system for playback
+    useEffect(() => {
+        agentController.setCommandSystem({
+            executeCommandString,
+            startCommand
+        });
+    }, [executeCommandString, startCommand]);
+
     // Generate search data when search pattern changes
     useEffect(() => {
         if (!isSearchActive || !searchPattern.trim()) {

@@ -34,9 +34,18 @@ export class AgentController {
     };
 
     private onStateChange?: (state: AgentVisualState) => void;
+    private commandSystem?: {
+        executeCommandString: (command: string) => void;
+        startCommand: (pos: Point) => void;
+    };
 
     constructor(onStateChange?: (state: AgentVisualState) => void) {
         this.onStateChange = onStateChange;
+    }
+
+    // Set command system reference for executing commands during playback
+    setCommandSystem(commandSystem: { executeCommandString: (command: string) => void; startCommand: (pos: Point) => void }) {
+        this.commandSystem = commandSystem;
     }
 
     // Enable/disable agent visibility
@@ -112,11 +121,20 @@ export class AgentController {
             case 'command_start':
                 this.visualState.pos = action.data.pos;
                 this.visualState.state = 'typing';
+                // Actually open the command palette during playback
+                if (this.commandSystem) {
+                    this.commandSystem.startCommand(action.data.pos);
+                }
                 break;
 
             case 'command_execute':
                 // Agent shows typing state during command execution
                 this.visualState.state = 'typing';
+                // Actually execute the command during playback
+                if (this.commandSystem && action.data.command) {
+                    console.log('[Agent] Executing command:', action.data.command);
+                    this.commandSystem.executeCommandString(action.data.command);
+                }
                 break;
         }
 
