@@ -4114,9 +4114,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 if (bottomScreenPos.x > -charPixelWidth * 2 && bottomScreenPos.x < cssWidth + charPixelWidth && topScreenPos.y > -charPixelHeight * 2 && bottomScreenPos.y < cssHeight + charPixelHeight) {
                     if (char) {
                         // Draw background using scaled dimensions (chat input always has inverted colors)
-                        // Add +1 to width/height to ensure no gaps between adjacent characters
                         ctx.fillStyle = engine.textColor;
-                        ctx.fillRect(topScreenPos.x, topScreenPos.y, charPixelWidth + 1, charPixelHeight + 1);
+                        ctx.fillRect(topScreenPos.x, topScreenPos.y, charPixelWidth, charPixelHeight);
 
                         // Draw text using background color (inverse of accent)
                         if (char.trim() !== '') {
