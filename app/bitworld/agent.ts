@@ -37,15 +37,22 @@ export class AgentController {
     private commandSystem?: {
         executeCommandString: (command: string) => void;
         startCommand: (pos: Point) => void;
+        startCommandWithInput: (pos: Point, input: string) => void;
     };
+    private executeCommandCallback?: () => Promise<any>;
 
     constructor(onStateChange?: (state: AgentVisualState) => void) {
         this.onStateChange = onStateChange;
     }
 
     // Set command system reference for executing commands during playback
-    setCommandSystem(commandSystem: { executeCommandString: (command: string) => void; startCommand: (pos: Point) => void }) {
+    setCommandSystem(commandSystem: {
+        executeCommandString: (command: string) => void;
+        startCommand: (pos: Point) => void;
+        startCommandWithInput: (pos: Point, input: string) => void;
+    }, executeCommandCallback?: () => Promise<any>) {
         this.commandSystem = commandSystem;
+        this.executeCommandCallback = executeCommandCallback;
     }
 
     // Enable/disable agent visibility
@@ -133,7 +140,15 @@ export class AgentController {
                 // Actually execute the command during playback
                 if (this.commandSystem && action.data.command) {
                     console.log('[Agent] Executing command:', action.data.command);
-                    this.commandSystem.executeCommandString(action.data.command);
+                    // Use startCommandWithInput to pre-fill the command, then execute
+                    const pos = this.visualState.pos;
+                    this.commandSystem.startCommandWithInput(pos, action.data.command);
+                    // Execute the command after a small delay to allow state to update
+                    setTimeout(() => {
+                        if (this.executeCommandCallback) {
+                            this.executeCommandCallback();
+                        }
+                    }, 100);
                 }
                 break;
         }

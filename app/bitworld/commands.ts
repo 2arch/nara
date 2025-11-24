@@ -1654,6 +1654,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (!commandToExecute) return null; // Safety check for undefined command
 
+        // Record command execution for playback
+        recorder?.recordAction('command_execute', { command: commandToExecute });
+
         const inputParts = commandToExecute.split(/\s+/);
         const commandName = inputParts[0];
         
@@ -3902,6 +3905,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         commandData,
         handleKeyDown,
         selectCommand,
+        executeCommand, // Expose for agent playback
         executeCommandString,
         startCommand, // Expose startCommand for keyboard shortcuts
         startCommandWithInput, // Expose for Cmd+F

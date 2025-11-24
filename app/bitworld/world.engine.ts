@@ -1452,6 +1452,7 @@ export function useWorldEngine({
         setFocusMode,
         exitFocusMode,
         restorePreviousBackground,
+        executeCommand,
         executeCommandString,
         startCommand,
         startCommandWithInput,
@@ -1486,9 +1487,10 @@ export function useWorldEngine({
     useEffect(() => {
         agentController.setCommandSystem({
             executeCommandString,
-            startCommand
-        });
-    }, [executeCommandString, startCommand]);
+            startCommand,
+            startCommandWithInput
+        }, executeCommand);
+    }, [executeCommandString, startCommand, startCommandWithInput, executeCommand]);
 
     // Generate search data when search pattern changes
     useEffect(() => {
