@@ -20,6 +20,7 @@ export interface CommandState {
     originalCursorPos: Point; // Store original cursor position to restore on Escape
     hasNavigated: boolean; // Track if user has used arrow keys to navigate
     helpMode?: boolean; // Flag to show help text for all commands
+    recordingTimestamp?: number; // Timestamp when command started (for playback sync)
 }
 
 export interface PendingCommand {
@@ -1571,9 +1572,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             selectedIndex: 0,
             commandStartPos: { x: cursorPos.x, y: cursorPos.y },
             originalCursorPos: { x: cursorPos.x, y: cursorPos.y }, // Store original position
-            hasNavigated: false
+            hasNavigated: false,
+            recordingTimestamp: recorder?.getCurrentTimestamp() // Store when '/' was pressed
         });
-    }, [isReadOnly, matchCommands, userUid, membershipLevel, modeState.cameraMode]);
+    }, [isReadOnly, matchCommands, userUid, membershipLevel, modeState.cameraMode, recorder]);
 
     // Handle character input in command mode
     const addCharacter = useCallback((char: string) => {
@@ -3580,6 +3582,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const originalPos = commandState.originalCursorPos;
 
             // Record command_enter with full command and position for playback
+            // Use the timestamp from when '/' was pressed so it plays back at that moment
             const fullInput = commandState.input.trim();
             const commandToRecord = commandState.hasNavigated && commandState.matchedCommands.length > 0
                 ? commandState.matchedCommands[commandState.selectedIndex]
@@ -3587,7 +3590,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             recorder?.recordAction('command_enter', {
                 command: commandToRecord,
                 pos: originalPos
-            });
+            }, commandState.recordingTimestamp);
 
             const result = executeCommand(isPermanent);
 

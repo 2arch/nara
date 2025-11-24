@@ -153,17 +153,24 @@ export class DataRecorder {
     }
 
     // Record high-level user actions (selections, commands)
-    recordAction(type: ActionType, data: any) {
+    // Optional overrideTimestamp allows recording an action at an earlier point in time
+    recordAction(type: ActionType, data: any, overrideTimestamp?: number) {
         if (!this.isRecording) return;
 
         const action: Action = {
-            timestamp: Date.now() - this.startTime,
+            timestamp: overrideTimestamp ?? (Date.now() - this.startTime),
             type,
             data
         };
 
         this.actions.push(action);
         console.log(`[Recording] Action recorded: ${type}`, data);
+    }
+
+    // Get current recording timestamp (for storing command start time)
+    getCurrentTimestamp(): number {
+        if (!this.isRecording) return 0;
+        return Date.now() - this.startTime;
     }
 
     loadRecording(session: RecordingSession) {
