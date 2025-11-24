@@ -141,19 +141,15 @@ export class AgentController {
                 break;
 
             case 'command_enter':
-                // Execute command via palette - this is the main command action for playback
+                // Execute command directly - this is the main command action for playback
                 this.visualState.state = 'typing';
-                if (this.commandSystem && action.data.command && action.data.pos) {
-                    console.log('[Agent] Executing command via palette:', action.data.command);
-                    this.visualState.pos = action.data.pos;
-                    // Show palette with full command, then execute
-                    this.commandSystem.startCommandWithInput(action.data.pos, action.data.command);
-                    // Execute after small delay to allow UI to update
-                    setTimeout(() => {
-                        if (this.executeCommandCallback) {
-                            this.executeCommandCallback();
-                        }
-                    }, 100);
+                if (this.commandSystem && action.data.command) {
+                    console.log('[Agent] Executing command:', action.data.command);
+                    if (action.data.pos) {
+                        this.visualState.pos = action.data.pos;
+                    }
+                    // Execute directly without showing palette
+                    this.commandSystem.executeCommandString(action.data.command);
                 }
                 break;
 
