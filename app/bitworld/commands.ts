@@ -2278,7 +2278,16 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             if (action === 'start') {
-                recorder.start();
+                // Pass engine state for snapshot
+                const engineState = {
+                    backgroundMode: modeState.backgroundMode,
+                    backgroundColor: modeState.backgroundColor,
+                    textColor: modeState.textColor,
+                    fontFamily: modeState.fontFamily,
+                    currentTextStyle: modeState.currentTextStyle,
+                    currentScale: currentScale
+                };
+                recorder.start(engineState);
                 setDialogueWithRevert("Recording started...", setDialogueText);
             } else if (action === 'stop') {
                 const session = recorder.stop();
@@ -2292,7 +2301,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                                 if (setWorldData) {
                                     setWorldData({});
                                 }
-                                recorder.startPlayback();
+                                // Pass engine for state restoration
+                                const engineForPlayback = {
+                                    switchBackgroundMode,
+                                    updateSettings,
+                                    setCurrentScale
+                                };
+                                recorder.startPlayback(engineForPlayback);
                                 setDialogueWithRevert(`Saved as '${autoName}'. Playing back...`, setDialogueText);
                             } else {
                                 setDialogueWithRevert(`Failed to save: ${result.error}`, setDialogueText);
@@ -2309,7 +2324,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     if (setWorldData) {
                         setWorldData({});
                     }
-                    recorder.startPlayback();
+                    // Pass engine for state restoration
+                    const engineForPlayback = {
+                        switchBackgroundMode,
+                        updateSettings,
+                        setCurrentScale
+                    };
+                    recorder.startPlayback(engineForPlayback);
                     setDialogueWithRevert("Playing most recent recording...", setDialogueText);
                 } else {
                     setDialogueWithRevert("No recording available. Use /record start to create one.", setDialogueText);
@@ -2343,8 +2364,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         if (setWorldData) {
                             setWorldData({});
                         }
+                        // Pass engine for state restoration
+                        const engineForPlayback = {
+                            switchBackgroundMode,
+                            updateSettings,
+                            setCurrentScale
+                        };
                         // Auto-play the loaded recording
-                        recorder.startPlayback();
+                        recorder.startPlayback(engineForPlayback);
                         setDialogueWithRevert(`Playing '${name}'...`, setDialogueText);
                     } else {
                         setDialogueWithRevert(`Failed to load: ${result.error}`, setDialogueText);

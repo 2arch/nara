@@ -39,6 +39,20 @@ export interface Action {
     data: any; // Type-specific data (e.g., Point for selection, string for command)
 }
 
+// Snapshot of canvas state at recording start
+export interface StateSnapshot {
+    backgroundMode: string;
+    backgroundColor?: string;
+    textColor: string;
+    fontFamily: string;
+    currentTextStyle: {
+        color: string;
+        background?: string;
+    };
+    currentScale: { w: number; h: number };
+    // Add more state as needed
+}
+
 export interface RecordingSession {
     name: string;
     startTime: number;
@@ -46,6 +60,7 @@ export interface RecordingSession {
     frames: FrameData[];
     contentChanges: ContentChange[];
     actions: Action[]; // High-level user actions
+    initialState?: StateSnapshot; // Canvas state at recording start
 }
 
 export class DataRecorder {
@@ -55,6 +70,7 @@ export class DataRecorder {
     private frames: FrameData[] = [];
     private contentChanges: ContentChange[] = [];
     private actions: Action[] = [];
+    private initialState: StateSnapshot | undefined = undefined;
     private startTime: number = 0;
     private playbackStart: number = 0;
     private playbackIndex: number = 0;
@@ -63,13 +79,28 @@ export class DataRecorder {
     public userOverrodeViewport: boolean = false; // Track if user manually panned/zoomed during playback
     private recordingCounter: number = 0; // Auto-incrementing counter for recordings
 
-    start() {
+    start(engine?: any) {
         this.isRecording = true;
         this.frames = [];
         this.contentChanges = [];
         this.actions = [];
         this.startTime = Date.now();
-        console.log('Recording started');
+
+        // Capture initial state snapshot if engine is provided
+        if (engine) {
+            this.initialState = {
+                backgroundMode: engine.backgroundMode,
+                backgroundColor: engine.backgroundColor,
+                textColor: engine.textColor,
+                fontFamily: engine.fontFamily,
+                currentTextStyle: { ...engine.currentTextStyle },
+                currentScale: { ...engine.currentScale }
+            };
+            console.log('Recording started with state snapshot:', this.initialState);
+        } else {
+            this.initialState = undefined;
+            console.log('Recording started (no state snapshot)');
+        }
     }
 
     stop(): RecordingSession | null {
@@ -83,11 +114,13 @@ export class DataRecorder {
             duration,
             frames: this.frames,
             contentChanges: this.contentChanges,
-            actions: this.actions
+            actions: this.actions,
+            initialState: this.initialState
         };
 
         console.log(`Recording stopped. Captured ${this.frames.length} frames, ${this.contentChanges.length} content changes, and ${this.actions.length} actions.`);
         console.log('Actions:', this.actions);
+        console.log('Initial state:', this.initialState);
         return this.currentRecording;
     }
 
@@ -138,7 +171,7 @@ export class DataRecorder {
         this.actionIndex = 0;
     }
 
-    startPlayback() {
+    startPlayback(engine?: any) {
         if (!this.currentRecording) {
             console.log('Cannot start playback: no currentRecording');
             return;
@@ -149,8 +182,42 @@ export class DataRecorder {
         this.contentChangeIndex = 0;
         this.actionIndex = 0;
         this.userOverrodeViewport = false; // Reset viewport override flag
+
+        // Restore initial state if available
+        if (this.currentRecording.initialState && engine) {
+            console.log('[Playback] Restoring initial state:', this.currentRecording.initialState);
+            this.restoreState(this.currentRecording.initialState, engine);
+        }
+
         console.log('Playback started');
         console.log(`Recording has ${this.currentRecording.frames.length} frames, ${this.currentRecording.contentChanges.length} content changes, and ${this.currentRecording.actions?.length || 0} actions`);
+    }
+
+    // Restore canvas state from snapshot
+    private restoreState(state: StateSnapshot, engine: any) {
+        // Restore background
+        if (state.backgroundMode) {
+            engine.switchBackgroundMode(
+                state.backgroundMode,
+                state.backgroundColor,
+                state.textColor
+            );
+        }
+
+        // Restore text settings
+        if (engine.updateSettings) {
+            engine.updateSettings({
+                textColor: state.textColor,
+                fontFamily: state.fontFamily
+            });
+        }
+
+        // Restore current scale
+        if (engine.setCurrentScale && state.currentScale) {
+            engine.setCurrentScale(state.currentScale);
+        }
+
+        console.log('[Playback] State restored successfully');
     }
 
     stopPlayback() {
