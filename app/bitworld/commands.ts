@@ -2569,13 +2569,17 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         return res.json();
                     })
                     .then(data => {
-                        addLog(`Response data: ${JSON.stringify(data).slice(0, 200)}`);
+                        // Add server-side steps to log
+                        if (data.steps && Array.isArray(data.steps)) {
+                            data.steps.forEach((step: string) => addLog(`[server] ${step}`));
+                        }
+                        addLog(`Response: ${data.error ? 'ERROR' : 'OK'}`);
                         if (data.error) {
                             addLog(`API error: ${data.error}`);
                             setDialogueText(`Failed: ${data.error}`);
                             setModeState(prev => ({ ...prev, isGeneratingSprite: false }));
                         } else {
-                            addLog(`Success! walkSheet: ${data.walkSheet}, idleSheet: ${data.idleSheet}`);
+                            addLog(`Success! walkSheet: ${data.walkSheet}`);
                             setModeState(prev => ({
                                 ...prev,
                                 isGeneratingSprite: false,

@@ -155,12 +155,20 @@ async function compositeSpriteSheet(
 }
 
 export async function POST(request: NextRequest) {
+    const steps: string[] = [];
+    const log = (msg: string) => {
+        const ts = new Date().toISOString().split('T')[1].split('.')[0];
+        steps.push(`[${ts}] ${msg}`);
+        console.log(`[SpriteAPI] ${msg}`);
+    };
+
     try {
         const { description, name } = await request.json();
+        log(`Request: description="${description}", name="${name}"`);
 
         if (!description || typeof description !== 'string') {
             return NextResponse.json(
-                { error: 'description is required and must be a string' },
+                { error: 'description is required and must be a string', steps },
                 { status: 400 }
             );
         }
@@ -170,36 +178,55 @@ export async function POST(request: NextRequest) {
 
         // Ensure output directory exists
         await mkdir(spritesDir, { recursive: true });
+        log(`Output dir: ${spritesDir}`);
 
         // Step 1: Generate base character (facing south)
-        console.log(`Generating base character: ${description}`);
+        log(`Step 1: Generating base character...`);
         const baseBuffer = await generateBaseCharacter(description);
+        log(`Step 1: Done (${baseBuffer.length} bytes)`);
 
         // Step 2: Rotate to all 8 directions
-        console.log('Rotating to 8 directions...');
+        log(`Step 2: Rotating to 8 directions...`);
         const directionBuffers = new Map<Direction, Buffer>();
 
         // Generate all rotations in parallel
         const rotationPromises = DIRECTIONS.map(async (direction) => {
-            const buffer = await rotateCharacter(baseBuffer, direction);
-            return { direction, buffer };
+            try {
+                const buffer = await rotateCharacter(baseBuffer, direction);
+                log(`  ✓ ${direction} (${buffer.length} bytes)`);
+                return { direction, buffer, error: null };
+            } catch (err) {
+                const errMsg = err instanceof Error ? err.message : String(err);
+                log(`  ✗ ${direction} failed: ${errMsg}`);
+                return { direction, buffer: null, error: errMsg };
+            }
         });
 
         const rotations = await Promise.all(rotationPromises);
-        for (const { direction, buffer } of rotations) {
-            directionBuffers.set(direction, buffer);
-            console.log(`  ✓ ${direction}`);
+        const failedRotations = rotations.filter(r => r.error);
+        if (failedRotations.length > 0) {
+            return NextResponse.json({
+                error: `Failed to rotate: ${failedRotations.map(r => r.direction).join(', ')}`,
+                steps
+            }, { status: 500 });
         }
 
+        for (const { direction, buffer } of rotations) {
+            if (buffer) directionBuffers.set(direction, buffer);
+        }
+        log(`Step 2: All rotations complete`);
+
         // Step 3: Composite sprite sheets
-        console.log('Compositing sprite sheets...');
+        log(`Step 3: Compositing sprite sheets...`);
 
         const [walkSheet, idleSheet] = await Promise.all([
             compositeSpriteSheet(directionBuffers, WALK_FRAME_SIZE, WALK_FRAMES_PER_DIR),
             compositeSpriteSheet(directionBuffers, IDLE_FRAME_SIZE, IDLE_FRAMES_PER_DIR),
         ]);
+        log(`Step 3: Walk=${walkSheet.length}b, Idle=${idleSheet.length}b`);
 
         // Step 4: Save sprite sheets
+        log(`Step 4: Saving files...`);
         const walkPath = join(spritesDir, `${spriteName}_walk.png`);
         const idlePath = join(spritesDir, `${spriteName}_idle.png`);
 
@@ -211,21 +238,25 @@ export async function POST(request: NextRequest) {
         // Also save the base image for reference
         const basePath = join(spritesDir, `${spriteName}_base.png`);
         await writeFile(basePath, baseBuffer);
+        log(`Step 4: Files saved`);
 
         const result = {
             name: spriteName,
             walkSheet: `/sprites/generated/${spriteName}_walk.png`,
             idleSheet: `/sprites/generated/${spriteName}_idle.png`,
             baseImage: `/sprites/generated/${spriteName}_base.png`,
+            steps,
         };
 
-        console.log('Done!', result);
+        log(`Done!`);
 
         return NextResponse.json(result);
     } catch (error) {
+        const errMsg = error instanceof Error ? error.message : 'Failed to generate sprite';
+        log(`ERROR: ${errMsg}`);
         console.error('Sprite generation failed:', error);
         return NextResponse.json(
-            { error: error instanceof Error ? error.message : 'Failed to generate sprite' },
+            { error: errMsg, steps },
             { status: 500 }
         );
     }
