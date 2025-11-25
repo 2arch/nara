@@ -26,7 +26,11 @@ interface PixellabRotateResponse {
     };
 }
 
-async function generateBaseCharacter(description: string): Promise<Buffer> {
+async function generateBaseCharacter(description: string, log: (msg: string) => void): Promise<Buffer> {
+    log(`Calling Pixellab generate-image-pixflux API...`);
+    log(`  URL: ${PIXELLAB_API_URL}/generate-image-pixflux`);
+    log(`  Description: "${description}"`);
+
     const response = await fetch(`${PIXELLAB_API_URL}/generate-image-pixflux`, {
         method: 'POST',
         headers: {
@@ -41,16 +45,31 @@ async function generateBaseCharacter(description: string): Promise<Buffer> {
         }),
     });
 
+    log(`  Response status: ${response.status} ${response.statusText}`);
+
     if (!response.ok) {
-        throw new Error(`Failed to generate base character: ${response.statusText}`);
+        const errorText = await response.text();
+        log(`  Error body: ${errorText.slice(0, 500)}`);
+        throw new Error(`Failed to generate base character: ${response.status} ${response.statusText}`);
     }
 
-    const data = await response.json() as PixellabRotateResponse;
-    return Buffer.from(data.image.base64, 'base64');
+    const data = await response.json();
+    log(`  Response keys: ${Object.keys(data).join(', ')}`);
+
+    if (!data.image?.base64) {
+        log(`  ERROR: No image.base64 in response`);
+        log(`  Full response: ${JSON.stringify(data).slice(0, 500)}`);
+        throw new Error('No image data in response');
+    }
+
+    const buffer = Buffer.from(data.image.base64, 'base64');
+    log(`  Got image: ${buffer.length} bytes`);
+    return buffer;
 }
 
-async function rotateCharacter(baseImageBuffer: Buffer, toDirection: Direction): Promise<Buffer> {
+async function rotateCharacter(baseImageBuffer: Buffer, toDirection: Direction, log: (msg: string) => void): Promise<Buffer> {
     const base64 = baseImageBuffer.toString('base64');
+    log(`  Rotating to ${toDirection}...`);
 
     const response = await fetch(`${PIXELLAB_API_URL}/rotate`, {
         method: 'POST',
@@ -66,12 +85,23 @@ async function rotateCharacter(baseImageBuffer: Buffer, toDirection: Direction):
         }),
     });
 
+    log(`    ${toDirection}: status ${response.status}`);
+
     if (!response.ok) {
-        throw new Error(`Failed to rotate to ${toDirection}: ${response.statusText}`);
+        const errorText = await response.text();
+        log(`    ${toDirection}: error - ${errorText.slice(0, 200)}`);
+        throw new Error(`Failed to rotate to ${toDirection}: ${response.status} - ${errorText.slice(0, 100)}`);
     }
 
-    const data = await response.json() as PixellabRotateResponse;
-    return Buffer.from(data.image.base64, 'base64');
+    const data = await response.json();
+    if (!data.image?.base64) {
+        log(`    ${toDirection}: no image.base64 in response`);
+        throw new Error(`No image data for ${toDirection}`);
+    }
+
+    const buffer = Buffer.from(data.image.base64, 'base64');
+    log(`    ${toDirection}: ✓ ${buffer.length} bytes`);
+    return buffer;
 }
 
 async function resizeAndCenter(
@@ -182,8 +212,8 @@ export async function POST(request: NextRequest) {
 
         // Step 1: Generate base character (facing south)
         log(`Step 1: Generating base character...`);
-        const baseBuffer = await generateBaseCharacter(description);
-        log(`Step 1: Done (${baseBuffer.length} bytes)`);
+        const baseBuffer = await generateBaseCharacter(description, log);
+        log(`Step 1: Complete`);
 
         // Step 2: Rotate to all 8 directions
         log(`Step 2: Rotating to 8 directions...`);
@@ -192,12 +222,11 @@ export async function POST(request: NextRequest) {
         // Generate all rotations in parallel
         const rotationPromises = DIRECTIONS.map(async (direction) => {
             try {
-                const buffer = await rotateCharacter(baseBuffer, direction);
-                log(`  ✓ ${direction} (${buffer.length} bytes)`);
+                const buffer = await rotateCharacter(baseBuffer, direction, log);
                 return { direction, buffer, error: null };
             } catch (err) {
                 const errMsg = err instanceof Error ? err.message : String(err);
-                log(`  ✗ ${direction} failed: ${errMsg}`);
+                log(`  ✗ ${direction} FAILED: ${errMsg}`);
                 return { direction, buffer: null, error: errMsg };
             }
         });
