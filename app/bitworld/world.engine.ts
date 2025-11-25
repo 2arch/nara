@@ -389,6 +389,8 @@ export interface WorldEngine {
     };
     setFaceDetectionEnabled: (enabled: boolean) => void;
     setFaceOrientation: (orientation: any) => void;
+    // Character sprite cursor
+    isCharacterEnabled: boolean;
     // Spatial indexing for efficient viewport-based rendering
     spatialIndex: React.MutableRefObject<Map<string, Set<string>>>;
     queryVisibleEntities: (startWorldX: number, startWorldY: number, endWorldX: number, endWorldY: number) => Set<string>;
@@ -1463,7 +1465,8 @@ export function useWorldEngine({
         isFaceDetectionEnabled,
         faceOrientation,
         setFaceDetectionEnabled,
-        setFaceOrientation, // <--- Get this
+        setFaceOrientation,
+        isCharacterEnabled,
     } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, currentScale, setCurrentScale, recorder, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
@@ -6101,7 +6104,7 @@ export function useWorldEngine({
                                 x: chatMode.inputPositions[0]?.x || cursorPos.x,
                                 y: (chatMode.inputPositions[chatMode.inputPositions.length - 1]?.y || cursorPos.y) + currentScale.h // Start one character height below last input line
                             };
-                            addInstantAIResponse(responseStartPos, response, { queryText: chatMode.currentInput.trim() });
+                            addInstantAIResponse(responseStartPos, response, { queryText: chatMode.currentInput.trim(), centered: false });
                             
                             // Clear current input from chat data after response
                             setChatData({});
@@ -10868,6 +10871,8 @@ export function useWorldEngine({
         faceOrientation,
         setFaceDetectionEnabled,
         setFaceOrientation,
+        // Character sprite cursor
+        isCharacterEnabled,
         // Spatial indexing
         spatialIndex: spatialIndexRef,
         queryVisibleEntities,

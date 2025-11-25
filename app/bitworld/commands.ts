@@ -86,6 +86,7 @@ export interface ModeState {
         endY: number;
     };
     isFaceDetectionEnabled: boolean; // Whether face-piloted geometry is active
+    isCharacterEnabled: boolean; // Whether character sprite replaces cursor
     faceOrientation?: { // Face rotation and expression data from MediaPipe
         rotX: number;
         rotY: number;
@@ -155,7 +156,7 @@ const AVAILABLE_COMMANDS = [
     // Special
     'mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help',
     // Styling & Display
-    'bg', 'text', 'font', 'style', 'display', 'scale',
+    'bg', 'text', 'font', 'style', 'display', 'scale', 'be',
     // State Management
     'state', 'random', 'clear', 'replay',
     // Sharing & Publishing
@@ -173,7 +174,7 @@ export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map', 'full', 'focus'],
     'create': ['chip', 'task', 'link', 'pack', 'clip', 'upload'],
     'special': ['mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help'],
-    'style': ['bg', 'text', 'font', 'style', 'display'],
+    'style': ['bg', 'text', 'font', 'style', 'display', 'be'],
     'state': ['state', 'random', 'clear', 'replay', 'record'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
     'account': ['signin', 'signout', 'account', 'upgrade'],
@@ -230,7 +231,8 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'signout': 'Sign out of your Nara account. You\'ll return to read-only mode.',
     'account': 'Manage your account settings. Use /account reset to reset your password.',
     'upgrade': 'Upgrade to Nara Pro for unlimited AI operations. Starts a guided conversation to learn about Pro benefits and pricing before upgrading.',
-    'debug': 'Toggle debug mode. Shows technical information about canvas state, performance, and rendering. Useful for troubleshooting or understanding the system.'
+    'debug': 'Toggle debug mode. Shows technical information about canvas state, performance, and rendering. Useful for troubleshooting or understanding the system.',
+    'be': 'Toggle character sprite cursor. When enabled, your cursor becomes an animated character that walks when you move and idles when stationary.'
 };
 
 // Standardized color mapping used throughout the application
@@ -310,6 +312,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         isFocusMode: false, // Focus mode not active initially
         focusRegion: undefined, // No focus region initially
         isFaceDetectionEnabled: false, // Face detection not active initially
+        isCharacterEnabled: false, // Character sprite cursor not active initially
         faceOrientation: undefined, // No face orientation initially
     });
 
@@ -1462,9 +1465,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         const wrappedLines = wrapText(text, wrapWidth);
         const allCharPositions: Array<{ x: number; y: number; char: string }> = [];
 
-        // Calculate dimensions for centering
-        const maxLineWidth = Math.max(...wrappedLines.map(line => line.length));
-        const totalHeight = wrappedLines.length;
+        // Calculate dimensions for centering (accounting for scale)
+        const scale = currentScale || { w: 1, h: 2 };
+        const maxLineWidth = Math.max(...wrappedLines.map(line => line.length)) * scale.w;
+        const totalHeight = wrappedLines.length * scale.h;
 
         // Offset startPos to center the text block (unless centered: false)
         const centeredStartX = options?.centered !== false
@@ -1479,7 +1483,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         wrappedLines.forEach(line => {
             for (let x = 0; x < line.length; x++) {
                 const char = line[x];
-                const worldX = centeredStartX + x;
+                const worldX = centeredStartX + (x * scale.w);
                 allCharPositions.push({ x: worldX, y, char });
 
                 // Add character instantly with no initial fade
@@ -1488,11 +1492,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     animationDelay: fadeDelay + (allCharPositions.length * fadeInterval)  // Stagger fade times
                 });
             }
-            y++;
+            y += scale.h;
         });
 
         return { width: maxLineWidth, height: totalHeight };
-    }, [addEphemeralText, calculateResponseWidth]);
+    }, [addEphemeralText, calculateResponseWidth, currentScale]);
 
     // Helper to restore camera mode when exiting command mode (mobile only)
     const restoreCameraModeIfNeeded = useCallback(() => {
@@ -2524,6 +2528,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (commandToExecute.startsWith('indent')) {
             return executeToggleModeCommand('isIndentEnabled', "Smart indentation enabled", "Smart indentation disabled");
+        }
+
+        if (commandToExecute.startsWith('be')) {
+            return executeToggleModeCommand('isCharacterEnabled', "Character cursor enabled", "Character cursor disabled");
         }
 
         if (commandToExecute.startsWith('signin')) {
@@ -3986,5 +3994,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             setModeState(prev => ({ ...prev, isFaceDetectionEnabled: enabled })),
         setFaceOrientation: (orientation: any) =>
             setModeState(prev => ({ ...prev, faceOrientation: orientation })),
+        isCharacterEnabled: modeState.isCharacterEnabled,
     };
 }

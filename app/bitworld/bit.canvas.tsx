@@ -24,6 +24,18 @@ const DRAW_GRID = true;
 const GRID_LINE_WIDTH = 1;
 const CURSOR_TRAIL_FADE_MS = 200; // Time in ms for trail to fully fade
 
+// Character sprite constants (Mudkip)
+const CHARACTER_WALK_SPRITE_URL = '/mudkip_walk.png';
+const CHARACTER_IDLE_SPRITE_URL = '/mudkip_idle.png';
+const CHARACTER_FRAME_WIDTH = 32;
+const CHARACTER_IDLE_FRAME_WIDTH = 24;
+const CHARACTER_FRAME_HEIGHT = 40;
+const CHARACTER_DIRECTIONS = 8;
+const CHARACTER_FRAMES_PER_DIRECTION = 6;
+const CHARACTER_IDLE_FRAMES_PER_DIRECTION = 7;
+const CHARACTER_ANIMATION_SPEED = 100; // ms per frame
+const CHARACTER_IDLE_TIMEOUT = 300; // ms before switching to idle
+
 // Grid system: Characters span multiple cells vertically (must match world.engine.ts)
 const GRID_CELL_SPAN = 2; // Characters occupy 2 vertically-stacked cells
 
@@ -1353,10 +1365,130 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const lastEnterPressRef = useRef<number>(0);
     const [isPasswordVisible, setIsPasswordVisible] = useState<boolean>(false);
 
+    // Character sprite state
+    const [walkSpriteSheet, setWalkSpriteSheet] = useState<HTMLImageElement | null>(null);
+    const [idleSpriteSheet, setIdleSpriteSheet] = useState<HTMLImageElement | null>(null);
+    const [characterDirection, setCharacterDirection] = useState<number>(0); // 0-7 for 8 directions
+    const [characterFrame, setCharacterFrame] = useState<number>(0);
+    const [isCharacterMoving, setIsCharacterMoving] = useState<boolean>(false);
+    const lastCharacterMoveTimeRef = useRef<number>(0);
+    const previousCharacterPosRef = useRef<Point | null>(null);
+    const characterAnimationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+    const idleTransitionPendingRef = useRef<boolean>(false);
+
     // Sync selectedNoteKey with engine for cross-compatibility with selection-based commands
     useEffect(() => {
         engine.setSelectedNoteKey(selectedNoteKey);
     }, [selectedNoteKey, engine]);
+
+    // Load character sprite sheets
+    useEffect(() => {
+        let isMounted = true;
+
+        const walkImg = new Image();
+        walkImg.onload = () => { if (isMounted) setWalkSpriteSheet(walkImg); };
+        walkImg.onerror = (err) => console.error('Failed to load walk sprite:', err);
+        walkImg.src = CHARACTER_WALK_SPRITE_URL;
+
+        const idleImg = new Image();
+        idleImg.onload = () => { if (isMounted) setIdleSpriteSheet(idleImg); };
+        idleImg.onerror = (err) => console.error('Failed to load idle sprite:', err);
+        idleImg.src = CHARACTER_IDLE_SPRITE_URL;
+
+        return () => { isMounted = false; };
+    }, []);
+
+    // Character sprite direction detection based on cursor movement
+    useEffect(() => {
+        if (!engine.isCharacterEnabled) return;
+
+        const currentPos = engine.cursorPos;
+
+        if (previousCharacterPosRef.current) {
+            const prevPos = previousCharacterPosRef.current;
+            const dx = currentPos.x - prevPos.x;
+            const dy = currentPos.y - prevPos.y;
+
+            if (dx !== 0 || dy !== 0) {
+                let newDirection = characterDirection;
+
+                // Map dx/dy to 8 directions (0=down, 2=right, 4=up, 6=left)
+                if (dx !== 0 && dy === 0) {
+                    newDirection = dx > 0 ? 2 : 6; // right or left
+                } else if (dy !== 0 && dx === 0) {
+                    newDirection = dy > 0 ? 0 : 4; // down or up
+                } else if (dx !== 0 && dy !== 0) {
+                    // Diagonal - prefer the axis with larger delta
+                    if (Math.abs(dx) >= Math.abs(dy)) {
+                        newDirection = dx > 0 ? 2 : 6;
+                    } else {
+                        newDirection = dy > 0 ? 0 : 4;
+                    }
+                }
+
+                if (newDirection !== characterDirection) {
+                    setCharacterDirection(newDirection);
+                    setCharacterFrame(0);
+                }
+
+                if (!isCharacterMoving) {
+                    setIsCharacterMoving(true);
+                    setCharacterFrame(0);
+                    idleTransitionPendingRef.current = false;
+                }
+                lastCharacterMoveTimeRef.current = Date.now();
+            }
+        }
+        previousCharacterPosRef.current = { ...currentPos };
+    }, [engine.cursorPos, engine.isCharacterEnabled, characterDirection, isCharacterMoving]);
+
+    // Character sprite animation interval
+    useEffect(() => {
+        if (!engine.isCharacterEnabled) {
+            if (characterAnimationIntervalRef.current) {
+                clearInterval(characterAnimationIntervalRef.current);
+                characterAnimationIntervalRef.current = null;
+            }
+            return;
+        }
+
+        if (characterAnimationIntervalRef.current) {
+            clearInterval(characterAnimationIntervalRef.current);
+            characterAnimationIntervalRef.current = null;
+        }
+
+        if (isCharacterMoving) {
+            // Walking animation
+            characterAnimationIntervalRef.current = setInterval(() => {
+                if (Date.now() - lastCharacterMoveTimeRef.current > CHARACTER_IDLE_TIMEOUT) {
+                    idleTransitionPendingRef.current = true;
+                }
+
+                setCharacterFrame(prevFrame => {
+                    const nextFrame = (prevFrame + 1) % CHARACTER_FRAMES_PER_DIRECTION;
+                    if (idleTransitionPendingRef.current && nextFrame === 0) {
+                        setIsCharacterMoving(false);
+                        idleTransitionPendingRef.current = false;
+                        return 0;
+                    }
+                    return nextFrame;
+                });
+            }, CHARACTER_ANIMATION_SPEED);
+        } else {
+            // Idle animation
+            idleTransitionPendingRef.current = false;
+            characterAnimationIntervalRef.current = setInterval(() => {
+                setCharacterFrame(prevFrame => (prevFrame + 1) % CHARACTER_IDLE_FRAMES_PER_DIRECTION);
+            }, CHARACTER_ANIMATION_SPEED);
+        }
+
+        return () => {
+            if (characterAnimationIntervalRef.current) {
+                clearInterval(characterAnimationIntervalRef.current);
+                characterAnimationIntervalRef.current = null;
+            }
+        };
+    }, [isCharacterMoving, engine.isCharacterEnabled]);
 
     // Track host mode dim fade-in (should only happen once when host mode activates)
     const hostDimFadeStartRef = useRef<number | null>(null);
@@ -5489,8 +5621,9 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             const cursorPixelHeight = effectiveCharHeight * cursorScale.h;
 
             // Draw cursor trail (older positions first, for proper layering)
+            // Skip trail rendering when character sprite is enabled
             const now = Date.now();
-            for (let i = cursorTrail.length - 1; i >= 0; i--) {
+            if (!engine.isCharacterEnabled) for (let i = cursorTrail.length - 1; i >= 0; i--) {
                 const trailPos = cursorTrail[i];
                 const age = now - trailPos.timestamp;
 
@@ -5546,23 +5679,65 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
                 // Don't render cursor if there's chat/command data at this position
                 if (!engine.chatData[key] && !engine.commandData[key]) {
-                    // Determine cursor color based on engine state
-                    if (engine.worldPersistenceError) {
-                        ctx.fillStyle = CURSOR_COLOR_ERROR;
-                    } else if (engine.isSavingWorld) {
-                        ctx.fillStyle = CURSOR_COLOR_SAVE;
-                    } else {
-                        ctx.fillStyle = engine.textColor;
-                    }
+                    // Check if we should render character sprite instead of rectangle cursor
+                    const shouldDrawCharacterSprite = engine.isCharacterEnabled && (walkSpriteSheet || idleSpriteSheet);
 
-                    // Add glowy effect to cursor
-                    ctx.shadowColor = ctx.fillStyle as string;
-                    ctx.shadowBlur = 0;
-                    ctx.shadowOffsetX = 0;
-                    ctx.shadowOffsetY = 0;
-                    // Render cursor with dynamic dimensions
-                    ctx.fillRect(cursorTopScreenPos.x, cursorTopScreenPos.y, cursorPixelWidth, cursorPixelHeight);
-                    ctx.shadowBlur = 0;
+                    if (shouldDrawCharacterSprite) {
+                        // Draw character sprite
+                        const sheetToDraw = isCharacterMoving ? walkSpriteSheet : idleSpriteSheet;
+                        const frameWidth = isCharacterMoving ? CHARACTER_FRAME_WIDTH : CHARACTER_IDLE_FRAME_WIDTH;
+                        const frameHeight = CHARACTER_FRAME_HEIGHT;
+
+                        if (sheetToDraw) {
+                            // Source rectangle from sprite sheet
+                            const sourceX = characterFrame * frameWidth;
+                            const sourceY = characterDirection * frameHeight;
+
+                            // Calculate destination size maintaining aspect ratio
+                            const spriteAspect = frameWidth / frameHeight;
+                            const cursorAspect = cursorPixelWidth / cursorPixelHeight;
+
+                            let destWidth: number, destHeight: number;
+                            if (spriteAspect > cursorAspect) {
+                                // Sprite is wider than cursor - fit to width
+                                destWidth = cursorPixelWidth;
+                                destHeight = cursorPixelWidth / spriteAspect;
+                            } else {
+                                // Sprite is taller than cursor - fit to height
+                                destHeight = cursorPixelHeight;
+                                destWidth = cursorPixelHeight * spriteAspect;
+                            }
+
+                            // Center sprite in cursor area
+                            const destX = cursorTopScreenPos.x + (cursorPixelWidth - destWidth) / 2;
+                            const destY = cursorTopScreenPos.y + (cursorPixelHeight - destHeight) / 2;
+
+                            ctx.drawImage(
+                                sheetToDraw,
+                                sourceX, sourceY, frameWidth, frameHeight,
+                                destX, destY, destWidth, destHeight
+                            );
+                        }
+                    } else {
+                        // Original rectangle cursor rendering
+                        // Determine cursor color based on engine state
+                        if (engine.worldPersistenceError) {
+                            ctx.fillStyle = CURSOR_COLOR_ERROR;
+                        } else if (engine.isSavingWorld) {
+                            ctx.fillStyle = CURSOR_COLOR_SAVE;
+                        } else {
+                            ctx.fillStyle = engine.textColor;
+                        }
+
+                        // Add glowy effect to cursor
+                        ctx.shadowColor = ctx.fillStyle as string;
+                        ctx.shadowBlur = 0;
+                        ctx.shadowOffsetX = 0;
+                        ctx.shadowOffsetY = 0;
+                        // Render cursor with dynamic dimensions
+                        ctx.fillRect(cursorTopScreenPos.x, cursorTopScreenPos.y, cursorPixelWidth, cursorPixelHeight);
+                        ctx.shadowBlur = 0;
+                    }
 
                     const charData = engine.worldData[key];
                     if (charData && !engine.isComposing) {
