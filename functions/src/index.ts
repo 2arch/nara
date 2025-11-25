@@ -109,7 +109,8 @@ async function processJob(jobId: string, description: string): Promise<void> {
         console.log(`[${jobId}] Step 2: Rotating to all directions...`);
         const rotatedImages: Record<string, string> = { south: baseImage };
 
-        const rotatePromises = DIRECTIONS.filter(dir => dir !== "south").map(async (direction) => {
+        // Rotate sequentially to avoid rate limiting
+        for (const direction of DIRECTIONS.filter(dir => dir !== "south")) {
             const rotated = await rotateCharacter(apiKey, baseImage, direction);
             rotatedImages[direction] = rotated;
             await jobRef.update({
@@ -117,9 +118,8 @@ async function processJob(jobId: string, description: string): Promise<void> {
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
             console.log(`[${jobId}] Rotated to ${direction}`);
-        });
+        }
 
-        await Promise.all(rotatePromises);
         console.log(`[${jobId}] All rotations complete`);
 
         // Step 3: Generate walking animations for each direction
