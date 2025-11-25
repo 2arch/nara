@@ -10,6 +10,72 @@ import { DataRecorder } from './recorder';
 // Grid cell span constant (characters occupy 2 vertically-stacked cells)
 const GRID_CELL_SPAN = 2;
 
+// Sprite sheet configuration
+const SPRITE_DIRECTIONS = [
+    'south', 'south-west', 'west', 'north-west',
+    'north', 'north-east', 'east', 'south-east'
+] as const;
+const WALK_FRAME_SIZE = { width: 32, height: 40 };
+const IDLE_FRAME_SIZE = { width: 24, height: 40 };
+const WALK_FRAMES_PER_DIR = 6;
+const IDLE_FRAMES_PER_DIR = 7;
+
+// Composite individual direction images into a sprite sheet using Canvas API
+async function compositeSpriteSheet(
+    directionImages: Record<string, string>,
+    frameSize: { width: number; height: number },
+    framesPerDirection: number
+): Promise<string> {
+    const sheetWidth = frameSize.width * framesPerDirection;
+    const sheetHeight = frameSize.height * SPRITE_DIRECTIONS.length;
+
+    // Create canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = sheetWidth;
+    canvas.height = sheetHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Failed to get canvas context');
+
+    // Load and draw each direction
+    for (let row = 0; row < SPRITE_DIRECTIONS.length; row++) {
+        const direction = SPRITE_DIRECTIONS[row];
+        const base64 = directionImages[direction];
+        if (!base64) continue;
+
+        // Load image from base64
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const image = new Image();
+            image.onload = () => resolve(image);
+            image.onerror = reject;
+            image.src = `data:image/png;base64,${base64}`;
+        });
+
+        // Calculate scaling to fit frame
+        const scale = Math.min(
+            frameSize.width / img.width,
+            frameSize.height / img.height
+        );
+        const scaledWidth = img.width * scale;
+        const scaledHeight = img.height * scale;
+        const offsetX = (frameSize.width - scaledWidth) / 2;
+        const offsetY = (frameSize.height - scaledHeight) / 2;
+
+        // Draw the same image for each frame column (static sprite)
+        for (let col = 0; col < framesPerDirection; col++) {
+            ctx.drawImage(
+                img,
+                col * frameSize.width + offsetX,
+                row * frameSize.height + offsetY,
+                scaledWidth,
+                scaledHeight
+            );
+        }
+    }
+
+    // Return as data URL
+    return canvas.toDataURL('image/png');
+}
+
 // --- Command System Types ---
 export interface CommandState {
     isActive: boolean;
@@ -2568,7 +2634,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         }
                         return res.json();
                     })
-                    .then(data => {
+                    .then(async data => {
                         // Add server-side steps to log
                         if (data.steps && Array.isArray(data.steps)) {
                             data.steps.forEach((step: string) => addLog(`[server] ${step}`));
@@ -2578,7 +2644,31 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             addLog(`API error: ${data.error}`);
                             setDialogueText(`Failed: ${data.error}`);
                             setModeState(prev => ({ ...prev, isGeneratingSprite: false }));
+                        } else if (data.images) {
+                            // New format: composite images client-side
+                            addLog(`Compositing sprite sheets...`);
+                            setDialogueText(`Compositing sprite sheets...`);
+
+                            const [walkSheet, idleSheet] = await Promise.all([
+                                compositeSpriteSheet(data.images, WALK_FRAME_SIZE, WALK_FRAMES_PER_DIR),
+                                compositeSpriteSheet(data.images, IDLE_FRAME_SIZE, IDLE_FRAMES_PER_DIR),
+                            ]);
+
+                            const spriteName = prompt.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                            addLog(`Success! Sprite: ${spriteName}`);
+                            setModeState(prev => ({
+                                ...prev,
+                                isGeneratingSprite: false,
+                                isCharacterEnabled: true,
+                                characterSprite: {
+                                    walkSheet,
+                                    idleSheet,
+                                    name: spriteName,
+                                },
+                            }));
+                            setDialogueText(`Now playing as: ${spriteName}`);
                         } else {
+                            // Legacy format: use pre-composited sheets from server
                             addLog(`Success! walkSheet: ${data.walkSheet}`);
                             setModeState(prev => ({
                                 ...prev,
