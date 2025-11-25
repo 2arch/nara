@@ -41,22 +41,36 @@ async function fetchPixellab(apiKey: string, endpoint: string, body: object): Pr
 }
 
 async function generateBaseCharacter(apiKey: string, description: string): Promise<string> {
-    const response = await fetchPixellab(apiKey, "generate-image-pixflux", {
+    console.log(`[generateBaseCharacter] Starting generation for: "${description}"`);
+
+    const response = await fetchPixellab(apiKey, "generate-image", {
         description,
         image_size: { width: 64, height: 64 },
         text_guidance_scale: 8,
         no_background: true,
+        outline: "single color black outline",
+        shading: "basic shading",
+        detail: "medium detail",
+        view: "low top-down",
     });
 
+    console.log(`[generateBaseCharacter] Response status: ${response.status}`);
+
     if (!response.ok) {
-        throw new Error(`Base generation failed: ${response.status}`);
+        const errorText = await response.text();
+        console.error(`[generateBaseCharacter] Error response:`, errorText);
+        throw new Error(`Base generation failed: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
+    console.log(`[generateBaseCharacter] Response data keys:`, Object.keys(data));
+
     if (!data.image?.base64) {
+        console.error(`[generateBaseCharacter] No image data in response:`, JSON.stringify(data));
         throw new Error("No image data in response");
     }
 
+    console.log(`[generateBaseCharacter] Success - base64 length: ${data.image.base64.length}`);
     return data.image.base64;
 }
 
