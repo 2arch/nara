@@ -362,6 +362,11 @@ export interface WorldEngine {
     clustersVisible: boolean;
     updateClusterLabels: () => Promise<void>;
     isMoveMode: boolean;
+    isPaintMode: boolean;
+    paintColor: string;
+    paintBrushSize: number;
+    exitPaintMode: () => void;
+    paintCell: (x: number, y: number) => void;
     cameraMode: import('./commands').CameraMode;
     setCameraMode: (mode: import('./commands').CameraMode) => void;
     gridMode: import('./commands').GridMode;
@@ -1450,6 +1455,10 @@ export function useWorldEngine({
         isIndentEnabled,
         isMoveMode,
         exitMoveMode,
+        isPaintMode,
+        paintColor,
+        paintBrushSize,
+        exitPaintMode,
         gridMode,
         cycleGridMode,
         artefactsEnabled,
@@ -3353,6 +3362,13 @@ export function useWorldEngine({
         if (key === 'Escape' && isFocusMode) {
             exitFocusMode();
             setDialogueWithRevert("Exited focus mode", setDialogueText);
+            return true;
+        }
+
+        // === Paint Mode Exit ===
+        if (key === 'Escape' && isPaintMode) {
+            exitPaintMode();
+            setDialogueWithRevert("Paint mode disabled", setDialogueText);
             return true;
         }
 
@@ -10864,6 +10880,38 @@ export function useWorldEngine({
         clustersVisible,
         updateClusterLabels,
         isMoveMode,
+        isPaintMode,
+        paintColor,
+        paintBrushSize,
+        exitPaintMode,
+        paintCell: (x: number, y: number) => {
+            if (!isPaintMode) return;
+            // Paint a circular brush centered at (x, y)
+            const radius = paintBrushSize;
+            const updates: Record<string, string> = {};
+            for (let dy = -radius; dy <= radius; dy++) {
+                for (let dx = -radius; dx <= radius; dx++) {
+                    // Check if within circular brush
+                    if (dx * dx + dy * dy <= radius * radius) {
+                        const cellX = Math.floor(x) + dx;
+                        const cellY = Math.floor(y) + dy;
+                        const key = `paint_${cellX}_${cellY}`;
+                        // Store as a paint cell with color
+                        updates[key] = JSON.stringify({
+                            type: 'paint',
+                            x: cellX,
+                            y: cellY,
+                            color: paintColor
+                        });
+                    }
+                }
+            }
+            // Batch update world data with all painted cells
+            setWorldData(prev => ({
+                ...prev,
+                ...updates
+            }));
+        },
         cameraMode,
         setCameraMode,
         gridMode,

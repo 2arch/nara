@@ -474,27 +474,37 @@ export const saveSprite = async (
 ): Promise<{ success: boolean; sprite?: SavedSprite; error?: string }> => {
   try {
     const spriteId = `sprite_${Date.now()}`;
+    console.log('[saveSprite] Starting save for user:', uid, 'sprite:', spriteId);
 
     // Extract base64 data from data URLs
     const walkBase64 = walkSheetDataUrl.split(',')[1];
     const idleBase64 = idleSheetDataUrl.split(',')[1];
 
+    if (!walkBase64 || !idleBase64) {
+      console.error('[saveSprite] Invalid data URLs - walk:', !!walkBase64, 'idle:', !!idleBase64);
+      return { success: false, error: 'Invalid sprite data URLs' };
+    }
+    console.log('[saveSprite] Base64 data extracted - walk:', walkBase64.length, 'bytes, idle:', idleBase64.length, 'bytes');
+
     // Upload to Storage
     const walkRef = storageRef(storage, `sprites/${uid}/${spriteId}/walk.png`);
     const idleRef = storageRef(storage, `sprites/${uid}/${spriteId}/idle.png`);
 
+    console.log('[saveSprite] Uploading to Firebase Storage...');
     await Promise.all([
       uploadString(walkRef, walkBase64, 'base64', { contentType: 'image/png' }),
       uploadString(idleRef, idleBase64, 'base64', { contentType: 'image/png' }),
     ]);
+    console.log('[saveSprite] Storage upload complete');
 
     // Get download URLs
     const [walkUrl, idleUrl] = await Promise.all([
       getDownloadURL(walkRef),
       getDownloadURL(idleRef),
     ]);
+    console.log('[saveSprite] Download URLs obtained:', walkUrl.substring(0, 50) + '...');
 
-    // Save metadata to database
+    // Save metadata to Realtime Database (NOT Firestore)
     const spriteData: SavedSprite = {
       id: spriteId,
       name,
@@ -504,11 +514,15 @@ export const saveSprite = async (
       createdAt: new Date().toISOString(),
     };
 
-    await set(ref(database, `users/${uid}/sprites/${spriteId}`), spriteData);
+    const dbPath = `users/${uid}/sprites/${spriteId}`;
+    console.log('[saveSprite] Saving metadata to Realtime Database at:', dbPath);
+    await set(ref(database, dbPath), spriteData);
+    console.log('[saveSprite] Metadata saved successfully!');
 
     logger.info(`Sprite saved: ${spriteId} for user ${uid}`);
     return { success: true, sprite: spriteData };
   } catch (error: any) {
+    console.error('[saveSprite] Error:', error);
     logger.error('Error saving sprite:', error);
     return { success: false, error: error.message || 'Failed to save sprite' };
   }

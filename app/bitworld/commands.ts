@@ -171,6 +171,9 @@ export interface ModeState {
         rightEyeBlink?: number; // Right eye blink (0=open, 1=closed)
         isTracked?: boolean; // True if from MediaPipe tracking, false if autonomous
     };
+    isPaintMode: boolean; // Whether paint mode is active
+    paintColor: string; // Current paint brush color
+    paintBrushSize: number; // Paint brush radius in cells
 }
 
 interface UseCommandSystemProps {
@@ -227,7 +230,7 @@ const AVAILABLE_COMMANDS = [
     // Navigation & View
     'nav', 'search', 'cam', 'indent', 'zoom', 'map', 'full', 'focus',
     // Content Creation
-    'chip', 'task', 'link', 'pack', 'clip', 'upload', 'pattern', 'connect',
+    'chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint', 'pattern', 'connect',
     // Special
     'mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help',
     // Styling & Display
@@ -247,7 +250,7 @@ const AVAILABLE_COMMANDS = [
 // Category mapping for visual organization
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map', 'full', 'focus'],
-    'create': ['chip', 'task', 'link', 'pack', 'clip', 'upload'],
+    'create': ['chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint'],
     'special': ['mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help'],
     'style': ['bg', 'text', 'font', 'style', 'display', 'be'],
     'state': ['state', 'random', 'clear', 'replay', 'record'],
@@ -389,6 +392,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         isFaceDetectionEnabled: false, // Face detection not active initially
         isCharacterEnabled: false, // Character sprite cursor not active initially
         faceOrientation: undefined, // No face orientation initially
+        isPaintMode: false, // Paint mode not active initially
+        paintColor: '#000000', // Default black paint
+        paintBrushSize: 1, // Default brush size (1 cell radius)
     });
 
     // User's saved sprites
@@ -3280,6 +3286,27 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             return executeToggleModeCommand('isMoveMode', "Move mode enabled - hover over text blocks to drag them. Press Escape to exit.", "Move mode disabled");
         }
 
+        if (commandToExecute.startsWith('paint')) {
+            // Parse optional color argument: /paint [color]
+            const paintArgs = commandToExecute.slice(5).trim();
+            if (paintArgs) {
+                // Check if it's a valid color
+                const colorResult = validateColor(paintArgs);
+                if (colorResult.valid && colorResult.hexColor) {
+                    setModeState(prev => ({
+                        ...prev,
+                        isPaintMode: true,
+                        paintColor: colorResult.hexColor!
+                    }));
+                    setDialogueWithRevert(`Paint mode enabled (${paintArgs}). Click/drag to paint. Press ESC to exit.`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+            }
+            // Toggle paint mode with current color
+            return executeToggleModeCommand('isPaintMode', "Paint mode enabled. Click/drag to paint. Press ESC to exit.", "Paint mode disabled");
+        }
+
         if (commandToExecute.startsWith('upgrade')) {
             return executeCallbackCommand(triggerUpgradeFlow, "Upgrade flow not available");
         }
@@ -4493,5 +4520,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         isGeneratingSprite: modeState.isGeneratingSprite,
         spriteProgress: modeState.spriteProgress,
         spriteDebugLog: modeState.spriteDebugLog,
+        // Paint mode
+        isPaintMode: modeState.isPaintMode,
+        paintColor: modeState.paintColor,
+        paintBrushSize: modeState.paintBrushSize,
+        exitPaintMode: () => setModeState(prev => ({ ...prev, isPaintMode: false })),
+        setPaintColor: (color: string) => setModeState(prev => ({ ...prev, paintColor: color })),
+        setPaintBrushSize: (size: number) => setModeState(prev => ({ ...prev, paintBrushSize: size })),
     };
 }

@@ -2545,6 +2545,7 @@ Camera & Viewport Controls:
     const panStartInfoRef = useRef<PanStartInfo | null>(null);
     const isMiddleMouseDownRef = useRef(false);
     const intermediatePanOffsetRef = useRef<Point>(engine.viewOffset); // Track offset during pan
+    const isPaintingRef = useRef(false); // Track if currently painting
 
     // Ref for tracking selection drag state (mouse button down)
     const isSelectingMouseDownRef = useRef(false);
@@ -4072,10 +4073,32 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             hexToRgb
         };
 
+        // Render paint cells first (underneath text)
+        for (const key in engine.worldData) {
+            if (!key.startsWith('paint_')) continue;
+
+            try {
+                const paintData = JSON.parse(engine.worldData[key] as string);
+                if (paintData.type !== 'paint') continue;
+
+                const worldX = paintData.x;
+                const worldY = paintData.y;
+
+                if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
+                    worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                    ctx.fillStyle = paintData.color || '#000000';
+                    ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                }
+            } catch (e) {
+                // Skip invalid paint data
+            }
+        }
+
         ctx.fillStyle = engine.textColor;
         for (const key in engine.worldData) {
-            // Skip block, chip, and image data - we render those separately
-            if (key.startsWith('block_') || key.startsWith('chip_') || key.startsWith('image_')) continue;
+            // Skip block, chip, image, and paint data - we render those separately
+            if (key.startsWith('block_') || key.startsWith('chip_') || key.startsWith('image_') || key.startsWith('paint_')) continue;
 
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10);
@@ -6832,6 +6855,14 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
+            // Paint mode - start painting
+            if (engine.isPaintMode) {
+                const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
+                engine.paintCell(worldPos.x, worldPos.y);
+                isPaintingRef.current = true;
+                return;
+            }
+
             // Check if clicking on a resize handle first
             const thumbSize = 8;
             const thumbHitArea = thumbSize + 6; // Add padding for easier clicking (14px total)
@@ -7126,6 +7157,13 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
+        // Paint mode - continue painting while dragging
+        if (engine.isPaintMode && isPaintingRef.current) {
+            const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
+            engine.paintCell(worldPos.x, worldPos.y);
+            return;
+        }
+
         // Handle trail tracking - only in normal mode (not during pan or selection)
         if (!isMiddleMouseDownRef.current && !isSelectingMouseDownRef.current) {
             const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
@@ -7412,6 +7450,11 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         }
 
         if (e.button === 0) { // Left mouse button
+            // Stop painting
+            if (isPaintingRef.current) {
+                isPaintingRef.current = false;
+            }
+
             // Reset resize state if active
             if (resizeState.active) {
                 setResizeState({
@@ -7991,6 +8034,15 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 }
             }
 
+            // Handle paint mode - paint immediately on touch
+            if (engine.isPaintMode) {
+                const worldPos = engine.screenToWorld(touches[0].x, touches[0].y, engine.zoomLevel, engine.viewOffset);
+                engine.paintCell(worldPos.x, worldPos.y);
+                isPaintingRef.current = true;
+                e.preventDefault();
+                return;
+            }
+
             // If no double-tap and no resize handle, prepare for pan (single tap primary gesture)
             if (!isDoubleTap) {
                 isDoubleTapModeRef.current = false;
@@ -8117,6 +8169,14 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         if (longPressTimerRef.current) {
             clearTimeout(longPressTimerRef.current);
             longPressTimerRef.current = null;
+        }
+
+        // Handle paint mode - continue painting on move
+        if (engine.isPaintMode && isPaintingRef.current && touches.length === 1) {
+            const worldPos = engine.screenToWorld(touches[0].x, touches[0].y, engine.zoomLevel, engine.viewOffset);
+            engine.paintCell(worldPos.x, worldPos.y);
+            e.preventDefault();
+            return;
         }
 
         // Handle resize drag (highest priority)
@@ -8447,6 +8507,15 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 roomIndex: null
             });
             return; // Early return after resize complete
+        }
+
+        // Stop painting on touch end
+        if (isPaintingRef.current) {
+            isPaintingRef.current = false;
+            // In paint mode, don't process other touch end events
+            if (engine.isPaintMode) {
+                return;
+            }
         }
 
         // Handle long press activated mode (move operation or command menu)
