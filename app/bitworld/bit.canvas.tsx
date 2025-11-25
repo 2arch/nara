@@ -5761,11 +5761,17 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             );
                         }
                     } else if (engine.isGeneratingSprite) {
-                        // Show spinning cursor while generating sprite
+                        // Show pulsing cursor while generating sprite (similar to processingRegion)
+                        const pulseOpacity = (Math.sin(Date.now() / 300) + 1) / 2; // Oscillates between 0 and 1
+                        ctx.globalAlpha = 0.3 + pulseOpacity * 0.7; // Range: 0.3 to 1.0
                         ctx.fillStyle = engine.textColor;
-                        ctx.font = `${cursorPixelHeight}px monospace`;
-                        ctx.textBaseline = 'top';
-                        ctx.fillText(SPINNER_CHARS[spinnerIndex], cursorTopScreenPos.x, cursorTopScreenPos.y);
+                        ctx.fillRect(
+                            cursorTopScreenPos.x,
+                            cursorTopScreenPos.y,
+                            cursorPixelWidth,
+                            cursorPixelHeight
+                        );
+                        ctx.globalAlpha = 1.0;
                     } else {
                         // Original rectangle cursor rendering
                         // Determine cursor color based on engine state
