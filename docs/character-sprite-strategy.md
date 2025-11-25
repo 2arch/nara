@@ -96,6 +96,59 @@ Extend `/be` to accept a prompt parameter:
 /be               → toggles current sprite on/off (existing behavior)
 ```
 
+### Sprite Sheet Requirements
+
+Each character requires **two sprite sheets** to support the animation state machine:
+
+| Sheet | Purpose | Content |
+|-------|---------|---------|
+| **Walk** | Movement animation | 8 directions × N frames |
+| **Idle** | Stationary animation | 8 directions × N frames |
+
+Both sheets must share:
+- Same frame height
+- Same direction row mapping (row 0 = down, row 2 = right, etc.)
+- Compatible art style for seamless transitions
+
+### Pixellab API Overview
+
+**REST API Base:** `https://api.pixellab.ai/v1`
+**Authentication:** Bearer token in Authorization header
+
+**Key Endpoints:**
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/generate-image-pixflux` | POST | Generate base character (up to 400×400) |
+| `/generate-image-bitforge` | POST | Generate with style transfer (up to 200×200) |
+| `/rotate` | POST | Rotate character to different direction/view |
+| `/animate-with-text` | POST | Text-guided animation (64×64 only) |
+| `/animate-with-skeleton` | POST | Skeleton-based animation (up to 256×256) |
+| `/balance` | GET | Check account credits |
+
+**Generation Parameters:**
+
+```typescript
+// Character generation
+{
+  description: string,      // "cute wizard with blue robe"
+  image_size: { width: 48, height: 48 },
+  text_guidance_scale: 8,   // How closely to follow description
+  no_background: true,      // Transparent background
+  seed?: number             // For reproducibility
+}
+
+// Animation generation
+{
+  description: string,      // Character description
+  action: string,           // "walk", "idle", "run"
+  reference_image: Base64,  // Character reference
+  n_frames: 4-8,           // Animation length
+  view: "low top-down",    // Camera perspective
+  direction: "south"       // Facing direction
+}
+```
+
 ### Pixellab MCP Integration
 
 **Setup (completed):**
@@ -103,26 +156,70 @@ Extend `/be` to accept a prompt parameter:
 claude mcp add pixellab https://api.pixellab.ai/mcp -t http -H "Authorization: Bearer <API_KEY>"
 ```
 
-**Relevant Pixellab Tools:**
+**MCP Tools (higher-level wrappers):**
 
 | Tool | Purpose |
 |------|---------|
 | `create_character` | Generate character with 4/8 directional views |
 | `animate_character` | Add walk/run/idle animations |
+| `get_character` | Retrieve character data and sprite URLs |
 
-**Example Flow:**
+### Generation Flow
+
 ```
 User: /be knight
 
-1. Parse command → extract "knight" as prompt
-2. Call Pixellab MCP:
-   - create_character(description="knight", n_directions=8)
-   - animate_character(character_id, animation="walk")
-   - animate_character(character_id, animation="idle")
-3. Download generated sprite sheets
-4. Store in memory or cache
-5. Update current character sprite
-6. Enable character mode
+┌─────────────────────────────────────────────────────────────────┐
+│ Step 1: Create Base Character                                   │
+├─────────────────────────────────────────────────────────────────┤
+│ create_character(                                               │
+│   description="knight in armor",                                │
+│   n_directions=8,                                               │
+│   size=48,                                                      │
+│   proportions="default"                                         │
+│ )                                                               │
+│ → Returns: character_id, job_id (async, 2-5 min)               │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ Step 2: Generate Walk Animation                                 │
+├─────────────────────────────────────────────────────────────────┤
+│ animate_character(                                              │
+│   character_id=character_id,                                    │
+│   template_animation_id="walk",                                 │
+│   animation_name="knight_walk"                                  │
+│ )                                                               │
+│ → Returns: walk sprite sheet URL (8 dirs × N frames)           │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ Step 3: Generate Idle Animation                                 │
+├─────────────────────────────────────────────────────────────────┤
+│ animate_character(                                              │
+│   character_id=character_id,                                    │
+│   template_animation_id="idle",                                 │
+│   animation_name="knight_idle"                                  │
+│ )                                                               │
+│ → Returns: idle sprite sheet URL (8 dirs × N frames)           │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ Step 4: Download & Cache Sprites                                │
+├─────────────────────────────────────────────────────────────────┤
+│ - Fetch sprite sheets from URLs                                 │
+│ - Save to /public/sprites/generated/                            │
+│ - Extract metadata (frame size, frame count)                    │
+│ - Update manifest.json                                          │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ Step 5: Activate Character                                      │
+├─────────────────────────────────────────────────────────────────┤
+│ - Load sprite sheets into HTMLImageElement                      │
+│ - Update currentCharacterSprite state                           │
+│ - Set isCharacterEnabled = true                                 │
+│ - Display "Character cursor enabled" feedback                   │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Architecture Changes Required
