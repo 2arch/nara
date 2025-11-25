@@ -9152,6 +9152,48 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             Copy
                         </button>
                     </div>
+                    {/* Progress bar for 8 directions */}
+                    {engine.isGeneratingSprite && (
+                        <div style={{ marginBottom: '10px' }}>
+                            <div style={{ color: '#888', marginBottom: '4px', fontSize: '10px' }}>
+                                Progress: {engine.spriteProgress || 0}/8 directions
+                            </div>
+                            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                {['S', 'SW', 'W', 'NW', 'N', 'NE', 'E', 'SE'].map((dir, i) => {
+                                    const progress = engine.spriteProgress || 0;
+                                    const isComplete = i < progress;
+                                    const isCurrent = i === progress;
+                                    return (
+                                        <div
+                                            key={dir}
+                                            style={{
+                                                width: '28px',
+                                                height: '28px',
+                                                borderRadius: '4px',
+                                                backgroundColor: isComplete ? '#0a3a0a' : '#1a1a1a',
+                                                border: `1px solid ${isComplete ? '#00ff00' : isCurrent ? '#ffaa00' : '#444'}`,
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                fontSize: '9px',
+                                                color: isComplete ? '#00ff00' : isCurrent ? '#ffaa00' : '#666',
+                                                animation: isCurrent ? 'pulse 1s ease-in-out infinite' : 'none',
+                                                fontWeight: isComplete || isCurrent ? 'bold' : 'normal',
+                                            }}
+                                        >
+                                            {isComplete ? '✓' : dir}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            <style>{`
+                                @keyframes pulse {
+                                    0%, 100% { opacity: 0.5; transform: scale(0.95); }
+                                    50% { opacity: 1; transform: scale(1.05); }
+                                }
+                            `}</style>
+                        </div>
+                    )}
                     {engine.spriteDebugLog.map((log, i) => (
                         <div key={i} style={{ marginBottom: '2px', wordBreak: 'break-all' }}>{log}</div>
                     ))}

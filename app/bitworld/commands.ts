@@ -159,6 +159,7 @@ export interface ModeState {
         name: string;
     };
     isGeneratingSprite?: boolean; // True while generating sprite via API
+    spriteProgress?: number; // Current progress (0-8) for sprite generation
     spriteDebugLog?: string[]; // Debug log for sprite generation
     faceOrientation?: { // Face rotation and expression data from MediaPipe
         rotX: number;
@@ -2617,35 +2618,68 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     console.log(`[SpriteGen] ${msg}`);
                 };
 
-                // Generate new sprite from prompt
-                setModeState(prev => ({ ...prev, isGeneratingSprite: true, spriteDebugLog: [] }));
+                // Generate new sprite from prompt using polling
+                setModeState(prev => ({ ...prev, isGeneratingSprite: true, spriteDebugLog: [], spriteProgress: 0 }));
                 setDialogueText(`Generating "${prompt}"...`);
                 addLog(`Starting generation: "${prompt}"`);
 
-                fetch('/api/generate-sprite', {
+                const spriteApiUrl = process.env.NEXT_PUBLIC_SPRITE_API_URL ||
+                    'https://us-central1-nara-a65bc.cloudfunctions.net/generateSprite';
+
+                // Start the job
+                fetch(spriteApiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ description: prompt }),
                 })
                     .then(res => {
-                        addLog(`Response status: ${res.status} ${res.statusText}`);
-                        if (!res.ok) {
-                            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-                        }
+                        addLog(`POST status: ${res.status}`);
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
                         return res.json();
                     })
                     .then(async data => {
-                        // Add server-side steps to log
-                        if (data.steps && Array.isArray(data.steps)) {
-                            data.steps.forEach((step: string) => addLog(`[server] ${step}`));
-                        }
-                        addLog(`Response: ${data.error ? 'ERROR' : 'OK'}`);
                         if (data.error) {
-                            addLog(`API error: ${data.error}`);
-                            setDialogueText(`Failed: ${data.error}`);
-                            setModeState(prev => ({ ...prev, isGeneratingSprite: false }));
-                        } else if (data.images) {
-                            // New format: composite images client-side
+                            throw new Error(data.error);
+                        }
+
+                        const jobId = data.jobId;
+                        addLog(`Job started: ${jobId}`);
+
+                        // Poll for status
+                        const pollInterval = 3000; // 3 seconds
+                        const maxPolls = 120; // 6 minutes max
+                        let polls = 0;
+
+                        const poll = async (): Promise<any> => {
+                            polls++;
+                            if (polls > maxPolls) {
+                                throw new Error('Generation timed out');
+                            }
+
+                            const statusRes = await fetch(`${spriteApiUrl}?jobId=${jobId}`);
+                            if (!statusRes.ok) throw new Error(`Poll failed: ${statusRes.status}`);
+                            const status = await statusRes.json();
+
+                            addLog(`[${polls}] ${status.status} ${status.progress || 0}/${status.total || 8} ${status.currentDirection || ''}`);
+                            setModeState(prev => ({ ...prev, spriteProgress: status.progress || 0 }));
+
+                            if (status.status === 'complete') {
+                                return status;
+                            } else if (status.status === 'error') {
+                                throw new Error(status.error || 'Generation failed');
+                            } else {
+                                // Update dialogue with progress
+                                const dir = status.currentDirection || 'base';
+                                setDialogueText(`Generating "${prompt}"... (${status.progress || 0}/8 ${dir})`);
+                                await new Promise(r => setTimeout(r, pollInterval));
+                                return poll();
+                            }
+                        };
+
+                        return poll();
+                    })
+                    .then(async data => {
+                        if (data.images) {
                             addLog(`Compositing sprite sheets...`);
                             setDialogueText(`Compositing sprite sheets...`);
 
@@ -2659,6 +2693,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             setModeState(prev => ({
                                 ...prev,
                                 isGeneratingSprite: false,
+                                spriteProgress: 0,
                                 isCharacterEnabled: true,
                                 characterSprite: {
                                     walkSheet,
@@ -2667,28 +2702,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                                 },
                             }));
                             setDialogueText(`Now playing as: ${spriteName}`);
-                        } else {
-                            // Legacy format: use pre-composited sheets from server
-                            addLog(`Success! walkSheet: ${data.walkSheet}`);
-                            setModeState(prev => ({
-                                ...prev,
-                                isGeneratingSprite: false,
-                                isCharacterEnabled: true,
-                                characterSprite: {
-                                    walkSheet: data.walkSheet,
-                                    idleSheet: data.idleSheet,
-                                    name: data.name,
-                                },
-                            }));
-                            setDialogueText(`Now playing as: ${data.name}`);
                         }
                     })
                     .catch(err => {
                         const errMsg = err instanceof Error ? err.message : String(err);
-                        addLog(`Catch error: ${errMsg}`);
+                        addLog(`Error: ${errMsg}`);
                         console.error('Sprite generation failed:', err);
                         setDialogueText(`Sprite generation failed: ${errMsg}`);
-                        setModeState(prev => ({ ...prev, isGeneratingSprite: false }));
+                        setModeState(prev => ({ ...prev, isGeneratingSprite: false, spriteProgress: 0 }));
                     });
 
                 clearCommandState();
@@ -4162,6 +4183,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         isCharacterEnabled: modeState.isCharacterEnabled,
         characterSprite: modeState.characterSprite,
         isGeneratingSprite: modeState.isGeneratingSprite,
+        spriteProgress: modeState.spriteProgress,
         spriteDebugLog: modeState.spriteDebugLog,
     };
 }
