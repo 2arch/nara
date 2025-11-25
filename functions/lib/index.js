@@ -75,20 +75,42 @@ async function generateBaseCharacter(apiKey, description) {
 }
 async function rotateCharacter(apiKey, baseImage, toDirection) {
     var _a;
-    const response = await fetchPixellab(apiKey, "rotate", {
-        from_image: { type: "base64", base64: baseImage },
-        image_size: { width: 64, height: 64 },
-        from_direction: "south",
-        to_direction: toDirection,
-    });
-    if (!response.ok) {
-        throw new Error(`Rotate to ${toDirection} failed: ${response.status}`);
+    const maxRetries = 3;
+    let lastError = null;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            const response = await fetchPixellab(apiKey, "rotate", {
+                from_image: { type: "base64", base64: baseImage },
+                image_size: { width: 64, height: 64 },
+                from_direction: "south",
+                to_direction: toDirection,
+            });
+            if (response.status === 429) {
+                // Rate limit - wait with exponential backoff
+                const waitTime = Math.pow(2, attempt) * 2000; // 2s, 4s, 8s
+                console.log(`Rate limited on ${toDirection}, waiting ${waitTime}ms (attempt ${attempt + 1}/${maxRetries})`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                continue;
+            }
+            if (!response.ok) {
+                throw new Error(`Rotate to ${toDirection} failed: ${response.status}`);
+            }
+            const data = await response.json();
+            if (!((_a = data.image) === null || _a === void 0 ? void 0 : _a.base64)) {
+                throw new Error(`No image data for ${toDirection}`);
+            }
+            return data.image.base64;
+        }
+        catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+            if (attempt < maxRetries - 1) {
+                const waitTime = Math.pow(2, attempt) * 2000;
+                console.log(`Error on ${toDirection}, retrying in ${waitTime}ms (attempt ${attempt + 1}/${maxRetries})`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
+        }
     }
-    const data = await response.json();
-    if (!((_a = data.image) === null || _a === void 0 ? void 0 : _a.base64)) {
-        throw new Error(`No image data for ${toDirection}`);
-    }
-    return data.image.base64;
+    throw lastError || new Error(`Failed to rotate to ${toDirection} after ${maxRetries} attempts`);
 }
 // Process job in background (updates Firestore as it progresses)
 async function processJob(jobId, description) {
@@ -113,7 +135,8 @@ async function processJob(jobId, description) {
         });
         console.log(`[${jobId}] Step 2: Rotating to all directions...`);
         const rotatedImages = { south: baseImage };
-        const rotatePromises = DIRECTIONS.filter(dir => dir !== "south").map(async (direction) => {
+        // Rotate sequentially with delay to avoid rate limiting
+        for (const direction of DIRECTIONS.filter(dir => dir !== "south")) {
             const rotated = await rotateCharacter(apiKey, baseImage, direction);
             rotatedImages[direction] = rotated;
             await jobRef.update({
@@ -121,8 +144,9 @@ async function processJob(jobId, description) {
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
             console.log(`[${jobId}] Rotated to ${direction}`);
-        });
-        await Promise.all(rotatePromises);
+            // Small delay between rotations to respect rate limits
+            await new Promise(r => setTimeout(r, 1000)); // 1 second delay
+        }
         console.log(`[${jobId}] All rotations complete`);
         // Step 3: Generate walking animations for each direction
         await jobRef.update({
@@ -136,29 +160,55 @@ async function processJob(jobId, description) {
                 currentDirection: `walk ${direction}`,
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
-            const walkRes = await fetch(`${PIXELLAB_API_URL}/animate-with-text`, {
-                method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${apiKey}`,
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    description,
-                    action: "walking",
-                    reference_image: { type: "base64", base64: rotatedImages[direction] },
-                    image_size: { width: 64, height: 64 },
-                    n_frames: 6,
-                    direction,
-                    view: "low top-down",
-                    text_guidance_scale: 8,
-                }),
-            });
-            if (!walkRes.ok) {
-                throw new Error(`Walk animation ${direction} failed: ${walkRes.status}`);
+            // Retry logic for walk animation
+            let walkSuccess = false;
+            let walkAttempts = 0;
+            const maxWalkAttempts = 3;
+            while (!walkSuccess && walkAttempts < maxWalkAttempts) {
+                walkAttempts++;
+                try {
+                    const walkRes = await fetch(`${PIXELLAB_API_URL}/animate-with-text`, {
+                        method: "POST",
+                        headers: {
+                            "Authorization": `Bearer ${apiKey}`,
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                            description,
+                            action: "walking",
+                            reference_image: { type: "base64", base64: rotatedImages[direction] },
+                            image_size: { width: 64, height: 64 },
+                            n_frames: 6,
+                            direction,
+                            view: "low top-down",
+                            text_guidance_scale: 8,
+                        }),
+                    });
+                    if (walkRes.status === 429 && walkAttempts < maxWalkAttempts) {
+                        const waitTime = Math.pow(2, walkAttempts - 1) * 2000;
+                        console.log(`[${jobId}] Rate limited on walk ${direction}, waiting ${waitTime}ms (attempt ${walkAttempts}/${maxWalkAttempts})`);
+                        await new Promise(r => setTimeout(r, waitTime));
+                        continue;
+                    }
+                    if (!walkRes.ok) {
+                        throw new Error(`Walk animation ${direction} failed: ${walkRes.status}`);
+                    }
+                    const walkData = await walkRes.json();
+                    walkFrames[direction] = walkData.images.map((img) => img.base64);
+                    console.log(`[${jobId}] Walk ${direction} complete (${walkFrames[direction].length} frames)`);
+                    walkSuccess = true;
+                }
+                catch (error) {
+                    if (walkAttempts >= maxWalkAttempts) {
+                        throw error;
+                    }
+                    const waitTime = Math.pow(2, walkAttempts - 1) * 2000;
+                    console.log(`[${jobId}] Error on walk ${direction}, retrying in ${waitTime}ms`);
+                    await new Promise(r => setTimeout(r, waitTime));
+                }
             }
-            const walkData = await walkRes.json();
-            walkFrames[direction] = walkData.images.map((img) => img.base64);
-            console.log(`[${jobId}] Walk ${direction} complete (${walkFrames[direction].length} frames)`);
+            // Small delay between animations
+            await new Promise(r => setTimeout(r, 500));
         }
         // Step 4: Create static idle frames (use rotated images, no animation needed)
         console.log(`[${jobId}] Step 4: Creating static idle frames...`);
