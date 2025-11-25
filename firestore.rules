@@ -2,17 +2,19 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Users collection - users can read/write their own data
-    match /users/{userId} {
-      // Allow users to read their own user document
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow write: if request.auth != null && request.auth.uid == userId;
-
-      // Sprites subcollection - user can manage their own sprites
-      match /sprites/{spriteId} {
-        allow read: if true; // Anyone can read sprites (for sharing)
-        allow write: if request.auth != null && request.auth.uid == userId;
+    // Sprites collection
+    match /sprites/{userId} {
+      // Public sprites - anyone can read, only admins can write
+      match /public/{spriteId} {
+        allow read: if true;
+        allow write: if false; // Manually add public sprites via console/admin
       }
+    }
+
+    // User sprites - user can manage their own
+    match /sprites/{userId}/{spriteId} {
+      allow read: if true; // Anyone can read (for sharing)
+      allow write: if request.auth != null && request.auth.uid == userId;
     }
 
     // Default: deny all other access

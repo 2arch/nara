@@ -516,9 +516,9 @@ export const saveSprite = async (
       createdAt: new Date().toISOString(),
     };
 
-    const dbPath = `users/${uid}/sprites/${spriteId}`;
+    const dbPath = `sprites/${uid}/${spriteId}`;
     console.log('[saveSprite] Saving metadata to Firestore at:', dbPath);
-    await setDoc(doc(firestore, 'users', uid, 'sprites', spriteId), spriteData);
+    await setDoc(doc(firestore, 'sprites', uid, spriteId), spriteData);
     console.log('[saveSprite] Metadata saved successfully!');
 
     logger.info(`Sprite saved: ${spriteId} for user ${uid}`);
@@ -530,28 +530,58 @@ export const saveSprite = async (
   }
 };
 
-export const getUserSprites = async (uid: string): Promise<SavedSprite[]> => {
+export const getUserSprites = async (uid: string | null): Promise<SavedSprite[]> => {
   try {
-    const spritesRef = collection(firestore, 'users', uid, 'sprites');
-    const q = firestoreQuery(spritesRef, orderBy('createdAt', 'desc'));
-    const snapshot = await getDocs(q);
+    const allSprites: SavedSprite[] = [];
 
-    if (snapshot.empty) return [];
+    // Always fetch public sprites
+    const publicRef = collection(firestore, 'sprites', 'public');
+    const publicSnapshot = await getDocs(publicRef);
+    const publicSprites = publicSnapshot.docs.map(doc => doc.data() as SavedSprite);
+    allSprites.push(...publicSprites);
 
-    const sprites: SavedSprite[] = snapshot.docs.map(doc => doc.data() as SavedSprite);
+    // Fetch user sprites if authenticated
+    if (uid) {
+      const userRef = collection(firestore, 'sprites', uid);
+      const userQ = firestoreQuery(userRef, orderBy('createdAt', 'desc'));
+      const userSnapshot = await getDocs(userQ);
+      const userSprites = userSnapshot.docs.map(doc => doc.data() as SavedSprite);
+      allSprites.push(...userSprites);
+    }
 
-    return sprites;
+    // Sort all sprites by createdAt (public first, then newest)
+    allSprites.sort((a, b) => {
+      // Prioritize public sprites
+      const aIsPublic = !a.id.startsWith('sprite_');
+      const bIsPublic = !b.id.startsWith('sprite_');
+      if (aIsPublic && !bIsPublic) return -1;
+      if (!aIsPublic && bIsPublic) return 1;
+      // Then sort by date
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+
+    return allSprites;
   } catch (error) {
-    logger.error('Error fetching user sprites:', error);
+    logger.error('Error fetching sprites:', error);
     return [];
   }
 };
 
 export const loadSprite = async (uid: string, spriteId: string): Promise<SavedSprite | null> => {
   try {
-    const docSnap = await getDoc(doc(firestore, 'users', uid, 'sprites', spriteId));
-    if (!docSnap.exists()) return null;
-    return docSnap.data() as SavedSprite;
+    // Try user sprites first
+    let docSnap = await getDoc(doc(firestore, 'sprites', uid, spriteId));
+    if (docSnap.exists()) {
+      return docSnap.data() as SavedSprite;
+    }
+
+    // Try public sprites
+    docSnap = await getDoc(doc(firestore, 'sprites', 'public', spriteId));
+    if (docSnap.exists()) {
+      return docSnap.data() as SavedSprite;
+    }
+
+    return null;
   } catch (error) {
     logger.error('Error loading sprite:', error);
     return null;
@@ -572,7 +602,7 @@ export const deleteSprite = async (uid: string, spriteId: string): Promise<{ suc
     ]);
 
     // Delete metadata from Firestore
-    await deleteDoc(doc(firestore, 'users', uid, 'sprites', spriteId));
+    await deleteDoc(doc(firestore, 'sprites', uid, spriteId));
 
     logger.info(`Sprite deleted: ${spriteId} for user ${uid}`);
     return { success: true };
@@ -590,7 +620,7 @@ export const renameSprite = async (
   try {
     // Update just the name field in Firestore
     const { updateDoc } = await import('firebase/firestore');
-    await updateDoc(doc(firestore, 'users', uid, 'sprites', spriteId), { name: newName });
+    await updateDoc(doc(firestore, 'sprites', uid, spriteId), { name: newName });
 
     logger.info(`Sprite renamed: ${spriteId} -> ${newName} for user ${uid}`);
     return { success: true };
