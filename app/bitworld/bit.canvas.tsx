@@ -24,9 +24,9 @@ const DRAW_GRID = true;
 const GRID_LINE_WIDTH = 1;
 const CURSOR_TRAIL_FADE_MS = 200; // Time in ms for trail to fully fade
 
-// Character sprite constants (Mudkip)
-const CHARACTER_WALK_SPRITE_URL = '/mudkip_walk.png';
-const CHARACTER_IDLE_SPRITE_URL = '/mudkip_idle.png';
+// Character sprite constants
+const CHARACTER_WALK_SPRITE_URL = '/sprites/test_walk.png';
+const CHARACTER_IDLE_SPRITE_URL = '/sprites/test_idle.png';
 const CHARACTER_FRAME_WIDTH = 32;
 const CHARACTER_IDLE_FRAME_WIDTH = 24;
 const CHARACTER_FRAME_HEIGHT = 40;
