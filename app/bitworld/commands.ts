@@ -6,7 +6,7 @@ import { detectImageIntent } from './ai.utils';
 import type { WorldSettings } from './settings';
 import { useFaceDetection, useSmoothFaceOrientation, faceOrientationToRotation } from './face';
 import { DataRecorder } from './recorder';
-import { saveSprite, getUserSprites, type SavedSprite } from '../firebase';
+import { saveSprite, getUserSprites, deleteSprite, renameSprite, type SavedSprite } from '../firebase';
 
 // Grid cell span constant (characters occupy 2 vertically-stacked cells)
 const GRID_CELL_SPAN = 2;
@@ -1187,23 +1187,73 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (lowerInput === 'be' || lowerInput.startsWith('be ')) {
             const parts = input.split(' ');
+            const BE_FLAGS = ['--rm', '--re', '--name'];
+
             if (parts.length > 1) {
+                const secondArg = parts[1].toLowerCase();
+
+                // Handle --rm flag
+                if (secondArg === '--rm' || '--rm'.startsWith(secondArg)) {
+                    if (parts.length > 2) {
+                        const spriteInput = parts[2].toLowerCase();
+                        const matchingSprites = userSprites
+                            .filter(sprite => sprite.name.toLowerCase().includes(spriteInput))
+                            .map(sprite => `be --rm ${sprite.name}`);
+                        return matchingSprites.length > 0 ? matchingSprites : [`be --rm ${spriteInput}`];
+                    }
+                    return userSprites.map(sprite => `be --rm ${sprite.name}`);
+                }
+
+                // Handle --re flag (regenerate)
+                if (secondArg === '--re' || '--re'.startsWith(secondArg)) {
+                    if (parts.length > 2) {
+                        const spriteInput = parts[2].toLowerCase();
+                        const matchingSprites = userSprites
+                            .filter(sprite => sprite.name.toLowerCase().includes(spriteInput))
+                            .map(sprite => `be --re ${sprite.name}`);
+                        return matchingSprites.length > 0 ? matchingSprites : [`be --re ${spriteInput}`];
+                    }
+                    return userSprites.map(sprite => `be --re ${sprite.name}`);
+                }
+
+                // Handle --name flag (rename)
+                if (secondArg === '--name' || '--name'.startsWith(secondArg)) {
+                    if (parts.length > 2) {
+                        const spriteInput = parts[2].toLowerCase();
+                        const matchingSprites = userSprites
+                            .filter(sprite => sprite.name.toLowerCase().includes(spriteInput))
+                            .map(sprite => `be --name ${sprite.name}`);
+                        if (parts.length > 3) {
+                            // Already have sprite name, just show current input
+                            return [input];
+                        }
+                        return matchingSprites.length > 0 ? matchingSprites : [`be --name ${spriteInput}`];
+                    }
+                    return userSprites.map(sprite => `be --name ${sprite.name}`);
+                }
+
+                // Check if typing a flag
+                const flagMatch = BE_FLAGS.filter(f => f.startsWith(secondArg));
+                if (flagMatch.length > 0 && secondArg.startsWith('-')) {
+                    return flagMatch.map(f => `be ${f}`);
+                }
+
+                // Regular sprite selection or prompt
                 const spriteInput = parts.slice(1).join(' ').toLowerCase();
-                // Filter saved sprites that match the input
                 const matchingSprites = userSprites
                     .filter(sprite => sprite.name.toLowerCase().includes(spriteInput))
                     .map(sprite => `be ${sprite.name}`);
-                // Also allow typing a new prompt
                 if (matchingSprites.length > 0) {
                     return [...matchingSprites, `be ${spriteInput}`];
                 }
                 return [`be ${spriteInput}`];
             }
-            // Show all saved sprites, or just the command if none
+            // Show flags + saved sprites
+            const baseOptions = ['be --rm', 'be --re', 'be --name'];
             if (userSprites.length > 0) {
-                return userSprites.map(sprite => `be ${sprite.name}`);
+                return [...baseOptions, ...userSprites.map(sprite => `be ${sprite.name}`)];
             }
-            return ['be'];
+            return [...baseOptions, 'be'];
         }
 
         return commandList.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
@@ -2719,29 +2769,138 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('be')) {
-            const prompt = commandToExecute.slice(2).trim();
+            const beArgs = commandToExecute.slice(2).trim();
 
-            if (prompt) {
-                // Check if this matches a saved sprite name
-                const savedSprite = userSprites.find(s => s.name.toLowerCase() === prompt.toLowerCase());
+            // Handle --rm flag (delete sprite)
+            if (beArgs.startsWith('--rm ')) {
+                const spriteName = beArgs.slice(5).trim();
+                const spriteToDelete = userSprites.find(s => s.name.toLowerCase() === spriteName.toLowerCase());
 
-                if (savedSprite) {
-                    // Load saved sprite
-                    setDialogueText(`Loading sprite: ${savedSprite.name}...`);
-                    setModeState(prev => ({
-                        ...prev,
-                        isCharacterEnabled: true,
-                        characterSprite: {
-                            walkSheet: savedSprite.walkUrl,
-                            idleSheet: savedSprite.idleUrl,
-                            name: savedSprite.name,
-                        },
-                    }));
-                    setDialogueText(`Now playing as: ${savedSprite.name}`);
+                if (!spriteToDelete) {
+                    setDialogueWithRevert(`Sprite "${spriteName}" not found`, setDialogueText);
                     clearCommandState();
                     return null;
                 }
 
+                if (!userUid) {
+                    setDialogueWithRevert("Must be logged in to delete sprites", setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                setDialogueText(`Deleting sprite: ${spriteToDelete.name}...`);
+                deleteSprite(userUid, spriteToDelete.id).then(result => {
+                    if (result.success) {
+                        setUserSprites(prev => prev.filter(s => s.id !== spriteToDelete.id));
+                        setDialogueText(`Deleted sprite: ${spriteToDelete.name}`);
+                    } else {
+                        setDialogueText(`Failed to delete: ${result.error}`);
+                    }
+                });
+
+                clearCommandState();
+                return null;
+            }
+
+            // Parse prompt and customName - may be overridden by --re
+            let prompt = beArgs;
+            let customName: string | undefined;
+
+            // Handle --re flag (regenerate sprite using saved description)
+            if (beArgs.startsWith('--re ')) {
+                const spriteName = beArgs.slice(5).trim();
+                const spriteToRegen = userSprites.find(s => s.name.toLowerCase() === spriteName.toLowerCase());
+
+                if (!spriteToRegen) {
+                    setDialogueWithRevert(`Sprite "${spriteName}" not found`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                // Use the saved description to regenerate, keeping the same name
+                prompt = spriteToRegen.description;
+                customName = spriteToRegen.name;
+                // Fall through to generation logic below
+            }
+
+            // Handle --name flag (rename sprite)
+            if (beArgs.startsWith('--name ')) {
+                const nameArgs = beArgs.slice(7).trim();
+                const parts = nameArgs.split(' ');
+
+                if (parts.length < 2) {
+                    setDialogueWithRevert("Usage: /be --name <sprite> <newname>", setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                const oldName = parts[0];
+                const newName = parts.slice(1).join('_').toLowerCase().replace(/[^a-z0-9_]/gi, '');
+
+                const spriteToRename = userSprites.find(s => s.name.toLowerCase() === oldName.toLowerCase());
+
+                if (!spriteToRename) {
+                    setDialogueWithRevert(`Sprite "${oldName}" not found`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                if (!userUid) {
+                    setDialogueWithRevert("Must be logged in to rename sprites", setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                setDialogueText(`Renaming sprite...`);
+                renameSprite(userUid, spriteToRename.id, newName).then(result => {
+                    if (result.success) {
+                        setUserSprites(prev => prev.map(s =>
+                            s.id === spriteToRename.id ? { ...s, name: newName } : s
+                        ));
+                        setDialogueText(`Renamed: ${oldName} → ${newName}`);
+                    } else {
+                        setDialogueText(`Failed to rename: ${result.error}`);
+                    }
+                });
+
+                clearCommandState();
+                return null;
+            }
+
+            // Parse quoted prompt and optional name: 'prompt text' [name]
+            // (Only if not already set by --re)
+            if (!beArgs.startsWith('--re ')) {
+                const quoteMatch = beArgs.match(/^'([^']+)'(?:\s+(\S+))?$/);
+                if (quoteMatch) {
+                    prompt = quoteMatch[1];
+                    customName = quoteMatch[2]?.toLowerCase().replace(/[^a-z0-9_]/gi, '');
+                }
+
+                // Check if this matches a saved sprite name (only if not using quotes)
+                if (!quoteMatch) {
+                    const savedSprite = userSprites.find(s => s.name.toLowerCase() === prompt.toLowerCase());
+
+                    if (savedSprite) {
+                        // Load saved sprite
+                        setDialogueText(`Loading sprite: ${savedSprite.name}...`);
+                        setModeState(prev => ({
+                            ...prev,
+                            isCharacterEnabled: true,
+                            characterSprite: {
+                                walkSheet: savedSprite.walkUrl,
+                                idleSheet: savedSprite.idleUrl,
+                                name: savedSprite.name,
+                            },
+                        }));
+                        setDialogueText(`Now playing as: ${savedSprite.name}`);
+                        clearCommandState();
+                        return null;
+                    }
+                }
+            } // End of !--re block
+
+            // Generate sprite if we have a prompt
+            if (prompt) {
                 // Helper to add log entry
                 const addLog = (msg: string) => {
                     const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
@@ -2822,7 +2981,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                                 compositeSpriteSheet(data.images, IDLE_FRAME_SIZE, IDLE_FRAMES_PER_DIR),
                             ]);
 
-                            const spriteName = prompt.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                            const spriteName = customName || prompt.replace(/[^a-z0-9]/gi, '_').toLowerCase();
                             addLog(`Success! Sprite: ${spriteName}`);
 
                             // Save to Firebase if user is logged in

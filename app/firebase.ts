@@ -543,4 +543,47 @@ export const loadSprite = async (uid: string, spriteId: string): Promise<SavedSp
   }
 };
 
+export const deleteSprite = async (uid: string, spriteId: string): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const { deleteObject } = await import('firebase/storage');
+
+    // Delete from Storage
+    const walkRef = storageRef(storage, `sprites/${uid}/${spriteId}/walk.png`);
+    const idleRef = storageRef(storage, `sprites/${uid}/${spriteId}/idle.png`);
+
+    await Promise.all([
+      deleteObject(walkRef).catch(() => {}), // Ignore if doesn't exist
+      deleteObject(idleRef).catch(() => {}),
+    ]);
+
+    // Delete metadata from database
+    const { remove } = await import('firebase/database');
+    await remove(ref(database, `users/${uid}/sprites/${spriteId}`));
+
+    logger.info(`Sprite deleted: ${spriteId} for user ${uid}`);
+    return { success: true };
+  } catch (error: any) {
+    logger.error('Error deleting sprite:', error);
+    return { success: false, error: error.message || 'Failed to delete sprite' };
+  }
+};
+
+export const renameSprite = async (
+  uid: string,
+  spriteId: string,
+  newName: string
+): Promise<{ success: boolean; error?: string }> => {
+  try {
+    // Update just the name field in the database
+    const { update } = await import('firebase/database');
+    await update(ref(database, `users/${uid}/sprites/${spriteId}`), { name: newName });
+
+    logger.info(`Sprite renamed: ${spriteId} -> ${newName} for user ${uid}`);
+    return { success: true };
+  } catch (error: any) {
+    logger.error('Error renaming sprite:', error);
+    return { success: false, error: error.message || 'Failed to rename sprite' };
+  }
+};
+
 export { database, app, auth, storage };
