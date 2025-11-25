@@ -2,7 +2,7 @@
 import { initializeApp } from "firebase/app";
 import { getDatabase, connectDatabaseEmulator, ref, onValue, set, get, query, orderByChild, equalTo } from "firebase/database";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, User, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink } from "firebase/auth";
-import { getStorage } from "firebase/storage";
+import { getStorage, ref as storageRef, uploadString, getDownloadURL } from "firebase/storage";
 import { logger } from './bitworld/logger';
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
@@ -452,6 +452,94 @@ export const incrementUserUsage = async (uid: string): Promise<boolean> => {
   } catch (error) {
     logger.error('Error incrementing user usage:', error);
     return false;
+  }
+};
+
+// Sprite management
+export interface SavedSprite {
+  id: string;
+  name: string;
+  description: string;
+  walkUrl: string;
+  idleUrl: string;
+  createdAt: string;
+}
+
+export const saveSprite = async (
+  uid: string,
+  name: string,
+  description: string,
+  walkSheetDataUrl: string,
+  idleSheetDataUrl: string
+): Promise<{ success: boolean; sprite?: SavedSprite; error?: string }> => {
+  try {
+    const spriteId = `sprite_${Date.now()}`;
+
+    // Extract base64 data from data URLs
+    const walkBase64 = walkSheetDataUrl.split(',')[1];
+    const idleBase64 = idleSheetDataUrl.split(',')[1];
+
+    // Upload to Storage
+    const walkRef = storageRef(storage, `sprites/${uid}/${spriteId}/walk.png`);
+    const idleRef = storageRef(storage, `sprites/${uid}/${spriteId}/idle.png`);
+
+    await Promise.all([
+      uploadString(walkRef, walkBase64, 'base64', { contentType: 'image/png' }),
+      uploadString(idleRef, idleBase64, 'base64', { contentType: 'image/png' }),
+    ]);
+
+    // Get download URLs
+    const [walkUrl, idleUrl] = await Promise.all([
+      getDownloadURL(walkRef),
+      getDownloadURL(idleRef),
+    ]);
+
+    // Save metadata to database
+    const spriteData: SavedSprite = {
+      id: spriteId,
+      name,
+      description,
+      walkUrl,
+      idleUrl,
+      createdAt: new Date().toISOString(),
+    };
+
+    await set(ref(database, `users/${uid}/sprites/${spriteId}`), spriteData);
+
+    logger.info(`Sprite saved: ${spriteId} for user ${uid}`);
+    return { success: true, sprite: spriteData };
+  } catch (error: any) {
+    logger.error('Error saving sprite:', error);
+    return { success: false, error: error.message || 'Failed to save sprite' };
+  }
+};
+
+export const getUserSprites = async (uid: string): Promise<SavedSprite[]> => {
+  try {
+    const snapshot = await get(ref(database, `users/${uid}/sprites`));
+    if (!snapshot.exists()) return [];
+
+    const spritesObj = snapshot.val();
+    const sprites: SavedSprite[] = Object.values(spritesObj);
+
+    // Sort by createdAt descending (newest first)
+    sprites.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    return sprites;
+  } catch (error) {
+    logger.error('Error fetching user sprites:', error);
+    return [];
+  }
+};
+
+export const loadSprite = async (uid: string, spriteId: string): Promise<SavedSprite | null> => {
+  try {
+    const snapshot = await get(ref(database, `users/${uid}/sprites/${spriteId}`));
+    if (!snapshot.exists()) return null;
+    return snapshot.val() as SavedSprite;
+  } catch (error) {
+    logger.error('Error loading sprite:', error);
+    return null;
   }
 };
 

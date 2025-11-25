@@ -262,3 +262,60 @@ export const generateSprite = onRequest(
         res.status(405).json({ error: "Method not allowed" });
     }
 );
+
+// Quick endpoint - generates base image only, duplicates for all directions
+// No polling needed - returns immediately with all images
+export const generateSpriteQuick = onRequest(
+    {
+        timeoutSeconds: 60,
+        memory: "256MiB",
+        cors: true,
+    },
+    async (req, res) => {
+        if (req.method === "OPTIONS") {
+            res.status(204).send("");
+            return;
+        }
+
+        if (req.method !== "POST") {
+            res.status(405).json({ error: "Method not allowed" });
+            return;
+        }
+
+        const { description } = req.body;
+
+        if (!description || typeof description !== "string") {
+            res.status(400).json({ error: "description is required" });
+            return;
+        }
+
+        const apiKey = PIXELLAB_API_KEY;
+        if (!apiKey) {
+            res.status(500).json({ error: "PIXELLAB_API_KEY not configured" });
+            return;
+        }
+
+        try {
+            console.log(`[quick] Generating: "${description}"`);
+            const baseImage = await generateBaseCharacter(apiKey, description);
+            console.log(`[quick] Done`);
+
+            // Use the same image for all 8 directions
+            const images: Record<string, string> = {};
+            for (const dir of DIRECTIONS) {
+                images[dir] = baseImage;
+            }
+
+            res.status(200).json({
+                status: "complete",
+                images,
+                directions: DIRECTIONS,
+            });
+
+        } catch (error) {
+            const errMsg = error instanceof Error ? error.message : "Unknown error";
+            console.error(`[quick] Error:`, errMsg);
+            res.status(500).json({ error: errMsg });
+        }
+    }
+);

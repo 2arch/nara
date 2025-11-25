@@ -6,6 +6,7 @@ import { detectImageIntent } from './ai.utils';
 import type { WorldSettings } from './settings';
 import { useFaceDetection, useSmoothFaceOrientation, faceOrientationToRotation } from './face';
 import { DataRecorder } from './recorder';
+import { saveSprite, getUserSprites, type SavedSprite } from '../firebase';
 
 // Grid cell span constant (characters occupy 2 vertically-stacked cells)
 const GRID_CELL_SPAN = 2;
@@ -389,6 +390,20 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         isCharacterEnabled: false, // Character sprite cursor not active initially
         faceOrientation: undefined, // No face orientation initially
     });
+
+    // User's saved sprites
+    const [userSprites, setUserSprites] = useState<SavedSprite[]>([]);
+
+    // Fetch user sprites when userUid changes
+    useEffect(() => {
+        if (userUid) {
+            getUserSprites(userUid).then(sprites => {
+                setUserSprites(sprites);
+            });
+        } else {
+            setUserSprites([]);
+        }
+    }, [userUid]);
 
     // Face detection system
     const { faceData, isReady: faceReady, hasDetection } = useFaceDetection({
@@ -1170,8 +1185,29 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             return MONOGRAM_OPTIONS.map(option => `monogram ${option}`);
         }
 
+        if (lowerInput === 'be' || lowerInput.startsWith('be ')) {
+            const parts = input.split(' ');
+            if (parts.length > 1) {
+                const spriteInput = parts.slice(1).join(' ').toLowerCase();
+                // Filter saved sprites that match the input
+                const matchingSprites = userSprites
+                    .filter(sprite => sprite.name.toLowerCase().includes(spriteInput))
+                    .map(sprite => `be ${sprite.name}`);
+                // Also allow typing a new prompt
+                if (matchingSprites.length > 0) {
+                    return [...matchingSprites, `be ${spriteInput}`];
+                }
+                return [`be ${spriteInput}`];
+            }
+            // Show all saved sprites, or just the command if none
+            if (userSprites.length > 0) {
+                return userSprites.map(sprite => `be ${sprite.name}`);
+            }
+            return ['be'];
+        }
+
         return commandList.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
-    }, [getAllChips, getAllBounds, availableStates, clipboardItems, isReadOnly, userUid, membershipLevel]);
+    }, [getAllChips, getAllBounds, availableStates, clipboardItems, isReadOnly, userUid, membershipLevel, userSprites]);
 
     // Mode switching functionality
     const switchMode = useCallback((newMode: CanvasMode) => {
@@ -2604,10 +2640,108 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             return executeToggleModeCommand('isIndentEnabled', "Smart indentation enabled", "Smart indentation disabled");
         }
 
+        // Quick sprite generation - single image, no rotations (for testing)
+        if (commandToExecute.startsWith('beq')) {
+            const prompt = commandToExecute.slice(3).trim();
+
+            if (prompt) {
+                const addLog = (msg: string) => {
+                    const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+                    setModeState(prev => ({
+                        ...prev,
+                        spriteDebugLog: [...(prev.spriteDebugLog || []), `[${timestamp}] ${msg}`]
+                    }));
+                    console.log(`[SpriteGenQuick] ${msg}`);
+                };
+
+                setModeState(prev => ({ ...prev, isGeneratingSprite: true, spriteDebugLog: [], spriteProgress: 0 }));
+                setDialogueText(`Quick generating "${prompt}"...`);
+                addLog(`Starting quick generation: "${prompt}"`);
+
+                const quickApiUrl = process.env.NEXT_PUBLIC_SPRITE_QUICK_API_URL ||
+                    'https://us-central1-nara-a65bc.cloudfunctions.net/generateSpriteQuick';
+
+                fetch(quickApiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ description: prompt }),
+                })
+                    .then(res => {
+                        addLog(`Response status: ${res.status}`);
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        return res.json();
+                    })
+                    .then(async data => {
+                        if (data.error) {
+                            throw new Error(data.error);
+                        }
+
+                        if (data.images) {
+                            addLog(`Compositing sprite sheets...`);
+                            setDialogueText(`Compositing sprite sheets...`);
+
+                            const [walkSheet, idleSheet] = await Promise.all([
+                                compositeSpriteSheet(data.images, WALK_FRAME_SIZE, WALK_FRAMES_PER_DIR),
+                                compositeSpriteSheet(data.images, IDLE_FRAME_SIZE, IDLE_FRAMES_PER_DIR),
+                            ]);
+
+                            const spriteName = prompt.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                            addLog(`Success! Sprite: ${spriteName}`);
+                            setModeState(prev => ({
+                                ...prev,
+                                isGeneratingSprite: false,
+                                spriteProgress: 0,
+                                isCharacterEnabled: true,
+                                characterSprite: {
+                                    walkSheet,
+                                    idleSheet,
+                                    name: spriteName,
+                                },
+                            }));
+                            setDialogueText(`Now playing as: ${spriteName}`);
+                        }
+                    })
+                    .catch(err => {
+                        const errMsg = err instanceof Error ? err.message : String(err);
+                        addLog(`Error: ${errMsg}`);
+                        console.error('Quick sprite generation failed:', err);
+                        setDialogueText(`Quick sprite generation failed: ${errMsg}`);
+                        setModeState(prev => ({ ...prev, isGeneratingSprite: false, spriteProgress: 0 }));
+                    });
+
+                clearCommandState();
+                return null;
+            } else {
+                setDialogueWithRevert("Usage: /beq <description> (quick test, no rotations)", setDialogueText);
+                clearCommandState();
+                return null;
+            }
+        }
+
         if (commandToExecute.startsWith('be')) {
             const prompt = commandToExecute.slice(2).trim();
 
             if (prompt) {
+                // Check if this matches a saved sprite name
+                const savedSprite = userSprites.find(s => s.name.toLowerCase() === prompt.toLowerCase());
+
+                if (savedSprite) {
+                    // Load saved sprite
+                    setDialogueText(`Loading sprite: ${savedSprite.name}...`);
+                    setModeState(prev => ({
+                        ...prev,
+                        isCharacterEnabled: true,
+                        characterSprite: {
+                            walkSheet: savedSprite.walkUrl,
+                            idleSheet: savedSprite.idleUrl,
+                            name: savedSprite.name,
+                        },
+                    }));
+                    setDialogueText(`Now playing as: ${savedSprite.name}`);
+                    clearCommandState();
+                    return null;
+                }
+
                 // Helper to add log entry
                 const addLog = (msg: string) => {
                     const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
@@ -2690,6 +2824,21 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                             const spriteName = prompt.replace(/[^a-z0-9]/gi, '_').toLowerCase();
                             addLog(`Success! Sprite: ${spriteName}`);
+
+                            // Save to Firebase if user is logged in
+                            if (userUid) {
+                                addLog(`Saving sprite to your collection...`);
+                                setDialogueText(`Saving sprite...`);
+                                const saveResult = await saveSprite(userUid, spriteName, prompt, walkSheet, idleSheet);
+                                if (saveResult.success && saveResult.sprite) {
+                                    addLog(`Sprite saved!`);
+                                    // Update local sprites list
+                                    setUserSprites(prev => [saveResult.sprite!, ...prev]);
+                                } else {
+                                    addLog(`Warning: Failed to save sprite - ${saveResult.error}`);
+                                }
+                            }
+
                             setModeState(prev => ({
                                 ...prev,
                                 isGeneratingSprite: false,
