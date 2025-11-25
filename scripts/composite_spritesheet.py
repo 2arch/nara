@@ -2,9 +2,9 @@
 """
 Composite individual direction sprites into a sprite sheet compatible with bit.canvas.tsx
 
-Mudkip format:
+Sprite format (consistent sizing):
 - Walk: 32×40 frames, 6 columns × 8 rows = 192×320
-- Idle: 24×40 frames, 7 columns × 8 rows = 168×320
+- Idle: 32×40 frames, 7 columns × 8 rows = 224×320
 
 Direction mapping (row index):
 0 = south (down)
@@ -25,9 +25,9 @@ import sys
 SPRITES_DIR = "public/sprites"
 OUTPUT_DIR = "public/sprites"
 
-# Target frame sizes (matching Mudkip format)
+# Target frame sizes (consistent 32×40 for both walk and idle)
 WALK_FRAME_SIZE = (32, 40)
-IDLE_FRAME_SIZE = (24, 40)
+IDLE_FRAME_SIZE = (32, 40)
 WALK_FRAMES_PER_DIR = 6
 IDLE_FRAMES_PER_DIR = 7
 
