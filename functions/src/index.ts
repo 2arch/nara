@@ -43,15 +43,11 @@ async function fetchPixellab(apiKey: string, endpoint: string, body: object): Pr
 async function generateBaseCharacter(apiKey: string, description: string): Promise<string> {
     console.log(`[generateBaseCharacter] Starting generation for: "${description}"`);
 
-    const response = await fetchPixellab(apiKey, "generate-image", {
+    const response = await fetchPixellab(apiKey, "generate-image-pixflux", {
         description,
         image_size: { width: 64, height: 64 },
         text_guidance_scale: 8,
         no_background: true,
-        outline: "single color black outline",
-        shading: "basic shading",
-        detail: "medium detail",
-        view: "low top-down",
     });
 
     console.log(`[generateBaseCharacter] Response status: ${response.status}`);
