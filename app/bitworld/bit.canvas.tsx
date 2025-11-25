@@ -5712,14 +5712,17 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             const sourceX = characterFrame * frameWidth;
                             const sourceY = characterDirection * frameHeight;
 
-                            // Scale sprite to be larger than cursor, maintaining aspect ratio
+                            // Scale sprite to fixed size based on single cell, not cursor height
                             const spriteAspect = frameWidth / frameHeight;
-                            const destHeight = cursorPixelHeight * CHARACTER_SPRITE_SCALE;
+                            const destHeight = effectiveCharHeight * CHARACTER_SPRITE_SCALE;
                             const destWidth = destHeight * spriteAspect;
 
-                            // Center sprite horizontally on cursor, bottom-align vertically
+                            // Bottom of cursor is bottom of the bottom cell
+                            const cursorBottomY = cursorBottomScreenPos.y + effectiveCharHeight;
+
+                            // Center sprite horizontally on cursor, bottom-align with cursor bottom
                             const destX = cursorTopScreenPos.x + (cursorPixelWidth - destWidth) / 2;
-                            const destY = cursorTopScreenPos.y + cursorPixelHeight - destHeight;
+                            const destY = cursorBottomY - destHeight;
 
                             ctx.drawImage(
                                 sheetToDraw,
