@@ -17,7 +17,7 @@ const SPRITE_DIRECTIONS = [
     'north', 'north-east', 'east', 'south-east'
 ] as const;
 const WALK_FRAME_SIZE = { width: 32, height: 40 };
-const IDLE_FRAME_SIZE = { width: 24, height: 40 };
+const IDLE_FRAME_SIZE = { width: 32, height: 40 };
 const WALK_FRAMES_PER_DIR = 6;
 const IDLE_FRAMES_PER_DIR = 7;
 

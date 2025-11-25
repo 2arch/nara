@@ -429,7 +429,8 @@ interface UseWorldEngineProps {
     worldId: string | null; // Add worldId for persistence
     initialBackgroundColor?: string;
     initialTextColor?: string; // Initial text color
-    userUid?: string | null; // Add user UID for user-specific persistence
+    userUid?: string | null; // World owner's UID for world-specific persistence
+    authenticatedUserUid?: string | null; // Authenticated user's UID for user-specific data (sprites, etc)
     username?: string; // Add username for routing
     enableCommands?: boolean; // Enable/disable command system (default: true)
     initialStateName?: string | null; // Initial state name from URL
@@ -647,7 +648,8 @@ export function useWorldEngine({
     worldId = null,      // Default to no persistence
     initialBackgroundColor,
     initialTextColor,
-    userUid = null,      // Default to no user-specific persistence
+    userUid = null,      // World owner's UID
+    authenticatedUserUid = null, // Authenticated user's UID for user-specific data
     enableCommands = true, // Default to enabled
     username,            // Username for routing
     initialStateName = null, // Initial state name from URL
@@ -1488,7 +1490,7 @@ export function useWorldEngine({
         isGeneratingSprite,
         spriteProgress,
         spriteDebugLog,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, currentScale, setCurrentScale, recorder, triggerUpgradeFlow: () => {
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid: authenticatedUserUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, currentScale, setCurrentScale, recorder, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
         }

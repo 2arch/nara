@@ -3,6 +3,7 @@ import { initializeApp } from "firebase/app";
 import { getDatabase, connectDatabaseEmulator, ref, onValue, set, get, query, orderByChild, equalTo } from "firebase/database";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, User, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink } from "firebase/auth";
 import { getStorage, ref as storageRef, uploadString, getDownloadURL } from "firebase/storage";
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc, query as firestoreQuery, orderBy, limit } from "firebase/firestore";
 import { logger } from './bitworld/logger';
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
@@ -21,6 +22,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const storage = getStorage(app);
+const firestore = getFirestore(app);
 
 // Configure for Electron environment
 const dbConfig = {
@@ -515,8 +517,8 @@ export const saveSprite = async (
     };
 
     const dbPath = `users/${uid}/sprites/${spriteId}`;
-    console.log('[saveSprite] Saving metadata to Realtime Database at:', dbPath);
-    await set(ref(database, dbPath), spriteData);
+    console.log('[saveSprite] Saving metadata to Firestore at:', dbPath);
+    await setDoc(doc(firestore, 'users', uid, 'sprites', spriteId), spriteData);
     console.log('[saveSprite] Metadata saved successfully!');
 
     logger.info(`Sprite saved: ${spriteId} for user ${uid}`);
@@ -530,14 +532,13 @@ export const saveSprite = async (
 
 export const getUserSprites = async (uid: string): Promise<SavedSprite[]> => {
   try {
-    const snapshot = await get(ref(database, `users/${uid}/sprites`));
-    if (!snapshot.exists()) return [];
+    const spritesRef = collection(firestore, 'users', uid, 'sprites');
+    const q = firestoreQuery(spritesRef, orderBy('createdAt', 'desc'));
+    const snapshot = await getDocs(q);
 
-    const spritesObj = snapshot.val();
-    const sprites: SavedSprite[] = Object.values(spritesObj);
+    if (snapshot.empty) return [];
 
-    // Sort by createdAt descending (newest first)
-    sprites.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const sprites: SavedSprite[] = snapshot.docs.map(doc => doc.data() as SavedSprite);
 
     return sprites;
   } catch (error) {
@@ -548,9 +549,9 @@ export const getUserSprites = async (uid: string): Promise<SavedSprite[]> => {
 
 export const loadSprite = async (uid: string, spriteId: string): Promise<SavedSprite | null> => {
   try {
-    const snapshot = await get(ref(database, `users/${uid}/sprites/${spriteId}`));
-    if (!snapshot.exists()) return null;
-    return snapshot.val() as SavedSprite;
+    const docSnap = await getDoc(doc(firestore, 'users', uid, 'sprites', spriteId));
+    if (!docSnap.exists()) return null;
+    return docSnap.data() as SavedSprite;
   } catch (error) {
     logger.error('Error loading sprite:', error);
     return null;
@@ -570,9 +571,8 @@ export const deleteSprite = async (uid: string, spriteId: string): Promise<{ suc
       deleteObject(idleRef).catch(() => {}),
     ]);
 
-    // Delete metadata from database
-    const { remove } = await import('firebase/database');
-    await remove(ref(database, `users/${uid}/sprites/${spriteId}`));
+    // Delete metadata from Firestore
+    await deleteDoc(doc(firestore, 'users', uid, 'sprites', spriteId));
 
     logger.info(`Sprite deleted: ${spriteId} for user ${uid}`);
     return { success: true };
@@ -588,9 +588,9 @@ export const renameSprite = async (
   newName: string
 ): Promise<{ success: boolean; error?: string }> => {
   try {
-    // Update just the name field in the database
-    const { update } = await import('firebase/database');
-    await update(ref(database, `users/${uid}/sprites/${spriteId}`), { name: newName });
+    // Update just the name field in Firestore
+    const { updateDoc } = await import('firebase/firestore');
+    await updateDoc(doc(firestore, 'users', uid, 'sprites', spriteId), { name: newName });
 
     logger.info(`Sprite renamed: ${spriteId} -> ${newName} for user ${uid}`);
     return { success: true };
@@ -600,4 +600,4 @@ export const renameSprite = async (
   }
 };
 
-export { database, app, auth, storage };
+export { database, app, auth, storage, firestore };

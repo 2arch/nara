@@ -140,6 +140,7 @@ function BasePageContent() {
   const engine = useWorldEngine({
     worldId: 'base',
     userUid: 'public', // 'public' userUid groups all public collaborative spaces
+    authenticatedUserUid: user?.uid || null, // Authenticated user's UID for user-specific data (sprites)
     username, // Use actual user's username from Firebase
     initialStateName: null, // No state name for base
     initialViewOffset,

@@ -28,7 +28,7 @@ const CURSOR_TRAIL_FADE_MS = 200; // Time in ms for trail to fully fade
 const CHARACTER_WALK_SPRITE_URL = '/sprites/test_walk.png';
 const CHARACTER_IDLE_SPRITE_URL = '/sprites/test_idle.png';
 const CHARACTER_FRAME_WIDTH = 32;
-const CHARACTER_IDLE_FRAME_WIDTH = 24;
+const CHARACTER_IDLE_FRAME_WIDTH = 32;
 const CHARACTER_FRAME_HEIGHT = 40;
 const CHARACTER_DIRECTIONS = 8;
 const CHARACTER_SPRITE_SCALE = 3; // Sprite renders 3× larger than cursor
@@ -1431,18 +1431,25 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             if (dx !== 0 || dy !== 0) {
                 let newDirection = characterDirection;
 
-                // Map dx/dy to 8 directions (0=down, 2=right, 4=up, 6=left)
-                if (dx !== 0 && dy === 0) {
-                    newDirection = dx > 0 ? 2 : 6; // right or left
-                } else if (dy !== 0 && dx === 0) {
-                    newDirection = dy > 0 ? 0 : 4; // down or up
-                } else if (dx !== 0 && dy !== 0) {
-                    // Diagonal - prefer the axis with larger delta
-                    if (Math.abs(dx) >= Math.abs(dy)) {
-                        newDirection = dx > 0 ? 2 : 6;
-                    } else {
-                        newDirection = dy > 0 ? 0 : 4;
-                    }
+                // Map dx/dy to 8 directions based on SPRITE_DIRECTIONS order:
+                // 0=south, 1=south-west, 2=west, 3=north-west,
+                // 4=north, 5=north-east, 6=east, 7=south-east
+                if (dy > 0 && dx === 0) {
+                    newDirection = 0; // south (down)
+                } else if (dy > 0 && dx < 0) {
+                    newDirection = 1; // south-west
+                } else if (dy === 0 && dx < 0) {
+                    newDirection = 2; // west (left)
+                } else if (dy < 0 && dx < 0) {
+                    newDirection = 3; // north-west
+                } else if (dy < 0 && dx === 0) {
+                    newDirection = 4; // north (up)
+                } else if (dy < 0 && dx > 0) {
+                    newDirection = 5; // north-east
+                } else if (dy === 0 && dx > 0) {
+                    newDirection = 6; // east (right)
+                } else if (dy > 0 && dx > 0) {
+                    newDirection = 7; // south-east
                 }
 
                 if (newDirection !== characterDirection) {

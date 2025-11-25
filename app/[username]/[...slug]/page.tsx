@@ -118,7 +118,8 @@ function UserStateContent() {
   const engine = useWorldEngine({
     worldId: stateName,
     // initialBackgroundColor: '#000',
-    userUid: targetUserUid, // Use the target user's UID, not the authenticated user's UID
+    userUid: targetUserUid, // World owner's UID for world persistence
+    authenticatedUserUid: user?.uid || null, // Authenticated user's UID for user-specific data (sprites, etc)
     username: username,
     initialStateName: stateName,
     initialViewOffset: initialViewOffset,
