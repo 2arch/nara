@@ -1377,10 +1377,25 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const characterAnimationIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const idleTransitionPendingRef = useRef<boolean>(false);
 
+    // Spinner for sprite generation
+    const SPINNER_CHARS = ['/', '|', '\\', '—'];
+    const [spinnerIndex, setSpinnerIndex] = useState(0);
+
     // Sync selectedNoteKey with engine for cross-compatibility with selection-based commands
     useEffect(() => {
         engine.setSelectedNoteKey(selectedNoteKey);
     }, [selectedNoteKey, engine]);
+
+    // Animate spinner while generating sprite
+    useEffect(() => {
+        if (!engine.isGeneratingSprite) return;
+
+        const interval = setInterval(() => {
+            setSpinnerIndex(prev => (prev + 1) % SPINNER_CHARS.length);
+        }, 100);
+
+        return () => clearInterval(interval);
+    }, [engine.isGeneratingSprite, SPINNER_CHARS.length]);
 
     // Load character sprite sheets (use dynamic URLs if available, fallback to defaults)
     useEffect(() => {
@@ -5712,6 +5727,12 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                                 destX, destY, destWidth, destHeight
                             );
                         }
+                    } else if (engine.isGeneratingSprite) {
+                        // Show spinning cursor while generating sprite
+                        ctx.fillStyle = engine.textColor;
+                        ctx.font = `${cursorPixelHeight}px monospace`;
+                        ctx.textBaseline = 'top';
+                        ctx.fillText(SPINNER_CHARS[spinnerIndex], cursorTopScreenPos.x, cursorTopScreenPos.y);
                     } else {
                         // Original rectangle cursor rendering
                         // Determine cursor color based on engine state
