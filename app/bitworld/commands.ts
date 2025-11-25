@@ -87,6 +87,12 @@ export interface ModeState {
     };
     isFaceDetectionEnabled: boolean; // Whether face-piloted geometry is active
     isCharacterEnabled: boolean; // Whether character sprite replaces cursor
+    characterSprite?: { // Custom character sprite URLs (from /be <prompt>)
+        walkSheet: string;
+        idleSheet: string;
+        name: string;
+    };
+    isGeneratingSprite?: boolean; // True while generating sprite via API
     faceOrientation?: { // Face rotation and expression data from MediaPipe
         rotX: number;
         rotY: number;
@@ -2531,7 +2537,49 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('be')) {
-            return executeToggleModeCommand('isCharacterEnabled', "Character cursor enabled", "Character cursor disabled");
+            const prompt = commandToExecute.slice(2).trim();
+
+            if (prompt) {
+                // Generate new sprite from prompt
+                setModeState(prev => ({ ...prev, isGeneratingSprite: true }));
+                setDialogueText(`Generating "${prompt}"...`);
+
+                fetch('/api/generate-sprite', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ description: prompt }),
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.error) {
+                            setDialogueText(`Failed: ${data.error}`);
+                            setModeState(prev => ({ ...prev, isGeneratingSprite: false }));
+                        } else {
+                            setModeState(prev => ({
+                                ...prev,
+                                isGeneratingSprite: false,
+                                isCharacterEnabled: true,
+                                characterSprite: {
+                                    walkSheet: data.walkSheet,
+                                    idleSheet: data.idleSheet,
+                                    name: data.name,
+                                },
+                            }));
+                            setDialogueText(`Now playing as: ${data.name}`);
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Sprite generation failed:', err);
+                        setDialogueText('Sprite generation failed');
+                        setModeState(prev => ({ ...prev, isGeneratingSprite: false }));
+                    });
+
+                clearCommandState();
+                return null;
+            } else {
+                // No prompt - just toggle character mode
+                return executeToggleModeCommand('isCharacterEnabled', "Character cursor enabled", "Character cursor disabled");
+            }
         }
 
         if (commandToExecute.startsWith('signin')) {
@@ -3995,5 +4043,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         setFaceOrientation: (orientation: any) =>
             setModeState(prev => ({ ...prev, faceOrientation: orientation })),
         isCharacterEnabled: modeState.isCharacterEnabled,
+        characterSprite: modeState.characterSprite,
+        isGeneratingSprite: modeState.isGeneratingSprite,
     };
 }

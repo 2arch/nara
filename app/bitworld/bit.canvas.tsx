@@ -31,6 +31,7 @@ const CHARACTER_FRAME_WIDTH = 32;
 const CHARACTER_IDLE_FRAME_WIDTH = 24;
 const CHARACTER_FRAME_HEIGHT = 40;
 const CHARACTER_DIRECTIONS = 8;
+const CHARACTER_SPRITE_SCALE = 3; // Sprite renders 3× larger than cursor
 const CHARACTER_FRAMES_PER_DIRECTION = 6;
 const CHARACTER_IDLE_FRAMES_PER_DIRECTION = 7;
 const CHARACTER_ANIMATION_SPEED = 100; // ms per frame
@@ -1381,22 +1382,25 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         engine.setSelectedNoteKey(selectedNoteKey);
     }, [selectedNoteKey, engine]);
 
-    // Load character sprite sheets
+    // Load character sprite sheets (use dynamic URLs if available, fallback to defaults)
     useEffect(() => {
         let isMounted = true;
+
+        const walkUrl = engine.characterSprite?.walkSheet || CHARACTER_WALK_SPRITE_URL;
+        const idleUrl = engine.characterSprite?.idleSheet || CHARACTER_IDLE_SPRITE_URL;
 
         const walkImg = new Image();
         walkImg.onload = () => { if (isMounted) setWalkSpriteSheet(walkImg); };
         walkImg.onerror = (err) => console.error('Failed to load walk sprite:', err);
-        walkImg.src = CHARACTER_WALK_SPRITE_URL;
+        walkImg.src = walkUrl;
 
         const idleImg = new Image();
         idleImg.onload = () => { if (isMounted) setIdleSpriteSheet(idleImg); };
         idleImg.onerror = (err) => console.error('Failed to load idle sprite:', err);
-        idleImg.src = CHARACTER_IDLE_SPRITE_URL;
+        idleImg.src = idleUrl;
 
         return () => { isMounted = false; };
-    }, []);
+    }, [engine.characterSprite]);
 
     // Character sprite direction detection based on cursor movement
     useEffect(() => {
@@ -5693,24 +5697,14 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             const sourceX = characterFrame * frameWidth;
                             const sourceY = characterDirection * frameHeight;
 
-                            // Calculate destination size maintaining aspect ratio
+                            // Scale sprite to be larger than cursor, maintaining aspect ratio
                             const spriteAspect = frameWidth / frameHeight;
-                            const cursorAspect = cursorPixelWidth / cursorPixelHeight;
+                            const destHeight = cursorPixelHeight * CHARACTER_SPRITE_SCALE;
+                            const destWidth = destHeight * spriteAspect;
 
-                            let destWidth: number, destHeight: number;
-                            if (spriteAspect > cursorAspect) {
-                                // Sprite is wider than cursor - fit to width
-                                destWidth = cursorPixelWidth;
-                                destHeight = cursorPixelWidth / spriteAspect;
-                            } else {
-                                // Sprite is taller than cursor - fit to height
-                                destHeight = cursorPixelHeight;
-                                destWidth = cursorPixelHeight * spriteAspect;
-                            }
-
-                            // Center sprite in cursor area
+                            // Center sprite horizontally on cursor, bottom-align vertically
                             const destX = cursorTopScreenPos.x + (cursorPixelWidth - destWidth) / 2;
-                            const destY = cursorTopScreenPos.y + (cursorPixelHeight - destHeight) / 2;
+                            const destY = cursorTopScreenPos.y + cursorPixelHeight - destHeight;
 
                             ctx.drawImage(
                                 sheetToDraw,
