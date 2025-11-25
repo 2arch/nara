@@ -8,6 +8,12 @@ const sharp = sharpModule;
 const PIXELLAB_API_KEY = process.env.PIXELLAB_API_KEY || '9bb378e0-6b46-442d-9019-96216f8e8ba7';
 const PIXELLAB_API_URL = 'https://api.pixellab.ai/v1';
 
+// Pixellab API is slow - 30-60s per image generation
+const FETCH_TIMEOUT_MS = 120000; // 2 minutes per request
+
+// Next.js route config - extend timeout to 5 minutes for full generation
+export const maxDuration = 300;
+
 // Sprite sheet configuration (matching Mudkip format)
 const WALK_FRAME_SIZE = { width: 32, height: 40 };
 const IDLE_FRAME_SIZE = { width: 24, height: 40 };
@@ -31,77 +37,103 @@ async function generateBaseCharacter(description: string, log: (msg: string) => 
     log(`  URL: ${PIXELLAB_API_URL}/generate-image-pixflux`);
     log(`  Description: "${description}"`);
 
-    const response = await fetch(`${PIXELLAB_API_URL}/generate-image-pixflux`, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${PIXELLAB_API_KEY}`,
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            description,
-            image_size: { width: 64, height: 64 },
-            text_guidance_scale: 8,
-            no_background: true,
-        }),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-    log(`  Response status: ${response.status} ${response.statusText}`);
+    try {
+        const response = await fetch(`${PIXELLAB_API_URL}/generate-image-pixflux`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${PIXELLAB_API_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                description,
+                image_size: { width: 64, height: 64 },
+                text_guidance_scale: 8,
+                no_background: true,
+            }),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        log(`  Error body: ${errorText.slice(0, 500)}`);
-        throw new Error(`Failed to generate base character: ${response.status} ${response.statusText}`);
+        log(`  Response status: ${response.status} ${response.statusText}`);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            log(`  Error body: ${errorText.slice(0, 500)}`);
+            throw new Error(`Failed to generate base character: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        log(`  Response keys: ${Object.keys(data).join(', ')}`);
+
+        if (!data.image?.base64) {
+            log(`  ERROR: No image.base64 in response`);
+            log(`  Full response: ${JSON.stringify(data).slice(0, 500)}`);
+            throw new Error('No image data in response');
+        }
+
+        const buffer = Buffer.from(data.image.base64, 'base64');
+        log(`  Got image: ${buffer.length} bytes`);
+        return buffer;
+    } catch (err) {
+        clearTimeout(timeoutId);
+        if (err instanceof Error && err.name === 'AbortError') {
+            throw new Error(`Pixellab API timeout after ${FETCH_TIMEOUT_MS / 1000}s`);
+        }
+        throw err;
     }
-
-    const data = await response.json();
-    log(`  Response keys: ${Object.keys(data).join(', ')}`);
-
-    if (!data.image?.base64) {
-        log(`  ERROR: No image.base64 in response`);
-        log(`  Full response: ${JSON.stringify(data).slice(0, 500)}`);
-        throw new Error('No image data in response');
-    }
-
-    const buffer = Buffer.from(data.image.base64, 'base64');
-    log(`  Got image: ${buffer.length} bytes`);
-    return buffer;
 }
 
 async function rotateCharacter(baseImageBuffer: Buffer, toDirection: Direction, log: (msg: string) => void): Promise<Buffer> {
     const base64 = baseImageBuffer.toString('base64');
     log(`  Rotating to ${toDirection}...`);
 
-    const response = await fetch(`${PIXELLAB_API_URL}/rotate`, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${PIXELLAB_API_KEY}`,
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            from_image: { type: 'base64', base64 },
-            image_size: { width: 64, height: 64 },
-            from_direction: 'south',
-            to_direction: toDirection,
-        }),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-    log(`    ${toDirection}: status ${response.status}`);
+    try {
+        const response = await fetch(`${PIXELLAB_API_URL}/rotate`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${PIXELLAB_API_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                from_image: { type: 'base64', base64 },
+                image_size: { width: 64, height: 64 },
+                from_direction: 'south',
+                to_direction: toDirection,
+            }),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        log(`    ${toDirection}: error - ${errorText.slice(0, 200)}`);
-        throw new Error(`Failed to rotate to ${toDirection}: ${response.status} - ${errorText.slice(0, 100)}`);
+        log(`    ${toDirection}: status ${response.status}`);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            log(`    ${toDirection}: error - ${errorText.slice(0, 200)}`);
+            throw new Error(`Failed to rotate to ${toDirection}: ${response.status} - ${errorText.slice(0, 100)}`);
+        }
+
+        const data = await response.json();
+        if (!data.image?.base64) {
+            log(`    ${toDirection}: no image.base64 in response`);
+            throw new Error(`No image data for ${toDirection}`);
+        }
+
+        const buffer = Buffer.from(data.image.base64, 'base64');
+        log(`    ${toDirection}: ✓ ${buffer.length} bytes`);
+        return buffer;
+    } catch (err) {
+        clearTimeout(timeoutId);
+        if (err instanceof Error && err.name === 'AbortError') {
+            throw new Error(`Rotate ${toDirection} timeout after ${FETCH_TIMEOUT_MS / 1000}s`);
+        }
+        throw err;
     }
-
-    const data = await response.json();
-    if (!data.image?.base64) {
-        log(`    ${toDirection}: no image.base64 in response`);
-        throw new Error(`No image data for ${toDirection}`);
-    }
-
-    const buffer = Buffer.from(data.image.base64, 'base64');
-    log(`    ${toDirection}: ✓ ${buffer.length} bytes`);
-    return buffer;
 }
 
 async function resizeAndCenter(
@@ -215,35 +247,29 @@ export async function POST(request: NextRequest) {
         const baseBuffer = await generateBaseCharacter(description, log);
         log(`Step 1: Complete`);
 
-        // Step 2: Rotate to all 8 directions
-        log(`Step 2: Rotating to 8 directions...`);
+        // Step 2: Rotate to all 8 directions (sequential to avoid rate limiting)
+        log(`Step 2: Rotating to 8 directions (sequential)...`);
         const directionBuffers = new Map<Direction, Buffer>();
+        const failedDirections: string[] = [];
 
-        // Generate all rotations in parallel
-        const rotationPromises = DIRECTIONS.map(async (direction) => {
+        for (const direction of DIRECTIONS) {
             try {
                 const buffer = await rotateCharacter(baseBuffer, direction, log);
-                return { direction, buffer, error: null };
+                directionBuffers.set(direction, buffer);
             } catch (err) {
                 const errMsg = err instanceof Error ? err.message : String(err);
                 log(`  ✗ ${direction} FAILED: ${errMsg}`);
-                return { direction, buffer: null, error: errMsg };
+                failedDirections.push(direction);
             }
-        });
+        }
 
-        const rotations = await Promise.all(rotationPromises);
-        const failedRotations = rotations.filter(r => r.error);
-        if (failedRotations.length > 0) {
+        if (failedDirections.length > 0) {
             return NextResponse.json({
-                error: `Failed to rotate: ${failedRotations.map(r => r.direction).join(', ')}`,
+                error: `Failed to rotate: ${failedDirections.join(', ')}`,
                 steps
             }, { status: 500 });
         }
-
-        for (const { direction, buffer } of rotations) {
-            if (buffer) directionBuffers.set(direction, buffer);
-        }
-        log(`Step 2: All rotations complete`);
+        log(`Step 2: All ${directionBuffers.size} rotations complete`);
 
         // Step 3: Composite sprite sheets
         log(`Step 3: Compositing sprite sheets...`);
