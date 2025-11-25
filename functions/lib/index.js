@@ -1,8 +1,41 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateSprite = void 0;
+exports.generateSpriteQuick = exports.generateSprite = void 0;
 const https_1 = require("firebase-functions/v2/https");
-const admin = require("firebase-admin");
+const admin = __importStar(require("firebase-admin"));
 // Initialize Firebase Admin
 admin.initializeApp();
 const db = admin.firestore();
@@ -65,36 +98,83 @@ async function processJob(jobId, description) {
         // Update status to generating
         await jobRef.update({
             status: "generating",
-            currentDirection: "base",
+            currentDirection: "creating character",
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        console.log(`[${jobId}] Generating base character...`);
+        console.log(`[${jobId}] Step 1: Generating base character...`);
+        // Step 1: Generate base character image
         const baseImage = await generateBaseCharacter(apiKey, description);
         console.log(`[${jobId}] Base character generated`);
-        const images = {};
-        // Process each direction
-        for (let i = 0; i < DIRECTIONS.length; i++) {
-            const direction = DIRECTIONS[i];
+        // Step 2: Rotate to all 8 directions
+        await jobRef.update({
+            currentDirection: "rotating",
+            progress: 1,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`[${jobId}] Step 2: Rotating to all directions...`);
+        const rotatedImages = { south: baseImage };
+        const rotatePromises = DIRECTIONS.filter(dir => dir !== "south").map(async (direction) => {
+            const rotated = await rotateCharacter(apiKey, baseImage, direction);
+            rotatedImages[direction] = rotated;
             await jobRef.update({
-                progress: i,
-                currentDirection: direction,
+                progress: admin.firestore.FieldValue.increment(1),
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
-            console.log(`[${jobId}] [${i + 1}/8] Rotating to ${direction}...`);
-            const rotatedImage = await rotateCharacter(apiKey, baseImage, direction);
-            images[direction] = rotatedImage;
-            console.log(`[${jobId}] ${direction}: done`);
-            // Small delay to avoid rate limits
-            if (i < DIRECTIONS.length - 1) {
-                await new Promise(r => setTimeout(r, 500));
+            console.log(`[${jobId}] Rotated to ${direction}`);
+        });
+        await Promise.all(rotatePromises);
+        console.log(`[${jobId}] All rotations complete`);
+        // Step 3: Generate walking animations for each direction
+        await jobRef.update({
+            currentDirection: "animating walk",
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`[${jobId}] Step 3: Generating walking animations...`);
+        const walkFrames = {};
+        for (const direction of DIRECTIONS) {
+            await jobRef.update({
+                currentDirection: `walk ${direction}`,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            const walkRes = await fetch(`${PIXELLAB_API_URL}/animate-with-text`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${apiKey}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    description,
+                    action: "walking",
+                    reference_image: { type: "base64", base64: rotatedImages[direction] },
+                    image_size: { width: 64, height: 64 },
+                    n_frames: 6,
+                    direction,
+                    view: "low top-down",
+                    text_guidance_scale: 8,
+                }),
+            });
+            if (!walkRes.ok) {
+                throw new Error(`Walk animation ${direction} failed: ${walkRes.status}`);
             }
+            const walkData = await walkRes.json();
+            walkFrames[direction] = walkData.images.map((img) => img.base64);
+            console.log(`[${jobId}] Walk ${direction} complete (${walkFrames[direction].length} frames)`);
         }
-        // Mark complete with images
+        // Step 4: Create static idle frames (use rotated images, no animation needed)
+        console.log(`[${jobId}] Step 4: Creating static idle frames...`);
+        const idleFrames = {};
+        for (const direction of DIRECTIONS) {
+            // Use the static rotated image for all 7 idle frames
+            idleFrames[direction] = Array(7).fill(rotatedImages[direction]);
+        }
+        console.log(`[${jobId}] Static idle frames created`);
+        // Update job with complete animation frames
         await jobRef.update({
             status: "complete",
             progress: DIRECTIONS.length,
             currentDirection: null,
-            images,
+            walkFrames,
+            idleFrames,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         console.log(`[${jobId}] Complete!`);
@@ -134,14 +214,15 @@ exports.generateSprite = (0, https_1.onRequest)({
                 return;
             }
             const job = jobDoc.data();
-            // Return status without images if still processing
+            // Return status with animation frames if complete
             if (job.status === "complete") {
                 res.status(200).json({
                     jobId,
                     status: job.status,
                     progress: job.progress,
                     total: job.total,
-                    images: job.images,
+                    walkFrames: job.walkFrames,
+                    idleFrames: job.idleFrames,
                     directions: DIRECTIONS,
                 });
             }
@@ -213,5 +294,51 @@ exports.generateSprite = (0, https_1.onRequest)({
         return;
     }
     res.status(405).json({ error: "Method not allowed" });
+});
+// Quick endpoint - generates base image only, duplicates for all directions
+// No polling needed - returns immediately with all images
+exports.generateSpriteQuick = (0, https_1.onRequest)({
+    timeoutSeconds: 60,
+    memory: "256MiB",
+    cors: true,
+}, async (req, res) => {
+    if (req.method === "OPTIONS") {
+        res.status(204).send("");
+        return;
+    }
+    if (req.method !== "POST") {
+        res.status(405).json({ error: "Method not allowed" });
+        return;
+    }
+    const { description } = req.body;
+    if (!description || typeof description !== "string") {
+        res.status(400).json({ error: "description is required" });
+        return;
+    }
+    const apiKey = PIXELLAB_API_KEY;
+    if (!apiKey) {
+        res.status(500).json({ error: "PIXELLAB_API_KEY not configured" });
+        return;
+    }
+    try {
+        console.log(`[quick] Generating: "${description}"`);
+        const baseImage = await generateBaseCharacter(apiKey, description);
+        console.log(`[quick] Done`);
+        // Use the same image for all 8 directions
+        const images = {};
+        for (const dir of DIRECTIONS) {
+            images[dir] = baseImage;
+        }
+        res.status(200).json({
+            status: "complete",
+            images,
+            directions: DIRECTIONS,
+        });
+    }
+    catch (error) {
+        const errMsg = error instanceof Error ? error.message : "Unknown error";
+        console.error(`[quick] Error:`, errMsg);
+        res.status(500).json({ error: errMsg });
+    }
 });
 //# sourceMappingURL=index.js.map

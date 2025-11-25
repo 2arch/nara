@@ -22,7 +22,8 @@ interface SpriteJob {
     progress: number;
     total: number;
     currentDirection?: string;
-    images?: Record<string, string>;
+    walkFrames?: Record<string, string[]>;
+    idleFrames?: Record<string, string[]>;
     error?: string;
     createdAt: admin.firestore.Timestamp;
     updatedAt: admin.firestore.Timestamp;
@@ -88,43 +89,98 @@ async function processJob(jobId: string, description: string): Promise<void> {
         // Update status to generating
         await jobRef.update({
             status: "generating",
-            currentDirection: "base",
+            currentDirection: "creating character",
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 
-        console.log(`[${jobId}] Generating base character...`);
+        console.log(`[${jobId}] Step 1: Generating base character...`);
+
+        // Step 1: Generate base character image
         const baseImage = await generateBaseCharacter(apiKey, description);
         console.log(`[${jobId}] Base character generated`);
 
-        const images: Record<string, string> = {};
+        // Step 2: Rotate to all 8 directions
+        await jobRef.update({
+            currentDirection: "rotating",
+            progress: 1,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
 
-        // Process each direction
-        for (let i = 0; i < DIRECTIONS.length; i++) {
-            const direction = DIRECTIONS[i];
+        console.log(`[${jobId}] Step 2: Rotating to all directions...`);
+        const rotatedImages: Record<string, string> = { south: baseImage };
 
+        const rotatePromises = DIRECTIONS.filter(dir => dir !== "south").map(async (direction) => {
+            const rotated = await rotateCharacter(apiKey, baseImage, direction);
+            rotatedImages[direction] = rotated;
             await jobRef.update({
-                progress: i,
-                currentDirection: direction,
+                progress: admin.firestore.FieldValue.increment(1),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            console.log(`[${jobId}] Rotated to ${direction}`);
+        });
+
+        await Promise.all(rotatePromises);
+        console.log(`[${jobId}] All rotations complete`);
+
+        // Step 3: Generate walking animations for each direction
+        await jobRef.update({
+            currentDirection: "animating walk",
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        console.log(`[${jobId}] Step 3: Generating walking animations...`);
+        const walkFrames: Record<string, string[]> = {};
+
+        for (const direction of DIRECTIONS) {
+            await jobRef.update({
+                currentDirection: `walk ${direction}`,
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
 
-            console.log(`[${jobId}] [${i + 1}/8] Rotating to ${direction}...`);
-            const rotatedImage = await rotateCharacter(apiKey, baseImage, direction);
-            images[direction] = rotatedImage;
-            console.log(`[${jobId}] ${direction}: done`);
+            const walkRes = await fetch(`${PIXELLAB_API_URL}/animate-with-text`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${apiKey}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    description,
+                    action: "walking",
+                    reference_image: { type: "base64", base64: rotatedImages[direction] },
+                    image_size: { width: 64, height: 64 },
+                    n_frames: 6,
+                    direction,
+                    view: "low top-down",
+                    text_guidance_scale: 8,
+                }),
+            });
 
-            // Small delay to avoid rate limits
-            if (i < DIRECTIONS.length - 1) {
-                await new Promise(r => setTimeout(r, 500));
+            if (!walkRes.ok) {
+                throw new Error(`Walk animation ${direction} failed: ${walkRes.status}`);
             }
+
+            const walkData = await walkRes.json();
+            walkFrames[direction] = walkData.images.map((img: any) => img.base64);
+            console.log(`[${jobId}] Walk ${direction} complete (${walkFrames[direction].length} frames)`);
         }
 
-        // Mark complete with images
+        // Step 4: Create static idle frames (use rotated images, no animation needed)
+        console.log(`[${jobId}] Step 4: Creating static idle frames...`);
+        const idleFrames: Record<string, string[]> = {};
+
+        for (const direction of DIRECTIONS) {
+            // Use the static rotated image for all 7 idle frames
+            idleFrames[direction] = Array(7).fill(rotatedImages[direction]);
+        }
+        console.log(`[${jobId}] Static idle frames created`);
+
+        // Update job with complete animation frames
         await jobRef.update({
             status: "complete",
             progress: DIRECTIONS.length,
             currentDirection: null,
-            images,
+            walkFrames,
+            idleFrames,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 
@@ -175,14 +231,15 @@ export const generateSprite = onRequest(
 
                 const job = jobDoc.data() as SpriteJob;
 
-                // Return status without images if still processing
+                // Return status with animation frames if complete
                 if (job.status === "complete") {
                     res.status(200).json({
                         jobId,
                         status: job.status,
                         progress: job.progress,
                         total: job.total,
-                        images: job.images,
+                        walkFrames: job.walkFrames,
+                        idleFrames: job.idleFrames,
                         directions: DIRECTIONS,
                     });
                 } else if (job.status === "error") {

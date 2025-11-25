@@ -77,6 +77,63 @@ async function compositeSpriteSheet(
     return canvas.toDataURL('image/png');
 }
 
+// Composite animated frames from PixelLab into sprite sheet
+async function compositeAnimatedSpriteSheet(
+    animationFrames: Record<string, string[]>, // direction -> array of base64 frames
+    frameSize: { width: number; height: number },
+    framesPerDirection: number
+): Promise<string> {
+    const sheetWidth = frameSize.width * framesPerDirection;
+    const sheetHeight = frameSize.height * SPRITE_DIRECTIONS.length;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = sheetWidth;
+    canvas.height = sheetHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Failed to get canvas context');
+
+    // Draw each direction row with its animation frames
+    for (let row = 0; row < SPRITE_DIRECTIONS.length; row++) {
+        const direction = SPRITE_DIRECTIONS[row];
+        const frames = animationFrames[direction];
+        if (!frames) continue;
+
+        // Draw each frame in this direction
+        for (let col = 0; col < Math.min(frames.length, framesPerDirection); col++) {
+            const frameBase64 = frames[col];
+
+            // Load frame image
+            const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+                const image = new Image();
+                image.onload = () => resolve(image);
+                image.onerror = reject;
+                image.src = `data:image/png;base64,${frameBase64}`;
+            });
+
+            // Calculate scaling to fit frame
+            const scale = Math.min(
+                frameSize.width / img.width,
+                frameSize.height / img.height
+            );
+            const scaledWidth = img.width * scale;
+            const scaledHeight = img.height * scale;
+            const offsetX = (frameSize.width - scaledWidth) / 2;
+            const offsetY = (frameSize.height - scaledHeight) / 2;
+
+            // Draw to sprite sheet
+            ctx.drawImage(
+                img,
+                col * frameSize.width + offsetX,
+                row * frameSize.height + offsetY,
+                scaledWidth,
+                scaledHeight
+            );
+        }
+    }
+
+    return canvas.toDataURL('image/png');
+}
+
 // --- Command System Types ---
 export interface CommandState {
     isActive: boolean;
@@ -2978,7 +3035,47 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         return poll();
                     })
                     .then(async data => {
-                        if (data.images) {
+                        // Check if we have animated frames (new format) or static images (legacy format)
+                        if (data.walkFrames && data.idleFrames) {
+                            addLog(`Compositing animated sprite sheets...`);
+                            setDialogueText(`Compositing animated sprite sheets...`);
+
+                            const [walkSheet, idleSheet] = await Promise.all([
+                                compositeAnimatedSpriteSheet(data.walkFrames, WALK_FRAME_SIZE, WALK_FRAMES_PER_DIR),
+                                compositeAnimatedSpriteSheet(data.idleFrames, IDLE_FRAME_SIZE, IDLE_FRAMES_PER_DIR),
+                            ]);
+
+                            const spriteName = customName || prompt.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                            addLog(`Success! Animated sprite: ${spriteName}`);
+
+                            // Save to Firebase if user is logged in
+                            if (userUid) {
+                                addLog(`Saving sprite to your collection...`);
+                                setDialogueText(`Saving sprite...`);
+                                const saveResult = await saveSprite(userUid, spriteName, prompt, walkSheet, idleSheet);
+                                if (saveResult.success && saveResult.sprite) {
+                                    addLog(`Sprite saved!`);
+                                    // Update local sprites list
+                                    setUserSprites(prev => [saveResult.sprite!, ...prev]);
+                                } else {
+                                    addLog(`Warning: Failed to save sprite - ${saveResult.error}`);
+                                }
+                            }
+
+                            setModeState(prev => ({
+                                ...prev,
+                                isGeneratingSprite: false,
+                                spriteProgress: 0,
+                                isCharacterEnabled: true,
+                                characterSprite: {
+                                    walkSheet,
+                                    idleSheet,
+                                    name: spriteName,
+                                },
+                            }));
+                            setDialogueText(`Now playing as: ${spriteName}`);
+                        } else if (data.images) {
+                            // Legacy format - static images
                             addLog(`Compositing sprite sheets...`);
                             setDialogueText(`Compositing sprite sheets...`);
 
