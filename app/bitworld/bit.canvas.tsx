@@ -9113,6 +9113,50 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     />
                 </div>
             )}
+            {/* Sprite Generation Debug Panel */}
+            {engine.spriteDebugLog && engine.spriteDebugLog.length > 0 && (
+                <div
+                    style={{
+                        position: 'absolute',
+                        bottom: '60px',
+                        left: '10px',
+                        maxWidth: '400px',
+                        maxHeight: '200px',
+                        overflowY: 'auto',
+                        backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                        color: '#00ff00',
+                        padding: '10px',
+                        borderRadius: '6px',
+                        fontSize: '11px',
+                        fontFamily: 'monospace',
+                        zIndex: 1000,
+                        border: '1px solid #333',
+                    }}
+                >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', borderBottom: '1px solid #333', paddingBottom: '4px' }}>
+                        <span style={{ color: '#888' }}>Sprite Gen Debug</span>
+                        <button
+                            onClick={() => {
+                                navigator.clipboard.writeText(engine.spriteDebugLog?.join('\n') || '');
+                            }}
+                            style={{
+                                background: '#333',
+                                color: '#fff',
+                                border: 'none',
+                                padding: '2px 8px',
+                                borderRadius: '3px',
+                                cursor: 'pointer',
+                                fontSize: '10px',
+                            }}
+                        >
+                            Copy
+                        </button>
+                    </div>
+                    {engine.spriteDebugLog.map((log, i) => (
+                        <div key={i} style={{ marginBottom: '2px', wordBreak: 'break-all' }}>{log}</div>
+                    ))}
+                </div>
+            )}
             {/* Chronological tracker for text blocks and note regions - HIDDEN */}
             {/* {(() => {
                 const items = getChronologicalItems();

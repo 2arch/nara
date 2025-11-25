@@ -93,6 +93,7 @@ export interface ModeState {
         name: string;
     };
     isGeneratingSprite?: boolean; // True while generating sprite via API
+    spriteDebugLog?: string[]; // Debug log for sprite generation
     faceOrientation?: { // Face rotation and expression data from MediaPipe
         rotX: number;
         rotY: number;
@@ -2540,21 +2541,41 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const prompt = commandToExecute.slice(2).trim();
 
             if (prompt) {
+                // Helper to add log entry
+                const addLog = (msg: string) => {
+                    const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+                    setModeState(prev => ({
+                        ...prev,
+                        spriteDebugLog: [...(prev.spriteDebugLog || []), `[${timestamp}] ${msg}`]
+                    }));
+                    console.log(`[SpriteGen] ${msg}`);
+                };
+
                 // Generate new sprite from prompt
-                setModeState(prev => ({ ...prev, isGeneratingSprite: true }));
+                setModeState(prev => ({ ...prev, isGeneratingSprite: true, spriteDebugLog: [] }));
                 setDialogueText(`Generating "${prompt}"...`);
+                addLog(`Starting generation: "${prompt}"`);
 
                 fetch('/api/generate-sprite', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ description: prompt }),
                 })
-                    .then(res => res.json())
+                    .then(res => {
+                        addLog(`Response status: ${res.status} ${res.statusText}`);
+                        if (!res.ok) {
+                            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                        }
+                        return res.json();
+                    })
                     .then(data => {
+                        addLog(`Response data: ${JSON.stringify(data).slice(0, 200)}`);
                         if (data.error) {
+                            addLog(`API error: ${data.error}`);
                             setDialogueText(`Failed: ${data.error}`);
                             setModeState(prev => ({ ...prev, isGeneratingSprite: false }));
                         } else {
+                            addLog(`Success! walkSheet: ${data.walkSheet}, idleSheet: ${data.idleSheet}`);
                             setModeState(prev => ({
                                 ...prev,
                                 isGeneratingSprite: false,
@@ -2569,8 +2590,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         }
                     })
                     .catch(err => {
+                        const errMsg = err instanceof Error ? err.message : String(err);
+                        addLog(`Catch error: ${errMsg}`);
                         console.error('Sprite generation failed:', err);
-                        setDialogueText('Sprite generation failed');
+                        setDialogueText(`Sprite generation failed: ${errMsg}`);
                         setModeState(prev => ({ ...prev, isGeneratingSprite: false }));
                     });
 
@@ -4045,5 +4068,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         isCharacterEnabled: modeState.isCharacterEnabled,
         characterSprite: modeState.characterSprite,
         isGeneratingSprite: modeState.isGeneratingSprite,
+        spriteDebugLog: modeState.spriteDebugLog,
     };
 }

@@ -397,6 +397,7 @@ export interface WorldEngine {
         name: string;
     };
     isGeneratingSprite?: boolean;
+    spriteDebugLog?: string[];
     // Spatial indexing for efficient viewport-based rendering
     spatialIndex: React.MutableRefObject<Map<string, Set<string>>>;
     queryVisibleEntities: (startWorldX: number, startWorldY: number, endWorldX: number, endWorldY: number) => Set<string>;
@@ -1475,6 +1476,7 @@ export function useWorldEngine({
         isCharacterEnabled,
         characterSprite,
         isGeneratingSprite,
+        spriteDebugLog,
     } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, currentScale, setCurrentScale, recorder, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
@@ -10883,6 +10885,7 @@ export function useWorldEngine({
         isCharacterEnabled,
         characterSprite,
         isGeneratingSprite,
+        spriteDebugLog,
         // Spatial indexing
         spatialIndex: spatialIndexRef,
         queryVisibleEntities,
