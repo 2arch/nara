@@ -39,65 +39,106 @@ const admin = __importStar(require("firebase-admin"));
 // Initialize Firebase Admin
 admin.initializeApp();
 const db = admin.firestore();
-// API key - set via environment variable or use default for testing
+// API key
 const PIXELLAB_API_KEY = process.env.PIXELLAB_API_KEY || "9bb378e0-6b46-442d-9019-96216f8e8ba7";
 const PIXELLAB_API_V2_URL = "https://api.pixellab.ai/v2";
 const DIRECTIONS = [
     "south", "south-west", "west", "north-west",
     "north", "north-east", "east", "south-east"
 ];
-async function fetchPixellabV2(apiKey, endpoint, body, method = "POST") {
+async function fetchPixellabV2(apiKey, endpoint, body) {
     return fetch(`${PIXELLAB_API_V2_URL}/${endpoint}`, {
-        method,
+        method: "POST",
         headers: {
             "Authorization": `Bearer ${apiKey}`,
             "Content-Type": "application/json",
         },
-        body: method === "POST" ? JSON.stringify(body) : undefined,
+        body: JSON.stringify(body),
     });
 }
 async function pollBackgroundJob(apiKey, jobId, jobType, maxWaitTime = 300000) {
+    var _a;
     const startTime = Date.now();
-    const pollInterval = 2000; // 2 seconds
+    const pollInterval = 2000;
     let pollCount = 0;
     while (Date.now() - startTime < maxWaitTime) {
         pollCount++;
         const response = await fetch(`${PIXELLAB_API_V2_URL}/background-jobs/${jobId}`, {
-            headers: {
-                "Authorization": `Bearer ${apiKey}`,
-            },
+            headers: { "Authorization": `Bearer ${apiKey}` },
         });
         if (!response.ok) {
             throw new Error(`Failed to poll job ${jobId}: ${response.status}`);
         }
         const data = await response.json();
-        console.log(`[pollJob ${jobType}] Poll #${pollCount} - Status: ${data.status}, Keys: ${Object.keys(data).join(', ')}`);
+        console.log(`[pollJob ${jobType}] Poll #${pollCount} - Status: ${data.status}`);
         if (data.status === "completed" || data.status === "complete") {
             console.log(`[pollJob ${jobType}] Job complete!`);
             return data;
         }
         else if (data.status === "failed" || data.status === "error") {
-            throw new Error(`Job ${jobId} failed: ${data.error || "Unknown error"}`);
+            const errorMsg = data.error || ((_a = data.last_response) === null || _a === void 0 ? void 0 : _a.error) || "Unknown error";
+            throw new Error(`Job ${jobId} failed: ${errorMsg}`);
         }
-        // Still processing, wait before next poll
         await new Promise(resolve => setTimeout(resolve, pollInterval));
     }
     throw new Error(`Job ${jobId} timed out after ${maxWaitTime}ms`);
 }
-// Process job in background using V2 API (updates Firestore as it progresses)
+// Animate a single direction with retries
+async function animateDirection(apiKey, characterId, direction, maxRetries = 3) {
+    var _a, _b;
+    let lastError = null;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            console.log(`[animate] ${direction} - Attempt ${attempt}/${maxRetries}`);
+            const animateRes = await fetchPixellabV2(apiKey, "animate-character", {
+                character_id: characterId,
+                template_animation_id: "walking-8-frames",
+                action_description: "walking",
+                directions: [direction],
+            });
+            if (!animateRes.ok) {
+                const errorText = await animateRes.text();
+                throw new Error(`Animation request failed: ${animateRes.status} - ${errorText}`);
+            }
+            const animateData = await animateRes.json();
+            const jobIds = animateData.background_job_ids;
+            if (!jobIds || jobIds.length === 0) {
+                throw new Error("No animation job IDs returned");
+            }
+            const jobData = await pollBackgroundJob(apiKey, jobIds[0], `anim-${direction}`);
+            const frames = ((_b = (_a = jobData.last_response) === null || _a === void 0 ? void 0 : _a.images) === null || _b === void 0 ? void 0 : _b.map((img) => img.base64)) || [];
+            if (frames.length === 0) {
+                throw new Error("No frames returned");
+            }
+            console.log(`[animate] ${direction} - Success (${frames.length} frames)`);
+            return frames;
+        }
+        catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+            console.log(`[animate] ${direction} - Attempt ${attempt} failed: ${lastError.message}`);
+            if (attempt < maxRetries) {
+                const waitTime = 5000 * attempt;
+                console.log(`[animate] ${direction} - Waiting ${waitTime}ms before retry...`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
+        }
+    }
+    throw new Error(`Animation for ${direction} failed after ${maxRetries} attempts: ${lastError === null || lastError === void 0 ? void 0 : lastError.message}`);
+}
+// Main processing function
 async function processJob(jobId, description) {
-    var _a, _b, _c, _d;
+    var _a, _b, _c;
     const jobRef = db.collection("spriteJobs").doc(jobId);
     const apiKey = PIXELLAB_API_KEY;
     try {
-        // Step 1: Create character with 8 directions using V2 API
+        // Step 1: Create character with 8 directions
         await jobRef.update({
             status: "generating",
-            currentDirection: "creating character with 8 directions",
+            currentDirection: "creating character",
             progress: 0,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        console.log(`[${jobId}] Step 1: Creating character with V2 API...`);
+        console.log(`[${jobId}] Step 1: Creating character...`);
         const createCharRes = await fetchPixellabV2(apiKey, "create-character-with-8-directions", {
             description,
             image_size: { width: 64, height: 64 },
@@ -113,78 +154,58 @@ async function processJob(jobId, description) {
         const createData = await createCharRes.json();
         const characterId = createData.character_id;
         const characterJobId = createData.background_job_id;
-        console.log(`[${jobId}] Character job started: ${characterJobId}`);
-        // Poll until character creation completes
+        console.log(`[${jobId}] Polling character job: ${characterJobId}`);
         await jobRef.update({
-            currentDirection: "waiting for character rotations",
+            currentDirection: "waiting for character",
             progress: 1,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        await pollBackgroundJob(apiKey, characterJobId, "character");
-        console.log(`[${jobId}] Character created successfully`);
-        // Step 2: Animate character with walking-8-frames template
+        const characterJobData = await pollBackgroundJob(apiKey, characterJobId, "character");
+        console.log(`[${jobId}] Character created!`);
+        // Step 2: Extract idle frames and save to Firestore IMMEDIATELY
+        // Client can start compositing + uploading idle while we animate
+        console.log(`[${jobId}] Step 2: Saving idle frames to Firestore...`);
+        const idleFrames = {};
+        for (const direction of DIRECTIONS) {
+            const rotationImage = ((_c = (_b = (_a = characterJobData.last_response) === null || _a === void 0 ? void 0 : _a.images) === null || _b === void 0 ? void 0 : _b[direction]) === null || _c === void 0 ? void 0 : _c.base64) || "";
+            if (rotationImage) {
+                idleFrames[direction] = [rotationImage];
+            }
+            else {
+                console.warn(`[${jobId}] No rotation image for ${direction}`);
+            }
+        }
+        // Save idle frames - client can now composite and upload idle.png
         await jobRef.update({
-            currentDirection: "creating walk animations",
+            idleFrames,
+            idleReady: true,
             progress: 2,
+            currentDirection: "idle ready, starting animations",
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        console.log(`[${jobId}] Step 2: Animating character...`);
-        const animateRes = await fetchPixellabV2(apiKey, "animate-character", {
-            character_id: characterId,
-            template_animation_id: "walking-8-frames",
-            action_description: "walking",
-        });
-        if (!animateRes.ok) {
-            const errorText = await animateRes.text();
-            throw new Error(`Animation failed: ${animateRes.status} - ${errorText}`);
-        }
-        const animateData = await animateRes.json();
-        const animationJobIds = animateData.background_job_ids;
-        console.log(`[${jobId}] Animation jobs started: ${animationJobIds.length} jobs`);
-        // Poll all animation jobs
+        console.log(`[${jobId}] Idle frames saved to Firestore (idleReady: true)`);
+        // Step 3: Animate each direction sequentially
+        console.log(`[${jobId}] Step 3: Animating directions...`);
         const walkFrames = {};
-        for (let i = 0; i < animationJobIds.length; i++) {
-            const animJobId = animationJobIds[i];
+        for (let i = 0; i < DIRECTIONS.length; i++) {
             const direction = DIRECTIONS[i];
             await jobRef.update({
                 currentDirection: `animating ${direction}`,
-                progress: 2 + i,
+                progress: 3 + i,
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
-            const animJobData = await pollBackgroundJob(apiKey, animJobId, `anim-${direction}`);
-            // Extract base64 frames from animation job (use all frames from template)
-            const frames = ((_a = animJobData.frames) === null || _a === void 0 ? void 0 : _a.map((f) => f.base64)) || [];
+            console.log(`[${jobId}] Animating ${direction} (${i + 1}/${DIRECTIONS.length})...`);
+            const frames = await animateDirection(apiKey, characterId, direction);
             walkFrames[direction] = frames;
             console.log(`[${jobId}] Walk ${direction} complete (${frames.length} frames)`);
         }
-        // Step 3: Create static idle frames from character rotations
-        console.log(`[${jobId}] Step 3: Creating idle frames...`);
-        const idleFrames = {};
-        // Get character data to extract rotation images
-        const getCharRes = await fetch(`${PIXELLAB_API_V2_URL}/characters/${characterId}`, {
-            headers: {
-                "Authorization": `Bearer ${apiKey}`,
-            },
-        });
-        if (!getCharRes.ok) {
-            throw new Error(`Failed to get character: ${getCharRes.status}`);
-        }
-        const charData = await getCharRes.json();
-        // Use rotation images for idle (match walk frame count)
-        for (let i = 0; i < DIRECTIONS.length; i++) {
-            const direction = DIRECTIONS[i];
-            const rotationImage = ((_c = (_b = charData.rotations) === null || _b === void 0 ? void 0 : _b[i]) === null || _c === void 0 ? void 0 : _c.base64) || "";
-            const walkFrameCount = ((_d = walkFrames[direction]) === null || _d === void 0 ? void 0 : _d.length) || 8;
-            idleFrames[direction] = Array(walkFrameCount).fill(rotationImage);
-        }
-        console.log(`[${jobId}] Idle frames created`);
-        // Update job with complete data
+        // Step 4: Save walk frames to Firestore
+        console.log(`[${jobId}] Step 4: Saving walk frames to Firestore...`);
         await jobRef.update({
             status: "complete",
-            progress: DIRECTIONS.length + 2,
+            progress: DIRECTIONS.length + 3,
             currentDirection: null,
             walkFrames,
-            idleFrames,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         console.log(`[${jobId}] Complete!`);
@@ -199,18 +220,16 @@ async function processJob(jobId, description) {
         });
     }
 }
-// Main endpoint - handles both POST (start) and GET (status)
+// Main endpoint
 exports.generateSprite = (0, https_1.onRequest)({
     timeoutSeconds: 3600,
-    memory: "256MiB",
+    memory: "512MiB",
     cors: true,
 }, async (req, res) => {
-    // Handle preflight
     if (req.method === "OPTIONS") {
         res.status(204).send("");
         return;
     }
-    // GET - Poll job status
     if (req.method === "GET") {
         const jobId = req.query.jobId;
         if (!jobId) {
@@ -224,7 +243,6 @@ exports.generateSprite = (0, https_1.onRequest)({
                 return;
             }
             const job = jobDoc.data();
-            // Return status with animation frames if complete
             if (job.status === "complete") {
                 res.status(200).json({
                     jobId,
@@ -233,7 +251,6 @@ exports.generateSprite = (0, https_1.onRequest)({
                     total: job.total,
                     walkFrames: job.walkFrames,
                     idleFrames: job.idleFrames,
-                    directions: DIRECTIONS,
                 });
             }
             else if (job.status === "error") {
@@ -244,13 +261,20 @@ exports.generateSprite = (0, https_1.onRequest)({
                 });
             }
             else {
-                res.status(200).json({
+                // Still generating - include idleFrames if ready
+                const response = {
                     jobId,
                     status: job.status,
                     progress: job.progress,
                     total: job.total,
                     currentDirection: job.currentDirection,
-                });
+                    idleReady: job.idleReady,
+                };
+                // Include idleFrames so client can start compositing early
+                if (job.idleReady && job.idleFrames) {
+                    response.idleFrames = job.idleFrames;
+                }
+                res.status(200).json(response);
             }
         }
         catch (error) {
@@ -259,20 +283,13 @@ exports.generateSprite = (0, https_1.onRequest)({
         }
         return;
     }
-    // POST - Start new job
     if (req.method === "POST") {
         const { description } = req.body;
         if (!description || typeof description !== "string") {
             res.status(400).json({ error: "description is required" });
             return;
         }
-        const apiKey = PIXELLAB_API_KEY;
-        if (!apiKey) {
-            res.status(500).json({ error: "PIXELLAB_API_KEY not configured" });
-            return;
-        }
         try {
-            // Create job document
             const jobRef = db.collection("spriteJobs").doc();
             const jobId = jobRef.id;
             const now = admin.firestore.FieldValue.serverTimestamp();
@@ -280,16 +297,14 @@ exports.generateSprite = (0, https_1.onRequest)({
                 status: "pending",
                 description,
                 progress: 0,
-                total: DIRECTIONS.length,
+                total: DIRECTIONS.length + 3,
                 createdAt: now,
                 updatedAt: now,
             });
             console.log(`[${jobId}] Job created for: "${description}"`);
-            // Start processing in background (don't await)
             processJob(jobId, description).catch(err => {
                 console.error(`[${jobId}] Background processing failed:`, err);
             });
-            // Return immediately with job ID
             res.status(202).json({
                 jobId,
                 status: "pending",
