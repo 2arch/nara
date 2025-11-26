@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateSpriteQuick = exports.generateSprite = void 0;
+exports.generateSprite = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const admin = __importStar(require("firebase-admin"));
 // Initialize Firebase Admin
@@ -41,197 +41,152 @@ admin.initializeApp();
 const db = admin.firestore();
 // API key - set via environment variable or use default for testing
 const PIXELLAB_API_KEY = process.env.PIXELLAB_API_KEY || "9bb378e0-6b46-442d-9019-96216f8e8ba7";
-const PIXELLAB_API_URL = "https://api.pixellab.ai/v1";
+const PIXELLAB_API_V2_URL = "https://api.pixellab.ai/v2";
 const DIRECTIONS = [
     "south", "south-west", "west", "north-west",
     "north", "north-east", "east", "south-east"
 ];
-async function fetchPixellab(apiKey, endpoint, body) {
-    return fetch(`${PIXELLAB_API_URL}/${endpoint}`, {
-        method: "POST",
+async function fetchPixellabV2(apiKey, endpoint, body, method = "POST") {
+    return fetch(`${PIXELLAB_API_V2_URL}/${endpoint}`, {
+        method,
         headers: {
             "Authorization": `Bearer ${apiKey}`,
             "Content-Type": "application/json",
         },
-        body: JSON.stringify(body),
+        body: method === "POST" ? JSON.stringify(body) : undefined,
     });
 }
-async function generateBaseCharacter(apiKey, description) {
-    var _a;
-    console.log(`[generateBaseCharacter] Starting generation for: "${description}"`);
-    const response = await fetchPixellab(apiKey, "generate-image-pixflux", {
-        description,
-        image_size: { width: 64, height: 64 },
-        text_guidance_scale: 8,
-        no_background: true,
-    });
-    console.log(`[generateBaseCharacter] Response status: ${response.status}`);
-    if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[generateBaseCharacter] Error response:`, errorText);
-        throw new Error(`Base generation failed: ${response.status} - ${errorText}`);
-    }
-    const data = await response.json();
-    console.log(`[generateBaseCharacter] Response data keys:`, Object.keys(data));
-    if (!((_a = data.image) === null || _a === void 0 ? void 0 : _a.base64)) {
-        console.error(`[generateBaseCharacter] No image data in response:`, JSON.stringify(data));
-        throw new Error("No image data in response");
-    }
-    console.log(`[generateBaseCharacter] Success - base64 length: ${data.image.base64.length}`);
-    return data.image.base64;
-}
-async function rotateCharacter(apiKey, baseImage, toDirection) {
-    var _a;
-    const maxRetries = 3;
-    let lastError = null;
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-        try {
-            const response = await fetchPixellab(apiKey, "rotate", {
-                from_image: { type: "base64", base64: baseImage },
-                image_size: { width: 64, height: 64 },
-                from_direction: "south",
-                to_direction: toDirection,
-            });
-            if (response.status === 429) {
-                // Rate limit - wait with exponential backoff
-                const waitTime = Math.pow(2, attempt) * 2000; // 2s, 4s, 8s
-                console.log(`Rate limited on ${toDirection}, waiting ${waitTime}ms (attempt ${attempt + 1}/${maxRetries})`);
-                await new Promise(resolve => setTimeout(resolve, waitTime));
-                continue;
-            }
-            if (!response.ok) {
-                throw new Error(`Rotate to ${toDirection} failed: ${response.status}`);
-            }
-            const data = await response.json();
-            if (!((_a = data.image) === null || _a === void 0 ? void 0 : _a.base64)) {
-                throw new Error(`No image data for ${toDirection}`);
-            }
-            return data.image.base64;
+async function pollBackgroundJob(apiKey, jobId, maxWaitTime = 300000) {
+    const startTime = Date.now();
+    const pollInterval = 2000; // 2 seconds
+    while (Date.now() - startTime < maxWaitTime) {
+        const response = await fetch(`${PIXELLAB_API_V2_URL}/background-jobs/${jobId}`, {
+            headers: {
+                "Authorization": `Bearer ${apiKey}`,
+            },
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to poll job ${jobId}: ${response.status}`);
         }
-        catch (error) {
-            lastError = error instanceof Error ? error : new Error(String(error));
-            if (attempt < maxRetries - 1) {
-                const waitTime = Math.pow(2, attempt) * 2000;
-                console.log(`Error on ${toDirection}, retrying in ${waitTime}ms (attempt ${attempt + 1}/${maxRetries})`);
-                await new Promise(resolve => setTimeout(resolve, waitTime));
-            }
+        const data = await response.json();
+        if (data.status === "completed") {
+            return data;
         }
+        else if (data.status === "failed") {
+            throw new Error(`Job ${jobId} failed: ${data.error || "Unknown error"}`);
+        }
+        // Still processing, wait before next poll
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
     }
-    throw lastError || new Error(`Failed to rotate to ${toDirection} after ${maxRetries} attempts`);
+    throw new Error(`Job ${jobId} timed out after ${maxWaitTime}ms`);
 }
-// Process job in background (updates Firestore as it progresses)
+// Process job in background using V2 API (updates Firestore as it progresses)
 async function processJob(jobId, description) {
+    var _a, _b, _c;
     const jobRef = db.collection("spriteJobs").doc(jobId);
     const apiKey = PIXELLAB_API_KEY;
     try {
-        // Update status to generating
+        // Step 1: Create character with 8 directions using V2 API
         await jobRef.update({
             status: "generating",
-            currentDirection: "creating character",
+            currentDirection: "creating character with 8 directions",
+            progress: 0,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        console.log(`[${jobId}] Step 1: Generating base character...`);
-        // Step 1: Generate base character image
-        const baseImage = await generateBaseCharacter(apiKey, description);
-        console.log(`[${jobId}] Base character generated`);
-        // Step 2: Rotate to all 8 directions
-        await jobRef.update({
-            currentDirection: "rotating",
-            progress: 1,
-            preview: `data:image/png;base64,${baseImage}`, // Show base image as preview
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        console.log(`[${jobId}] Step 1: Creating character with V2 API...`);
+        const createCharRes = await fetchPixellabV2(apiKey, "create-character-with-8-directions", {
+            description,
+            image_size: { width: 64, height: 64 },
+            view: "low top-down",
+            outline: "single color outline",
+            shading: "medium shading",
+            detail: "medium detail",
         });
-        console.log(`[${jobId}] Step 2: Rotating to all directions...`);
-        const rotatedImages = { south: baseImage };
-        // Rotate sequentially with delay to avoid rate limiting
-        for (const direction of DIRECTIONS.filter(dir => dir !== "south")) {
-            const rotated = await rotateCharacter(apiKey, baseImage, direction);
-            rotatedImages[direction] = rotated;
-            await jobRef.update({
-                progress: admin.firestore.FieldValue.increment(1),
-                preview: `data:image/png;base64,${rotated}`, // Update preview with latest rotation
-                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-            console.log(`[${jobId}] Rotated to ${direction}`);
-            // Small delay between rotations to respect rate limits
-            await new Promise(r => setTimeout(r, 1000)); // 1 second delay
+        if (!createCharRes.ok) {
+            const errorText = await createCharRes.text();
+            throw new Error(`Character creation failed: ${createCharRes.status} - ${errorText}`);
         }
-        console.log(`[${jobId}] All rotations complete`);
-        // Step 3: Generate walking animations for each direction
+        const createData = await createCharRes.json();
+        const characterId = createData.character_id;
+        const characterJobId = createData.background_job_id;
+        console.log(`[${jobId}] Character job started: ${characterJobId}`);
+        // Poll until character creation completes
         await jobRef.update({
-            currentDirection: "animating walk",
+            currentDirection: "waiting for character rotations",
+            progress: 1,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        console.log(`[${jobId}] Step 3: Generating walking animations...`);
+        await pollBackgroundJob(apiKey, characterJobId);
+        console.log(`[${jobId}] Character created successfully`);
+        // Step 2: Animate character with walking-8-frames template
+        await jobRef.update({
+            currentDirection: "creating walk animations",
+            progress: 2,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`[${jobId}] Step 2: Animating character...`);
+        const animateRes = await fetchPixellabV2(apiKey, "animate-character", {
+            character_id: characterId,
+            template_animation_id: "walking-8-frames",
+            action_description: "walking",
+        });
+        if (!animateRes.ok) {
+            const errorText = await animateRes.text();
+            throw new Error(`Animation failed: ${animateRes.status} - ${errorText}`);
+        }
+        const animateData = await animateRes.json();
+        const animationJobIds = animateData.background_job_ids;
+        console.log(`[${jobId}] Animation jobs started: ${animationJobIds.length} jobs`);
+        // Poll all animation jobs
         const walkFrames = {};
-        for (const direction of DIRECTIONS) {
+        for (let i = 0; i < animationJobIds.length; i++) {
+            const animJobId = animationJobIds[i];
+            const direction = DIRECTIONS[i];
             await jobRef.update({
-                currentDirection: `walk ${direction}`,
+                currentDirection: `animating ${direction}`,
+                progress: 2 + i,
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
-            // Retry logic for walk animation
-            let walkSuccess = false;
-            let walkAttempts = 0;
-            const maxWalkAttempts = 3;
-            while (!walkSuccess && walkAttempts < maxWalkAttempts) {
-                walkAttempts++;
-                try {
-                    const walkRes = await fetch(`${PIXELLAB_API_URL}/animate-with-text`, {
-                        method: "POST",
-                        headers: {
-                            "Authorization": `Bearer ${apiKey}`,
-                            "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify({
-                            description: "walking", // Minimal description - rely on reference image
-                            action: "walking",
-                            reference_image: { type: "base64", base64: rotatedImages[direction] },
-                            image_size: { width: 64, height: 64 },
-                            n_frames: 7, // Match idle frame count
-                            direction,
-                            view: "low top-down",
-                            text_guidance_scale: 4, // Lower guidance = stronger reference influence
-                            image_guidance_scale: 12, // Higher image guidance = stick closer to reference
-                        }),
-                    });
-                    if (walkRes.status === 429 && walkAttempts < maxWalkAttempts) {
-                        const waitTime = Math.pow(2, walkAttempts - 1) * 2000;
-                        console.log(`[${jobId}] Rate limited on walk ${direction}, waiting ${waitTime}ms (attempt ${walkAttempts}/${maxWalkAttempts})`);
-                        await new Promise(r => setTimeout(r, waitTime));
-                        continue;
-                    }
-                    if (!walkRes.ok) {
-                        throw new Error(`Walk animation ${direction} failed: ${walkRes.status}`);
-                    }
-                    const walkData = await walkRes.json();
-                    walkFrames[direction] = walkData.images.map((img) => img.base64);
-                    console.log(`[${jobId}] Walk ${direction} complete (${walkFrames[direction].length} frames)`);
-                    walkSuccess = true;
-                }
-                catch (error) {
-                    if (walkAttempts >= maxWalkAttempts) {
-                        throw error;
-                    }
-                    const waitTime = Math.pow(2, walkAttempts - 1) * 2000;
-                    console.log(`[${jobId}] Error on walk ${direction}, retrying in ${waitTime}ms`);
-                    await new Promise(r => setTimeout(r, waitTime));
+            const animJobData = await pollBackgroundJob(apiKey, animJobId);
+            // Extract base64 frames from animation job
+            const frames = ((_a = animJobData.frames) === null || _a === void 0 ? void 0 : _a.map((f) => f.base64)) || [];
+            // Pad or trim to 7 frames
+            if (frames.length < 7) {
+                // Repeat frames to fill
+                while (frames.length < 7) {
+                    frames.push(...frames.slice(0, Math.min(frames.length, 7 - frames.length)));
                 }
             }
-            // Small delay between animations
-            await new Promise(r => setTimeout(r, 500));
+            else if (frames.length > 7) {
+                frames.length = 7;
+            }
+            walkFrames[direction] = frames;
+            console.log(`[${jobId}] Walk ${direction} complete (${frames.length} frames)`);
         }
-        // Step 4: Create static idle frames (use rotated images, no animation needed)
-        console.log(`[${jobId}] Step 4: Creating static idle frames...`);
+        // Step 3: Create static idle frames from character rotations
+        console.log(`[${jobId}] Step 3: Creating idle frames...`);
         const idleFrames = {};
-        for (const direction of DIRECTIONS) {
-            // Use the static rotated image for all 7 idle frames
-            idleFrames[direction] = Array(7).fill(rotatedImages[direction]);
+        // Get character data to extract rotation images
+        const getCharRes = await fetch(`${PIXELLAB_API_V2_URL}/characters/${characterId}`, {
+            headers: {
+                "Authorization": `Bearer ${apiKey}`,
+            },
+        });
+        if (!getCharRes.ok) {
+            throw new Error(`Failed to get character: ${getCharRes.status}`);
         }
-        console.log(`[${jobId}] Static idle frames created`);
-        // Update job with complete animation frames
+        const charData = await getCharRes.json();
+        // Use rotation images for idle
+        for (let i = 0; i < DIRECTIONS.length; i++) {
+            const direction = DIRECTIONS[i];
+            const rotationImage = ((_c = (_b = charData.rotations) === null || _b === void 0 ? void 0 : _b[i]) === null || _c === void 0 ? void 0 : _c.base64) || "";
+            idleFrames[direction] = Array(7).fill(rotationImage);
+        }
+        console.log(`[${jobId}] Idle frames created`);
+        // Update job with complete data
         await jobRef.update({
             status: "complete",
-            progress: DIRECTIONS.length,
+            progress: DIRECTIONS.length + 2,
             currentDirection: null,
             walkFrames,
             idleFrames,
@@ -354,51 +309,5 @@ exports.generateSprite = (0, https_1.onRequest)({
         return;
     }
     res.status(405).json({ error: "Method not allowed" });
-});
-// Quick endpoint - generates base image only, duplicates for all directions
-// No polling needed - returns immediately with all images
-exports.generateSpriteQuick = (0, https_1.onRequest)({
-    timeoutSeconds: 60,
-    memory: "256MiB",
-    cors: true,
-}, async (req, res) => {
-    if (req.method === "OPTIONS") {
-        res.status(204).send("");
-        return;
-    }
-    if (req.method !== "POST") {
-        res.status(405).json({ error: "Method not allowed" });
-        return;
-    }
-    const { description } = req.body;
-    if (!description || typeof description !== "string") {
-        res.status(400).json({ error: "description is required" });
-        return;
-    }
-    const apiKey = PIXELLAB_API_KEY;
-    if (!apiKey) {
-        res.status(500).json({ error: "PIXELLAB_API_KEY not configured" });
-        return;
-    }
-    try {
-        console.log(`[quick] Generating: "${description}"`);
-        const baseImage = await generateBaseCharacter(apiKey, description);
-        console.log(`[quick] Done`);
-        // Use the same image for all 8 directions
-        const images = {};
-        for (const dir of DIRECTIONS) {
-            images[dir] = baseImage;
-        }
-        res.status(200).json({
-            status: "complete",
-            images,
-            directions: DIRECTIONS,
-        });
-    }
-    catch (error) {
-        const errMsg = error instanceof Error ? error.message : "Unknown error";
-        console.error(`[quick] Error:`, errMsg);
-        res.status(500).json({ error: errMsg });
-    }
 });
 //# sourceMappingURL=index.js.map
