@@ -1424,6 +1424,19 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         if (!engine.isCharacterEnabled) return;
 
         const currentPos = engine.visualCursorPos;
+        const targetPos = engine.cursorPos;
+
+        // Check distance to destination
+        const distanceToTarget = Math.sqrt(
+            Math.pow(currentPos.x - targetPos.x, 2) +
+            Math.pow(currentPos.y - targetPos.y, 2)
+        );
+
+        // Start idle transition when very close to destination (within 0.5 cells)
+        const arrivalThreshold = 0.5;
+        if (distanceToTarget < arrivalThreshold && isCharacterMoving) {
+            idleTransitionPendingRef.current = true;
+        }
 
         if (previousCharacterPosRef.current) {
             const prevPos = previousCharacterPosRef.current;
@@ -1470,7 +1483,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             }
         }
         previousCharacterPosRef.current = { ...currentPos };
-    }, [engine.visualCursorPos, engine.isCharacterEnabled, characterDirection, isCharacterMoving]);
+    }, [engine.visualCursorPos, engine.cursorPos, engine.isCharacterEnabled, characterDirection, isCharacterMoving]);
 
     // Character sprite animation interval
     useEffect(() => {
