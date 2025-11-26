@@ -154,18 +154,8 @@ async function processJob(jobId: string, description: string): Promise<void> {
 
             const animJobData = await pollBackgroundJob(apiKey, animJobId);
 
-            // Extract base64 frames from animation job
+            // Extract base64 frames from animation job (use all frames from template)
             const frames = animJobData.frames?.map((f: any) => f.base64) || [];
-
-            // Pad or trim to 7 frames
-            if (frames.length < 7) {
-                // Repeat frames to fill
-                while (frames.length < 7) {
-                    frames.push(...frames.slice(0, Math.min(frames.length, 7 - frames.length)));
-                }
-            } else if (frames.length > 7) {
-                frames.length = 7;
-            }
 
             walkFrames[direction] = frames;
             console.log(`[${jobId}] Walk ${direction} complete (${frames.length} frames)`);
@@ -188,11 +178,12 @@ async function processJob(jobId: string, description: string): Promise<void> {
 
         const charData = await getCharRes.json();
 
-        // Use rotation images for idle
+        // Use rotation images for idle (match walk frame count)
         for (let i = 0; i < DIRECTIONS.length; i++) {
             const direction = DIRECTIONS[i];
             const rotationImage = charData.rotations?.[i]?.base64 || "";
-            idleFrames[direction] = Array(7).fill(rotationImage);
+            const walkFrameCount = walkFrames[direction]?.length || 8;
+            idleFrames[direction] = Array(walkFrameCount).fill(rotationImage);
         }
 
         console.log(`[${jobId}] Idle frames created`);

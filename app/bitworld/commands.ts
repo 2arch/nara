@@ -18,8 +18,8 @@ const SPRITE_DIRECTIONS = [
 ] as const;
 const WALK_FRAME_SIZE = { width: 32, height: 40 };
 const IDLE_FRAME_SIZE = { width: 32, height: 40 };
-const WALK_FRAMES_PER_DIR = 7;
-const IDLE_FRAMES_PER_DIR = 7;
+const WALK_FRAMES_PER_DIR = 8;
+const IDLE_FRAMES_PER_DIR = 8;
 
 // Composite individual direction images into a sprite sheet using Canvas API
 async function compositeSpriteSheet(

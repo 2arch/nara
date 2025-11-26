@@ -82,7 +82,7 @@ async function pollBackgroundJob(apiKey, jobId, maxWaitTime = 300000) {
 }
 // Process job in background using V2 API (updates Firestore as it progresses)
 async function processJob(jobId, description) {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     const jobRef = db.collection("spriteJobs").doc(jobId);
     const apiKey = PIXELLAB_API_KEY;
     try {
@@ -148,18 +148,8 @@ async function processJob(jobId, description) {
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
             const animJobData = await pollBackgroundJob(apiKey, animJobId);
-            // Extract base64 frames from animation job
+            // Extract base64 frames from animation job (use all frames from template)
             const frames = ((_a = animJobData.frames) === null || _a === void 0 ? void 0 : _a.map((f) => f.base64)) || [];
-            // Pad or trim to 7 frames
-            if (frames.length < 7) {
-                // Repeat frames to fill
-                while (frames.length < 7) {
-                    frames.push(...frames.slice(0, Math.min(frames.length, 7 - frames.length)));
-                }
-            }
-            else if (frames.length > 7) {
-                frames.length = 7;
-            }
             walkFrames[direction] = frames;
             console.log(`[${jobId}] Walk ${direction} complete (${frames.length} frames)`);
         }
@@ -176,11 +166,12 @@ async function processJob(jobId, description) {
             throw new Error(`Failed to get character: ${getCharRes.status}`);
         }
         const charData = await getCharRes.json();
-        // Use rotation images for idle
+        // Use rotation images for idle (match walk frame count)
         for (let i = 0; i < DIRECTIONS.length; i++) {
             const direction = DIRECTIONS[i];
             const rotationImage = ((_c = (_b = charData.rotations) === null || _b === void 0 ? void 0 : _b[i]) === null || _c === void 0 ? void 0 : _c.base64) || "";
-            idleFrames[direction] = Array(7).fill(rotationImage);
+            const walkFrameCount = ((_d = walkFrames[direction]) === null || _d === void 0 ? void 0 : _d.length) || 8;
+            idleFrames[direction] = Array(walkFrameCount).fill(rotationImage);
         }
         console.log(`[${jobId}] Idle frames created`);
         // Update job with complete data
