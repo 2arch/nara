@@ -2,7 +2,7 @@
 import { initializeApp } from "firebase/app";
 import { getDatabase, connectDatabaseEmulator, ref, onValue, set, get, query, orderByChild, equalTo } from "firebase/database";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, User, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink } from "firebase/auth";
-import { getStorage, ref as storageRef, uploadString, getDownloadURL } from "firebase/storage";
+import { getStorage, ref as storageRef, uploadString, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc, query as firestoreQuery, orderBy, limit } from "firebase/firestore";
 import { logger } from './bitworld/logger';
 // TODO: Add SDKs for Firebase products that you want to use
@@ -507,6 +507,18 @@ export const saveSprite = async (
     ]);
     console.log('[saveSprite] Download URLs obtained:', walkUrl.substring(0, 50) + '...');
 
+    // Save metadata.json alongside the sprite sheets
+    const metadata = {
+      id: spriteId,
+      name,
+      description,
+      createdAt: new Date().toISOString(),
+    };
+    const metadataRef = storageRef(storage, `sprites/${uid}/${spriteId}/metadata.json`);
+    const metadataBlob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
+    await uploadBytes(metadataRef, metadataBlob);
+    console.log('[saveSprite] Metadata saved');
+
     // Return sprite data (Storage URLs only, no Firestore)
     const spriteData: SavedSprite = {
       id: spriteId,
@@ -514,7 +526,7 @@ export const saveSprite = async (
       description,
       walkUrl,
       idleUrl,
-      createdAt: new Date().toISOString(),
+      createdAt: metadata.createdAt,
     };
 
     console.log('[saveSprite] Sprite saved to Storage:', spriteId);
@@ -537,12 +549,29 @@ export const getUserSprites = async (uid: string | null): Promise<SavedSprite[]>
       const userSpritesRef = storageRef(storage, `sprites/${uid}`);
       const result = await listAll(userSpritesRef);
 
-      // Each sprite has a folder with walk.png and idle.png
+      // Each sprite has a folder with walk.png, idle.png, and metadata.json
       for (const folderRef of result.prefixes) {
         const spriteId = folderRef.name;
         try {
           const walkRef = storageRef(storage, `sprites/${uid}/${spriteId}/walk.png`);
           const idleRef = storageRef(storage, `sprites/${uid}/${spriteId}/idle.png`);
+          const metadataRef = storageRef(storage, `sprites/${uid}/${spriteId}/metadata.json`);
+
+          // Load metadata if it exists
+          let name = spriteId.replace('sprite_', '').replace(/_/g, ' ');
+          let description = '';
+          let createdAt = new Date().toISOString();
+
+          try {
+            const metadataUrl = await getDownloadURL(metadataRef);
+            const metadataRes = await fetch(metadataUrl);
+            const metadata = await metadataRes.json();
+            name = metadata.name || name;
+            description = metadata.description || '';
+            createdAt = metadata.createdAt || createdAt;
+          } catch (error) {
+            // No metadata file, use defaults
+          }
 
           const [walkUrl, idleUrl] = await Promise.all([
             getDownloadURL(walkRef),
@@ -551,11 +580,11 @@ export const getUserSprites = async (uid: string | null): Promise<SavedSprite[]>
 
           allSprites.push({
             id: spriteId,
-            name: spriteId.replace('sprite_', '').replace(/_/g, ' '),
-            description: '', // No metadata available
+            name,
+            description,
             walkUrl,
             idleUrl,
-            createdAt: new Date().toISOString(),
+            createdAt,
           });
         } catch (error) {
           console.warn(`Skipping sprite ${spriteId}:`, error);

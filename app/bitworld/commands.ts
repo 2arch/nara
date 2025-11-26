@@ -18,7 +18,7 @@ const SPRITE_DIRECTIONS = [
 ] as const;
 const WALK_FRAME_SIZE = { width: 32, height: 40 };
 const IDLE_FRAME_SIZE = { width: 32, height: 40 };
-const WALK_FRAMES_PER_DIR = 6;
+const WALK_FRAMES_PER_DIR = 7;
 const IDLE_FRAMES_PER_DIR = 7;
 
 // Composite individual direction images into a sprite sheet using Canvas API
@@ -2987,19 +2987,31 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 if (userUid) {
                     addLog(`Creating Storage folder: ${spriteId}`);
                     try {
-                        const { ref: storageRef, uploadString } = await import('firebase/storage');
+                        const { ref: storageRef, uploadString, uploadBytes } = await import('firebase/storage');
                         const { storage } = await import('@/app/firebase');
 
                         // Create placeholder files to establish the folder structure
                         const placeholderData = 'data:text/plain;base64,Z2VuZXJhdGluZy4uLg=='; // "generating..."
                         const walkRef = storageRef(storage, `sprites/${userUid}/${spriteId}/walk.png`);
                         const idleRef = storageRef(storage, `sprites/${userUid}/${spriteId}/idle.png`);
+                        const metadataRef = storageRef(storage, `sprites/${userUid}/${spriteId}/metadata.json`);
+
+                        // Create metadata.json with sprite info
+                        const metadata = {
+                            id: spriteId,
+                            name: spriteName,
+                            description: prompt,
+                            status: 'generating',
+                            createdAt: new Date().toISOString(),
+                        };
+                        const metadataBlob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
 
                         await Promise.all([
                             uploadString(walkRef, placeholderData, 'data_url'),
                             uploadString(idleRef, placeholderData, 'data_url'),
+                            uploadBytes(metadataRef, metadataBlob),
                         ]);
-                        addLog(`Storage folder created!`);
+                        addLog(`Storage folder created with metadata!`);
                     } catch (error) {
                         const errorMsg = error instanceof Error ? error.message : String(error);
                         addLog(`Warning: Failed to create Storage folder - ${errorMsg}`);

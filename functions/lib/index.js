@@ -138,6 +138,7 @@ async function processJob(jobId, description) {
         await jobRef.update({
             currentDirection: "rotating",
             progress: 1,
+            preview: `data:image/png;base64,${baseImage}`, // Show base image as preview
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         console.log(`[${jobId}] Step 2: Rotating to all directions...`);
@@ -148,6 +149,7 @@ async function processJob(jobId, description) {
             rotatedImages[direction] = rotated;
             await jobRef.update({
                 progress: admin.firestore.FieldValue.increment(1),
+                preview: `data:image/png;base64,${rotated}`, // Update preview with latest rotation
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
             console.log(`[${jobId}] Rotated to ${direction}`);
@@ -181,14 +183,15 @@ async function processJob(jobId, description) {
                             "Content-Type": "application/json",
                         },
                         body: JSON.stringify({
-                            description,
+                            description: "walking", // Minimal description - rely on reference image
                             action: "walking",
                             reference_image: { type: "base64", base64: rotatedImages[direction] },
                             image_size: { width: 64, height: 64 },
-                            n_frames: 6,
+                            n_frames: 7, // Match idle frame count
                             direction,
                             view: "low top-down",
-                            text_guidance_scale: 8,
+                            text_guidance_scale: 4, // Lower guidance = stronger reference influence
+                            image_guidance_scale: 12, // Higher image guidance = stick closer to reference
                         }),
                     });
                     if (walkRes.status === 429 && walkAttempts < maxWalkAttempts) {
@@ -248,7 +251,7 @@ async function processJob(jobId, description) {
 }
 // Main endpoint - handles both POST (start) and GET (status)
 exports.generateSprite = (0, https_1.onRequest)({
-    timeoutSeconds: 300,
+    timeoutSeconds: 3600,
     memory: "256MiB",
     cors: true,
 }, async (req, res) => {

@@ -191,14 +191,15 @@ async function processJob(jobId: string, description: string): Promise<void> {
                             "Content-Type": "application/json",
                         },
                         body: JSON.stringify({
-                            description,
+                            description: "walking",  // Minimal description - rely on reference image
                             action: "walking",
                             reference_image: { type: "base64", base64: rotatedImages[direction] },
                             image_size: { width: 64, height: 64 },
-                            n_frames: 6,
+                            n_frames: 7,  // Match idle frame count
                             direction,
                             view: "low top-down",
-                            text_guidance_scale: 8,
+                            text_guidance_scale: 4,  // Lower guidance = stronger reference influence
+                            image_guidance_scale: 12,  // Higher image guidance = stick closer to reference
                         }),
                     });
 
