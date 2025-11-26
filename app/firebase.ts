@@ -518,7 +518,7 @@ export const saveSprite = async (
 
     const dbPath = `sprites/${uid}/${spriteId}`;
     console.log('[saveSprite] Saving metadata to Firestore at:', dbPath);
-    await setDoc(doc(firestore, 'sprites', uid, spriteId), spriteData);
+    await setDoc(doc(firestore, `sprites/${uid}`, spriteId), spriteData);
     console.log('[saveSprite] Metadata saved successfully!');
 
     logger.info(`Sprite saved: ${spriteId} for user ${uid}`);
@@ -570,13 +570,13 @@ export const getUserSprites = async (uid: string | null): Promise<SavedSprite[]>
 export const loadSprite = async (uid: string, spriteId: string): Promise<SavedSprite | null> => {
   try {
     // Try user sprites first
-    let docSnap = await getDoc(doc(firestore, 'sprites', uid, spriteId));
+    let docSnap = await getDoc(doc(firestore, `sprites/${uid}`, spriteId));
     if (docSnap.exists()) {
       return docSnap.data() as SavedSprite;
     }
 
     // Try public sprites
-    docSnap = await getDoc(doc(firestore, 'sprites', 'public', spriteId));
+    docSnap = await getDoc(doc(firestore, `sprites/public`, spriteId));
     if (docSnap.exists()) {
       return docSnap.data() as SavedSprite;
     }
@@ -602,7 +602,7 @@ export const deleteSprite = async (uid: string, spriteId: string): Promise<{ suc
     ]);
 
     // Delete metadata from Firestore
-    await deleteDoc(doc(firestore, 'sprites', uid, spriteId));
+    await deleteDoc(doc(firestore, `sprites/${uid}`, spriteId));
 
     logger.info(`Sprite deleted: ${spriteId} for user ${uid}`);
     return { success: true };
@@ -620,7 +620,7 @@ export const renameSprite = async (
   try {
     // Update just the name field in Firestore
     const { updateDoc } = await import('firebase/firestore');
-    await updateDoc(doc(firestore, 'sprites', uid, spriteId), { name: newName });
+    await updateDoc(doc(firestore, `sprites/${uid}`, spriteId), { name: newName });
 
     logger.info(`Sprite renamed: ${spriteId} -> ${newName} for user ${uid}`);
     return { success: true };
