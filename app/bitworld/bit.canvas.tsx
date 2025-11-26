@@ -1423,34 +1423,36 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     useEffect(() => {
         if (!engine.isCharacterEnabled) return;
 
-        const currentPos = engine.cursorPos;
+        const currentPos = engine.visualCursorPos;
 
         if (previousCharacterPosRef.current) {
             const prevPos = previousCharacterPosRef.current;
             const dx = currentPos.x - prevPos.x;
             const dy = currentPos.y - prevPos.y;
 
-            if (dx !== 0 || dy !== 0) {
+            // Use threshold to avoid micro-movements causing direction changes
+            const threshold = 0.01;
+            if (Math.abs(dx) > threshold || Math.abs(dy) > threshold) {
                 let newDirection = characterDirection;
 
                 // Map dx/dy to 8 directions based on SPRITE_DIRECTIONS order:
                 // 0=south, 1=south-west, 2=west, 3=north-west,
                 // 4=north, 5=north-east, 6=east, 7=south-east
-                if (dy > 0 && dx === 0) {
+                if (dy > threshold && Math.abs(dx) <= threshold) {
                     newDirection = 0; // south (down)
-                } else if (dy > 0 && dx < 0) {
+                } else if (dy > threshold && dx < -threshold) {
                     newDirection = 1; // south-west
-                } else if (dy === 0 && dx < 0) {
+                } else if (Math.abs(dy) <= threshold && dx < -threshold) {
                     newDirection = 2; // west (left)
-                } else if (dy < 0 && dx < 0) {
+                } else if (dy < -threshold && dx < -threshold) {
                     newDirection = 3; // north-west
-                } else if (dy < 0 && dx === 0) {
+                } else if (dy < -threshold && Math.abs(dx) <= threshold) {
                     newDirection = 4; // north (up)
-                } else if (dy < 0 && dx > 0) {
+                } else if (dy < -threshold && dx > threshold) {
                     newDirection = 5; // north-east
-                } else if (dy === 0 && dx > 0) {
+                } else if (Math.abs(dy) <= threshold && dx > threshold) {
                     newDirection = 6; // east (right)
-                } else if (dy > 0 && dx > 0) {
+                } else if (dy > threshold && dx > threshold) {
                     newDirection = 7; // south-east
                 }
 
@@ -1468,7 +1470,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             }
         }
         previousCharacterPosRef.current = { ...currentPos };
-    }, [engine.cursorPos, engine.isCharacterEnabled, characterDirection, isCharacterMoving]);
+    }, [engine.visualCursorPos, engine.isCharacterEnabled, characterDirection, isCharacterMoving]);
 
     // Character sprite animation interval
     useEffect(() => {
