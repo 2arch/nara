@@ -403,6 +403,7 @@ export interface WorldEngine {
     };
     isGeneratingSprite?: boolean;
     spriteProgress?: number;
+    spritePreview?: string;
     spriteDebugLog?: string[];
     // Spatial indexing for efficient viewport-based rendering
     spatialIndex: React.MutableRefObject<Map<string, Set<string>>>;

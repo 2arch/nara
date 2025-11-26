@@ -160,14 +160,16 @@ function parseNoteFromWorldData(key: string, value: any): Note | null {
         // Populate content-specific data based on type
         switch (baseNote.contentType) {
             case 'image':
+                // Support both nested imageData and top-level fields (legacy)
+                const imgData = data.imageData || data;
                 const imageData: ImageAttachment = {
-                    src: data.src,
-                    originalWidth: data.originalWidth,
-                    originalHeight: data.originalHeight,
-                    ...(data.isAnimated && { isAnimated: data.isAnimated }),
-                    ...(data.frameTiming && { frameTiming: data.frameTiming }),
-                    ...(data.totalDuration && { totalDuration: data.totalDuration }),
-                    ...(data.animationStartTime && { animationStartTime: data.animationStartTime })
+                    src: imgData.src,
+                    originalWidth: imgData.originalWidth,
+                    originalHeight: imgData.originalHeight,
+                    ...(imgData.isAnimated && { isAnimated: imgData.isAnimated }),
+                    ...(imgData.frameTiming && { frameTiming: imgData.frameTiming }),
+                    ...(imgData.totalDuration && { totalDuration: imgData.totalDuration }),
+                    ...(imgData.animationStartTime && { animationStartTime: imgData.animationStartTime })
                 };
                 // Store in both new and legacy locations for backward compat
                 baseNote.content = { imageData };
@@ -5761,17 +5763,49 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             );
                         }
                     } else if (engine.isGeneratingSprite) {
-                        // Show pulsing cursor while generating sprite (similar to processingRegion)
+                        // Show sprite preview while generating (if available)
                         const pulseOpacity = (Math.sin(Date.now() / 300) + 1) / 2; // Oscillates between 0 and 1
-                        ctx.globalAlpha = 0.3 + pulseOpacity * 0.7; // Range: 0.3 to 1.0
-                        ctx.fillStyle = engine.textColor;
-                        ctx.fillRect(
-                            cursorTopScreenPos.x,
-                            cursorTopScreenPos.y,
-                            cursorPixelWidth,
-                            cursorPixelHeight
-                        );
-                        ctx.globalAlpha = 1.0;
+
+                        if (engine.spritePreview) {
+                            // Draw the preview image with pulsing effect
+                            const previewImg = new Image();
+                            previewImg.src = engine.spritePreview;
+
+                            // If image is already loaded, draw it
+                            if (previewImg.complete && previewImg.naturalHeight !== 0) {
+                                ctx.globalAlpha = 0.3 + pulseOpacity * 0.7; // Range: 0.3 to 1.0
+                                ctx.drawImage(
+                                    previewImg,
+                                    cursorTopScreenPos.x,
+                                    cursorTopScreenPos.y,
+                                    cursorPixelWidth,
+                                    cursorPixelHeight
+                                );
+                                ctx.globalAlpha = 1.0;
+                            } else {
+                                // Fallback to pulsing rectangle while image loads
+                                ctx.globalAlpha = 0.3 + pulseOpacity * 0.7;
+                                ctx.fillStyle = engine.textColor;
+                                ctx.fillRect(
+                                    cursorTopScreenPos.x,
+                                    cursorTopScreenPos.y,
+                                    cursorPixelWidth,
+                                    cursorPixelHeight
+                                );
+                                ctx.globalAlpha = 1.0;
+                            }
+                        } else {
+                            // No preview yet, show pulsing rectangle
+                            ctx.globalAlpha = 0.3 + pulseOpacity * 0.7;
+                            ctx.fillStyle = engine.textColor;
+                            ctx.fillRect(
+                                cursorTopScreenPos.x,
+                                cursorTopScreenPos.y,
+                                cursorPixelWidth,
+                                cursorPixelHeight
+                            );
+                            ctx.globalAlpha = 1.0;
+                        }
                     } else {
                         // Original rectangle cursor rendering
                         // Determine cursor color based on engine state

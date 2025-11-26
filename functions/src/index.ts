@@ -137,6 +137,7 @@ async function processJob(jobId: string, description: string): Promise<void> {
         await jobRef.update({
             currentDirection: "rotating",
             progress: 1,
+            preview: `data:image/png;base64,${baseImage}`, // Show base image as preview
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 
@@ -149,6 +150,7 @@ async function processJob(jobId: string, description: string): Promise<void> {
             rotatedImages[direction] = rotated;
             await jobRef.update({
                 progress: admin.firestore.FieldValue.increment(1),
+                preview: `data:image/png;base64,${rotated}`, // Update preview with latest rotation
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
             console.log(`[${jobId}] Rotated to ${direction}`);
@@ -266,7 +268,7 @@ async function processJob(jobId: string, description: string): Promise<void> {
 // Main endpoint - handles both POST (start) and GET (status)
 export const generateSprite = onRequest(
     {
-        timeoutSeconds: 300,
+        timeoutSeconds: 3600,
         memory: "256MiB",
         cors: true,
     },
