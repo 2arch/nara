@@ -18,6 +18,7 @@ import { DataRecorder } from './recorder';
 import { parseGIFFromArrayBuffer, getCurrentFrame, isGIFUrl } from './gif.parser';
 import type { AgentState } from './agent';
 import { AgentController } from './agent';
+import { findSmoothPath, type Point as PathPoint } from './paths';
 
 // API route helper functions for AI operations
 const callTransformAPI = async (text: string, instructions: string, userId?: string): Promise<string> => {
@@ -818,6 +819,10 @@ export function useWorldEngine({
     const visualCursorPosRef = useRef<Point>(initialCursorPos);
     const animationFrameRef = useRef<number | null>(null);
 
+    // Pathfinding state
+    const currentPathRef = useRef<PathPoint[]>([]);
+    const pathIndexRef = useRef<number>(0);
+
     const [viewOffset, setViewOffset] = useState<Point>(initialCenteredOffset);
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
 
@@ -877,36 +882,63 @@ export function useWorldEngine({
         cursorPosRef.current = cursorPos;
     }, [cursorPos]);
 
-    // Animate visual cursor position toward target cursor position
+    // Calculate path when cursor target changes
+    useEffect(() => {
+        const target = cursorPosRef.current;
+        const current = visualCursorPosRef.current;
+
+        // Calculate new path using A* with obstacle avoidance
+        const path = findSmoothPath(current, target, worldData);
+        currentPathRef.current = path;
+        pathIndexRef.current = 0;
+    }, [cursorPos, worldData]);
+
+    // Animate visual cursor position following the path
     useEffect(() => {
         const animate = () => {
-            const target = cursorPosRef.current;
             const current = visualCursorPosRef.current;
+            const path = currentPathRef.current;
+            let pathIndex = pathIndexRef.current;
 
-            // Calculate distance to target
-            const dx = target.x - current.x;
-            const dy = target.y - current.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-
-            // If we're close enough, snap to target
-            if (distance < 0.01) {
-                if (current.x !== target.x || current.y !== target.y) {
-                    setVisualCursorPos(target);
-                    visualCursorPosRef.current = target;
-                }
+            // No path or already at end
+            if (path.length === 0 || pathIndex >= path.length) {
                 animationFrameRef.current = null;
                 return;
             }
 
-            // Lerp factor - higher = faster movement
+            // Get current target waypoint
+            let waypoint = path[pathIndex];
+
+            // Calculate distance to current waypoint
+            const dx = waypoint.x - current.x;
+            const dy = waypoint.y - current.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            // If close enough to waypoint, move to next one
+            if (distance < 0.1) {
+                pathIndex++;
+                pathIndexRef.current = pathIndex;
+
+                // If we've reached the last waypoint, snap to final position
+                if (pathIndex >= path.length) {
+                    const finalPos = path[path.length - 1];
+                    setVisualCursorPos(finalPos);
+                    visualCursorPosRef.current = finalPos;
+                    animationFrameRef.current = null;
+                    return;
+                }
+
+                waypoint = path[pathIndex];
+            }
+
+            // Lerp toward current waypoint
             // Use higher speed for longer distances
-            const baseLerpFactor = 0.15;
-            const distanceBoost = Math.min(distance / 10, 1); // Boost up to 2x for far distances
+            const baseLerpFactor = 0.2;
+            const distanceBoost = Math.min(distance / 5, 1);
             const lerpFactor = baseLerpFactor * (1 + distanceBoost);
 
-            // Calculate new position
-            const newX = current.x + dx * lerpFactor;
-            const newY = current.y + dy * lerpFactor;
+            const newX = current.x + (waypoint.x - current.x) * lerpFactor;
+            const newY = current.y + (waypoint.y - current.y) * lerpFactor;
 
             setVisualCursorPos({ x: newX, y: newY });
             visualCursorPosRef.current = { x: newX, y: newY };
@@ -915,8 +947,8 @@ export function useWorldEngine({
             animationFrameRef.current = requestAnimationFrame(animate);
         };
 
-        // Start animation if target has changed
-        if (!animationFrameRef.current) {
+        // Start animation if not already running
+        if (!animationFrameRef.current && currentPathRef.current.length > 0) {
             animationFrameRef.current = requestAnimationFrame(animate);
         }
 
