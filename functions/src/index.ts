@@ -38,11 +38,13 @@ async function fetchPixellabV2(apiKey: string, endpoint: string, body: object, m
     });
 }
 
-async function pollBackgroundJob(apiKey: string, jobId: string, maxWaitTime: number = 300000): Promise<any> {
+async function pollBackgroundJob(apiKey: string, jobId: string, jobType: string, maxWaitTime: number = 300000): Promise<any> {
     const startTime = Date.now();
     const pollInterval = 2000; // 2 seconds
+    let pollCount = 0;
 
     while (Date.now() - startTime < maxWaitTime) {
+        pollCount++;
         const response = await fetch(`${PIXELLAB_API_V2_URL}/background-jobs/${jobId}`, {
             headers: {
                 "Authorization": `Bearer ${apiKey}`,
@@ -54,10 +56,12 @@ async function pollBackgroundJob(apiKey: string, jobId: string, maxWaitTime: num
         }
 
         const data = await response.json();
+        console.log(`[pollJob ${jobType}] Poll #${pollCount} - Status: ${data.status}, Keys: ${Object.keys(data).join(', ')}`);
 
-        if (data.status === "completed") {
+        if (data.status === "completed" || data.status === "complete") {
+            console.log(`[pollJob ${jobType}] Job complete!`);
             return data;
-        } else if (data.status === "failed") {
+        } else if (data.status === "failed" || data.status === "error") {
             throw new Error(`Job ${jobId} failed: ${data.error || "Unknown error"}`);
         }
 
@@ -111,7 +115,7 @@ async function processJob(jobId: string, description: string): Promise<void> {
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 
-        await pollBackgroundJob(apiKey, characterJobId);
+        await pollBackgroundJob(apiKey, characterJobId, "character");
         console.log(`[${jobId}] Character created successfully`);
 
         // Step 2: Animate character with walking-8-frames template
@@ -152,7 +156,7 @@ async function processJob(jobId: string, description: string): Promise<void> {
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
 
-            const animJobData = await pollBackgroundJob(apiKey, animJobId);
+            const animJobData = await pollBackgroundJob(apiKey, animJobId, `anim-${direction}`);
 
             // Extract base64 frames from animation job (use all frames from template)
             const frames = animJobData.frames?.map((f: any) => f.base64) || [];

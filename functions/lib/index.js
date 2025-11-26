@@ -56,10 +56,12 @@ async function fetchPixellabV2(apiKey, endpoint, body, method = "POST") {
         body: method === "POST" ? JSON.stringify(body) : undefined,
     });
 }
-async function pollBackgroundJob(apiKey, jobId, maxWaitTime = 300000) {
+async function pollBackgroundJob(apiKey, jobId, jobType, maxWaitTime = 300000) {
     const startTime = Date.now();
     const pollInterval = 2000; // 2 seconds
+    let pollCount = 0;
     while (Date.now() - startTime < maxWaitTime) {
+        pollCount++;
         const response = await fetch(`${PIXELLAB_API_V2_URL}/background-jobs/${jobId}`, {
             headers: {
                 "Authorization": `Bearer ${apiKey}`,
@@ -69,10 +71,12 @@ async function pollBackgroundJob(apiKey, jobId, maxWaitTime = 300000) {
             throw new Error(`Failed to poll job ${jobId}: ${response.status}`);
         }
         const data = await response.json();
-        if (data.status === "completed") {
+        console.log(`[pollJob ${jobType}] Poll #${pollCount} - Status: ${data.status}, Keys: ${Object.keys(data).join(', ')}`);
+        if (data.status === "completed" || data.status === "complete") {
+            console.log(`[pollJob ${jobType}] Job complete!`);
             return data;
         }
-        else if (data.status === "failed") {
+        else if (data.status === "failed" || data.status === "error") {
             throw new Error(`Job ${jobId} failed: ${data.error || "Unknown error"}`);
         }
         // Still processing, wait before next poll
@@ -116,7 +120,7 @@ async function processJob(jobId, description) {
             progress: 1,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        await pollBackgroundJob(apiKey, characterJobId);
+        await pollBackgroundJob(apiKey, characterJobId, "character");
         console.log(`[${jobId}] Character created successfully`);
         // Step 2: Animate character with walking-8-frames template
         await jobRef.update({
@@ -147,7 +151,7 @@ async function processJob(jobId, description) {
                 progress: 2 + i,
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
-            const animJobData = await pollBackgroundJob(apiKey, animJobId);
+            const animJobData = await pollBackgroundJob(apiKey, animJobId, `anim-${direction}`);
             // Extract base64 frames from animation job (use all frames from template)
             const frames = ((_a = animJobData.frames) === null || _a === void 0 ? void 0 : _a.map((f) => f.base64)) || [];
             walkFrames[direction] = frames;
