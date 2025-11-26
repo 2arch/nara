@@ -77,6 +77,62 @@ async function compositeSpriteSheet(
     return canvas.toDataURL('image/png');
 }
 
+// Composite sprite sheet from Storage URLs (V2 API format)
+async function compositeSpriteSheetFromUrls(
+    storagePaths: Record<string, string>,
+    frameSize: { width: number; height: number },
+    framesPerDirection: number
+): Promise<string> {
+    const sheetWidth = frameSize.width * framesPerDirection;
+    const sheetHeight = frameSize.height * SPRITE_DIRECTIONS.length;
+
+    // Create canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = sheetWidth;
+    canvas.height = sheetHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Failed to get canvas context');
+
+    // Load and draw each direction
+    for (let row = 0; row < SPRITE_DIRECTIONS.length; row++) {
+        const direction = SPRITE_DIRECTIONS[row];
+        const imageUrl = storagePaths[direction];
+        if (!imageUrl) continue;
+
+        // Load image from URL
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const image = new Image();
+            image.crossOrigin = 'anonymous'; // Required for cross-origin images
+            image.onload = () => resolve(image);
+            image.onerror = reject;
+            image.src = imageUrl;
+        });
+
+        // Calculate scaling to fit frame
+        const scale = Math.min(
+            frameSize.width / img.width,
+            frameSize.height / img.height
+        );
+        const scaledWidth = img.width * scale;
+        const scaledHeight = img.height * scale;
+        const offsetX = (frameSize.width - scaledWidth) / 2;
+        const offsetY = (frameSize.height - scaledHeight) / 2;
+
+        // Draw the same image for each frame column (static sprite)
+        for (let col = 0; col < framesPerDirection; col++) {
+            ctx.drawImage(
+                img,
+                col * frameSize.width + offsetX,
+                row * frameSize.height + offsetY,
+                scaledWidth,
+                scaledHeight
+            );
+        }
+    }
+
+    return canvas.toDataURL('image/png');
+}
+
 // Composite animated frames from PixelLab into sprite sheet
 async function compositeAnimatedSpriteSheet(
     animationFrames: Record<string, string[]>, // direction -> array of base64 frames
@@ -3041,12 +3097,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         const jobId = data.jobId;
                         addLog(`Job started: ${jobId}`);
 
-                        // Poll for status with early idle upload
+                        // Poll for status (V2 API: rotationsReady + storagePaths)
                         const pollInterval = 3000; // 3 seconds
-                        const maxPolls = 200; // 10 minutes max (animations take a while)
+                        const maxPolls = 200; // 10 minutes max
                         let polls = 0;
-                        let idleUploaded = false;
-                        let idleSheet: string | null = null;
+                        let cursorSet = false;
+                        let staticSheet: string | null = null;
 
                         const poll = async (): Promise<any> => {
                             polls++;
@@ -3058,43 +3114,58 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             if (!statusRes.ok) throw new Error(`Poll failed: ${statusRes.status}`);
                             const status = await statusRes.json();
 
-                            addLog(`[${polls}] ${status.status} ${status.progress || 0}/${status.total || 11} ${status.currentDirection || ''}`);
+                            // V2 API uses currentPhase instead of currentDirection
+                            const phase = status.currentPhase || status.currentDirection || '';
+                            addLog(`[${polls}] ${status.status} ${status.progress || 0}/${status.total || 8} ${phase}`);
                             setModeState(prev => ({ ...prev, spriteProgress: status.progress || 0 }));
 
-                            // Early idle upload: when idleReady and we haven't uploaded yet
-                            if (status.idleReady && status.idleFrames && !idleUploaded && userUid) {
-                                addLog(`Idle ready! Compositing idle spritesheet...`);
-                                setDialogueText(`Uploading idle sprite...`);
+                            // Show retry info in debug if present
+                            if (status.lastRetry) {
+                                const retry = status.lastRetry;
+                                addLog(`  ↳ ${retry.type}: ${retry.message} (${retry.attempt}/${retry.maxAttempts})`);
+                            }
+
+                            // V2 API: When rotations are ready, create spritesheet and set cursor
+                            if (status.rotationsReady && status.storagePaths && !cursorSet) {
+                                addLog(`Rotations ready! Creating spritesheet...`);
+                                setDialogueText(`Loading character...`);
 
                                 try {
-                                    // Composite idle spritesheet
-                                    idleSheet = await compositeAnimatedSpriteSheet(status.idleFrames, IDLE_FRAME_SIZE, IDLE_FRAMES_PER_DIR);
+                                    // Create spritesheet from Storage URLs
+                                    staticSheet = await compositeSpriteSheetFromUrls(
+                                        status.storagePaths,
+                                        IDLE_FRAME_SIZE,
+                                        IDLE_FRAMES_PER_DIR
+                                    );
 
-                                    // Upload idle.png to Storage immediately
-                                    const { ref: storageRef, uploadString } = await import('firebase/storage');
-                                    const { storage } = await import('@/app/firebase');
-                                    const idleRef = storageRef(storage, `sprites/${userUid}/${spriteId}/idle.png`);
-                                    const idleBase64 = idleSheet.split(',')[1];
-                                    await uploadString(idleRef, idleBase64, 'base64', { contentType: 'image/png' });
+                                    // Set cursor immediately with static sprite
+                                    setModeState(prev => ({
+                                        ...prev,
+                                        isCharacterEnabled: true,
+                                        characterSprite: {
+                                            walkSheet: staticSheet!,
+                                            idleSheet: staticSheet!,
+                                            name: spriteName,
+                                        },
+                                    }));
 
-                                    idleUploaded = true;
-                                    addLog(`Idle uploaded to Storage!`);
+                                    cursorSet = true;
+                                    addLog(`Cursor set to ${spriteName}!`);
+                                    setDialogueText(`Playing as: ${spriteName} (static)`);
                                 } catch (err) {
                                     const errMsg = err instanceof Error ? err.message : String(err);
-                                    addLog(`Warning: Early idle upload failed - ${errMsg}`);
+                                    addLog(`Warning: Failed to create spritesheet - ${errMsg}`);
                                 }
                             }
 
                             if (status.status === 'complete') {
-                                // Include the idleSheet we already composited
-                                return { ...status, _cachedIdleSheet: idleSheet };
+                                return { ...status, _staticSheet: staticSheet };
                             } else if (status.status === 'error') {
                                 throw new Error(status.error || 'Generation failed');
                             } else {
                                 // Update dialogue with progress
-                                const dir = status.currentDirection || 'base';
-                                const idleStatus = idleUploaded ? ' (idle ready!)' : '';
-                                setDialogueText(`Generating "${prompt}"... (${status.progress || 0}/${status.total || 11} ${dir})${idleStatus}`);
+                                const cursorStatus = cursorSet ? ' ✓' : '';
+                                setDialogueText(`Generating "${prompt}"... (${phase})${cursorStatus}`);
                                 await new Promise(r => setTimeout(r, pollInterval));
                                 return poll();
                             }
@@ -3103,45 +3174,122 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         return poll();
                     })
                     .then(async data => {
-                        // New flow: walkFrames + idleFrames from Firestore, idle may already be uploaded
-                        if (data.walkFrames && data.idleFrames) {
-                            addLog(`Compositing walk spritesheet...`);
-                            setDialogueText(`Compositing walk sprite...`);
+                        // V2 API: rotationsReady + storagePaths (static rotations)
+                        if (data.rotationsReady && data.storagePaths) {
+                            addLog(`Generation complete!`);
 
-                            // Composite walk frames
-                            const walkSheet = await compositeAnimatedSpriteSheet(data.walkFrames, WALK_FRAME_SIZE, WALK_FRAMES_PER_DIR);
-
-                            // Use cached idle sheet if available, otherwise composite now
-                            let idleSheet = data._cachedIdleSheet;
-                            if (!idleSheet) {
-                                addLog(`Compositing idle spritesheet...`);
-                                idleSheet = await compositeAnimatedSpriteSheet(data.idleFrames, IDLE_FRAME_SIZE, IDLE_FRAMES_PER_DIR);
+                            // Use the static sheet we already created during polling
+                            let staticSheet = data._staticSheet;
+                            if (!staticSheet) {
+                                addLog(`Creating spritesheet from storagePaths...`);
+                                staticSheet = await compositeSpriteSheetFromUrls(
+                                    data.storagePaths,
+                                    IDLE_FRAME_SIZE,
+                                    IDLE_FRAMES_PER_DIR
+                                );
                             }
 
-                            addLog(`Success! Animated sprite: ${spriteName}`);
+                            addLog(`Success! Character: ${spriteName}`);
 
-                            // Upload walk.png to Storage (idle was already uploaded earlier)
+                            // Save sprite info for user
                             if (userUid) {
-                                addLog(`Uploading walk sprite to Storage...`);
+                                addLog(`Saving sprite metadata...`);
                                 setDialogueText(`Saving sprite...`);
 
                                 try {
-                                    const { ref: storageRef, uploadString, uploadBytes } = await import('firebase/storage');
+                                    const { ref: storageRef, uploadBytes, uploadString } = await import('firebase/storage');
                                     const { storage } = await import('@/app/firebase');
 
-                                    // Upload walk.png
+                                    // Save the composited static sheet as idle.png
+                                    const idleRef = storageRef(storage, `sprites/${userUid}/${spriteId}/idle.png`);
+                                    await uploadString(idleRef, staticSheet, 'data_url');
+
+                                    // Use same for walk (static for now)
                                     const walkRef = storageRef(storage, `sprites/${userUid}/${spriteId}/walk.png`);
-                                    const walkBase64 = walkSheet.split(',')[1];
-                                    await uploadString(walkRef, walkBase64, 'base64', { contentType: 'image/png' });
+                                    await uploadString(walkRef, staticSheet, 'data_url');
 
-                                    // Upload idle.png if not already uploaded during polling
-                                    if (!data._cachedIdleSheet) {
-                                        const idleRef = storageRef(storage, `sprites/${userUid}/${spriteId}/idle.png`);
-                                        const idleBase64 = idleSheet.split(',')[1];
-                                        await uploadString(idleRef, idleBase64, 'base64', { contentType: 'image/png' });
-                                    }
+                                    // Update metadata.json
+                                    const metadata = {
+                                        id: spriteId,
+                                        name: spriteName,
+                                        description: prompt,
+                                        status: 'complete',
+                                        characterId: data.characterId, // V2 character ID for future animations
+                                        createdAt: new Date().toISOString(),
+                                    };
+                                    const metadataRef = storageRef(storage, `sprites/${userUid}/${spriteId}/metadata.json`);
+                                    const metadataBlob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
+                                    await uploadBytes(metadataRef, metadataBlob);
 
-                                    // Update metadata.json with completed status
+                                    addLog(`Sprite saved!`);
+
+                                    // Add to local sprites list
+                                    const { getDownloadURL } = await import('firebase/storage');
+                                    const [finalWalkUrl, finalIdleUrl] = await Promise.all([
+                                        getDownloadURL(walkRef),
+                                        getDownloadURL(idleRef),
+                                    ]);
+
+                                    setUserSprites(prev => [{
+                                        id: spriteId,
+                                        name: spriteName,
+                                        description: prompt,
+                                        walkUrl: finalWalkUrl,
+                                        idleUrl: finalIdleUrl,
+                                        createdAt: metadata.createdAt,
+                                    }, ...prev]);
+                                } catch (err) {
+                                    const errMsg = err instanceof Error ? err.message : String(err);
+                                    addLog(`Warning: Failed to save sprite - ${errMsg}`);
+                                }
+                            }
+
+                            setModeState(prev => ({
+                                ...prev,
+                                isGeneratingSprite: false,
+                                spriteProgress: 0,
+                                isCharacterEnabled: true,
+                                characterSprite: {
+                                    walkSheet: staticSheet,
+                                    idleSheet: staticSheet,
+                                    name: spriteName,
+                                },
+                            }));
+                            setDialogueText(`Now playing as: ${spriteName}`);
+                        } else if (data.walkUrl && data.idleUrl) {
+                            // Legacy V1 flow: server returns walkUrl + idleUrl
+                            addLog(`Downloading walk spritesheet...`);
+                            setDialogueText(`Downloading sprites...`);
+
+                            const walkResponse = await fetch(data.walkUrl);
+                            const walkBlob = await walkResponse.blob();
+                            const walkReader = new FileReader();
+                            const walkSheet = await new Promise<string>((resolve) => {
+                                walkReader.onloadend = () => resolve(walkReader.result as string);
+                                walkReader.readAsDataURL(walkBlob);
+                            });
+
+                            const idleResponse = await fetch(data.idleUrl);
+                            const idleBlob = await idleResponse.blob();
+                            const idleReader = new FileReader();
+                            const idleSheet = await new Promise<string>((resolve) => {
+                                idleReader.onloadend = () => resolve(idleReader.result as string);
+                                idleReader.readAsDataURL(idleBlob);
+                            });
+
+                            addLog(`Success! Animated sprite: ${spriteName}`);
+
+                            if (userUid) {
+                                try {
+                                    const { ref: storageRef, uploadBytes } = await import('firebase/storage');
+                                    const { storage } = await import('@/app/firebase');
+
+                                    const walkRef = storageRef(storage, `sprites/${userUid}/${spriteId}/walk.png`);
+                                    await uploadBytes(walkRef, walkBlob, { contentType: 'image/png' });
+
+                                    const idleRef = storageRef(storage, `sprites/${userUid}/${spriteId}/idle.png`);
+                                    await uploadBytes(idleRef, idleBlob, { contentType: 'image/png' });
+
                                     const metadata = {
                                         id: spriteId,
                                         name: spriteName,
@@ -3153,26 +3301,22 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                                     const metadataBlob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
                                     await uploadBytes(metadataRef, metadataBlob);
 
-                                    addLog(`Sprite saved to Storage!`);
-
-                                    // Add to local sprites list
                                     const { getDownloadURL } = await import('firebase/storage');
-                                    const [walkUrl, idleUrl] = await Promise.all([
+                                    const [finalWalkUrl, finalIdleUrl] = await Promise.all([
                                         getDownloadURL(walkRef),
-                                        getDownloadURL(storageRef(storage, `sprites/${userUid}/${spriteId}/idle.png`)),
+                                        getDownloadURL(idleRef),
                                     ]);
 
                                     setUserSprites(prev => [{
                                         id: spriteId,
                                         name: spriteName,
                                         description: prompt,
-                                        walkUrl,
-                                        idleUrl,
+                                        walkUrl: finalWalkUrl,
+                                        idleUrl: finalIdleUrl,
                                         createdAt: metadata.createdAt,
                                     }, ...prev]);
                                 } catch (err) {
-                                    const errMsg = err instanceof Error ? err.message : String(err);
-                                    addLog(`Warning: Failed to save sprite - ${errMsg}`);
+                                    addLog(`Warning: Failed to save - ${err}`);
                                 }
                             }
 
