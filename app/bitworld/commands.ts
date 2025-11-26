@@ -2979,6 +2979,40 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 setDialogueText(`Generating "${prompt}"...`);
                 addLog(`Starting generation: "${prompt}"`);
 
+                // Create Firestore scaffold immediately
+                const spriteId = `sprite_${Date.now()}`;
+                const spriteName = customName || prompt.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+
+                if (userUid) {
+                    addLog(`Creating Firestore scaffold: ${spriteId}`);
+                    console.log('[/be] Creating Firestore document at sprites/' + userUid + '/' + spriteId);
+                    try {
+                        const { doc, setDoc } = await import('firebase/firestore');
+                        const { firestore } = await import('@/app/firebase');
+
+                        await setDoc(doc(firestore, `sprites/${userUid}`, spriteId), {
+                            id: spriteId,
+                            name: spriteName,
+                            description: prompt,
+                            status: 'generating',
+                            progress: 0,
+                            walkUrl: null,
+                            idleUrl: null,
+                            createdAt: new Date().toISOString(),
+                            updatedAt: new Date().toISOString(),
+                        });
+                        addLog(`Firestore scaffold created!`);
+                        console.log('[/be] Firestore document created successfully');
+                    } catch (error) {
+                        const errorMsg = error instanceof Error ? error.message : String(error);
+                        addLog(`Warning: Failed to create scaffold - ${errorMsg}`);
+                        console.error('[/be] Firestore scaffold creation failed:', error);
+                    }
+                } else {
+                    addLog(`Warning: No user UID, skipping Firestore scaffold`);
+                    console.log('[/be] No userUid, skipping Firestore creation');
+                }
+
                 const spriteApiUrl = process.env.NEXT_PUBLIC_SPRITE_API_URL ||
                     'https://us-central1-nara-a65bc.cloudfunctions.net/generateSprite';
 
@@ -3045,14 +3079,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                                 compositeAnimatedSpriteSheet(data.idleFrames, IDLE_FRAME_SIZE, IDLE_FRAMES_PER_DIR),
                             ]);
 
-                            const spriteName = customName || prompt.replace(/[^a-z0-9]/gi, '_').toLowerCase();
                             addLog(`Success! Animated sprite: ${spriteName}`);
 
                             // Save to Firebase if user is logged in
                             if (userUid) {
-                                addLog(`Saving sprite to your collection...`);
+                                addLog(`Updating sprite in Firestore...`);
                                 setDialogueText(`Saving sprite...`);
-                                const saveResult = await saveSprite(userUid, spriteName, prompt, walkSheet, idleSheet);
+                                const saveResult = await saveSprite(userUid, spriteName, prompt, walkSheet, idleSheet, spriteId);
                                 if (saveResult.success && saveResult.sprite) {
                                     addLog(`Sprite saved!`);
                                     // Update local sprites list
@@ -3084,14 +3117,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                                 compositeSpriteSheet(data.images, IDLE_FRAME_SIZE, IDLE_FRAMES_PER_DIR),
                             ]);
 
-                            const spriteName = customName || prompt.replace(/[^a-z0-9]/gi, '_').toLowerCase();
                             addLog(`Success! Sprite: ${spriteName}`);
 
                             // Save to Firebase if user is logged in
                             if (userUid) {
-                                addLog(`Saving sprite to your collection...`);
+                                addLog(`Updating sprite in Firestore...`);
                                 setDialogueText(`Saving sprite...`);
-                                const saveResult = await saveSprite(userUid, spriteName, prompt, walkSheet, idleSheet);
+                                const saveResult = await saveSprite(userUid, spriteName, prompt, walkSheet, idleSheet, spriteId);
                                 if (saveResult.success && saveResult.sprite) {
                                     addLog(`Sprite saved!`);
                                     // Update local sprites list

@@ -472,11 +472,12 @@ export const saveSprite = async (
   name: string,
   description: string,
   walkSheetDataUrl: string,
-  idleSheetDataUrl: string
+  idleSheetDataUrl: string,
+  existingSpriteId?: string
 ): Promise<{ success: boolean; sprite?: SavedSprite; error?: string }> => {
   try {
-    const spriteId = `sprite_${Date.now()}`;
-    console.log('[saveSprite] Starting save for user:', uid, 'sprite:', spriteId);
+    const spriteId = existingSpriteId || `sprite_${Date.now()}`;
+    console.log('[saveSprite] Starting save for user:', uid, 'sprite:', spriteId, 'existing:', !!existingSpriteId);
 
     // Extract base64 data from data URLs
     const walkBase64 = walkSheetDataUrl.split(',')[1];
@@ -506,7 +507,7 @@ export const saveSprite = async (
     ]);
     console.log('[saveSprite] Download URLs obtained:', walkUrl.substring(0, 50) + '...');
 
-    // Save metadata to Realtime Database (NOT Firestore)
+    // Update or create sprite metadata in Firestore
     const spriteData: SavedSprite = {
       id: spriteId,
       name,
@@ -518,8 +519,24 @@ export const saveSprite = async (
 
     const dbPath = `sprites/${uid}/${spriteId}`;
     console.log('[saveSprite] Saving metadata to Firestore at:', dbPath);
-    await setDoc(doc(firestore, `sprites/${uid}`, spriteId), spriteData);
-    console.log('[saveSprite] Metadata saved successfully!');
+
+    if (existingSpriteId) {
+      // Update existing document
+      const { updateDoc } = await import('firebase/firestore');
+      console.log('[saveSprite] Updating existing sprite document');
+      await updateDoc(doc(firestore, `sprites/${uid}`, spriteId), {
+        walkUrl,
+        idleUrl,
+        status: 'complete',
+        updatedAt: new Date().toISOString(),
+      });
+      console.log('[saveSprite] Existing sprite updated!');
+    } else {
+      // Create new document
+      console.log('[saveSprite] Creating new sprite document');
+      await setDoc(doc(firestore, `sprites/${uid}`, spriteId), spriteData);
+      console.log('[saveSprite] New sprite created!');
+    }
 
     logger.info(`Sprite saved: ${spriteId} for user ${uid}`);
     return { success: true, sprite: spriteData };
