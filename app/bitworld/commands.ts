@@ -2983,6 +2983,30 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 const spriteId = `sprite_${Date.now()}`;
                 const spriteName = customName || prompt.replace(/[^a-z0-9]/gi, '_').toLowerCase();
 
+                // Create placeholder files in Storage immediately
+                if (userUid) {
+                    addLog(`Creating Storage folder: ${spriteId}`);
+                    try {
+                        const { ref: storageRef, uploadString } = await import('firebase/storage');
+                        const { storage } = await import('@/app/firebase');
+
+                        // Create placeholder files to establish the folder structure
+                        const placeholderData = 'data:text/plain;base64,Z2VuZXJhdGluZy4uLg=='; // "generating..."
+                        const walkRef = storageRef(storage, `sprites/${userUid}/${spriteId}/walk.png`);
+                        const idleRef = storageRef(storage, `sprites/${userUid}/${spriteId}/idle.png`);
+
+                        await Promise.all([
+                            uploadString(walkRef, placeholderData, 'data_url'),
+                            uploadString(idleRef, placeholderData, 'data_url'),
+                        ]);
+                        addLog(`Storage folder created!`);
+                    } catch (error) {
+                        const errorMsg = error instanceof Error ? error.message : String(error);
+                        addLog(`Warning: Failed to create Storage folder - ${errorMsg}`);
+                        console.error('[/be] Storage folder creation failed:', error);
+                    }
+                }
+
                 const spriteApiUrl = process.env.NEXT_PUBLIC_SPRITE_API_URL ||
                     'https://us-central1-nara-a65bc.cloudfunctions.net/generateSprite';
 
