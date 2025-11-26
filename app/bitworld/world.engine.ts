@@ -822,6 +822,8 @@ export function useWorldEngine({
     // Pathfinding state
     const currentPathRef = useRef<PathPoint[]>([]);
     const pathIndexRef = useRef<number>(0);
+    const pathDistanceTraveledRef = useRef<number>(0);
+    const lastAnimationTimeRef = useRef<number>(0);
 
     const [viewOffset, setViewOffset] = useState<Point>(initialCenteredOffset);
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
@@ -891,57 +893,77 @@ export function useWorldEngine({
         const path = findSmoothPath(current, target, worldData);
         currentPathRef.current = path;
         pathIndexRef.current = 0;
+        pathDistanceTraveledRef.current = 0;
+        lastAnimationTimeRef.current = 0;
     }, [cursorPos, worldData]);
 
-    // Animate visual cursor position following the path
+    // Animate visual cursor position following the path at constant speed
     useEffect(() => {
-        const animate = () => {
-            const current = visualCursorPosRef.current;
+        const animate = (currentTime: number) => {
             const path = currentPathRef.current;
-            let pathIndex = pathIndexRef.current;
 
             // No path or already at end
-            if (path.length === 0 || pathIndex >= path.length) {
+            if (path.length === 0 || pathIndexRef.current >= path.length - 1) {
                 animationFrameRef.current = null;
                 return;
             }
 
-            // Get current target waypoint
-            let waypoint = path[pathIndex];
-
-            // Calculate distance to current waypoint
-            const dx = waypoint.x - current.x;
-            const dy = waypoint.y - current.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-
-            // If close enough to waypoint, move to next one
-            if (distance < 0.1) {
-                pathIndex++;
-                pathIndexRef.current = pathIndex;
-
-                // If we've reached the last waypoint, snap to final position
-                if (pathIndex >= path.length) {
-                    const finalPos = path[path.length - 1];
-                    setVisualCursorPos(finalPos);
-                    visualCursorPosRef.current = finalPos;
-                    animationFrameRef.current = null;
-                    return;
-                }
-
-                waypoint = path[pathIndex];
+            // Initialize time on first frame
+            if (lastAnimationTimeRef.current === 0) {
+                lastAnimationTimeRef.current = currentTime;
+                animationFrameRef.current = requestAnimationFrame(animate);
+                return;
             }
 
-            // Lerp toward current waypoint
-            // Use higher speed for longer distances
-            const baseLerpFactor = 0.2;
-            const distanceBoost = Math.min(distance / 5, 1);
-            const lerpFactor = baseLerpFactor * (1 + distanceBoost);
+            // Calculate time delta
+            const deltaTime = (currentTime - lastAnimationTimeRef.current) / 1000; // Convert to seconds
+            lastAnimationTimeRef.current = currentTime;
 
-            const newX = current.x + (waypoint.x - current.x) * lerpFactor;
-            const newY = current.y + (waypoint.y - current.y) * lerpFactor;
+            // Constant speed (cells per second) - adjust this value to change speed
+            const speed = 15; // 15 cells per second
+            const distanceToMove = speed * deltaTime;
 
-            setVisualCursorPos({ x: newX, y: newY });
-            visualCursorPosRef.current = { x: newX, y: newY };
+            // Move along the path
+            let remainingDistance = distanceToMove;
+            let currentPos = visualCursorPosRef.current;
+
+            while (remainingDistance > 0 && pathIndexRef.current < path.length - 1) {
+                const currentWaypoint = path[pathIndexRef.current];
+                const nextWaypoint = path[pathIndexRef.current + 1];
+
+                // Distance to next waypoint
+                const dx = nextWaypoint.x - currentPos.x;
+                const dy = nextWaypoint.y - currentPos.y;
+                const distanceToNext = Math.sqrt(dx * dx + dy * dy);
+
+                if (distanceToNext <= remainingDistance) {
+                    // Move to next waypoint
+                    currentPos = { x: nextWaypoint.x, y: nextWaypoint.y };
+                    remainingDistance -= distanceToNext;
+                    pathIndexRef.current++;
+                } else {
+                    // Move partway to next waypoint
+                    const ratio = remainingDistance / distanceToNext;
+                    currentPos = {
+                        x: currentPos.x + dx * ratio,
+                        y: currentPos.y + dy * ratio
+                    };
+                    remainingDistance = 0;
+                }
+            }
+
+            // Update position
+            setVisualCursorPos(currentPos);
+            visualCursorPosRef.current = currentPos;
+
+            // Check if we've reached the end
+            if (pathIndexRef.current >= path.length - 1) {
+                const finalPos = path[path.length - 1];
+                setVisualCursorPos(finalPos);
+                visualCursorPosRef.current = finalPos;
+                animationFrameRef.current = null;
+                return;
+            }
 
             // Continue animation
             animationFrameRef.current = requestAnimationFrame(animate);
