@@ -19,8 +19,8 @@ type Direction = typeof DIRECTIONS[number];
 
 const WALK_FRAME_SIZE = { width: 32, height: 40 };
 const IDLE_FRAME_SIZE = { width: 32, height: 40 };
-const WALK_FRAMES_PER_DIR = 7;
-const IDLE_FRAMES_PER_DIR = 7;
+const WALK_FRAMES_PER_DIR = 8;
+const IDLE_FRAMES_PER_DIR = 8;
 
 function log(msg: string) {
     const ts = new Date().toISOString().split('T')[1].split('.')[0];
