@@ -2989,10 +2989,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     addLog(`Creating Firestore scaffold: ${spriteId}`);
                     console.log('[/be] Creating Firestore document at sprites/' + userUid + '/' + spriteId);
                     try {
-                        const { doc, setDoc } = await import('firebase/firestore');
+                        const { collection, doc, setDoc } = await import('firebase/firestore');
                         const { firestore } = await import('@/app/firebase');
 
-                        await setDoc(doc(firestore, 'sprites', userUid, spriteId), {
+                        // Create document in subcollection: collection(firestore, 'sprites', userUid) then doc(spriteId)
+                        const spritesCollection = collection(firestore, 'sprites', userUid);
+                        const spriteDoc = doc(spritesCollection, spriteId);
+
+                        await setDoc(spriteDoc, {
                             id: spriteId,
                             name: spriteName,
                             description: prompt,

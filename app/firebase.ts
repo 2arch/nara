@@ -522,9 +522,11 @@ export const saveSprite = async (
 
     if (existingSpriteId) {
       // Update existing document
-      const { updateDoc } = await import('firebase/firestore');
+      const { collection, updateDoc } = await import('firebase/firestore');
       console.log('[saveSprite] Updating existing sprite document');
-      await updateDoc(doc(firestore, 'sprites', uid, spriteId), {
+      const spritesCollection = collection(firestore, 'sprites', uid);
+      const spriteDoc = doc(spritesCollection, spriteId);
+      await updateDoc(spriteDoc, {
         walkUrl,
         idleUrl,
         status: 'complete',
@@ -533,8 +535,11 @@ export const saveSprite = async (
       console.log('[saveSprite] Existing sprite updated!');
     } else {
       // Create new document
+      const { collection } = await import('firebase/firestore');
       console.log('[saveSprite] Creating new sprite document');
-      await setDoc(doc(firestore, 'sprites', uid, spriteId), spriteData);
+      const spritesCollection = collection(firestore, 'sprites', uid);
+      const spriteDoc = doc(spritesCollection, spriteId);
+      await setDoc(spriteDoc, spriteData);
       console.log('[saveSprite] New sprite created!');
     }
 
@@ -592,7 +597,8 @@ export const getUserSprites = async (uid: string | null): Promise<SavedSprite[]>
 export const loadSprite = async (uid: string, spriteId: string): Promise<SavedSprite | null> => {
   try {
     // Try user sprites first
-    let docSnap = await getDoc(doc(firestore, 'sprites', uid, spriteId));
+    const spritesCollection = collection(firestore, 'sprites', uid);
+    let docSnap = await getDoc(doc(spritesCollection, spriteId));
     if (docSnap.exists()) {
       return docSnap.data() as SavedSprite;
     }
@@ -624,7 +630,8 @@ export const deleteSprite = async (uid: string, spriteId: string): Promise<{ suc
     ]);
 
     // Delete metadata from Firestore
-    await deleteDoc(doc(firestore, 'sprites', uid, spriteId));
+    const spritesCollection = collection(firestore, 'sprites', uid);
+    await deleteDoc(doc(spritesCollection, spriteId));
 
     logger.info(`Sprite deleted: ${spriteId} for user ${uid}`);
     return { success: true };
@@ -642,7 +649,8 @@ export const renameSprite = async (
   try {
     // Update just the name field in Firestore
     const { updateDoc } = await import('firebase/firestore');
-    await updateDoc(doc(firestore, 'sprites', uid, spriteId), { name: newName });
+    const spritesCollection = collection(firestore, 'sprites', uid);
+    await updateDoc(doc(spritesCollection, spriteId), { name: newName });
 
     logger.info(`Sprite renamed: ${spriteId} -> ${newName} for user ${uid}`);
     return { success: true };
