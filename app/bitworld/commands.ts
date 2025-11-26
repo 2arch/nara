@@ -3056,7 +3056,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             if (!statusRes.ok) throw new Error(`Poll failed: ${statusRes.status}`);
                             const status = await statusRes.json();
 
-                            addLog(`[${polls}] ${status.status} ${status.progress || 0}/${status.total || 8} ${status.currentDirection || ''}`);
+                            addLog(`[${polls}] ${status.status} ${status.progress || 0}/${status.total || SPRITE_DIRECTIONS.length} ${status.currentDirection || ''}`);
                             setModeState(prev => ({ ...prev, spriteProgress: status.progress || 0 }));
 
                             if (status.status === 'complete') {
@@ -3066,7 +3066,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             } else {
                                 // Update dialogue with progress
                                 const dir = status.currentDirection || 'base';
-                                setDialogueText(`Generating "${prompt}"... (${status.progress || 0}/8 ${dir})`);
+                                setDialogueText(`Generating "${prompt}"... (${status.progress || 0}/${status.total || SPRITE_DIRECTIONS.length} ${dir})`);
                                 await new Promise(r => setTimeout(r, pollInterval));
                                 return poll();
                             }
