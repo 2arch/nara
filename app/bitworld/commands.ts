@@ -2983,6 +2983,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 const spriteId = `sprite_${Date.now()}`;
                 const spriteName = customName || prompt.replace(/[^a-z0-9]/gi, '_').toLowerCase();
 
+                console.log('[/be] userUid check:', { userUid, hasUid: !!userUid, type: typeof userUid });
+
                 if (userUid) {
                     addLog(`Creating Firestore scaffold: ${spriteId}`);
                     console.log('[/be] Creating Firestore document at sprites/' + userUid + '/' + spriteId);
