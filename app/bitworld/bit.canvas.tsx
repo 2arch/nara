@@ -5721,8 +5721,9 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             }
 
             // Cursor spans cursorScale.h cells: bottom cell at cursorPos.y and top cell at cursorPos.y - (h-1)
-            const cursorBottomScreenPos = engine.worldToScreen(engine.cursorPos.x, engine.cursorPos.y, currentZoom, currentOffset);
-            const cursorTopScreenPos = engine.worldToScreen(engine.cursorPos.x, engine.cursorPos.y - (cursorScale.h - 1), currentZoom, currentOffset);
+            // Use visualCursorPos for smooth animated rendering
+            const cursorBottomScreenPos = engine.worldToScreen(engine.visualCursorPos.x, engine.visualCursorPos.y, currentZoom, currentOffset);
+            const cursorTopScreenPos = engine.worldToScreen(engine.visualCursorPos.x, engine.visualCursorPos.y - (cursorScale.h - 1), currentZoom, currentOffset);
 
             if (cursorBottomScreenPos.x >= -effectiveCharWidth && cursorBottomScreenPos.x <= cssWidth &&
                 cursorTopScreenPos.y >= -effectiveCharHeight && cursorBottomScreenPos.y <= cssHeight) {

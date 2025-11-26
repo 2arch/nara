@@ -189,6 +189,7 @@ export interface WorldEngine {
     searchData: WorldData;
     viewOffset: Point;
     cursorPos: Point;
+    visualCursorPos: Point;
     zoomLevel: number;
     backgroundMode: BackgroundMode;
     backgroundColor?: string; // Optional - undefined for transparent stream/image backgrounds
@@ -811,6 +812,12 @@ export function useWorldEngine({
 
     const cursorPos = cursorPosInternal;
     const cursorPosRef = useRef<Point>(initialCursorPos); // Ref for synchronous cursor position access
+
+    // Visual cursor position for smooth animation
+    const [visualCursorPos, setVisualCursorPos] = useState<Point>(initialCursorPos);
+    const visualCursorPosRef = useRef<Point>(initialCursorPos);
+    const animationFrameRef = useRef<number | null>(null);
+
     const [viewOffset, setViewOffset] = useState<Point>(initialCenteredOffset);
     const [zoomLevel, setZoomLevel] = useState<number>(initialZoomLevel); // Store zoom *level*, not index
 
@@ -868,6 +875,58 @@ export function useWorldEngine({
     // Keep cursorPosRef synchronized with cursorPos state
     useEffect(() => {
         cursorPosRef.current = cursorPos;
+    }, [cursorPos]);
+
+    // Animate visual cursor position toward target cursor position
+    useEffect(() => {
+        const animate = () => {
+            const target = cursorPosRef.current;
+            const current = visualCursorPosRef.current;
+
+            // Calculate distance to target
+            const dx = target.x - current.x;
+            const dy = target.y - current.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            // If we're close enough, snap to target
+            if (distance < 0.01) {
+                if (current.x !== target.x || current.y !== target.y) {
+                    setVisualCursorPos(target);
+                    visualCursorPosRef.current = target;
+                }
+                animationFrameRef.current = null;
+                return;
+            }
+
+            // Lerp factor - higher = faster movement
+            // Use higher speed for longer distances
+            const baseLerpFactor = 0.15;
+            const distanceBoost = Math.min(distance / 10, 1); // Boost up to 2x for far distances
+            const lerpFactor = baseLerpFactor * (1 + distanceBoost);
+
+            // Calculate new position
+            const newX = current.x + dx * lerpFactor;
+            const newY = current.y + dy * lerpFactor;
+
+            setVisualCursorPos({ x: newX, y: newY });
+            visualCursorPosRef.current = { x: newX, y: newY };
+
+            // Continue animation
+            animationFrameRef.current = requestAnimationFrame(animate);
+        };
+
+        // Start animation if target has changed
+        if (!animationFrameRef.current) {
+            animationFrameRef.current = requestAnimationFrame(animate);
+        }
+
+        // Cleanup
+        return () => {
+            if (animationFrameRef.current) {
+                cancelAnimationFrame(animationFrameRef.current);
+                animationFrameRef.current = null;
+            }
+        };
     }, [cursorPos]);
 
     // Fetch user membership level
@@ -10742,6 +10801,7 @@ export function useWorldEngine({
         searchData,
         viewOffset,
         cursorPos,
+        visualCursorPos,
         zoomLevel,
         currentScale,
         setCurrentScale,
