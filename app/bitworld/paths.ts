@@ -17,8 +17,9 @@ interface PathNode {
     parent: PathNode | null;
 }
 
+// Simplified WorldData type for pathfinding (accepts any value type)
 export interface WorldData {
-    [key: string]: string;
+    [key: string]: any;
 }
 
 /**
