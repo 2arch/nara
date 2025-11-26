@@ -507,7 +507,7 @@ export const saveSprite = async (
     ]);
     console.log('[saveSprite] Download URLs obtained:', walkUrl.substring(0, 50) + '...');
 
-    // Update or create sprite metadata in Firestore
+    // Return sprite data (Storage URLs only, no Firestore)
     const spriteData: SavedSprite = {
       id: spriteId,
       name,
@@ -517,35 +517,8 @@ export const saveSprite = async (
       createdAt: new Date().toISOString(),
     };
 
-    const dbPath = `users/${uid}/sprites/${spriteId}`;
-    console.log('[saveSprite] Saving metadata to Firestore at:', dbPath);
-
-    if (existingSpriteId) {
-      // Update existing document
-      const { collection, updateDoc } = await import('firebase/firestore');
-      console.log('[saveSprite] Updating existing sprite document');
-      const userDoc = doc(firestore, 'users', uid);
-      const spritesCollection = collection(userDoc, 'sprites');
-      const spriteDoc = doc(spritesCollection, spriteId);
-      await updateDoc(spriteDoc, {
-        walkUrl,
-        idleUrl,
-        status: 'complete',
-        updatedAt: new Date().toISOString(),
-      });
-      console.log('[saveSprite] Existing sprite updated!');
-    } else {
-      // Create new document
-      const { collection } = await import('firebase/firestore');
-      console.log('[saveSprite] Creating new sprite document');
-      const userDoc = doc(firestore, 'users', uid);
-      const spritesCollection = collection(userDoc, 'sprites');
-      const spriteDoc = doc(spritesCollection, spriteId);
-      await setDoc(spriteDoc, spriteData);
-      console.log('[saveSprite] New sprite created!');
-    }
-
-    logger.info(`Sprite saved: ${spriteId} for user ${uid}`);
+    console.log('[saveSprite] Sprite saved to Storage:', spriteId);
+    logger.info(`Sprite saved to Storage: ${spriteId} for user ${uid}`);
     return { success: true, sprite: spriteData };
   } catch (error: any) {
     console.error('[saveSprite] Error:', error);
@@ -558,37 +531,40 @@ export const getUserSprites = async (uid: string | null): Promise<SavedSprite[]>
   try {
     const allSprites: SavedSprite[] = [];
 
-    // Always fetch public sprites (using top-level collection)
-    try {
-      const publicRef = collection(firestore, 'sprites_public');
-      const publicSnapshot = await getDocs(publicRef);
-      const publicSprites = publicSnapshot.docs.map(doc => doc.data() as SavedSprite);
-      allSprites.push(...publicSprites);
-    } catch (error) {
-      console.warn('No public sprites available or error fetching:', error);
-      // Continue even if public sprites fail
-    }
-
-    // Fetch user sprites if authenticated
+    // Fetch user sprites from Storage if authenticated
     if (uid) {
-      const userDoc = doc(firestore, 'users', uid);
-      const userSpritesRef = collection(userDoc, 'sprites');
-      const userQ = firestoreQuery(userSpritesRef, orderBy('createdAt', 'desc'));
-      const userSnapshot = await getDocs(userQ);
-      const userSprites = userSnapshot.docs.map(doc => doc.data() as SavedSprite);
-      allSprites.push(...userSprites);
+      const { listAll } = await import('firebase/storage');
+      const userSpritesRef = storageRef(storage, `sprites/${uid}`);
+      const result = await listAll(userSpritesRef);
+
+      // Each sprite has a folder with walk.png and idle.png
+      for (const folderRef of result.prefixes) {
+        const spriteId = folderRef.name;
+        try {
+          const walkRef = storageRef(storage, `sprites/${uid}/${spriteId}/walk.png`);
+          const idleRef = storageRef(storage, `sprites/${uid}/${spriteId}/idle.png`);
+
+          const [walkUrl, idleUrl] = await Promise.all([
+            getDownloadURL(walkRef),
+            getDownloadURL(idleRef),
+          ]);
+
+          allSprites.push({
+            id: spriteId,
+            name: spriteId.replace('sprite_', '').replace(/_/g, ' '),
+            description: '', // No metadata available
+            walkUrl,
+            idleUrl,
+            createdAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          console.warn(`Skipping sprite ${spriteId}:`, error);
+        }
+      }
     }
 
-    // Sort all sprites by createdAt (public first, then newest)
-    allSprites.sort((a, b) => {
-      // Prioritize public sprites
-      const aIsPublic = !a.id.startsWith('sprite_');
-      const bIsPublic = !b.id.startsWith('sprite_');
-      if (aIsPublic && !bIsPublic) return -1;
-      if (!aIsPublic && bIsPublic) return 1;
-      // Then sort by date
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
+    // Sort by sprite ID (newest first, based on timestamp in ID)
+    allSprites.sort((a, b) => b.id.localeCompare(a.id));
 
     return allSprites;
   } catch (error) {
@@ -599,21 +575,23 @@ export const getUserSprites = async (uid: string | null): Promise<SavedSprite[]>
 
 export const loadSprite = async (uid: string, spriteId: string): Promise<SavedSprite | null> => {
   try {
-    // Try user sprites first
-    const userDoc = doc(firestore, 'users', uid);
-    const spritesCollection = collection(userDoc, 'sprites');
-    let docSnap = await getDoc(doc(spritesCollection, spriteId));
-    if (docSnap.exists()) {
-      return docSnap.data() as SavedSprite;
-    }
+    // Load sprite from Storage
+    const walkRef = storageRef(storage, `sprites/${uid}/${spriteId}/walk.png`);
+    const idleRef = storageRef(storage, `sprites/${uid}/${spriteId}/idle.png`);
 
-    // Try public sprites (using sprites_public top-level collection)
-    docSnap = await getDoc(doc(firestore, 'sprites_public', spriteId));
-    if (docSnap.exists()) {
-      return docSnap.data() as SavedSprite;
-    }
+    const [walkUrl, idleUrl] = await Promise.all([
+      getDownloadURL(walkRef),
+      getDownloadURL(idleRef),
+    ]);
 
-    return null;
+    return {
+      id: spriteId,
+      name: spriteId.replace('sprite_', '').replace(/_/g, ' '),
+      description: '',
+      walkUrl,
+      idleUrl,
+      createdAt: new Date().toISOString(),
+    };
   } catch (error) {
     logger.error('Error loading sprite:', error);
     return null;
@@ -624,7 +602,7 @@ export const deleteSprite = async (uid: string, spriteId: string): Promise<{ suc
   try {
     const { deleteObject } = await import('firebase/storage');
 
-    // Delete from Storage
+    // Delete from Storage only
     const walkRef = storageRef(storage, `sprites/${uid}/${spriteId}/walk.png`);
     const idleRef = storageRef(storage, `sprites/${uid}/${spriteId}/idle.png`);
 
@@ -633,12 +611,7 @@ export const deleteSprite = async (uid: string, spriteId: string): Promise<{ suc
       deleteObject(idleRef).catch(() => {}),
     ]);
 
-    // Delete metadata from Firestore
-    const userDoc = doc(firestore, 'users', uid);
-    const spritesCollection = collection(userDoc, 'sprites');
-    await deleteDoc(doc(spritesCollection, spriteId));
-
-    logger.info(`Sprite deleted: ${spriteId} for user ${uid}`);
+    logger.info(`Sprite deleted from Storage: ${spriteId} for user ${uid}`);
     return { success: true };
   } catch (error: any) {
     logger.error('Error deleting sprite:', error);
@@ -651,19 +624,10 @@ export const renameSprite = async (
   spriteId: string,
   newName: string
 ): Promise<{ success: boolean; error?: string }> => {
-  try {
-    // Update just the name field in Firestore
-    const { updateDoc } = await import('firebase/firestore');
-    const userDoc = doc(firestore, 'users', uid);
-    const spritesCollection = collection(userDoc, 'sprites');
-    await updateDoc(doc(spritesCollection, spriteId), { name: newName });
-
-    logger.info(`Sprite renamed: ${spriteId} -> ${newName} for user ${uid}`);
-    return { success: true };
-  } catch (error: any) {
-    logger.error('Error renaming sprite:', error);
-    return { success: false, error: error.message || 'Failed to rename sprite' };
-  }
+  // Renaming not supported with Storage-only implementation
+  // Sprite names are derived from sprite IDs
+  logger.info(`Rename requested but not supported: ${spriteId} -> ${newName}`);
+  return { success: false, error: 'Rename not supported with Storage-only sprites' };
 };
 
 export { database, app, auth, storage, firestore };

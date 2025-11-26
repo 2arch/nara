@@ -2979,50 +2979,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 setDialogueText(`Generating "${prompt}"...`);
                 addLog(`Starting generation: "${prompt}"`);
 
-                // Create Firestore scaffold immediately
+                // Generate sprite ID and name
                 const spriteId = `sprite_${Date.now()}`;
                 const spriteName = customName || prompt.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-
-                console.log('[/be] userUid check:', { userUid, hasUid: !!userUid, type: typeof userUid });
-
-                if (userUid) {
-                    addLog(`Creating Firestore scaffold: ${spriteId}`);
-                    console.log('[/be] Creating Firestore document at users/' + userUid + '/sprites/' + spriteId);
-                    try {
-                        const { collection, doc, setDoc } = await import('firebase/firestore');
-                        const { firestore } = await import('@/app/firebase');
-
-                        // Proper Firestore hierarchy: users/{uid}/sprites/{spriteId}
-                        // collection(firestore, 'users') = 1 segment (odd) ✓
-                        // doc(users, uid) = 2 segments (even) ✓
-                        // collection(userDoc, 'sprites') = 3 segments (odd) ✓
-                        // doc(sprites, spriteId) = 4 segments (even) ✓
-                        const userDoc = doc(firestore, 'users', userUid);
-                        const spritesCollection = collection(userDoc, 'sprites');
-                        const spriteDoc = doc(spritesCollection, spriteId);
-
-                        await setDoc(spriteDoc, {
-                            id: spriteId,
-                            name: spriteName,
-                            description: prompt,
-                            status: 'generating',
-                            progress: 0,
-                            walkUrl: null,
-                            idleUrl: null,
-                            createdAt: new Date().toISOString(),
-                            updatedAt: new Date().toISOString(),
-                        });
-                        addLog(`Firestore scaffold created!`);
-                        console.log('[/be] Firestore document created successfully');
-                    } catch (error) {
-                        const errorMsg = error instanceof Error ? error.message : String(error);
-                        addLog(`Warning: Failed to create scaffold - ${errorMsg}`);
-                        console.error('[/be] Firestore scaffold creation failed:', error);
-                    }
-                } else {
-                    addLog(`Warning: No user UID, skipping Firestore scaffold`);
-                    console.log('[/be] No userUid, skipping Firestore creation');
-                }
 
                 const spriteApiUrl = process.env.NEXT_PUBLIC_SPRITE_API_URL ||
                     'https://us-central1-nara-a65bc.cloudfunctions.net/generateSprite';
