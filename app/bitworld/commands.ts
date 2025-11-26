@@ -3030,6 +3030,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     console.log(`[SpriteGen] ${msg}`);
                 };
 
+                // Require user to be logged in
+                if (!userUid) {
+                    setDialogueWithRevert("Sign in required to generate sprites. Use /signin", setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
                 // Generate new sprite from prompt using polling
                 setModeState(prev => ({ ...prev, isGeneratingSprite: true, spriteDebugLog: [], spriteProgress: 0 }));
                 setDialogueText(`Generating "${prompt}"...`);
@@ -3078,11 +3085,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 const spriteApiUrl = process.env.NEXT_PUBLIC_SPRITE_API_URL ||
                     'https://us-central1-nara-a65bc.cloudfunctions.net/generateSprite';
 
-                // Start the job
+                // Start the job (send userUid and spriteId for correct Storage path)
                 fetch(spriteApiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ description: prompt }),
+                    body: JSON.stringify({ description: prompt, userUid, spriteId }),
                 })
                     .then(res => {
                         addLog(`POST status: ${res.status}`);

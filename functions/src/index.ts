@@ -278,9 +278,15 @@ async function createCharacterWithRetries(
 }
 
 // Main processing function using V2 API
-async function processJob(jobId: string, description: string): Promise<void> {
+async function processJob(
+    jobId: string,
+    description: string,
+    userUid: string,
+    spriteId: string
+): Promise<void> {
     const jobRef = db.collection("spriteJobs").doc(jobId);
     const apiKey = PIXELLAB_API_KEY;
+    const storagePath = `sprites/${userUid}/${spriteId}`;
 
     try {
         // Step 1: Create character with 8 directions using V2 API
@@ -352,8 +358,8 @@ async function processJob(jobId: string, description: string): Promise<void> {
                 continue;
             }
 
-            const storagePath = `sprites/${jobId}/rotations/${direction}.png`;
-            const publicUrl = await downloadAndUploadToStorage(pixellabUrl, storagePath);
+            const filePath = `${storagePath}/rotations/${direction}.png`;
+            const publicUrl = await downloadAndUploadToStorage(pixellabUrl, filePath);
             storagePaths[direction] = publicUrl;
 
             console.log(`[${jobId}] Uploaded ${direction} to Storage`);
@@ -462,10 +468,20 @@ export const generateSprite = onRequest(
 
         // POST - Start new job
         if (req.method === "POST") {
-            const { description } = req.body;
+            const { description, userUid, spriteId } = req.body;
 
             if (!description || typeof description !== "string") {
                 res.status(400).json({ error: "description is required" });
+                return;
+            }
+
+            if (!userUid || typeof userUid !== "string") {
+                res.status(400).json({ error: "userUid is required" });
+                return;
+            }
+
+            if (!spriteId || typeof spriteId !== "string") {
+                res.status(400).json({ error: "spriteId is required" });
                 return;
             }
 
@@ -478,16 +494,18 @@ export const generateSprite = onRequest(
                 await jobRef.set({
                     status: "pending",
                     description,
+                    userUid,
+                    spriteId,
                     progress: 0,
                     total: DIRECTIONS.length,
                     createdAt: now,
                     updatedAt: now,
                 });
 
-                console.log(`[${jobId}] Job created for: "${description}"`);
+                console.log(`[${jobId}] Job created for user ${userUid}, sprite ${spriteId}: "${description}"`);
 
                 // Start processing in background (don't await)
-                processJob(jobId, description).catch(err => {
+                processJob(jobId, description, userUid, spriteId).catch(err => {
                     console.error(`[${jobId}] Background processing failed:`, err);
                 });
 
