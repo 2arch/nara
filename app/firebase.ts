@@ -524,7 +524,7 @@ export const saveSprite = async (
       // Update existing document
       const { updateDoc } = await import('firebase/firestore');
       console.log('[saveSprite] Updating existing sprite document');
-      await updateDoc(doc(firestore, `sprites/${uid}`, spriteId), {
+      await updateDoc(doc(firestore, 'sprites', uid, spriteId), {
         walkUrl,
         idleUrl,
         status: 'complete',
@@ -534,7 +534,7 @@ export const saveSprite = async (
     } else {
       // Create new document
       console.log('[saveSprite] Creating new sprite document');
-      await setDoc(doc(firestore, `sprites/${uid}`, spriteId), spriteData);
+      await setDoc(doc(firestore, 'sprites', uid, spriteId), spriteData);
       console.log('[saveSprite] New sprite created!');
     }
 
@@ -551,11 +551,16 @@ export const getUserSprites = async (uid: string | null): Promise<SavedSprite[]>
   try {
     const allSprites: SavedSprite[] = [];
 
-    // Always fetch public sprites
-    const publicRef = collection(firestore, 'sprites', 'public');
-    const publicSnapshot = await getDocs(publicRef);
-    const publicSprites = publicSnapshot.docs.map(doc => doc.data() as SavedSprite);
-    allSprites.push(...publicSprites);
+    // Always fetch public sprites (using top-level collection)
+    try {
+      const publicRef = collection(firestore, 'sprites_public');
+      const publicSnapshot = await getDocs(publicRef);
+      const publicSprites = publicSnapshot.docs.map(doc => doc.data() as SavedSprite);
+      allSprites.push(...publicSprites);
+    } catch (error) {
+      console.warn('No public sprites available or error fetching:', error);
+      // Continue even if public sprites fail
+    }
 
     // Fetch user sprites if authenticated
     if (uid) {
@@ -587,13 +592,13 @@ export const getUserSprites = async (uid: string | null): Promise<SavedSprite[]>
 export const loadSprite = async (uid: string, spriteId: string): Promise<SavedSprite | null> => {
   try {
     // Try user sprites first
-    let docSnap = await getDoc(doc(firestore, `sprites/${uid}`, spriteId));
+    let docSnap = await getDoc(doc(firestore, 'sprites', uid, spriteId));
     if (docSnap.exists()) {
       return docSnap.data() as SavedSprite;
     }
 
-    // Try public sprites
-    docSnap = await getDoc(doc(firestore, `sprites/public`, spriteId));
+    // Try public sprites (using sprites_public top-level collection)
+    docSnap = await getDoc(doc(firestore, 'sprites_public', spriteId));
     if (docSnap.exists()) {
       return docSnap.data() as SavedSprite;
     }
@@ -619,7 +624,7 @@ export const deleteSprite = async (uid: string, spriteId: string): Promise<{ suc
     ]);
 
     // Delete metadata from Firestore
-    await deleteDoc(doc(firestore, `sprites/${uid}`, spriteId));
+    await deleteDoc(doc(firestore, 'sprites', uid, spriteId));
 
     logger.info(`Sprite deleted: ${spriteId} for user ${uid}`);
     return { success: true };
@@ -637,7 +642,7 @@ export const renameSprite = async (
   try {
     // Update just the name field in Firestore
     const { updateDoc } = await import('firebase/firestore');
-    await updateDoc(doc(firestore, `sprites/${uid}`, spriteId), { name: newName });
+    await updateDoc(doc(firestore, 'sprites', uid, spriteId), { name: newName });
 
     logger.info(`Sprite renamed: ${spriteId} -> ${newName} for user ${uid}`);
     return { success: true };

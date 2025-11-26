@@ -2992,7 +2992,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         const { doc, setDoc } = await import('firebase/firestore');
                         const { firestore } = await import('@/app/firebase');
 
-                        await setDoc(doc(firestore, `sprites/${userUid}`, spriteId), {
+                        await setDoc(doc(firestore, 'sprites', userUid, spriteId), {
                             id: spriteId,
                             name: spriteName,
                             description: prompt,

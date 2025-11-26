@@ -86,13 +86,18 @@ export default function UserHome() {
     checkTutorialStatus();
   }, [user, targetUserUid, tutorialChecked]);
 
+  // Detect if current user is the owner
+  const isOwner = user && targetUserUid && user.uid === targetUserUid;
+
   // Initialize monogram system
   const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0 });
 
   const engine = useWorldEngine({
     worldId: 'home',
-    userUid: targetUserUid, // Use the target user's UID, not the authenticated user's UID
+    userUid: targetUserUid, // World owner's UID for world persistence
+    authenticatedUserUid: user?.uid || null, // Authenticated user's UID for user-specific data (sprites, etc)
     username: username,
+    isReadOnly: !isOwner, // Pass read-only flag
     monogramSystem: monogram // Pass monogram to engine for command system
   });
 
