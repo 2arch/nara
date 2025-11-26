@@ -28,7 +28,7 @@ OUTPUT_DIR = "public/sprites"
 # Target frame sizes (consistent 32×40 for both walk and idle)
 WALK_FRAME_SIZE = (32, 40)
 IDLE_FRAME_SIZE = (32, 40)
-WALK_FRAMES_PER_DIR = 6
+WALK_FRAMES_PER_DIR = 7
 IDLE_FRAMES_PER_DIR = 7
 
 # Direction order (matches row index in sprite sheet)
