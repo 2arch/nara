@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Point, WorldData } from './world.engine';
+import { rewrapNoteText } from './world.engine';
 import { generateImage, generateVideo, setDialogueWithRevert } from './ai';
 import { detectImageIntent } from './ai.utils';
 import type { WorldSettings } from './settings';
@@ -4397,10 +4398,15 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             // Update note with new display mode
-            const updatedNote = {
+            let updatedNote = {
                 ...foundNote,
                 displayMode: newMode
             };
+
+            // If switching to wrap mode, rewrap existing text
+            if (newMode === 'wrap') {
+                updatedNote = rewrapNoteText(updatedNote);
+            }
 
             setWorldData({
                 ...worldData,

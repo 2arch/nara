@@ -110,6 +110,100 @@ export const getCharScale = (data: string | StyledCharacter | ImageData): { w: n
     return { w: 1, h: 2 };
 };
 
+// Standalone helper to rewrap text in a note when switching to wrap mode or resizing
+export const rewrapNoteText = (noteData: any): any => {
+    if (!noteData.data || Object.keys(noteData.data).length === 0) {
+        return noteData; // No text to rewrap
+    }
+
+    const noteWidth = noteData.endX - noteData.startX;
+
+    // Group characters by their Y coordinate (lines)
+    const lineMap: Map<number, Array<{ relativeX: number; char: string; style?: any }>> = new Map();
+
+    for (const coordKey in noteData.data) {
+        const [xStr, yStr] = coordKey.split(',');
+        const relativeX = parseInt(xStr);
+        const relativeY = parseInt(yStr);
+
+        const charData = noteData.data[coordKey];
+        const char = typeof charData === 'string' ? charData :
+                    (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
+        const style = typeof charData === 'object' && 'style' in charData ? charData.style : undefined;
+
+        if (!lineMap.has(relativeY)) {
+            lineMap.set(relativeY, []);
+        }
+        lineMap.get(relativeY)!.push({ relativeX, char, style });
+    }
+
+    // Sort lines by Y coordinate
+    const sortedLines = Array.from(lineMap.entries()).sort((a, b) => a[0] - b[0]);
+
+    // Rewrap each line that exceeds the note width
+    const newData: any = {};
+    let currentY = 0;
+
+    for (const [originalY, characters] of sortedLines) {
+        // Sort characters by X coordinate
+        characters.sort((a, b) => a.relativeX - b.relativeX);
+
+        // Build array of characters for this line
+        const lineChars: Array<{ char: string; style?: any }> = [];
+        for (const { char, style } of characters) {
+            lineChars.push({ char, style });
+        }
+
+        // Word-wrap this line
+        let currentX = 0;
+        let lineStart = 0; // Start index for current line being built
+
+        for (let i = 0; i < lineChars.length; i++) {
+            const { char, style } = lineChars[i];
+
+            // Check if placing this character would exceed width
+            if (currentX > noteWidth) {
+                // Find last space in the range [lineStart, i)
+                let wrapIndex = -1;
+                for (let j = i - 1; j >= lineStart; j--) {
+                    if (lineChars[j].char === ' ') {
+                        wrapIndex = j;
+                        break;
+                    }
+                }
+
+                // Wrap at space if found, otherwise wrap at current position
+                if (wrapIndex >= lineStart) {
+                    // Wrap at space - move to next line and skip the space
+                    currentY += GRID_CELL_SPAN;
+                    currentX = 0;
+                    lineStart = wrapIndex + 1; // Skip the space
+                    i = wrapIndex; // Will increment to wrapIndex + 1 on next iteration
+                    continue;
+                } else {
+                    // No space found - hard wrap at current position
+                    currentY += GRID_CELL_SPAN;
+                    currentX = 0;
+                    lineStart = i;
+                }
+            }
+
+            // Place character
+            const coordKey = `${currentX},${currentY}`;
+            newData[coordKey] = style ? { char, style } : char;
+            currentX++;
+        }
+
+        // Move to next line after this original line (preserve line breaks)
+        currentY += GRID_CELL_SPAN;
+    }
+
+    return {
+        ...noteData,
+        data: newData
+    };
+};
+
 export interface ImageData {
     type: 'image';
     src: string; // Data URL or blob URL (for GIFs, this is the first frame URL)
@@ -426,6 +520,8 @@ export interface WorldEngine {
         endY: number;
     };
     recorder: DataRecorder;
+    // Note text wrapping
+    rewrapNoteText: (noteData: any) => any;
 }
 
 // --- Hook Input ---
@@ -2867,6 +2963,100 @@ export function useWorldEngine({
             }
         }
         return null;
+    };
+
+    // Helper to rewrap text in a note when switching to wrap mode or resizing
+    const rewrapNoteTextInternal = (noteData: any): any => {
+        if (!noteData.data || Object.keys(noteData.data).length === 0) {
+            return noteData; // No text to rewrap
+        }
+
+        const noteWidth = noteData.endX - noteData.startX;
+
+        // Group characters by their Y coordinate (lines)
+        const lineMap: Map<number, Array<{ relativeX: number; char: string; style?: any }>> = new Map();
+
+        for (const coordKey in noteData.data) {
+            const [xStr, yStr] = coordKey.split(',');
+            const relativeX = parseInt(xStr);
+            const relativeY = parseInt(yStr);
+
+            const charData = noteData.data[coordKey];
+            const char = typeof charData === 'string' ? charData :
+                        (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
+            const style = typeof charData === 'object' && 'style' in charData ? charData.style : undefined;
+
+            if (!lineMap.has(relativeY)) {
+                lineMap.set(relativeY, []);
+            }
+            lineMap.get(relativeY)!.push({ relativeX, char, style });
+        }
+
+        // Sort lines by Y coordinate
+        const sortedLines = Array.from(lineMap.entries()).sort((a, b) => a[0] - b[0]);
+
+        // Rewrap each line that exceeds the note width
+        const newData: any = {};
+        let currentY = 0;
+
+        for (const [originalY, characters] of sortedLines) {
+            // Sort characters by X coordinate
+            characters.sort((a, b) => a.relativeX - b.relativeX);
+
+            // Build array of characters for this line
+            const lineChars: Array<{ char: string; style?: any }> = [];
+            for (const { char, style } of characters) {
+                lineChars.push({ char, style });
+            }
+
+            // Word-wrap this line
+            let currentX = 0;
+            let lineStart = 0; // Start index for current line being built
+
+            for (let i = 0; i < lineChars.length; i++) {
+                const { char, style } = lineChars[i];
+
+                // Check if placing this character would exceed width
+                if (currentX > noteWidth) {
+                    // Find last space in the range [lineStart, i)
+                    let wrapIndex = -1;
+                    for (let j = i - 1; j >= lineStart; j--) {
+                        if (lineChars[j].char === ' ') {
+                            wrapIndex = j;
+                            break;
+                        }
+                    }
+
+                    // Wrap at space if found, otherwise wrap at current position
+                    if (wrapIndex >= lineStart) {
+                        // Wrap at space - move to next line and skip the space
+                        currentY += GRID_CELL_SPAN;
+                        currentX = 0;
+                        lineStart = wrapIndex + 1; // Skip the space
+                        i = wrapIndex; // Will increment to wrapIndex + 1 on next iteration
+                        continue;
+                    } else {
+                        // No space found - hard wrap at current position
+                        currentY += GRID_CELL_SPAN;
+                        currentX = 0;
+                        lineStart = i;
+                    }
+                }
+
+                // Place character
+                const coordKey = `${currentX},${currentY}`;
+                newData[coordKey] = style ? { char, style } : char;
+                currentX++;
+            }
+
+            // Move to next line after this original line (preserve line breaks)
+            currentY += GRID_CELL_SPAN;
+        }
+
+        return {
+            ...noteData,
+            data: newData
+        };
     };
 
     // === Helper Functions (Largely unchanged, but use state variables) ===
@@ -11288,5 +11478,7 @@ export function useWorldEngine({
         isFocusMode,
         focusRegion,
         recorder,
+        // Note text wrapping
+        rewrapNoteText: rewrapNoteTextInternal,
     };
 }
