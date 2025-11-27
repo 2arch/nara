@@ -3014,20 +3014,31 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                 setDialogueText(`Applying tileset: ${tilesetName}...`);
 
-                // Apply tiles immediately using autotiling logic
+                // Apply tiles using CORNER-based Wang autotiling
+                // Each corner (NW, NE, SW, SE) is shared by 4 cells
+                // A corner is "grass" if ALL 4 cells sharing it are in the region
                 const updates: Record<string, string> = {};
                 const regionSet = new Set(region.points.map(p => `${p.x},${p.y}`));
 
-                for (const p of region.points) {
-                    let mask = 0;
-                    // N, E, S, W - check which neighbors are in the region
-                    if (regionSet.has(`${p.x},${p.y-1}`)) mask |= 1;
-                    if (regionSet.has(`${p.x+1},${p.y}`)) mask |= 2;
-                    if (regionSet.has(`${p.x},${p.y+1}`)) mask |= 4;
-                    if (regionSet.has(`${p.x-1},${p.y}`)) mask |= 8;
+                const inRegion = (x: number, y: number) => regionSet.has(`${x},${y}`);
 
-                    // Invert mask: tiles with more neighbors should show MORE of the upper terrain
-                    const tileIndex = 15 - mask;
+                for (const p of region.points) {
+                    // For each corner, check if all 4 cells sharing it are in region
+                    // NW corner of (x,y) is shared with (x-1,y-1), (x,y-1), (x-1,y)
+                    const nw = inRegion(p.x, p.y) && inRegion(p.x-1, p.y) &&
+                               inRegion(p.x, p.y-1) && inRegion(p.x-1, p.y-1) ? 1 : 0;
+                    // NE corner shared with (x+1,y-1), (x,y-1), (x+1,y)
+                    const ne = inRegion(p.x, p.y) && inRegion(p.x+1, p.y) &&
+                               inRegion(p.x, p.y-1) && inRegion(p.x+1, p.y-1) ? 1 : 0;
+                    // SW corner shared with (x-1,y+1), (x,y+1), (x-1,y)
+                    const sw = inRegion(p.x, p.y) && inRegion(p.x-1, p.y) &&
+                               inRegion(p.x, p.y+1) && inRegion(p.x-1, p.y+1) ? 1 : 0;
+                    // SE corner shared with (x+1,y+1), (x,y+1), (x+1,y)
+                    const se = inRegion(p.x, p.y) && inRegion(p.x+1, p.y) &&
+                               inRegion(p.x, p.y+1) && inRegion(p.x+1, p.y+1) ? 1 : 0;
+
+                    // Corner index: NW=8, NE=4, SW=2, SE=1
+                    const cornerIndex = nw * 8 + ne * 4 + sw * 2 + se * 1;
 
                     const key = `paint_${p.x}_${p.y}`;
                     updates[key] = JSON.stringify({
@@ -3035,7 +3046,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         x: p.x,
                         y: p.y,
                         tileset: tilesetUrl,
-                        tileIndex: tileIndex
+                        tileIndex: cornerIndex
                     });
                 }
 
