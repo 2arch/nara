@@ -57,3 +57,6 @@ host-flows-export.json
 service-account-key.json
 **/service-account-key.json
 functions/service-account-key.json
+
+# Google Cloud SDK
+/google-cloud-sdk/
