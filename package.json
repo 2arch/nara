@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "next dev -p 3000 -H 0.0.0.0",
     "dev:watch": "nodemon --watch app --watch components --watch lib --ext ts,tsx,js,jsx --exec 'next dev -p 3000 -H 0.0.0.0'",
-    "build": "next build",
+    "build": "fuser -k 3000/tcp 2>/dev/null || true && next build && (npm run dev > /dev/null 2>&1 &)",
+    "build:only": "next build",
     "start": "next start",
     "lint": "next lint",
     "electron:dev": "concurrently \"cross-env ELECTRON_START_URL=http://localhost:3000 electron .\" \"next dev\"",

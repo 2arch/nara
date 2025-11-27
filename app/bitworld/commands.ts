@@ -77,7 +77,78 @@ async function compositeSpriteSheet(
     return canvas.toDataURL('image/png');
 }
 
-// Composite sprite sheet from Storage URLs (V2 API format)
+// Composite sprite sheet from Storage refs (CORS is enabled on bucket)
+async function compositeSpriteSheetFromRefs(
+    storageRefs: { direction: string; ref: any }[],
+    frameSize: { width: number; height: number },
+    framesPerDirection: number
+): Promise<string> {
+
+    const sheetWidth = frameSize.width * framesPerDirection;
+    const sheetHeight = frameSize.height * SPRITE_DIRECTIONS.length;
+
+    console.log('[compositeSpriteSheetFromRefs] Creating sheet with', storageRefs.length, 'refs');
+
+    // Create canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = sheetWidth;
+    canvas.height = sheetHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Failed to get canvas context');
+
+    const { getDownloadURL } = await import('firebase/storage');
+
+    // Load and draw each direction
+    for (let row = 0; row < SPRITE_DIRECTIONS.length; row++) {
+        const direction = SPRITE_DIRECTIONS[row];
+        const refInfo = storageRefs.find(r => r.direction === direction);
+        if (!refInfo) {
+            console.log(`[compositeSpriteSheetFromRefs] No ref for direction: ${direction}`);
+            continue;
+        }
+
+        console.log(`[compositeSpriteSheetFromRefs] Loading ${direction}`);
+
+        // Get download URL and load with CORS
+        const url = await getDownloadURL(refInfo.ref);
+
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const image = new Image();
+            image.crossOrigin = 'anonymous'; // CORS is now enabled on bucket
+            image.onload = () => resolve(image);
+            image.onerror = (e) => {
+                console.error(`[compositeSpriteSheetFromRefs] Failed to load ${direction}:`, e);
+                reject(new Error(`Failed to load image for ${direction}`));
+            };
+            image.src = url;
+        });
+
+        // Calculate scaling to fit frame
+        const scale = Math.min(
+            frameSize.width / img.width,
+            frameSize.height / img.height
+        );
+        const scaledWidth = img.width * scale;
+        const scaledHeight = img.height * scale;
+        const offsetX = (frameSize.width - scaledWidth) / 2;
+        const offsetY = (frameSize.height - scaledHeight) / 2;
+
+        // Draw the same image for each frame column (static sprite)
+        for (let col = 0; col < framesPerDirection; col++) {
+            ctx.drawImage(
+                img,
+                col * frameSize.width + offsetX,
+                row * frameSize.height + offsetY,
+                scaledWidth,
+                scaledHeight
+            );
+        }
+    }
+
+    return canvas.toDataURL('image/png');
+}
+
+// Composite sprite sheet from URL map (CORS is enabled on bucket)
 async function compositeSpriteSheetFromUrls(
     storagePaths: Record<string, string>,
     frameSize: { width: number; height: number },
@@ -85,6 +156,8 @@ async function compositeSpriteSheetFromUrls(
 ): Promise<string> {
     const sheetWidth = frameSize.width * framesPerDirection;
     const sheetHeight = frameSize.height * SPRITE_DIRECTIONS.length;
+
+    console.log('[compositeSpriteSheetFromUrls] Creating sheet from URLs');
 
     // Create canvas
     const canvas = document.createElement('canvas');
@@ -96,16 +169,23 @@ async function compositeSpriteSheetFromUrls(
     // Load and draw each direction
     for (let row = 0; row < SPRITE_DIRECTIONS.length; row++) {
         const direction = SPRITE_DIRECTIONS[row];
-        const imageUrl = storagePaths[direction];
-        if (!imageUrl) continue;
+        const url = storagePaths[direction];
+        if (!url) {
+            console.log(`[compositeSpriteSheetFromUrls] No URL for direction: ${direction}`);
+            continue;
+        }
 
-        // Load image from URL
+        console.log(`[compositeSpriteSheetFromUrls] Loading ${direction}`);
+
         const img = await new Promise<HTMLImageElement>((resolve, reject) => {
             const image = new Image();
-            image.crossOrigin = 'anonymous'; // Required for cross-origin images
+            image.crossOrigin = 'anonymous'; // CORS is now enabled on bucket
             image.onload = () => resolve(image);
-            image.onerror = reject;
-            image.src = imageUrl;
+            image.onerror = (e) => {
+                console.error(`[compositeSpriteSheetFromUrls] Failed to load ${direction}:`, e);
+                reject(new Error(`Failed to load image for ${direction}`));
+            };
+            image.src = url;
         });
 
         // Calculate scaling to fit frame
@@ -285,6 +365,7 @@ export interface ModeState {
         isTracked?: boolean; // True if from MediaPipe tracking, false if autonomous
     };
     isPaintMode: boolean; // Whether paint mode is active
+    paintTool: 'brush' | 'fill' | 'lasso'; // Current paint tool
     paintColor: string; // Current paint brush color
     paintBrushSize: number; // Paint brush radius in cells
 }
@@ -506,6 +587,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         isCharacterEnabled: false, // Character sprite cursor not active initially
         faceOrientation: undefined, // No face orientation initially
         isPaintMode: false, // Paint mode not active initially
+        paintTool: 'brush', // Default to brush tool
         paintColor: '#000000', // Default black paint
         paintBrushSize: 1, // Default brush size (1 cell radius)
     });
@@ -1306,10 +1388,34 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (lowerInput === 'be' || lowerInput.startsWith('be ')) {
             const parts = input.split(' ');
-            const BE_FLAGS = ['--rm', '--re', '--name'];
+            const BE_FLAGS = ['--rm', '--re', '--rename', '--sheet', '--animate', '--animate-continue', '--re-animate'];
+
+            // Public sprites available in /public folder
+            const PUBLIC_SPRITES = [
+                { name: 'mudkip', walkPath: '/mudkip_walk.png', idlePath: '/mudkip_idle.png' },
+                { name: 'test', walkPath: '/sprites/test_walk.png', idlePath: '/sprites/test_idle.png' },
+                { name: 'wizard', walkPath: '/sprites/generated/wizard_walk.png', idlePath: '/sprites/generated/wizard_idle.png' },
+                { name: 'wizard_blue', walkPath: '/sprites/generated/wizard_with_blue_robes_walk.png', idlePath: '/sprites/generated/wizard_with_blue_robes_idle.png' },
+                { name: 'dragon_knight', walkPath: '/sprites/Dragon_knight/walk.png', idlePath: '/sprites/Dragon_knight/idle.png' },
+            ];
 
             if (parts.length > 1) {
                 const secondArg = parts[1].toLowerCase();
+
+                // Handle --sheet flag (create sheet from existing rotations)
+                if (secondArg === '--sheet' || '--sheet'.startsWith(secondArg)) {
+                    if (parts.length > 2) {
+                        const spriteInput = parts[2].toLowerCase();
+                        const matchingSprites = userSprites
+                            .filter(sprite => sprite.name.toLowerCase().includes(spriteInput))
+                            .map(sprite => `be --sheet ${sprite.name}`);
+                        return matchingSprites.length > 0 ? matchingSprites : [`be --sheet ${spriteInput}`];
+                    }
+                    // Show all sprite names
+                    return userSprites.length > 0
+                        ? userSprites.map(sprite => `be --sheet ${sprite.name}`)
+                        : ['be --sheet'];
+                }
 
                 // Handle --rm flag
                 if (secondArg === '--rm' || '--rm'.startsWith(secondArg)) {
@@ -1335,44 +1441,108 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     return userSprites.map(sprite => `be --re ${sprite.name}`);
                 }
 
-                // Handle --name flag (rename)
-                if (secondArg === '--name' || '--name'.startsWith(secondArg)) {
+                // Handle --rename flag (rename sprite)
+                if (secondArg === '--rename' || '--rename'.startsWith(secondArg)) {
                     if (parts.length > 2) {
                         const spriteInput = parts[2].toLowerCase();
                         const matchingSprites = userSprites
                             .filter(sprite => sprite.name.toLowerCase().includes(spriteInput))
-                            .map(sprite => `be --name ${sprite.name}`);
+                            .map(sprite => `be --rename ${sprite.name}`);
                         if (parts.length > 3) {
-                            // Already have sprite name, just show current input
+                            // Already have sprite name, show input for new name
                             return [input];
                         }
-                        return matchingSprites.length > 0 ? matchingSprites : [`be --name ${spriteInput}`];
+                        return matchingSprites.length > 0 ? matchingSprites : [`be --rename ${spriteInput}`];
                     }
-                    return userSprites.map(sprite => `be --name ${sprite.name}`);
+                    return userSprites.length > 0
+                        ? userSprites.map(sprite => `be --rename ${sprite.name}`)
+                        : ['be --rename'];
+                }
+
+                // Handle --animate flag (generate walk animation)
+                if (secondArg === '--animate' || '--animate'.startsWith(secondArg)) {
+                    if (parts.length > 2) {
+                        const spriteInput = parts[2].toLowerCase();
+                        const matchingSprites = userSprites
+                            .filter(sprite => sprite.name.toLowerCase().includes(spriteInput))
+                            .map(sprite => `be --animate ${sprite.name}`);
+                        return matchingSprites.length > 0 ? matchingSprites : [`be --animate ${spriteInput}`];
+                    }
+                    // Show all sprite names
+                    return userSprites.length > 0
+                        ? userSprites.map(sprite => `be --animate ${sprite.name}`)
+                        : ['be --animate'];
+                }
+
+                // Handle --animate-continue flag (continue failed animation)
+                if (secondArg === '--animate-continue' || '--animate-continue'.startsWith(secondArg)) {
+                    if (parts.length > 2) {
+                        const spriteInput = parts[2].toLowerCase();
+                        const matchingSprites = userSprites
+                            .filter(sprite => sprite.name.toLowerCase().includes(spriteInput))
+                            .map(sprite => `be --animate-continue ${sprite.name}`);
+                        return matchingSprites.length > 0 ? matchingSprites : [`be --animate-continue ${spriteInput}`];
+                    }
+                    return userSprites.length > 0
+                        ? userSprites.map(sprite => `be --animate-continue ${sprite.name}`)
+                        : ['be --animate-continue'];
+                }
+
+                // Handle --re-animate flag (alias for --animate-continue)
+                if (secondArg === '--re-animate' || '--re-animate'.startsWith(secondArg)) {
+                    if (parts.length > 2) {
+                        const spriteInput = parts[2].toLowerCase();
+                        const matchingSprites = userSprites
+                            .filter(sprite => sprite.name.toLowerCase().includes(spriteInput))
+                            .map(sprite => `be --re-animate ${sprite.name}`);
+                        return matchingSprites.length > 0 ? matchingSprites : [`be --re-animate ${spriteInput}`];
+                    }
+                    return userSprites.length > 0
+                        ? userSprites.map(sprite => `be --re-animate ${sprite.name}`)
+                        : ['be --re-animate'];
                 }
 
                 // Check if typing a flag
                 const flagMatch = BE_FLAGS.filter(f => f.startsWith(secondArg));
                 if (flagMatch.length > 0 && secondArg.startsWith('-')) {
-                    return flagMatch.map(f => `be ${f}`);
+                    const suggestions = flagMatch.map(f => `be ${f}`);
+                    // If the user typed something like 'be --a', ensure animate options are there
+                    if (secondArg.startsWith('--ani')) {
+                        if (!suggestions.includes('be --animate')) suggestions.push('be --animate');
+                        if (!suggestions.includes('be --animate-continue')) suggestions.push('be --animate-continue');
+                        if (!suggestions.includes('be --re-animate')) suggestions.push('be --re-animate');
+                    }
+                    return suggestions;
                 }
 
-                // Regular sprite selection or prompt
+                // Regular sprite selection or prompt (includes public sprites)
                 const spriteInput = parts.slice(1).join(' ').toLowerCase();
-                const matchingSprites = userSprites
+                // Match user sprites by name OR id
+                const matchingUserSpritesByName = userSprites
                     .filter(sprite => sprite.name.toLowerCase().includes(spriteInput))
                     .map(sprite => `be ${sprite.name}`);
-                if (matchingSprites.length > 0) {
-                    return [...matchingSprites, `be ${spriteInput}`];
+                const matchingUserSpritesById = userSprites
+                    .filter(sprite => sprite.id.toLowerCase().includes(spriteInput))
+                    .map(sprite => `be ${sprite.id}`);
+                const matchingPublicSprites = PUBLIC_SPRITES
+                    .filter(sprite => sprite.name.toLowerCase().includes(spriteInput))
+                    .map(sprite => `be ${sprite.name}`);
+                // Combine and dedupe
+                const allMatches = [...new Set([...matchingUserSpritesByName, ...matchingUserSpritesById, ...matchingPublicSprites])];
+                if (allMatches.length > 0) {
+                    return [...allMatches, `be ${spriteInput}`];
                 }
                 return [`be ${spriteInput}`];
             }
-            // Show flags + saved sprites
-            const baseOptions = ['be --rm', 'be --re', 'be --name'];
+            // Show flags + saved sprites (by name and id) + public sprites
+            const baseOptions = ['be --rm', 'be --re', 'be --rename', 'be --sheet', 'be --animate', 'be --animate-continue', 'be --re-animate'];
+            const userSpriteByName = userSprites.map(sprite => `be ${sprite.name}`);
+            const userSpriteById = userSprites.map(sprite => `be ${sprite.id}`);
+            const publicSpriteOptions = PUBLIC_SPRITES.map(sprite => `be ${sprite.name}`);
             if (userSprites.length > 0) {
-                return [...baseOptions, ...userSprites.map(sprite => `be ${sprite.name}`)];
+                return [...baseOptions, ...userSpriteByName, ...userSpriteById, ...publicSpriteOptions];
             }
-            return [...baseOptions, 'be'];
+            return [...baseOptions, ...publicSpriteOptions];
         }
 
         return commandList.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
@@ -1939,6 +2109,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             : fullInput;
 
         if (!commandToExecute) return null; // Safety check for undefined command
+
+        // DEBUG: Log command execution
+        console.log('[executeCommand] commandToExecute:', JSON.stringify(commandToExecute));
+        console.log('[executeCommand] hasNavigated:', commandState.hasNavigated);
+        console.log('[executeCommand] matchedCommands:', commandState.matchedCommands.slice(0, 5));
 
         const inputParts = commandToExecute.split(/\s+/);
         const commandName = inputParts[0];
@@ -2809,86 +2984,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             return executeToggleModeCommand('isIndentEnabled', "Smart indentation enabled", "Smart indentation disabled");
         }
 
-        // Quick sprite generation - single image, no rotations (for testing)
-        if (commandToExecute.startsWith('beq')) {
-            const prompt = commandToExecute.slice(3).trim();
-
-            if (prompt) {
-                const addLog = (msg: string) => {
-                    const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
-                    setModeState(prev => ({
-                        ...prev,
-                        spriteDebugLog: [...(prev.spriteDebugLog || []), `[${timestamp}] ${msg}`]
-                    }));
-                    console.log(`[SpriteGenQuick] ${msg}`);
-                };
-
-                setModeState(prev => ({ ...prev, isGeneratingSprite: true, spriteDebugLog: [], spriteProgress: 0 }));
-                setDialogueText(`Quick generating "${prompt}"...`);
-                addLog(`Starting quick generation: "${prompt}"`);
-
-                const quickApiUrl = process.env.NEXT_PUBLIC_SPRITE_QUICK_API_URL ||
-                    'https://us-central1-nara-a65bc.cloudfunctions.net/generateSpriteQuick';
-
-                fetch(quickApiUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ description: prompt }),
-                })
-                    .then(res => {
-                        addLog(`Response status: ${res.status}`);
-                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                        return res.json();
-                    })
-                    .then(async data => {
-                        if (data.error) {
-                            throw new Error(data.error);
-                        }
-
-                        if (data.images) {
-                            addLog(`Compositing sprite sheets...`);
-                            setDialogueText(`Compositing sprite sheets...`);
-
-                            const [walkSheet, idleSheet] = await Promise.all([
-                                compositeSpriteSheet(data.images, WALK_FRAME_SIZE, WALK_FRAMES_PER_DIR),
-                                compositeSpriteSheet(data.images, IDLE_FRAME_SIZE, IDLE_FRAMES_PER_DIR),
-                            ]);
-
-                            const spriteName = prompt.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-                            addLog(`Success! Sprite: ${spriteName}`);
-                            setModeState(prev => ({
-                                ...prev,
-                                isGeneratingSprite: false,
-                                spriteProgress: 0,
-                                isCharacterEnabled: true,
-                                characterSprite: {
-                                    walkSheet,
-                                    idleSheet,
-                                    name: spriteName,
-                                },
-                            }));
-                            setDialogueText(`Now playing as: ${spriteName}`);
-                        }
-                    })
-                    .catch(err => {
-                        const errMsg = err instanceof Error ? err.message : String(err);
-                        addLog(`Error: ${errMsg}`);
-                        console.error('Quick sprite generation failed:', err);
-                        setDialogueText(`Quick sprite generation failed: ${errMsg}`);
-                        setModeState(prev => ({ ...prev, isGeneratingSprite: false, spriteProgress: 0 }));
-                    });
-
-                clearCommandState();
-                return null;
-            } else {
-                setDialogueWithRevert("Usage: /beq <description> (quick test, no rotations)", setDialogueText);
-                clearCommandState();
-                return null;
-            }
-        }
-
         if (commandToExecute.startsWith('be')) {
             const beArgs = commandToExecute.slice(2).trim();
+            console.log('[/be] Command received, beArgs:', JSON.stringify(beArgs));
+            console.log('[/be] userUid:', userUid);
+            console.log('[/be] userSprites count:', userSprites.length);
 
             // Handle --rm flag (delete sprite)
             if (beArgs.startsWith('--rm ')) {
@@ -2986,6 +3086,585 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 return null;
             }
 
+            // Handle --sheet flag (create idle sheet from existing rotations)
+            if (beArgs.startsWith('--sheet ')) {
+                const spriteName = beArgs.slice(8).trim();
+
+                if (!userUid) {
+                    setDialogueWithRevert("Must be logged in to create sheet", setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                // Look up sprite by name to get ID
+                const sprite = userSprites.find(s => s.name.toLowerCase() === spriteName.toLowerCase());
+                if (!sprite) {
+                    setDialogueWithRevert(`Sprite "${spriteName}" not found`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+                const spriteId = sprite.id;
+
+                setDialogueText(`Creating idle sheet for ${spriteName}...`);
+                console.log(`[/be --sheet] Creating sheet for sprite: ${spriteName} (id: ${spriteId})`);
+
+                (async () => {
+                    try {
+                        const { ref: storageRef, listAll } = await import('firebase/storage');
+                        const { storage } = await import('@/app/firebase');
+
+                        // List rotations in the sprite folder
+                        const rotationsRef = storageRef(storage, `sprites/${userUid}/${spriteId}/rotations`);
+                        const rotationsList = await listAll(rotationsRef);
+
+                        console.log(`[/be --sheet] Found ${rotationsList.items.length} rotation files`);
+
+                        if (rotationsList.items.length === 0) {
+                            setDialogueText(`No rotations found for ${spriteId}`);
+                            return;
+                        }
+
+                        // Build refs array for the new function
+                        const storageRefs = rotationsList.items.map(item => ({
+                            direction: item.name.replace('.png', ''),
+                            ref: item,
+                        }));
+                        console.log(`[/be --sheet] Built ${storageRefs.length} refs`);
+
+                        // Create the spritesheet using Firebase SDK (no CORS issues)
+                        console.log(`[/be --sheet] Compositing spritesheet...`);
+                        const staticSheet = await compositeSpriteSheetFromRefs(
+                            storageRefs,
+                            IDLE_FRAME_SIZE,
+                            IDLE_FRAMES_PER_DIR
+                        );
+
+                        // Upload as idle.png only (walk.png created by --animate)
+                        const { uploadString } = await import('firebase/storage');
+                        const idleRef = storageRef(storage, `sprites/${userUid}/${spriteId}/idle.png`);
+                        await uploadString(idleRef, staticSheet, 'data_url');
+
+                        console.log(`[/be --sheet] Uploaded idle.png`);
+
+                        // Set as current cursor (use idle for walk until animated)
+                        setModeState(prev => ({
+                            ...prev,
+                            isCharacterEnabled: true,
+                            characterSprite: {
+                                walkSheet: staticSheet, // Fallback to idle until --animate creates walk.png
+                                idleSheet: staticSheet,
+                                name: spriteId,
+                            },
+                        }));
+
+                        setDialogueText(`Now playing as: ${spriteId}`);
+                    } catch (err) {
+                        const errMsg = err instanceof Error ? err.message : String(err);
+                        console.error('[/be --sheet] Error:', err);
+                        setDialogueText(`Failed to create sheet: ${errMsg}`);
+                    }
+                })();
+
+                clearCommandState();
+                return null;
+            }
+
+            // Handle --animate flag (generate walk animation from existing character)
+            if (beArgs.startsWith('--animate ')) {
+                const spriteName = beArgs.slice(10).trim();
+
+                if (!userUid) {
+                    setDialogueWithRevert("Must be logged in to animate", setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                // Look up sprite by name to get ID
+                const sprite = userSprites.find(s => s.name.toLowerCase() === spriteName.toLowerCase());
+                if (!sprite) {
+                    setDialogueWithRevert(`Sprite "${spriteName}" not found`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+                const spriteId = sprite.id;
+
+                // Helper to add log entry to debug div
+                const addLog = (msg: string) => {
+                    const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+                    setModeState(prev => ({
+                        ...prev,
+                        spriteDebugLog: [...(prev.spriteDebugLog || []), `[${timestamp}] ${msg}`]
+                    }));
+                    console.log(`[AnimateSprite] ${msg}`);
+                };
+
+                // Set cursor to idle sprite immediately (it will pulse during animation)
+                const idleUrl = sprite.idleUrl || '';
+                setModeState(prev => ({
+                    ...prev,
+                    isGeneratingSprite: true,
+                    spriteDebugLog: [],
+                    isCharacterEnabled: true,
+                    characterSprite: {
+                        walkSheet: idleUrl, // Use idle for walk temporarily
+                        idleSheet: idleUrl,
+                        name: spriteName,
+                    },
+                }));
+                setDialogueText(`Generating walk animation for ${spriteName}...`);
+                addLog(`Starting animation for: ${spriteName}`);
+                addLog(`Cursor set to idle sprite (pulsing)`);
+                console.log(`[/be --animate] Starting animation for sprite: ${spriteName} (id: ${spriteId})`);
+
+                (async () => {
+                    try {
+                        const { ref: storageRef, getDownloadURL, getBytes, uploadString } = await import('firebase/storage');
+                        const { storage } = await import('@/app/firebase');
+
+                        // Read metadata to get characterId
+                        addLog(`Reading metadata...`);
+                        const metadataRef = storageRef(storage, `sprites/${userUid}/${spriteId}/metadata.json`);
+                        const metadataBytes = await getBytes(metadataRef);
+                        const metadataText = new TextDecoder().decode(metadataBytes);
+                        const metadata = JSON.parse(metadataText);
+
+                        if (!metadata.characterId) {
+                            addLog(`ERROR: No characterId found`);
+                            setModeState(prev => ({ ...prev, isGeneratingSprite: false }));
+                            setDialogueText(`No characterId found for ${spriteName}. Regenerate with /be.`);
+                            return;
+                        }
+
+                        addLog(`Found characterId: ${metadata.characterId.slice(0, 8)}...`);
+                        console.log(`[/be --animate] Found characterId: ${metadata.characterId}`);
+                        setDialogueText(`Requesting animation from Pixellab...`);
+                        addLog(`Requesting animation from Pixellab...`);
+
+                        // Call Cloud Function to generate animation
+                        const response = await fetch(
+                            'https://us-central1-nara-a65bc.cloudfunctions.net/animateSprite',
+                            {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    characterId: metadata.characterId,
+                                    userUid,
+                                    spriteId,
+                                }),
+                            }
+                        );
+
+                        if (!response.ok) {
+                            const errText = await response.text();
+                            addLog(`ERROR: Animation request failed`);
+                            throw new Error(`Animation request failed: ${errText}`);
+                        }
+
+                        const { jobId } = await response.json();
+                        addLog(`Job started: ${jobId.slice(0, 8)}...`);
+                        console.log(`[/be --animate] Animation job started: ${jobId}`);
+
+                        // Poll for completion
+                        const pollInterval = 3000;
+                        const maxPolls = 120; // 6 minutes max
+                        let pollCount = 0;
+
+                        const poll = async (): Promise<any> => {
+                            pollCount++;
+                            const statusRes = await fetch(
+                                `https://us-central1-nara-a65bc.cloudfunctions.net/animateSprite?jobId=${jobId}`
+                            );
+                            const status = await statusRes.json();
+
+                            const phase = status.currentPhase || 'processing';
+                            addLog(`[${pollCount}] ${status.status} - ${phase}`);
+                            console.log(`[/be --animate] Poll ${pollCount}: ${status.status} - ${phase}`);
+
+                            if (status.status === 'complete') {
+                                return status;
+                            } else if (status.status === 'partial') {
+                                // Animation partially completed - some directions failed
+                                const completed = status.completedDirections?.length || 0;
+                                const total = status.totalDirections || 8;
+                                addLog(`PARTIAL: ${completed}/${total} directions completed`);
+                                if (status.missingDirections?.length > 0) {
+                                    addLog(`Missing: ${status.missingDirections.join(', ')}`);
+                                }
+                                // Treat partial as success - user can retry failed directions with --animate-continue
+                                return status;
+                            } else if (status.status === 'error') {
+                                addLog(`ERROR: ${status.error || 'Animation failed'}`);
+                                throw new Error(status.error || 'Animation failed');
+                            } else if (pollCount >= maxPolls) {
+                                addLog(`ERROR: Animation timed out`);
+                                throw new Error('Animation timed out');
+                            }
+
+                            // Update dialogue with progress
+                            setDialogueText(`Animating ${spriteName}... (${phase})`);
+                            await new Promise(r => setTimeout(r, pollInterval));
+                            return poll();
+                        };
+
+                        const result = await poll();
+                        addLog(`Animation complete!`);
+                        console.log(`[/be --animate] Animation complete! framePaths:`, result.framePaths);
+
+                        setDialogueText(`Compositing walk sheet...`);
+                        addLog(`Compositing walk sheet...`);
+
+                        // Composite animation frames into walk sprite sheet
+                        const framePaths = result.framePaths as Record<string, string[]>;
+                        const FRAME_WIDTH = 32;
+                        const FRAME_HEIGHT = 40;
+                        const FRAMES_PER_DIR = 8;
+
+                        const walkCanvas = document.createElement('canvas');
+                        walkCanvas.width = FRAME_WIDTH * FRAMES_PER_DIR;
+                        walkCanvas.height = FRAME_HEIGHT * SPRITE_DIRECTIONS.length;
+                        const walkCtx = walkCanvas.getContext('2d')!;
+
+                        // Load and draw frames for each direction
+                        for (let row = 0; row < SPRITE_DIRECTIONS.length; row++) {
+                            const direction = SPRITE_DIRECTIONS[row];
+                            const frames = framePaths[direction];
+                            if (!frames) {
+                                console.log(`[/be --animate] No frames for ${direction}`);
+                                continue;
+                            }
+
+                            for (let col = 0; col < frames.length && col < FRAMES_PER_DIR; col++) {
+                                const frameUrl = frames[col];
+                                try {
+                                    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+                                        const image = new Image();
+                                        image.crossOrigin = 'anonymous';
+                                        image.onload = () => resolve(image);
+                                        image.onerror = reject;
+                                        image.src = frameUrl;
+                                    });
+
+                                    // Calculate scaling to fit frame
+                                    const scale = Math.min(
+                                        FRAME_WIDTH / img.width,
+                                        FRAME_HEIGHT / img.height
+                                    );
+                                    const scaledWidth = img.width * scale;
+                                    const scaledHeight = img.height * scale;
+                                    const offsetX = (FRAME_WIDTH - scaledWidth) / 2;
+                                    const offsetY = (FRAME_HEIGHT - scaledHeight) / 2;
+
+                                    walkCtx.drawImage(
+                                        img,
+                                        col * FRAME_WIDTH + offsetX,
+                                        row * FRAME_HEIGHT + offsetY,
+                                        scaledWidth,
+                                        scaledHeight
+                                    );
+                                } catch (err) {
+                                    console.warn(`[/be --animate] Failed to load frame ${direction}_${col}:`, err);
+                                }
+                            }
+                        }
+
+                        const walkSheet = walkCanvas.toDataURL('image/png');
+                        console.log(`[/be --animate] Walk sheet composited`);
+
+                        // Upload walk sheet to Storage
+                        const { uploadString: uploadStr } = await import('firebase/storage');
+                        const walkRef = storageRef(storage, `sprites/${userUid}/${spriteId}/walk.png`);
+                        await uploadStr(walkRef, walkSheet, 'data_url');
+                        console.log(`[/be --animate] Walk sheet uploaded`);
+
+                        // Load idle sheet
+                        const idleRef = storageRef(storage, `sprites/${userUid}/${spriteId}/idle.png`);
+                        const idleUrl = await getDownloadURL(idleRef);
+
+                        const idleImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+                            const img = new Image();
+                            img.crossOrigin = 'anonymous';
+                            img.onload = () => resolve(img);
+                            img.onerror = reject;
+                            img.src = idleUrl;
+                        });
+
+                        const idleCanvas = document.createElement('canvas');
+                        idleCanvas.width = idleImg.width;
+                        idleCanvas.height = idleImg.height;
+                        const idleCtx = idleCanvas.getContext('2d')!;
+                        idleCtx.drawImage(idleImg, 0, 0);
+                        const idleSheet = idleCanvas.toDataURL('image/png');
+
+                        addLog(`Success! Walk animation ready.`);
+
+                        // Set as current cursor with animated walk
+                        setModeState(prev => ({
+                            ...prev,
+                            isGeneratingSprite: false,
+                            isCharacterEnabled: true,
+                            characterSprite: {
+                                walkSheet,
+                                idleSheet,
+                                name: spriteName,
+                            },
+                        }));
+
+                        setDialogueText(`${spriteName} now has walk animation!`);
+
+                    } catch (err) {
+                        const errMsg = err instanceof Error ? err.message : String(err);
+                        addLog(`ERROR: ${errMsg}`);
+                        console.error('[/be --animate] Error:', err);
+                        setModeState(prev => ({ ...prev, isGeneratingSprite: false }));
+                        setDialogueText(`Animation failed: ${errMsg}`);
+                    }
+                })();
+
+                clearCommandState();
+                return null;
+            }
+
+            // Handle --animate-continue flag (continue animation if walk sheet missing)
+            if (beArgs.startsWith('--animate-continue ')) {
+                const spriteName = beArgs.slice(19).trim();
+
+                if (!userUid) {
+                    setDialogueWithRevert("Must be logged in", setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                // Look up sprite by name to get ID
+                const sprite = userSprites.find(s => s.name.toLowerCase() === spriteName.toLowerCase());
+                if (!sprite) {
+                    setDialogueWithRevert(`Sprite "${spriteName}" not found`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+                const spriteId = sprite.id;
+
+                setDialogueText(`Checking ${spriteName} animation status...`);
+                console.log(`[/be --animate-continue] Checking sprite: ${spriteName} (id: ${spriteId})`);
+
+                (async () => {
+                    try {
+                        const { ref: storageRef, getDownloadURL, getBytes } = await import('firebase/storage');
+                        const { storage } = await import('@/app/firebase');
+
+                        // Check if walk.png exists
+                        const walkRef = storageRef(storage, `sprites/${userUid}/${spriteId}/walk.png`);
+                        try {
+                            await getDownloadURL(walkRef);
+                            setDialogueText(`${spriteId} already has walk animation. Use /be ${spriteId} to load.`);
+                            return;
+                        } catch {
+                            // walk.png doesn't exist, continue with animation
+                            console.log(`[/be --animate-continue] Walk sheet missing, continuing animation...`);
+                        }
+
+                        // Read metadata to get characterId
+                        const metadataRef = storageRef(storage, `sprites/${userUid}/${spriteId}/metadata.json`);
+                        const metadataBytes = await getBytes(metadataRef);
+                        const metadataText = new TextDecoder().decode(metadataBytes);
+                        const metadata = JSON.parse(metadataText);
+
+                        if (!metadata.characterId) {
+                            setDialogueText(`No characterId for ${spriteId}. Use /be to regenerate.`);
+                            return;
+                        }
+
+                        setDialogueText(`Continuing animation for ${spriteId}...`);
+
+                        // Same animation flow as --animate
+                        const response = await fetch(
+                            'https://us-central1-nara-a65bc.cloudfunctions.net/animateSprite',
+                            {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    characterId: metadata.characterId,
+                                    userUid,
+                                    spriteId,
+                                }),
+                            }
+                        );
+
+                        if (!response.ok) {
+                            const errText = await response.text();
+                            throw new Error(`Animation request failed: ${errText}`);
+                        }
+
+                        const { jobId } = await response.json();
+                        console.log(`[/be --animate-continue] Animation job started: ${jobId}`);
+
+                        // Poll for completion
+                        const pollInterval = 3000;
+                        const maxPolls = 120;
+                        let pollCount = 0;
+
+                        const poll = async (): Promise<any> => {
+                            pollCount++;
+                            const statusRes = await fetch(
+                                `https://us-central1-nara-a65bc.cloudfunctions.net/animateSprite?jobId=${jobId}`
+                            );
+                            const status = await statusRes.json();
+
+                            if (status.status === 'complete') return status;
+                            if (status.status === 'partial') {
+                                // Partial success - some directions completed
+                                console.log(`[/be --animate-continue] Partial: ${status.completedDirections?.length}/${status.totalDirections}`);
+                                return status;
+                            }
+                            if (status.status === 'error') throw new Error(status.error || 'Animation failed');
+                            if (pollCount >= maxPolls) throw new Error('Animation timed out');
+
+                            setDialogueText(`Animating ${spriteId}... (${status.currentPhase || 'processing'})`);
+                            await new Promise(r => setTimeout(r, pollInterval));
+                            return poll();
+                        };
+
+                        const result = await poll();
+
+                        // Composite frames (same as --animate)
+                        setDialogueText(`Compositing walk sheet...`);
+                        const framePaths = result.framePaths as Record<string, string[]>;
+                        const FRAME_WIDTH = 32;
+                        const FRAME_HEIGHT = 40;
+                        const FRAMES_PER_DIR = 8;
+
+                        const walkCanvas = document.createElement('canvas');
+                        walkCanvas.width = FRAME_WIDTH * FRAMES_PER_DIR;
+                        walkCanvas.height = FRAME_HEIGHT * SPRITE_DIRECTIONS.length;
+                        const walkCtx = walkCanvas.getContext('2d')!;
+
+                        for (let row = 0; row < SPRITE_DIRECTIONS.length; row++) {
+                            const direction = SPRITE_DIRECTIONS[row];
+                            const frames = framePaths[direction];
+                            if (!frames) continue;
+
+                            for (let col = 0; col < frames.length && col < FRAMES_PER_DIR; col++) {
+                                try {
+                                    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+                                        const image = new Image();
+                                        image.crossOrigin = 'anonymous';
+                                        image.onload = () => resolve(image);
+                                        image.onerror = reject;
+                                        image.src = frames[col];
+                                    });
+
+                                    const scale = Math.min(FRAME_WIDTH / img.width, FRAME_HEIGHT / img.height);
+                                    const scaledWidth = img.width * scale;
+                                    const scaledHeight = img.height * scale;
+                                    const offsetX = (FRAME_WIDTH - scaledWidth) / 2;
+                                    const offsetY = (FRAME_HEIGHT - scaledHeight) / 2;
+
+                                    walkCtx.drawImage(img, col * FRAME_WIDTH + offsetX, row * FRAME_HEIGHT + offsetY, scaledWidth, scaledHeight);
+                                } catch (err) {
+                                    console.warn(`Failed to load frame ${direction}_${col}:`, err);
+                                }
+                            }
+                        }
+
+                        const walkSheet = walkCanvas.toDataURL('image/png');
+                        const { uploadString: uploadStr } = await import('firebase/storage');
+                        await uploadStr(walkRef, walkSheet, 'data_url');
+
+                        // Load idle and set sprite
+                        const idleRef = storageRef(storage, `sprites/${userUid}/${spriteId}/idle.png`);
+                        const idleUrl = await getDownloadURL(idleRef);
+                        const idleImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+                            const img = new Image();
+                            img.crossOrigin = 'anonymous';
+                            img.onload = () => resolve(img);
+                            img.onerror = reject;
+                            img.src = idleUrl;
+                        });
+                        const idleCanvas = document.createElement('canvas');
+                        idleCanvas.width = idleImg.width;
+                        idleCanvas.height = idleImg.height;
+                        idleCanvas.getContext('2d')!.drawImage(idleImg, 0, 0);
+                        const idleSheet = idleCanvas.toDataURL('image/png');
+
+                        setModeState(prev => ({
+                            ...prev,
+                            isCharacterEnabled: true,
+                            characterSprite: { walkSheet, idleSheet, name: spriteId },
+                        }));
+
+                        setDialogueText(`${spriteId} animation complete!`);
+                    } catch (err) {
+                        const errMsg = err instanceof Error ? err.message : String(err);
+                        console.error('[/be --animate-continue] Error:', err);
+                        setDialogueText(`Animation failed: ${errMsg}`);
+                    }
+                })();
+
+                clearCommandState();
+                return null;
+            }
+
+            // Handle --rename flag (rename sprite and update metadata)
+            if (beArgs.startsWith('--rename ')) {
+                const renameArgs = beArgs.slice(9).trim();
+                const [spriteId, newName] = renameArgs.split(/\s+/);
+
+                if (!userUid) {
+                    setDialogueWithRevert("Must be logged in", setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                if (!spriteId) {
+                    setDialogueWithRevert("Usage: /be --rename <spriteId> <newName>", setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                if (!newName) {
+                    setDialogueWithRevert(`Enter new name: /be --rename ${spriteId} <newName>`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                const sanitizedName = newName.toLowerCase().replace(/[^a-z0-9_]/gi, '');
+                setDialogueText(`Renaming ${spriteId} to ${sanitizedName}...`);
+
+                (async () => {
+                    try {
+                        const { ref: storageRef, getBytes, uploadBytes } = await import('firebase/storage');
+                        const { storage } = await import('@/app/firebase');
+
+                        // Read existing metadata
+                        const metadataRef = storageRef(storage, `sprites/${userUid}/${spriteId}/metadata.json`);
+                        const metadataBytes = await getBytes(metadataRef);
+                        const metadataText = new TextDecoder().decode(metadataBytes);
+                        const metadata = JSON.parse(metadataText);
+
+                        // Update name
+                        metadata.name = sanitizedName;
+                        metadata.updatedAt = new Date().toISOString();
+
+                        // Save updated metadata
+                        const updatedBlob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
+                        await uploadBytes(metadataRef, updatedBlob);
+
+                        // Update local state
+                        setUserSprites(prev => prev.map(s =>
+                            s.id === spriteId ? { ...s, name: sanitizedName } : s
+                        ));
+
+                        setDialogueText(`Renamed to: ${sanitizedName}`);
+                    } catch (err) {
+                        const errMsg = err instanceof Error ? err.message : String(err);
+                        console.error('[/be --rename] Error:', err);
+                        setDialogueText(`Rename failed: ${errMsg}`);
+                    }
+                })();
+
+                clearCommandState();
+                return null;
+            }
+
             // Parse quoted prompt and optional name: 'prompt text' [name]
             // (Only if not already set by --re)
             if (!beArgs.startsWith('--re ')) {
@@ -2995,18 +3674,22 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     customName = quoteMatch[2]?.toLowerCase().replace(/[^a-z0-9_]/gi, '');
                 }
 
-                // Check if this matches a saved sprite name (only if not using quotes)
+                // Check if this matches a saved sprite name or ID (only if not using quotes)
                 if (!quoteMatch) {
-                    const savedSprite = userSprites.find(s => s.name.toLowerCase() === prompt.toLowerCase());
+                    // First try to match by name, then by ID
+                    const savedSprite = userSprites.find(s => s.name.toLowerCase() === prompt.toLowerCase())
+                        || userSprites.find(s => s.id.toLowerCase() === prompt.toLowerCase());
+                    console.log('[/be] Checking savedSprite for prompt:', prompt, 'found:', !!savedSprite);
 
                     if (savedSprite) {
-                        // Load saved sprite
+                        // Load saved sprite (use idleUrl as fallback if no walkUrl)
                         setDialogueText(`Loading sprite: ${savedSprite.name}...`);
+                        const walkSheet = savedSprite.walkUrl || savedSprite.idleUrl;
                         setModeState(prev => ({
                             ...prev,
                             isCharacterEnabled: true,
                             characterSprite: {
-                                walkSheet: savedSprite.walkUrl,
+                                walkSheet,
                                 idleSheet: savedSprite.idleUrl,
                                 name: savedSprite.name,
                             },
@@ -3015,11 +3698,40 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         clearCommandState();
                         return null;
                     }
+
+                    // Check if this matches a public sprite name
+                    const PUBLIC_SPRITES = [
+                        { name: 'mudkip', walkPath: '/mudkip_walk.png', idlePath: '/mudkip_idle.png' },
+                        { name: 'test', walkPath: '/sprites/test_walk.png', idlePath: '/sprites/test_idle.png' },
+                        { name: 'wizard', walkPath: '/sprites/generated/wizard_walk.png', idlePath: '/sprites/generated/wizard_idle.png' },
+                        { name: 'wizard_blue', walkPath: '/sprites/generated/wizard_with_blue_robes_walk.png', idlePath: '/sprites/generated/wizard_with_blue_robes_idle.png' },
+                        { name: 'dragon_knight', walkPath: '/sprites/Dragon_knight/walk.png', idlePath: '/sprites/Dragon_knight/idle.png' },
+                    ];
+                    const publicSprite = PUBLIC_SPRITES.find(s => s.name.toLowerCase() === prompt.toLowerCase());
+
+                    if (publicSprite) {
+                        // Load public sprite
+                        setDialogueText(`Loading public sprite: ${publicSprite.name}...`);
+                        setModeState(prev => ({
+                            ...prev,
+                            isCharacterEnabled: true,
+                            characterSprite: {
+                                walkSheet: publicSprite.walkPath,
+                                idleSheet: publicSprite.idlePath,
+                                name: publicSprite.name,
+                            },
+                        }));
+                        setDialogueText(`Now playing as: ${publicSprite.name}`);
+                        clearCommandState();
+                        return null;
+                    }
                 }
             } // End of !--re block
 
             // Generate sprite if we have a prompt
+            console.log('[/be] About to check prompt, prompt:', JSON.stringify(prompt));
             if (prompt) {
+                console.log('[/be] Entering generation block');
                 // Helper to add log entry
                 const addLog = (msg: string) => {
                     const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
@@ -3032,13 +3744,18 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                 // Require user to be logged in
                 if (!userUid) {
+                    console.log('[/be] User not signed in, showing sign-in message');
                     setDialogueWithRevert("Sign in required to generate sprites. Use /signin", setDialogueText);
                     clearCommandState();
                     return null;
                 }
 
                 // Generate new sprite from prompt using polling
-                setModeState(prev => ({ ...prev, isGeneratingSprite: true, spriteDebugLog: [], spriteProgress: 0 }));
+                console.log('[/be] Starting generation, setting isGeneratingSprite: true');
+                setModeState(prev => {
+                    console.log('[/be] setModeState called, prev.isGeneratingSprite:', prev.isGeneratingSprite);
+                    return { ...prev, isGeneratingSprite: true, spriteDebugLog: [], spriteProgress: 0 };
+                });
                 setDialogueText(`Generating "${prompt}"...`);
                 addLog(`Starting generation: "${prompt}"`);
 
@@ -3207,44 +3924,151 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                                     const { ref: storageRef, uploadBytes, uploadString } = await import('firebase/storage');
                                     const { storage } = await import('@/app/firebase');
 
-                                    // Save the composited static sheet as idle.png
+                                    // Save the composited static sheet as idle.png only
+                                    // walk.png will be created by animation
                                     const idleRef = storageRef(storage, `sprites/${userUid}/${spriteId}/idle.png`);
                                     await uploadString(idleRef, staticSheet, 'data_url');
 
-                                    // Use same for walk (static for now)
-                                    const walkRef = storageRef(storage, `sprites/${userUid}/${spriteId}/walk.png`);
-                                    await uploadString(walkRef, staticSheet, 'data_url');
-
-                                    // Update metadata.json
+                                    // Update metadata.json with characterId for animation
                                     const metadata = {
                                         id: spriteId,
                                         name: spriteName,
                                         description: prompt,
                                         status: 'complete',
-                                        characterId: data.characterId, // V2 character ID for future animations
+                                        characterId: data.characterId, // V2 character ID for animations
                                         createdAt: new Date().toISOString(),
                                     };
                                     const metadataRef = storageRef(storage, `sprites/${userUid}/${spriteId}/metadata.json`);
                                     const metadataBlob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
                                     await uploadBytes(metadataRef, metadataBlob);
 
-                                    addLog(`Sprite saved!`);
+                                    addLog(`Idle sprite saved!`);
 
-                                    // Add to local sprites list
+                                    // Add to local sprites list (no walkUrl yet)
                                     const { getDownloadURL } = await import('firebase/storage');
-                                    const [finalWalkUrl, finalIdleUrl] = await Promise.all([
-                                        getDownloadURL(walkRef),
-                                        getDownloadURL(idleRef),
-                                    ]);
+                                    const finalIdleUrl = await getDownloadURL(idleRef);
 
                                     setUserSprites(prev => [{
                                         id: spriteId,
                                         name: spriteName,
                                         description: prompt,
-                                        walkUrl: finalWalkUrl,
+                                        walkUrl: '', // Will be set after animation
                                         idleUrl: finalIdleUrl,
                                         createdAt: metadata.createdAt,
                                     }, ...prev]);
+
+                                    // Automatically start animation
+                                    addLog(`Starting walk animation...`);
+                                    setDialogueText(`Generating walk animation...`);
+
+                                    const animResponse = await fetch(
+                                        'https://us-central1-nara-a65bc.cloudfunctions.net/animateSprite',
+                                        {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({
+                                                characterId: data.characterId,
+                                                userUid,
+                                                spriteId,
+                                            }),
+                                        }
+                                    );
+
+                                    if (!animResponse.ok) {
+                                        addLog(`Animation request failed, use --animate later`);
+                                    } else {
+                                        const { jobId: animJobId } = await animResponse.json();
+                                        addLog(`Animation job: ${animJobId.slice(0, 8)}...`);
+
+                                        // Poll for animation completion
+                                        let animPolls = 0;
+                                        const maxAnimPolls = 120;
+                                        const animPollInterval = 3000;
+
+                                        const animPoll = async (): Promise<any> => {
+                                            animPolls++;
+                                            const statusRes = await fetch(
+                                                `https://us-central1-nara-a65bc.cloudfunctions.net/animateSprite?jobId=${animJobId}`
+                                            );
+                                            const status = await statusRes.json();
+                                            const phase = status.currentPhase || 'processing';
+                                            addLog(`[${animPolls}] ${status.status} - ${phase}`);
+
+                                            if (status.status === 'complete') {
+                                                return status;
+                                            } else if (status.status === 'partial') {
+                                                // Partial success - some directions completed
+                                                const completed = status.completedDirections?.length || 0;
+                                                const total = status.totalDirections || 8;
+                                                addLog(`PARTIAL: ${completed}/${total} directions`);
+                                                if (status.missingDirections?.length > 0) {
+                                                    addLog(`Missing: ${status.missingDirections.join(', ')}`);
+                                                    addLog(`Use --animate-continue to retry`);
+                                                }
+                                                return status;
+                                            } else if (status.status === 'error') {
+                                                throw new Error(status.error || 'Animation failed');
+                                            } else if (animPolls >= maxAnimPolls) {
+                                                throw new Error('Animation timed out');
+                                            }
+
+                                            setDialogueText(`Animating ${spriteName}... (${phase})`);
+                                            await new Promise(r => setTimeout(r, animPollInterval));
+                                            return animPoll();
+                                        };
+
+                                        try {
+                                            const animResult = await animPoll();
+                                            addLog(`Animation complete!`);
+
+                                            // Composite animation frames
+                                            const framePaths = animResult.framePaths as Record<string, string[]>;
+                                            const FRAME_W = 32, FRAME_H = 40, FRAMES = 8;
+                                            const walkCanvas = document.createElement('canvas');
+                                            walkCanvas.width = FRAME_W * FRAMES;
+                                            walkCanvas.height = FRAME_H * SPRITE_DIRECTIONS.length;
+                                            const walkCtx = walkCanvas.getContext('2d')!;
+
+                                            for (let row = 0; row < SPRITE_DIRECTIONS.length; row++) {
+                                                const dir = SPRITE_DIRECTIONS[row];
+                                                const frames = framePaths[dir];
+                                                if (!frames) continue;
+                                                for (let col = 0; col < frames.length && col < FRAMES; col++) {
+                                                    try {
+                                                        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+                                                            const image = new Image();
+                                                            image.crossOrigin = 'anonymous';
+                                                            image.onload = () => resolve(image);
+                                                            image.onerror = reject;
+                                                            image.src = frames[col];
+                                                        });
+                                                        const scale = Math.min(FRAME_W / img.width, FRAME_H / img.height);
+                                                        const w = img.width * scale, h = img.height * scale;
+                                                        const x = col * FRAME_W + (FRAME_W - w) / 2;
+                                                        const y = row * FRAME_H + (FRAME_H - h);
+                                                        walkCtx.drawImage(img, x, y, w, h);
+                                                    } catch { /* skip frame */ }
+                                                }
+                                            }
+
+                                            const walkSheet = walkCanvas.toDataURL('image/png');
+                                            const walkRef = storageRef(storage, `sprites/${userUid}/${spriteId}/walk.png`);
+                                            await uploadString(walkRef, walkSheet, 'data_url');
+                                            addLog(`Walk sheet saved!`);
+
+                                            // Update cursor with animated walk
+                                            setModeState(prev => ({
+                                                ...prev,
+                                                characterSprite: {
+                                                    walkSheet,
+                                                    idleSheet: staticSheet,
+                                                    name: spriteName,
+                                                },
+                                            }));
+                                        } catch (animErr) {
+                                            addLog(`Animation failed: ${animErr}`);
+                                        }
+                                    }
                                 } catch (err) {
                                     const errMsg = err instanceof Error ? err.message : String(err);
                                     addLog(`Warning: Failed to save sprite - ${errMsg}`);
@@ -3257,7 +4081,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                                 spriteProgress: 0,
                                 isCharacterEnabled: true,
                                 characterSprite: {
-                                    walkSheet: staticSheet,
+                                    walkSheet: staticSheet, // Initial static, updated if animation succeeds
                                     idleSheet: staticSheet,
                                     name: spriteName,
                                 },
@@ -3648,24 +4472,48 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('paint')) {
-            // Parse optional color argument: /paint [color]
+            // Parse arguments: /paint [brush|fill|lasso] [color]
             const paintArgs = commandToExecute.slice(5).trim();
-            if (paintArgs) {
-                // Check if it's a valid color
-                const colorResult = validateColor(paintArgs);
+            const parts = paintArgs.split(/\s+/);
+
+            let tool: 'brush' | 'fill' | 'lasso' = modeState.paintTool; // Keep current tool
+            let color: string | null = null;
+
+            // Parse tool type
+            if (parts[0] === 'brush' || parts[0] === 'fill' || parts[0] === 'lasso') {
+                tool = parts[0];
+                // Check for color after tool
+                if (parts[1]) {
+                    const colorResult = validateColor(parts[1]);
+                    if (colorResult.valid && colorResult.hexColor) {
+                        color = colorResult.hexColor;
+                    }
+                }
+            } else if (parts[0]) {
+                // No tool specified, might be just a color
+                const colorResult = validateColor(parts[0]);
                 if (colorResult.valid && colorResult.hexColor) {
-                    setModeState(prev => ({
-                        ...prev,
-                        isPaintMode: true,
-                        paintColor: colorResult.hexColor!
-                    }));
-                    setDialogueWithRevert(`Paint mode enabled (${paintArgs}). Click/drag to paint. Press ESC to exit.`, setDialogueText);
-                    clearCommandState();
-                    return null;
+                    color = colorResult.hexColor;
                 }
             }
-            // Toggle paint mode with current color
-            return executeToggleModeCommand('isPaintMode', "Paint mode enabled. Click/drag to paint. Press ESC to exit.", "Paint mode disabled");
+
+            // If we have arguments, enable paint mode and update settings
+            if (paintArgs) {
+                const toolNames = { brush: 'Brush', fill: 'Fill', lasso: 'Lasso' };
+                const colorStr = color ? ` (${parts.find(p => validateColor(p).valid) || color})` : '';
+                setModeState(prev => ({
+                    ...prev,
+                    isPaintMode: true,
+                    paintTool: tool,
+                    paintColor: color || prev.paintColor
+                }));
+                setDialogueWithRevert(`Paint ${toolNames[tool]} enabled${colorStr}. ${tool === 'fill' ? 'Click to fill.' : tool === 'lasso' ? 'Draw outline then release.' : 'Click/drag to paint.'} Press ESC to exit.`, setDialogueText);
+                clearCommandState();
+                return null;
+            }
+
+            // No arguments, toggle paint mode with current settings
+            return executeToggleModeCommand('isPaintMode', `Paint ${tool.charAt(0).toUpperCase() + tool.slice(1)} enabled. Press ESC to exit.`, "Paint mode disabled");
         }
 
         if (commandToExecute.startsWith('upgrade')) {
@@ -4883,10 +5731,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         spriteDebugLog: modeState.spriteDebugLog,
         // Paint mode
         isPaintMode: modeState.isPaintMode,
+        paintTool: modeState.paintTool,
         paintColor: modeState.paintColor,
         paintBrushSize: modeState.paintBrushSize,
         exitPaintMode: () => setModeState(prev => ({ ...prev, isPaintMode: false })),
         setPaintColor: (color: string) => setModeState(prev => ({ ...prev, paintColor: color })),
         setPaintBrushSize: (size: number) => setModeState(prev => ({ ...prev, paintBrushSize: size })),
+        setPaintTool: (tool: 'brush' | 'fill' | 'lasso') => setModeState(prev => ({ ...prev, paintTool: tool })),
     };
 }

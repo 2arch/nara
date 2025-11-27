@@ -2570,6 +2570,8 @@ Camera & Viewport Controls:
     const isMiddleMouseDownRef = useRef(false);
     const intermediatePanOffsetRef = useRef<Point>(engine.viewOffset); // Track offset during pan
     const isPaintingRef = useRef(false); // Track if currently painting
+    const lastPaintPosRef = useRef<Point | null>(null); // Track last paint position for interpolation
+    const lassoPointsRef = useRef<Point[]>([]); // Track lasso outline points
 
     // Ref for tracking selection drag state (mouse button down)
     const isSelectingMouseDownRef = useRef(false);
@@ -5772,11 +5774,20 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             const destX = cursorTopScreenPos.x + (cursorPixelWidth - destWidth) / 2;
                             const destY = cursorBottomY - destHeight;
 
+                            // Apply pulsing opacity when animating (isGeneratingSprite means animation in progress)
+                            const savedAlpha = ctx.globalAlpha;
+                            if (engine.isGeneratingSprite) {
+                                const pulseOpacity = (Math.sin(Date.now() / 300) + 1) / 2;
+                                ctx.globalAlpha = 0.4 + pulseOpacity * 0.6; // Range: 0.4 to 1.0
+                            }
+
                             ctx.drawImage(
                                 sheetToDraw,
                                 sourceX, sourceY, frameWidth, frameHeight,
                                 destX, destY, destWidth, destHeight
                             );
+
+                            ctx.globalAlpha = savedAlpha;
                         }
                     } else if (engine.isGeneratingSprite) {
                         // Show sprite preview while generating (if available)
@@ -6918,12 +6929,28 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
-            // Paint mode - start painting
+            // Paint mode - handle different tools
             if (engine.isPaintMode) {
-                const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
-                engine.paintCell(worldPos.x, worldPos.y);
-                isPaintingRef.current = true;
-                return;
+                const worldPos = engine.screenToWorldPixel(x, y, engine.zoomLevel, engine.viewOffset);
+
+                if (engine.paintTool === 'fill') {
+                    // Flood fill on click
+                    engine.floodFill(worldPos.x, worldPos.y);
+                    return;
+                } else if (engine.paintTool === 'brush') {
+                    // Start brush painting
+                    engine.paintCell(worldPos.x, worldPos.y);
+                    lastPaintPosRef.current = worldPos;
+                    isPaintingRef.current = true;
+                    return;
+                } else if (engine.paintTool === 'lasso') {
+                    // Start lasso - clear previous points and begin tracking
+                    lassoPointsRef.current = [worldPos];
+                    engine.paintCell(worldPos.x, worldPos.y);
+                    lastPaintPosRef.current = worldPos;
+                    isPaintingRef.current = true;
+                    return;
+                }
             }
 
             // Check if clicking on a resize handle first
@@ -7220,10 +7247,26 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
-        // Paint mode - continue painting while dragging
+        // Paint mode - continue painting while dragging (use pixel-perfect conversion)
         if (engine.isPaintMode && isPaintingRef.current) {
-            const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
-            engine.paintCell(worldPos.x, worldPos.y);
+            const worldPos = engine.screenToWorldPixel(x, y, engine.zoomLevel, engine.viewOffset);
+            const prev = lastPaintPosRef.current;
+
+            if (engine.paintTool === 'brush' || engine.paintTool === 'lasso') {
+                engine.paintCell(worldPos.x, worldPos.y, prev?.x, prev?.y); // Interpolate from last position
+                lastPaintPosRef.current = worldPos; // Update for next move
+
+                // Track lasso points (only if moved at least 2 cells to reduce points)
+                if (engine.paintTool === 'lasso') {
+                    const lastLassoPoint = lassoPointsRef.current[lassoPointsRef.current.length - 1];
+                    if (!lastLassoPoint ||
+                        Math.abs(worldPos.x - lastLassoPoint.x) >= 2 ||
+                        Math.abs(worldPos.y - lastLassoPoint.y) >= 2) {
+                        lassoPointsRef.current.push(worldPos);
+                    }
+                }
+            }
+
             return;
         }
 
@@ -7515,7 +7558,14 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         if (e.button === 0) { // Left mouse button
             // Stop painting
             if (isPaintingRef.current) {
+                // Fill lasso polygon if in lasso mode
+                if (engine.isPaintMode && engine.paintTool === 'lasso' && lassoPointsRef.current.length > 2) {
+                    engine.fillPolygon(lassoPointsRef.current);
+                    lassoPointsRef.current = []; // Clear lasso points
+                }
+
                 isPaintingRef.current = false;
+                lastPaintPosRef.current = null; // Reset for next stroke
             }
 
             // Reset resize state if active
@@ -8097,13 +8147,28 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 }
             }
 
-            // Handle paint mode - paint immediately on touch
+            // Handle paint mode - handle different tools (use pixel-perfect conversion)
             if (engine.isPaintMode) {
-                const worldPos = engine.screenToWorld(touches[0].x, touches[0].y, engine.zoomLevel, engine.viewOffset);
-                engine.paintCell(worldPos.x, worldPos.y);
-                isPaintingRef.current = true;
-                e.preventDefault();
-                return;
+                const worldPos = engine.screenToWorldPixel(touches[0].x, touches[0].y, engine.zoomLevel, engine.viewOffset);
+
+                if (engine.paintTool === 'fill') {
+                    engine.floodFill(worldPos.x, worldPos.y);
+                    e.preventDefault();
+                    return;
+                } else if (engine.paintTool === 'brush') {
+                    engine.paintCell(worldPos.x, worldPos.y);
+                    lastPaintPosRef.current = worldPos;
+                    isPaintingRef.current = true;
+                    e.preventDefault();
+                    return;
+                } else if (engine.paintTool === 'lasso') {
+                    lassoPointsRef.current = [worldPos];
+                    engine.paintCell(worldPos.x, worldPos.y);
+                    lastPaintPosRef.current = worldPos;
+                    isPaintingRef.current = true;
+                    e.preventDefault();
+                    return;
+                }
             }
 
             // If no double-tap and no resize handle, prepare for pan (single tap primary gesture)
@@ -8234,10 +8299,26 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             longPressTimerRef.current = null;
         }
 
-        // Handle paint mode - continue painting on move
+        // Handle paint mode - continue painting on move (use pixel-perfect conversion)
         if (engine.isPaintMode && isPaintingRef.current && touches.length === 1) {
-            const worldPos = engine.screenToWorld(touches[0].x, touches[0].y, engine.zoomLevel, engine.viewOffset);
-            engine.paintCell(worldPos.x, worldPos.y);
+            const worldPos = engine.screenToWorldPixel(touches[0].x, touches[0].y, engine.zoomLevel, engine.viewOffset);
+            const prev = lastPaintPosRef.current;
+
+            if (engine.paintTool === 'brush' || engine.paintTool === 'lasso') {
+                engine.paintCell(worldPos.x, worldPos.y, prev?.x, prev?.y);
+                lastPaintPosRef.current = worldPos;
+
+                // Track lasso points (throttled)
+                if (engine.paintTool === 'lasso') {
+                    const lastLassoPoint = lassoPointsRef.current[lassoPointsRef.current.length - 1];
+                    if (!lastLassoPoint ||
+                        Math.abs(worldPos.x - lastLassoPoint.x) >= 2 ||
+                        Math.abs(worldPos.y - lastLassoPoint.y) >= 2) {
+                        lassoPointsRef.current.push(worldPos);
+                    }
+                }
+            }
+
             e.preventDefault();
             return;
         }
@@ -8574,7 +8655,15 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
         // Stop painting on touch end
         if (isPaintingRef.current) {
+            // Fill lasso polygon if in lasso mode
+            if (engine.isPaintMode && engine.paintTool === 'lasso' && lassoPointsRef.current.length > 2) {
+                engine.fillPolygon(lassoPointsRef.current);
+                lassoPointsRef.current = [];
+            }
+
             isPaintingRef.current = false;
+            lastPaintPosRef.current = null; // Reset for next stroke
+
             // In paint mode, don't process other touch end events
             if (engine.isPaintMode) {
                 return;

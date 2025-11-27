@@ -213,6 +213,7 @@ export interface WorldEngine {
     setCurrentScale: (scale: { w: number; h: number }) => void;
     getEffectiveCharDims: (zoom: number) => { width: number; height: number; fontSize: number; };
     screenToWorld: (screenX: number, screenY: number, currentZoom: number, currentOffset: Point) => Point;
+    screenToWorldPixel: (screenX: number, screenY: number, currentZoom: number, currentOffset: Point) => Point;
     worldToScreen: (worldX: number, worldY: number, currentZoom: number, currentOffset: Point) => Point;
     handleCanvasClick: (canvasRelativeX: number, canvasRelativeY: number, clearSelection?: boolean, shiftKey?: boolean, metaKey?: boolean, ctrlKey?: boolean) => void;
     handleCanvasWheel: (deltaX: number, deltaY: number, canvasRelativeX: number, canvasRelativeY: number, ctrlOrMetaKey: boolean) => void;
@@ -365,10 +366,14 @@ export interface WorldEngine {
     updateClusterLabels: () => Promise<void>;
     isMoveMode: boolean;
     isPaintMode: boolean;
+    paintTool: 'brush' | 'fill' | 'lasso';
     paintColor: string;
     paintBrushSize: number;
     exitPaintMode: () => void;
-    paintCell: (x: number, y: number) => void;
+    paintCell: (x: number, y: number, prevX?: number, prevY?: number) => void;
+    fillPolygon: (points: Point[]) => void;
+    floodFill: (x: number, y: number) => void;
+    lassoPoints: Point[];
     cameraMode: import('./commands').CameraMode;
     setCameraMode: (mode: import('./commands').CameraMode) => void;
     gridMode: import('./commands').GridMode;
@@ -798,6 +803,7 @@ export function useWorldEngine({
 
     const [cursorPosInternal, setCursorPosInternal] = useState<Point>(initialCursorPos);
     const [currentScale, setCurrentScale] = useState<{ w: number; h: number }>({ w: 1, h: 2 }); // Default scale 1x2
+    const lassoPointsRef = useRef<Point[]>([]); // Track lasso outline points
 
     // Wrapper to constrain cursor to grid-aligned y-coordinates
     const setCursorPos = useCallback((pos: Point | ((prev: Point) => Point)) => {
@@ -1246,6 +1252,17 @@ export function useWorldEngine({
         return { x: Math.floor(worldX), y: roundedY };
     }, [getEffectiveCharDims, currentScale]);
 
+    // Pixel-perfect screen-to-world conversion (no Y snapping to text scale)
+    // Used for paint mode to enable continuous 1x1 strokes
+    const screenToWorldPixel = useCallback((screenX: number, screenY: number, currentZoom: number, currentOffset: Point): Point => {
+        const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(currentZoom);
+        if (effectiveCharWidth === 0 || effectiveCharHeight === 0) return currentOffset;
+        const worldX = screenX / effectiveCharWidth + currentOffset.x;
+        const worldY = screenY / effectiveCharHeight + currentOffset.y;
+        // No Y snapping - paint works independently of text scale
+        return { x: Math.floor(worldX), y: Math.floor(worldY) };
+    }, [getEffectiveCharDims]);
+
     // === Viewport Center Calculation ===
     const getViewportCenter = useCallback((): Point => {
         // Calculate center of viewport in world coordinates
@@ -1572,6 +1589,7 @@ export function useWorldEngine({
         isMoveMode,
         exitMoveMode,
         isPaintMode,
+        paintTool,
         paintColor,
         paintBrushSize,
         exitPaintMode,
@@ -10875,6 +10893,7 @@ export function useWorldEngine({
         updateSettings,
         getEffectiveCharDims,
         screenToWorld,
+        screenToWorldPixel,
         worldToScreen,
         handleCanvasClick,
         handleCanvasWheel,
@@ -11001,23 +11020,84 @@ export function useWorldEngine({
         paintColor,
         paintBrushSize,
         exitPaintMode,
-        paintCell: (x: number, y: number) => {
+        paintCell: (x: number, y: number, prevX?: number, prevY?: number) => {
             if (!isPaintMode) return;
-            // Paint a circular brush centered at (x, y)
+            const cellX = Math.floor(x);
+            const cellY = Math.floor(y);
+
+            // Helper to paint a single cell
+            const paintSingleCell = (px: number, py: number, updates: Record<string, string>) => {
+                const key = `paint_${px}_${py}`;
+                updates[key] = JSON.stringify({
+                    type: 'paint',
+                    x: px,
+                    y: py,
+                    color: paintColor
+                });
+            };
+
+            // Bresenham's line algorithm for interpolation
+            const drawLine = (x0: number, y0: number, x1: number, y1: number, updates: Record<string, string>) => {
+                const dx = Math.abs(x1 - x0);
+                const dy = Math.abs(y1 - y0);
+                const sx = x0 < x1 ? 1 : -1;
+                const sy = y0 < y1 ? 1 : -1;
+                let err = dx - dy;
+
+                let cx = x0;
+                let cy = y0;
+
+                while (true) {
+                    paintSingleCell(cx, cy, updates);
+
+                    if (cx === x1 && cy === y1) break;
+
+                    const e2 = 2 * err;
+                    if (e2 > -dy) {
+                        err -= dy;
+                        cx += sx;
+                    }
+                    if (e2 < dx) {
+                        err += dx;
+                        cy += sy;
+                    }
+                }
+            };
+
+            // For brush size 1, paint single pixel with line interpolation
+            if (paintBrushSize <= 1) {
+                const updates: Record<string, string> = {};
+                if (prevX !== undefined && prevY !== undefined) {
+                    const prevCellX = Math.floor(prevX);
+                    const prevCellY = Math.floor(prevY);
+                    // Draw line from previous position to current
+                    drawLine(prevCellX, prevCellY, cellX, cellY, updates);
+                } else {
+                    // Just paint current cell
+                    paintSingleCell(cellX, cellY, updates);
+                }
+
+                setWorldData(prev => ({
+                    ...prev,
+                    ...updates
+                }));
+                return;
+            }
+
+            // For larger brush sizes, paint a circular area
             const radius = paintBrushSize;
             const updates: Record<string, string> = {};
             for (let dy = -radius; dy <= radius; dy++) {
                 for (let dx = -radius; dx <= radius; dx++) {
-                    // Check if within circular brush
-                    if (dx * dx + dy * dy <= radius * radius) {
-                        const cellX = Math.floor(x) + dx;
-                        const cellY = Math.floor(y) + dy;
-                        const key = `paint_${cellX}_${cellY}`;
-                        // Store as a paint cell with color
+                    // Check if within circular brush (strict < for clean edges)
+                    if (dx * dx + dy * dy < radius * radius) {
+                        const px = cellX + dx;
+                        const py = cellY + dy;
+                        const key = `paint_${px}_${py}`;
                         updates[key] = JSON.stringify({
                             type: 'paint',
-                            x: cellX,
-                            y: cellY,
+                            x: px,
+                            y: py,
                             color: paintColor
                         });
                     }
@@ -11029,6 +11109,144 @@ export function useWorldEngine({
                 ...updates
             }));
         },
+        fillPolygon: (points: Point[]) => {
+            if (!isPaintMode || points.length < 3) return;
+
+            // Find bounding box
+            let minX = Infinity, maxX = -Infinity;
+            let minY = Infinity, maxY = -Infinity;
+
+            for (const p of points) {
+                minX = Math.min(minX, Math.floor(p.x));
+                maxX = Math.max(maxX, Math.floor(p.x));
+                minY = Math.min(minY, Math.floor(p.y));
+                maxY = Math.max(maxY, Math.floor(p.y));
+            }
+
+            // Point-in-polygon test using ray casting
+            const isInside = (px: number, py: number): boolean => {
+                let inside = false;
+                for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+                    const xi = Math.floor(points[i].x);
+                    const yi = Math.floor(points[i].y);
+                    const xj = Math.floor(points[j].x);
+                    const yj = Math.floor(points[j].y);
+
+                    const intersect = ((yi > py) !== (yj > py)) &&
+                        (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+                    if (intersect) inside = !inside;
+                }
+                return inside;
+            };
+
+            // Fill all cells inside the polygon
+            const updates: Record<string, string> = {};
+            for (let y = minY; y <= maxY; y++) {
+                for (let x = minX; x <= maxX; x++) {
+                    if (isInside(x, y)) {
+                        const key = `paint_${x}_${y}`;
+                        updates[key] = JSON.stringify({
+                            type: 'paint',
+                            x,
+                            y,
+                            color: paintColor
+                        });
+                    }
+                }
+            }
+
+            setWorldData(prev => ({
+                ...prev,
+                ...updates
+            }));
+        },
+        floodFill: (x: number, y: number) => {
+            if (!isPaintMode) return;
+            const startX = Math.floor(x);
+            const startY = Math.floor(y);
+
+            // Get the color at the start point
+            const startKey = `paint_${startX}_${startY}`;
+            const startCell = worldData[startKey];
+            let targetColor: string | null = null;
+
+            if (startCell) {
+                try {
+                    const data = JSON.parse(startCell as string);
+                    if (data.type === 'paint') {
+                        targetColor = data.color;
+                    }
+                } catch (e) {
+                    // Invalid data
+                }
+            }
+
+            // If clicking on same color as paint color, do nothing
+            if (targetColor === paintColor) return;
+
+            // Flood fill algorithm using BFS
+            // If targetColor is null, fill empty regions (stop at any painted boundary)
+            // If targetColor is a color, fill only cells of that color
+            const fillEmpty = targetColor === null;
+            const queue: Point[] = [{ x: startX, y: startY }];
+            const visited = new Set<string>();
+            const updates: Record<string, string> = {};
+            const maxCells = 10000; // Safety limit
+
+            while (queue.length > 0 && Object.keys(updates).length < maxCells) {
+                const pos = queue.shift()!;
+                const key = `${pos.x},${pos.y}`;
+
+                if (visited.has(key)) continue;
+                visited.add(key);
+
+                const paintKey = `paint_${pos.x}_${pos.y}`;
+                const cell = worldData[paintKey];
+                let cellColor: string | null = null;
+
+                if (cell) {
+                    try {
+                        const data = JSON.parse(cell as string);
+                        if (data.type === 'paint') {
+                            cellColor = data.color;
+                        }
+                    } catch (e) {
+                        // Invalid data
+                    }
+                }
+
+                // Fill logic depends on whether we're filling empty or colored cells
+                if (fillEmpty) {
+                    // Filling empty region - stop at any painted boundary
+                    if (cellColor !== null) continue;
+                } else {
+                    // Filling colored region - only fill matching color
+                    if (cellColor !== targetColor) continue;
+                }
+
+                // Paint this cell
+                updates[paintKey] = JSON.stringify({
+                    type: 'paint',
+                    x: pos.x,
+                    y: pos.y,
+                    color: paintColor
+                });
+
+                // Add neighbors to queue
+                queue.push({ x: pos.x + 1, y: pos.y });
+                queue.push({ x: pos.x - 1, y: pos.y });
+                queue.push({ x: pos.x, y: pos.y + 1 });
+                queue.push({ x: pos.x, y: pos.y - 1 });
+            }
+
+            // Apply updates
+            setWorldData(prev => ({
+                ...prev,
+                ...updates
+            }));
+        },
+        paintTool,
+        lassoPoints: lassoPointsRef.current,
         cameraMode,
         setCameraMode,
         gridMode,
