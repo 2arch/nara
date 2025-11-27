@@ -4587,7 +4587,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
             // Rewrap text when entering wrap mode
             if (newMode === 'wrap') {
-                updatedNote = rewrapNoteText(updatedNote);
+                // Pass worldData to enable paint-aware wrapping if paint exists
+                updatedNote = rewrapNoteText(updatedNote, worldData);
             }
 
             setWorldData({
@@ -4613,6 +4614,20 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     message = `Paint mode: ${paintCellCount}+ cells detected`;
                 } else {
                     message = `Paint mode: no paint detected (draw to create viewport)`;
+                }
+            } else if (newMode === 'wrap') {
+                // Check if paint exists for paint-aware wrapping
+                let hasPaint = false;
+                for (let y = foundNote.startY; y <= foundNote.endY && !hasPaint; y++) {
+                    for (let x = foundNote.startX; x <= foundNote.endX && !hasPaint; x++) {
+                        const paintKey = `paint_${x}_${y}`;
+                        if (worldData[paintKey]) {
+                            hasPaint = true;
+                        }
+                    }
+                }
+                if (hasPaint) {
+                    message = `Wrap mode: paint-aware (text wraps to paint boundaries)`;
                 }
             }
 

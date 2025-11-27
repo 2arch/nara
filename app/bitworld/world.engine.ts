@@ -189,8 +189,50 @@ export const findConnectedPaintRegion = (worldData: WorldData, x: number, y: num
     };
 };
 
+// Helper function to find paint bounds at a given Y coordinate within note bounds
+// Returns {startX, endX} in relative coordinates, or null if no paint at this Y
+export const getPaintBoundsAtY = (noteData: any, relativeY: number, worldData: Record<string, any>): { startX: number; endX: number } | null => {
+    const noteStartX = noteData.startX;
+    const noteStartY = noteData.startY;
+    const noteWidth = noteData.endX - noteData.startX;
+
+    const worldY = noteStartY + relativeY;
+
+    let minPaintX = -1;
+    let maxPaintX = -1;
+
+    // Find leftmost and rightmost paint cells at this Y
+    for (let relativeX = 0; relativeX < noteWidth; relativeX++) {
+        const worldX = noteStartX + relativeX;
+        const paintKey = `paint_${worldX}_${worldY}`;
+        if (worldData[paintKey]) {
+            if (minPaintX === -1) minPaintX = relativeX;
+            maxPaintX = relativeX;
+        }
+    }
+
+    if (minPaintX === -1) return null;
+
+    return { startX: minPaintX, endX: maxPaintX };
+};
+
+// Helper function to find the top-left-most paint cell
+// Returns {x, y} in relative coordinates, or null if no paint
+export const getTopLeftPaintCell = (noteData: any, worldData: Record<string, any>): { x: number; y: number } | null => {
+    const noteHeight = noteData.endY - noteData.startY;
+
+    for (let relativeY = 0; relativeY < noteHeight; relativeY++) {
+        const bounds = getPaintBoundsAtY(noteData, relativeY, worldData);
+        if (bounds) {
+            return { x: bounds.startX, y: relativeY };
+        }
+    }
+
+    return null;
+};
+
 // Helper function to rewrap text within a note
-export const rewrapNoteText = (noteData: any): any => {
+export const rewrapNoteText = (noteData: any, worldData?: Record<string, any>): any => {
     if (!noteData.data || Object.keys(noteData.data).length === 0) {
         return noteData; // No text to rewrap
     }
@@ -292,7 +334,22 @@ export const rewrapNoteText = (noteData: any): any => {
 
     // Rewrap each paragraph based on new width
     const newData: any = {};
-    let currentY = 0;
+
+    // Check if we should use paint-aware wrapping
+    const usePaintBounds = worldData && noteData.displayMode === 'wrap';
+    const paintStart = usePaintBounds ? getTopLeftPaintCell(noteData, worldData) : null;
+
+    // Cache paint bounds for all Y coordinates to avoid recalculating
+    const paintBoundsCache: Map<number, { startX: number; endX: number } | null> = new Map();
+    if (usePaintBounds) {
+        const noteHeight = noteData.endY - noteData.startY;
+        for (let y = 0; y < noteHeight; y++) {
+            paintBoundsCache.set(y, getPaintBoundsAtY(noteData, y, worldData!));
+        }
+    }
+
+    // Start from top-left paint cell if paint exists, otherwise start from 0,0
+    let currentY = paintStart ? paintStart.y : 0;
 
     for (const paragraph of paragraphs) {
         if (paragraph.length === 0) {
@@ -308,8 +365,37 @@ export const rewrapNoteText = (noteData: any): any => {
         for (let i = 0; i < paragraph.length; i++) {
             const { char, style } = paragraph[i];
 
-            // Check if placing this character would exceed width
-            if (currentX >= noteWidth) {
+            // Get paint bounds for current line if using paint-aware wrapping
+            let lineStartX = 0;
+            let lineEndX = noteWidth;
+
+            if (usePaintBounds) {
+                const paintBounds = paintBoundsCache.get(currentY);
+                if (paintBounds) {
+                    lineStartX = paintBounds.startX;
+                    lineEndX = paintBounds.endX + 1; // +1 because endX is inclusive
+                } else {
+                    // No paint on this line - skip to next line with paint
+                    currentY += GRID_CELL_SPAN;
+                    const nextBounds = paintBoundsCache.get(currentY);
+                    if (nextBounds) {
+                        lineStartX = nextBounds.startX;
+                        lineEndX = nextBounds.endX + 1;
+                        currentX = 0; // Reset X for new line
+                    } else {
+                        // No more paint - stop placing text
+                        break;
+                    }
+                }
+            }
+
+            // Check if this is the first character on a new line
+            if (currentX === 0) {
+                currentX = lineStartX; // Start from left-most paint cell
+            }
+
+            // Check if placing this character would exceed the line's paint boundary
+            if (currentX >= lineEndX) {
                 // Need to wrap - find last space on current line
                 let wrapIndex = -1;
 
@@ -334,10 +420,19 @@ export const rewrapNoteText = (noteData: any): any => {
 
                     // Move to next line
                     currentY += GRID_CELL_SPAN;
-                    currentX = 0;
                     lineStartIndex = wrapIndex + 1; // New line starts after the space
 
-                    // Re-add characters (except the space)
+                    // Get paint bounds for new line (if using paint-aware wrapping)
+                    let newLineStartX = 0;
+                    if (usePaintBounds) {
+                        const nextBounds = paintBoundsCache.get(currentY);
+                        if (nextBounds) {
+                            newLineStartX = nextBounds.startX;
+                        }
+                    }
+                    currentX = newLineStartX;
+
+                    // Re-add characters (except the space) starting from new line's left-most paint cell
                     for (let k = wrapIndex + 1; k < i; k++) {
                         const coordKey = `${currentX},${currentY}`;
                         const { char: c, style: s } = paragraph[k];

@@ -606,17 +606,34 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
             renderStyledRect(baseRenderContext, screenBounds, style);
             ctx.restore();
         } else if (note.displayMode !== 'paint') {
-            // Default: semi-transparent overlay (skip in paint mode - paint is the background)
-            const planColor = getTextColor(engine, 0.15);
-            ctx.fillStyle = planColor;
+            // Check if wrap mode has paint (paint acts as background)
+            let hasPaint = false;
+            if (note.displayMode === 'wrap') {
+                // Quick check for any paint cells in note bounds
+                outerLoop: for (let y = startY; y <= endY && !hasPaint; y++) {
+                    for (let x = startX; x <= endX && !hasPaint; x++) {
+                        if (engine.worldData[`paint_${x}_${y}`]) {
+                            hasPaint = true;
+                            break outerLoop;
+                        }
+                    }
+                }
+            }
 
-            for (let worldY = startY; worldY <= endY; worldY += GRID_CELL_SPAN) {
-                for (let worldX = startX; worldX <= endX; worldX++) {
-                    const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                    const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
-                    if (bottomScreenPos.x >= -effectiveCharWidth && bottomScreenPos.x <= cssWidth &&
-                        topScreenPos.y >= -effectiveCharHeight && bottomScreenPos.y <= cssHeight) {
-                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+            // Skip overlay if paint exists (paint is the background)
+            if (!hasPaint) {
+                // Default: semi-transparent overlay
+                const planColor = getTextColor(engine, 0.15);
+                ctx.fillStyle = planColor;
+
+                for (let worldY = startY; worldY <= endY; worldY += GRID_CELL_SPAN) {
+                    for (let worldX = startX; worldX <= endX; worldX++) {
+                        const bottomScreenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                        const topScreenPos = engine.worldToScreen(worldX, worldY - 1, currentZoom, currentOffset);
+                        if (bottomScreenPos.x >= -effectiveCharWidth && bottomScreenPos.x <= cssWidth &&
+                            topScreenPos.y >= -effectiveCharHeight && bottomScreenPos.y <= cssHeight) {
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                        }
                     }
                 }
             }
@@ -7804,7 +7821,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     try {
                         const noteData = JSON.parse(engine.worldData[resizeState.key] as string);
                         if (noteData.displayMode === 'wrap') {
-                            const rewrapped = rewrapNoteText(noteData);
+                            // Pass worldData to enable paint-aware wrapping if paint exists
+                            const rewrapped = rewrapNoteText(noteData, engine.worldData);
                             engine.setWorldData(prev => ({
                                 ...prev,
                                 [resizeState.key!]: JSON.stringify(rewrapped)
@@ -9059,7 +9077,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 try {
                     const noteData = JSON.parse(engine.worldData[resizeState.key] as string);
                     if (noteData.displayMode === 'wrap') {
-                        const rewrapped = rewrapNoteText(noteData);
+                        // Pass worldData to enable paint-aware wrapping if paint exists
+                        const rewrapped = rewrapNoteText(noteData, engine.worldData);
                         engine.setWorldData(prev => ({
                             ...prev,
                             [resizeState.key!]: JSON.stringify(rewrapped)
