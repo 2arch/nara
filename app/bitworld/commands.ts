@@ -7,7 +7,7 @@ import { detectImageIntent } from './ai.utils';
 import type { WorldSettings } from './settings';
 import { useFaceDetection, useSmoothFaceOrientation, faceOrientationToRotation } from './face';
 import { DataRecorder } from './recorder';
-import { saveSprite, getUserSprites, deleteSprite, renameSprite, type SavedSprite } from '../firebase';
+import { saveSprite, getUserSprites, deleteSprite, renameSprite, type SavedSprite, getUserTilesets, deleteTileset, type SavedTileset } from '../firebase';
 
 // Grid cell span constant (characters occupy 2 vertically-stacked cells)
 const GRID_CELL_SPAN = 2;
@@ -596,14 +596,21 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
     // User's saved sprites
     const [userSprites, setUserSprites] = useState<SavedSprite[]>([]);
 
-    // Fetch user sprites when userUid changes
+    // User's saved tilesets
+    const [userTilesets, setUserTilesets] = useState<SavedTileset[]>([]);
+
+    // Fetch user sprites and tilesets when userUid changes
     useEffect(() => {
         if (userUid) {
             getUserSprites(userUid).then(sprites => {
                 setUserSprites(sprites);
             });
+            getUserTilesets(userUid).then(tilesets => {
+                setUserTilesets(tilesets);
+            });
         } else {
             setUserSprites([]);
+            setUserTilesets([]);
         }
     }, [userUid]);
 
@@ -3003,12 +3010,52 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 return null;
             }
 
-            // Check if using a saved tileset (simple name without spaces, like "cobblestone")
-            // If it looks like a tileset name (no spaces, could have extension), try to load from /tilesets/
-            const isSavedTileset = !prompt.includes(' ') && !prompt.startsWith('http');
+            // Check if using a saved tileset from user's collection
+            const savedTileset = userTilesets.find(t =>
+                t.name.toLowerCase() === prompt.toLowerCase() ||
+                t.id.toLowerCase() === prompt.toLowerCase()
+            );
 
-            if (isSavedTileset) {
-                // Add .png extension if not present
+            if (savedTileset) {
+                // Use saved tileset from Firebase Storage
+                const tilesetUrl = savedTileset.imageUrl;
+                setDialogueText(`Applying tileset: ${savedTileset.name}...`);
+
+                // Apply tiles using CORNER-based Wang autotiling
+                const updates: Record<string, string> = {};
+                const regionSet = new Set(region.points.map(p => `${p.x},${p.y}`));
+                const inRegion = (x: number, y: number) => regionSet.has(`${x},${y}`);
+
+                for (const p of region.points) {
+                    const nw = inRegion(p.x, p.y) && inRegion(p.x-1, p.y) &&
+                               inRegion(p.x, p.y-1) && inRegion(p.x-1, p.y-1) ? 1 : 0;
+                    const ne = inRegion(p.x, p.y) && inRegion(p.x+1, p.y) &&
+                               inRegion(p.x, p.y-1) && inRegion(p.x+1, p.y-1) ? 1 : 0;
+                    const sw = inRegion(p.x, p.y) && inRegion(p.x-1, p.y) &&
+                               inRegion(p.x, p.y+1) && inRegion(p.x-1, p.y+1) ? 1 : 0;
+                    const se = inRegion(p.x, p.y) && inRegion(p.x+1, p.y) &&
+                               inRegion(p.x, p.y+1) && inRegion(p.x+1, p.y+1) ? 1 : 0;
+                    const cornerIndex = nw * 8 + ne * 4 + sw * 2 + se * 1;
+
+                    const key = `paint_${p.x}_${p.y}`;
+                    updates[key] = JSON.stringify({
+                        type: 'tile', x: p.x, y: p.y, tileset: tilesetUrl, tileIndex: cornerIndex
+                    });
+                }
+
+                if (setWorldData) {
+                    setWorldData((prev: any) => ({ ...prev, ...updates }));
+                }
+                setDialogueText(`Tileset applied: ${savedTileset.name}`);
+                clearCommandState();
+                return null;
+            }
+
+            // Check if using a public tileset (simple name without spaces)
+            const isPublicTileset = !prompt.includes(' ') && !prompt.startsWith('http');
+
+            if (isPublicTileset) {
+                // Try to load from public /tilesets/ folder
                 const tilesetName = prompt.endsWith('.png') ? prompt : `${prompt}.png`;
                 const tilesetUrl = `/tilesets/${tilesetName}`;
 
@@ -3099,40 +3146,46 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     setDialogueText(`Generating: ${status.currentPhase || status.status} (${status.progress || 0}/3)`);
 
                     if (status.status === 'complete' && status.imageUrl) {
-                        // Apply tiles
+                        // Apply tiles using CORNER-based Wang autotiling
                         const tilesetUrl = status.imageUrl;
                         const updates: Record<string, string> = {};
-
-                        // Autotile logic (4-bit bitmasking)
                         const regionSet = new Set(region.points.map(p => `${p.x},${p.y}`));
+                        const inRegion = (x: number, y: number) => regionSet.has(`${x},${y}`);
 
                         for (const p of region.points) {
-                            let mask = 0;
-                            // N, E, S, W - check which neighbors are in the region
-                            if (regionSet.has(`${p.x},${p.y-1}`)) mask |= 1;
-                            if (regionSet.has(`${p.x+1},${p.y}`)) mask |= 2;
-                            if (regionSet.has(`${p.x},${p.y+1}`)) mask |= 4;
-                            if (regionSet.has(`${p.x-1},${p.y}`)) mask |= 8;
-
-                            // Invert mask: tiles with more neighbors should show MORE of the upper terrain
-                            // mask=15 (all neighbors) -> tileIndex=0 (fully filled with upper terrain)
-                            // mask=0 (no neighbors) -> tileIndex=15 (show lower terrain/background)
-                            const tileIndex = 15 - mask;
+                            const nw = inRegion(p.x, p.y) && inRegion(p.x-1, p.y) &&
+                                       inRegion(p.x, p.y-1) && inRegion(p.x-1, p.y-1) ? 1 : 0;
+                            const ne = inRegion(p.x, p.y) && inRegion(p.x+1, p.y) &&
+                                       inRegion(p.x, p.y-1) && inRegion(p.x+1, p.y-1) ? 1 : 0;
+                            const sw = inRegion(p.x, p.y) && inRegion(p.x-1, p.y) &&
+                                       inRegion(p.x, p.y+1) && inRegion(p.x-1, p.y+1) ? 1 : 0;
+                            const se = inRegion(p.x, p.y) && inRegion(p.x+1, p.y) &&
+                                       inRegion(p.x, p.y+1) && inRegion(p.x+1, p.y+1) ? 1 : 0;
+                            const cornerIndex = nw * 8 + ne * 4 + sw * 2 + se * 1;
 
                             const key = `paint_${p.x}_${p.y}`;
                             updates[key] = JSON.stringify({
-                                type: 'tile',
-                                x: p.x,
-                                y: p.y,
-                                tileset: tilesetUrl,
-                                tileIndex: tileIndex
+                                type: 'tile', x: p.x, y: p.y, tileset: tilesetUrl, tileIndex: cornerIndex
                             });
                         }
 
                         if (setWorldData) {
                             setWorldData((prev: any) => ({ ...prev, ...updates }));
                         }
-                        setDialogueText(`Tileset applied!`);
+
+                        // Add new tileset to local state
+                        const newTileset: SavedTileset = {
+                            id: tilesetId,
+                            name: prompt,
+                            description: prompt,
+                            imageUrl: tilesetUrl,
+                            createdAt: new Date().toISOString(),
+                            tileSize: 32,
+                            gridSize: 4,
+                        };
+                        setUserTilesets(prev => [newTileset, ...prev]);
+
+                        setDialogueText(`Tileset "${prompt}" saved & applied!`);
                         return;
                     } else if (status.status === 'error') {
                         throw new Error(status.error);
