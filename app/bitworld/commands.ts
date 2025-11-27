@@ -3053,11 +3053,16 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                         for (const p of region.points) {
                             let mask = 0;
-                            // N, E, S, W
+                            // N, E, S, W - check which neighbors are in the region
                             if (regionSet.has(`${p.x},${p.y-1}`)) mask |= 1;
                             if (regionSet.has(`${p.x+1},${p.y}`)) mask |= 2;
                             if (regionSet.has(`${p.x},${p.y+1}`)) mask |= 4;
                             if (regionSet.has(`${p.x-1},${p.y}`)) mask |= 8;
+
+                            // Invert mask: tiles with more neighbors should show MORE of the upper terrain
+                            // mask=15 (all neighbors) -> tileIndex=0 (fully filled with upper terrain)
+                            // mask=0 (no neighbors) -> tileIndex=15 (show lower terrain/background)
+                            const tileIndex = 15 - mask;
 
                             const key = `paint_${p.x}_${p.y}`;
                             updates[key] = JSON.stringify({
@@ -3065,7 +3070,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                                 x: p.x,
                                 y: p.y,
                                 tileset: tilesetUrl,
-                                tileIndex: mask
+                                tileIndex: tileIndex
                             });
                         }
 
@@ -4507,15 +4512,17 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             // Toggle or set display mode
-            let newMode: 'expand' | 'scroll' | 'paint';
-            if (mode === 'expand' || mode === 'scroll' || mode === 'paint') {
+            let newMode: 'expand' | 'scroll' | 'wrap' | 'paint';
+            if (mode === 'expand' || mode === 'scroll' || mode === 'wrap' || mode === 'paint') {
                 newMode = mode;
             } else {
-                // Cycle through modes: expand -> scroll -> paint -> expand
+                // Cycle through modes: expand -> scroll -> wrap -> paint -> expand
                 const currentMode = foundNote.displayMode || 'expand';
                 if (currentMode === 'expand') {
                     newMode = 'scroll';
                 } else if (currentMode === 'scroll') {
+                    newMode = 'wrap';
+                } else if (currentMode === 'wrap') {
                     newMode = 'paint';
                 } else {
                     newMode = 'expand';
@@ -4523,10 +4530,15 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             // Update note with new display mode
-            const updatedNote = {
+            let updatedNote = {
                 ...foundNote,
                 displayMode: newMode
             };
+
+            // Rewrap text when entering wrap mode
+            if (newMode === 'wrap') {
+                updatedNote = rewrapNoteText(updatedNote);
+            }
 
             setWorldData({
                 ...worldData,
