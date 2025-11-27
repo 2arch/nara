@@ -1126,8 +1126,45 @@ async function processTilesetJob(
 
         let resultUrl = jobData.output_url || jobData.last_response?.output_url || jobData.last_response?.image_url;
 
-        // Handle inline tileset data
+        // Handle inline base64 image (most common case for v2 API)
+        if (!resultUrl && jobData.last_response?.image?.base64) {
+            console.log(`[${jobId}] Processing inline base64 tileset image`);
+
+            const base64Data = jobData.last_response.image.base64;
+            const rawBuffer = Buffer.from(base64Data, 'base64');
+
+            // Calculate dimensions (raw RGBA data: width * height * 4 bytes)
+            const totalPixels = rawBuffer.length / 4;
+            const dimension = Math.sqrt(totalPixels);
+
+            console.log(`[${jobId}] Raw image: ${dimension}x${dimension} pixels (${rawBuffer.length} bytes)`);
+
+            // Convert raw RGBA to PNG using Sharp
+            const pngBuffer = await sharp(rawBuffer, {
+                raw: {
+                    width: dimension,
+                    height: dimension,
+                    channels: 4
+                }
+            }).png().toBuffer();
+
+            console.log(`[${jobId}] Converted to PNG: ${pngBuffer.length} bytes`);
+
+            // Upload to Firebase Storage
+            const bucket = storage.bucket();
+            const file = bucket.file(storagePath);
+            await file.save(pngBuffer, {
+                metadata: { contentType: "image/png" },
+            });
+            await file.makePublic();
+
+            resultUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+            console.log(`[${jobId}] Uploaded PNG tileset: ${resultUrl}`);
+        }
+
+        // Handle inline tileset data with individual tiles (less common)
         const tilesetData = jobData.last_response?.tileset || jobData.tileset;
+
         if (!resultUrl && tilesetData && Array.isArray(tilesetData.tiles)) {
             console.log(`[${jobId}] Processing inline tileset with ${tilesetData.tiles.length} tiles`);
             

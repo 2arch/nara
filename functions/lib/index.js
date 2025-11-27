@@ -839,7 +839,7 @@ exports.uploadSprites = (0, https_1.onRequest)({
 });
 // Process tileset job
 async function processTilesetJob(jobId, description, userUid, tilesetId) {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f;
     const jobRef = db.collection("tilesetJobs").doc(jobId);
     const apiKey = PIXELLAB_API_KEY;
     const storagePath = `tilesets/${userUid}/${tilesetId}.png`;
@@ -880,8 +880,36 @@ async function processTilesetJob(jobId, description, userUid, tilesetId) {
         const jobData = await jobResponse.json();
         console.log(`[${jobId}] Job data:`, JSON.stringify(jobData, null, 2));
         let resultUrl = jobData.output_url || ((_a = jobData.last_response) === null || _a === void 0 ? void 0 : _a.output_url) || ((_b = jobData.last_response) === null || _b === void 0 ? void 0 : _b.image_url);
-        // Handle inline tileset data
-        const tilesetData = ((_c = jobData.last_response) === null || _c === void 0 ? void 0 : _c.tileset) || jobData.tileset;
+        // Handle inline base64 image (most common case for v2 API)
+        if (!resultUrl && ((_d = (_c = jobData.last_response) === null || _c === void 0 ? void 0 : _c.image) === null || _d === void 0 ? void 0 : _d.base64)) {
+            console.log(`[${jobId}] Processing inline base64 tileset image`);
+            const base64Data = jobData.last_response.image.base64;
+            const rawBuffer = Buffer.from(base64Data, 'base64');
+            // Calculate dimensions (raw RGBA data: width * height * 4 bytes)
+            const totalPixels = rawBuffer.length / 4;
+            const dimension = Math.sqrt(totalPixels);
+            console.log(`[${jobId}] Raw image: ${dimension}x${dimension} pixels (${rawBuffer.length} bytes)`);
+            // Convert raw RGBA to PNG using Sharp
+            const pngBuffer = await (0, sharp_1.default)(rawBuffer, {
+                raw: {
+                    width: dimension,
+                    height: dimension,
+                    channels: 4
+                }
+            }).png().toBuffer();
+            console.log(`[${jobId}] Converted to PNG: ${pngBuffer.length} bytes`);
+            // Upload to Firebase Storage
+            const bucket = storage.bucket();
+            const file = bucket.file(storagePath);
+            await file.save(pngBuffer, {
+                metadata: { contentType: "image/png" },
+            });
+            await file.makePublic();
+            resultUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+            console.log(`[${jobId}] Uploaded PNG tileset: ${resultUrl}`);
+        }
+        // Handle inline tileset data with individual tiles (less common)
+        const tilesetData = ((_e = jobData.last_response) === null || _e === void 0 ? void 0 : _e.tileset) || jobData.tileset;
         if (!resultUrl && tilesetData && Array.isArray(tilesetData.tiles)) {
             console.log(`[${jobId}] Processing inline tileset with ${tilesetData.tiles.length} tiles`);
             // Create composite
@@ -898,7 +926,7 @@ async function processTilesetJob(jobId, description, userUid, tilesetId) {
             });
             const composites = [];
             for (const tile of tilesetData.tiles) {
-                if (!((_d = tile.image) === null || _d === void 0 ? void 0 : _d.base64))
+                if (!((_f = tile.image) === null || _f === void 0 ? void 0 : _f.base64))
                     continue;
                 const buffer = Buffer.from(tile.image.base64, 'base64');
                 // Determine index based on corners (heuristic mapping to 0-15)
