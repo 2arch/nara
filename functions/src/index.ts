@@ -1087,14 +1087,14 @@ async function processTilesetJob(
 
         console.log(`[${jobId}] Starting tileset generation: "${description}"`);
 
-        // Step 1: Request tileset
-        // Endpoint is create-tileset
-        // We use the prompt for the 'upper' terrain (the feature) and a generic background for 'lower'
-        const response = await fetchPixellabV2(apiKey, "create-tileset", {
+        // Step 1: Request tileset using the topdown endpoint for proper Wang blob format
+        // Use MCP-style endpoint that returns corner-based Wang tiles
+        const response = await fetchPixellabV2(apiKey, "create-topdown-tileset", {
             upper_description: description,
-            lower_description: "simple background", 
+            lower_description: "simple background",
             tile_size: { width: 32, height: 32 },
-            view: "low top-down"
+            view: "high top-down",
+            transition_size: 0  // No transition for simple Wang blob
         });
 
         if (!response.ok) {
