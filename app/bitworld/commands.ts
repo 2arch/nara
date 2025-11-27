@@ -2984,7 +2984,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         if (commandToExecute.startsWith('make')) {
             const prompt = commandToExecute.slice(4).trim();
             if (!prompt) {
-                setDialogueWithRevert("Usage: /make <description>", setDialogueText);
+                setDialogueWithRevert("Usage: /make <description> or /make <tileset_name>", setDialogueText);
                 clearCommandState();
                 return null;
             }
@@ -2999,6 +2999,50 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const region = findConnectedPaintRegion(worldData, cursorPos.x, cursorPos.y);
             if (!region) {
                 setDialogueWithRevert("No painted region under cursor", setDialogueText);
+                clearCommandState();
+                return null;
+            }
+
+            // Check if using a saved tileset (simple name without spaces, like "cobblestone")
+            // If it looks like a tileset name (no spaces, could have extension), try to load from /tilesets/
+            const isSavedTileset = !prompt.includes(' ') && !prompt.startsWith('http');
+
+            if (isSavedTileset) {
+                // Add .png extension if not present
+                const tilesetName = prompt.endsWith('.png') ? prompt : `${prompt}.png`;
+                const tilesetUrl = `/tilesets/${tilesetName}`;
+
+                setDialogueText(`Applying tileset: ${tilesetName}...`);
+
+                // Apply tiles immediately using autotiling logic
+                const updates: Record<string, string> = {};
+                const regionSet = new Set(region.points.map(p => `${p.x},${p.y}`));
+
+                for (const p of region.points) {
+                    let mask = 0;
+                    // N, E, S, W - check which neighbors are in the region
+                    if (regionSet.has(`${p.x},${p.y-1}`)) mask |= 1;
+                    if (regionSet.has(`${p.x+1},${p.y}`)) mask |= 2;
+                    if (regionSet.has(`${p.x},${p.y+1}`)) mask |= 4;
+                    if (regionSet.has(`${p.x-1},${p.y}`)) mask |= 8;
+
+                    // Invert mask: tiles with more neighbors should show MORE of the upper terrain
+                    const tileIndex = 15 - mask;
+
+                    const key = `paint_${p.x}_${p.y}`;
+                    updates[key] = JSON.stringify({
+                        type: 'tile',
+                        x: p.x,
+                        y: p.y,
+                        tileset: tilesetUrl,
+                        tileIndex: tileIndex
+                    });
+                }
+
+                if (setWorldData) {
+                    setWorldData((prev: any) => ({ ...prev, ...updates }));
+                }
+                setDialogueText(`Tileset applied: ${tilesetName}`);
                 clearCommandState();
                 return null;
             }
@@ -4475,10 +4519,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('display')) {
-            // /display command - toggle note display mode (expand vs scroll)
+            // /display command - toggle note display mode (expand vs scroll vs wrap vs paint)
             // Must be used inside a note region
             const args = inputParts.slice(1);
-            const mode = args[0] as 'expand' | 'scroll' | undefined;
+            const mode = args[0] as 'expand' | 'scroll' | 'wrap' | 'paint' | undefined;
             const cursorPos = commandState.commandStartPos;
 
             if (!worldData || !setWorldData) {
@@ -4513,11 +4557,17 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
             // Toggle or set display mode
             let newMode: 'expand' | 'scroll' | 'wrap' | 'paint';
+            const currentMode = foundNote.displayMode || 'expand';
+
             if (mode === 'expand' || mode === 'scroll' || mode === 'wrap' || mode === 'paint') {
-                newMode = mode;
+                // If user specifies wrap mode while already in wrap, toggle it off
+                if (mode === 'wrap' && currentMode === 'wrap') {
+                    newMode = 'expand'; // Exit wrap mode back to expand
+                } else {
+                    newMode = mode;
+                }
             } else {
                 // Cycle through modes: expand -> scroll -> wrap -> paint -> expand
-                const currentMode = foundNote.displayMode || 'expand';
                 if (currentMode === 'expand') {
                     newMode = 'scroll';
                 } else if (currentMode === 'scroll') {
