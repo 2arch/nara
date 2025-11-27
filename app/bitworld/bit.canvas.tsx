@@ -118,7 +118,7 @@ interface Note {
     visibleHeight?: number;   // How many lines to show (viewport size)
     scrollOffset?: number;    // Which content line is at top of viewport (Y axis)
     scrollOffsetX?: number;   // Which content column is at left of viewport (X axis)
-    displayMode?: 'expand' | 'scroll'; // How note behaves when typing creates new lines
+    displayMode?: 'expand' | 'scroll' | 'paint'; // How note behaves when typing creates new lines
 }
 
 // ============================================================================
@@ -204,6 +204,12 @@ function parseNoteFromWorldData(key: string, value: any): Note | null {
                 }
                 if (data.scrollOffset !== undefined) {
                     baseNote.scrollOffset = data.scrollOffset;
+                }
+                if (data.scrollOffsetX !== undefined) {
+                    baseNote.scrollOffsetX = data.scrollOffsetX;
+                }
+                if (data.displayMode !== undefined) {
+                    baseNote.displayMode = data.displayMode;
                 }
                 break;
         }
@@ -659,6 +665,9 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
             const minContentX = Math.max(noteContentStartX, minVisibleWorldX - startX + scrollOffsetX);
             const maxContentX = Math.min(noteContentEndX, maxVisibleWorldX - startX + scrollOffsetX);
 
+            // Check paint mode once outside loop for performance
+            const isPaintMode = note.displayMode === 'paint';
+
             // Only iterate through visible region (viewport culling on both axes with 2D scrolling)
             for (let relativeY = Math.floor(minContentY); relativeY <= Math.ceil(maxContentY); relativeY++) {
                 const viewportLine = relativeY - scrollOffsetY;
@@ -672,6 +681,11 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
 
                     const viewportColumn = relativeX - scrollOffsetX;
                     const worldX = startX + viewportColumn;
+
+                    // Paint mode: only render where paint cells exist
+                    if (isPaintMode && !engine.worldData[`paint_${worldX}_${renderY}`]) {
+                        continue;
+                    }
 
                     // Single worldToScreen calculation using renderY directly
                     const topScreenPos = engine.worldToScreen(worldX, renderY - 1, currentZoom, currentOffset);
@@ -2575,9 +2589,17 @@ Camera & Viewport Controls:
 
     // Ref for tracking selection drag state (mouse button down)
     const isSelectingMouseDownRef = useRef(false);
-    
+
     // Ref for tracking when cursor movement is from click (to skip trail)
     const isClickMovementRef = useRef(false);
+
+    // Refs for note/list drag-to-scroll
+    const noteScrollStateRef = useRef<{
+        key: string;
+        type: 'note' | 'list';
+        startY: number;
+        startScrollOffset: number;
+    } | null>(null);
 
     // --- Resize Handler (Canvas specific) ---
     const handleResize = useCallback(() => {
@@ -2806,6 +2828,27 @@ Camera & Viewport Controls:
 
     const findChipAtPosition = useCallback((pos: Point): { key: string, data: any } | null => {
         return findEntityAtPosition(engine.worldData, pos, 'chip');
+    }, [engine]);
+
+    const findListAt = useCallback((pos: Point): { key: string; data: any } | null => {
+        for (const key in engine.worldData) {
+            if (key.startsWith('note_')) {
+                try {
+                    const noteData = JSON.parse(engine.worldData[key] as string);
+                    if (noteData.contentType === 'list') {
+                        const { startX, endX, startY, visibleHeight } = noteData;
+                        // Check if position is within list viewport
+                        if (pos.x >= startX && pos.x <= endX &&
+                            pos.y >= startY && pos.y < startY + visibleHeight) {
+                            return { key, data: noteData };
+                        }
+                    }
+                } catch (e) {
+                    // Skip invalid note data
+                }
+            }
+        }
+        return null;
     }, [engine]);
 
     // Helper to get chronological list of note regions and text blocks
@@ -7215,7 +7258,61 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     y: Math.floor(worldPos.y)
                 };
 
-                // Check for pattern first
+                // Check for scrollable note/list first (for drag-to-scroll)
+                const listAtPos = findListAt(snappedWorldPos);
+                let noteAtPos: { key: string; data: any } | null = null;
+
+                // Only check for text notes if no list found
+                if (!listAtPos) {
+                    for (const key in engine.worldData) {
+                        if (key.startsWith('note_')) {
+                            try {
+                                const noteData = typeof engine.worldData[key] === 'string'
+                                    ? JSON.parse(engine.worldData[key] as string)
+                                    : engine.worldData[key];
+
+                                // Check if it's a text note with scrolling enabled
+                                const isTextNote = !noteData.contentType || noteData.contentType === 'text';
+                                const hasScrolling = noteData.data && (noteData.scrollOffset !== undefined || noteData.scrollOffsetX !== undefined);
+
+                                if (isTextNote && hasScrolling &&
+                                    snappedWorldPos.x >= noteData.startX && snappedWorldPos.x <= noteData.endX &&
+                                    snappedWorldPos.y >= noteData.startY && snappedWorldPos.y <= noteData.endY) {
+                                    noteAtPos = { key, data: noteData };
+                                    break;
+                                }
+                            } catch (e) {
+                                // Skip invalid note data
+                            }
+                        }
+                    }
+                }
+
+                if (listAtPos) {
+                    // Start list scroll mode
+                    noteScrollStateRef.current = {
+                        key: listAtPos.key,
+                        type: 'list',
+                        startY: e.clientY,
+                        startScrollOffset: listAtPos.data.scrollOffset || 0
+                    };
+                    isSelectingMouseDownRef.current = false;
+                    if (canvasRef.current) canvasRef.current.style.cursor = 'grabbing';
+                    return; // Don't process other mouse events
+                } else if (noteAtPos) {
+                    // Start note scroll mode
+                    noteScrollStateRef.current = {
+                        key: noteAtPos.key,
+                        type: 'note',
+                        startY: e.clientY,
+                        startScrollOffset: noteAtPos.data.scrollOffset || 0
+                    };
+                    isSelectingMouseDownRef.current = false;
+                    if (canvasRef.current) canvasRef.current.style.cursor = 'grabbing';
+                    return; // Don't process other mouse events
+                }
+
+                // Check for pattern
                 const patternAtPosition = findPatternAtPosition(snappedWorldPos);
 
                 if (patternAtPosition) {
@@ -7238,7 +7335,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
             canvasRef.current?.focus();
         }
-    }, [engine, selectedImageKey, selectedNoteKey]);
+    }, [engine, selectedImageKey, selectedNoteKey, findListAt, findPatternAtPosition]);
 
     const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -7534,6 +7631,107 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 const roundedDistance = Math.round(distance);
                 setPanDistance(roundedDistance);
             }
+        } else if (noteScrollStateRef.current) {
+            // Handle note/list drag-to-scroll
+            const scrollState = noteScrollStateRef.current;
+            const dyPixels = e.clientY - scrollState.startY;
+
+            // Convert pixel delta to scroll offset (negative because dragging down should scroll up)
+            // Use a sensitivity factor for smooth scrolling (1 line per 40 pixels)
+            const scrollDelta = -Math.floor(dyPixels / 40);
+
+            if (scrollState.type === 'list') {
+                // Scroll list
+                const listData = engine.worldData[scrollState.key];
+                if (listData) {
+                    try {
+                        const parsedListData = JSON.parse(listData as string);
+                        const contentKey = `${scrollState.key}_content`;
+                        const contentData = engine.worldData[contentKey];
+
+                        if (contentData) {
+                            const content = JSON.parse(contentData as string);
+                            const totalLines = Object.keys(content).length;
+                            const visibleHeight = parsedListData.visibleHeight || 10;
+
+                            // Calculate new scroll offset with bounds
+                            const newScrollOffset = Math.max(
+                                0,
+                                Math.min(
+                                    totalLines - visibleHeight,
+                                    scrollState.startScrollOffset + scrollDelta
+                                )
+                            );
+
+                            // Update list scroll offset
+                            if (newScrollOffset !== parsedListData.scrollOffset) {
+                                engine.setWorldData(prev => ({
+                                    ...prev,
+                                    [scrollState.key]: JSON.stringify({
+                                        ...parsedListData,
+                                        scrollOffset: newScrollOffset
+                                    })
+                                }));
+                            }
+                        }
+                    } catch (e) {
+                        // Skip invalid data
+                    }
+                }
+            } else if (scrollState.type === 'note') {
+                // Scroll note (using GRID_CELL_SPAN units)
+                const noteData = engine.worldData[scrollState.key];
+                if (noteData) {
+                    try {
+                        const parsedNoteData = JSON.parse(noteData as string);
+
+                        // Calculate viewport and content dimensions
+                        const GRID_CELL_SPAN = 2;
+                        const visibleHeight = parsedNoteData.endY - parsedNoteData.startY + 1;
+                        const visibleHeightLines = Math.floor(visibleHeight / GRID_CELL_SPAN);
+
+                        // Calculate total content height from note.data
+                        let maxRelativeY = 0;
+                        if (parsedNoteData.data) {
+                            for (const coordKey in parsedNoteData.data) {
+                                const commaIndex = coordKey.indexOf(',');
+                                if (commaIndex !== -1) {
+                                    const relativeY = parseInt(coordKey.substring(commaIndex + 1), 10);
+                                    if (!isNaN(relativeY) && relativeY > maxRelativeY) {
+                                        maxRelativeY = relativeY;
+                                    }
+                                }
+                            }
+                        }
+
+                        const totalContentLines = Math.floor(maxRelativeY / GRID_CELL_SPAN) + 1;
+                        const maxScroll = Math.max(0, (totalContentLines - visibleHeightLines) * GRID_CELL_SPAN);
+
+                        // Calculate new scroll offset with bounds (scroll by GRID_CELL_SPAN units)
+                        const scrollDeltaWorld = scrollDelta * GRID_CELL_SPAN;
+                        const newScrollOffset = Math.max(
+                            0,
+                            Math.min(
+                                maxScroll,
+                                scrollState.startScrollOffset + scrollDeltaWorld
+                            )
+                        );
+
+                        // Update note scroll offset
+                        if (newScrollOffset !== parsedNoteData.scrollOffset) {
+                            engine.setWorldData(prev => ({
+                                ...prev,
+                                [scrollState.key]: JSON.stringify({
+                                    ...parsedNoteData,
+                                    scrollOffset: newScrollOffset
+                                })
+                            }));
+                        }
+                    } catch (e) {
+                        // Skip invalid data
+                    }
+                }
+            }
         } else if (isSelectingMouseDownRef.current && !shiftDragStartPos) { // Check mouse down ref and not shift+dragging
             // Handle selection move
             engine.handleSelectionMove(x, y); // Update engine's selection end
@@ -7579,6 +7777,13 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     roomIndex: null
                 });
                 return; // Early return after resize complete
+            }
+
+            // Reset note scroll state if active
+            if (noteScrollStateRef.current) {
+                noteScrollStateRef.current = null;
+                if (canvasRef.current) canvasRef.current.style.cursor = 'text';
+                return; // Early return after note scroll complete
             }
 
             if (e.shiftKey && shiftDragStartPos) {
@@ -8171,21 +8376,79 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 }
             }
 
-            // If no double-tap and no resize handle, prepare for pan (single tap primary gesture)
+            // If no double-tap and no resize handle, check for scrollable note or prepare for pan
             if (!isDoubleTap) {
                 isDoubleTapModeRef.current = false;
-                isTouchPanningRef.current = true;
-                const info = engine.handlePanStart(touches[0].clientX, touches[0].clientY);
-                panStartInfoRef.current = info;
-                intermediatePanOffsetRef.current = { ...engine.viewOffset };
-                panStartPosRef.current = { ...engine.viewOffset };
-                setIsPanning(true);
-                setPanDistance(0);
-                lastPanMilestoneRef.current = 0;
 
-                // Mark that user overrode viewport during playback
-                if (engine.recorder?.isPlaying) {
-                    engine.recorder.userOverrodeViewport = true;
+                // Check for scrollable note/list first (for drag-to-scroll)
+                const worldPos = engine.screenToWorld(touches[0].x, touches[0].y, engine.zoomLevel, engine.viewOffset);
+                const snappedWorldPos = {
+                    x: Math.floor(worldPos.x),
+                    y: Math.floor(worldPos.y)
+                };
+
+                const listAtPos = findListAt(snappedWorldPos);
+                let noteAtPos: { key: string; data: any } | null = null;
+
+                // Only check for text notes if no list found
+                if (!listAtPos) {
+                    for (const key in engine.worldData) {
+                        if (key.startsWith('note_')) {
+                            try {
+                                const noteData = typeof engine.worldData[key] === 'string'
+                                    ? JSON.parse(engine.worldData[key] as string)
+                                    : engine.worldData[key];
+
+                                // Check if it's a text note with scrolling enabled
+                                const isTextNote = !noteData.contentType || noteData.contentType === 'text';
+                                const hasScrolling = noteData.data && (noteData.scrollOffset !== undefined || noteData.scrollOffsetX !== undefined);
+
+                                if (isTextNote && hasScrolling &&
+                                    snappedWorldPos.x >= noteData.startX && snappedWorldPos.x <= noteData.endX &&
+                                    snappedWorldPos.y >= noteData.startY && snappedWorldPos.y <= noteData.endY) {
+                                    noteAtPos = { key, data: noteData };
+                                    break;
+                                }
+                            } catch (e) {
+                                // Skip invalid note data
+                            }
+                        }
+                    }
+                }
+
+                if (listAtPos) {
+                    // Start list scroll mode
+                    noteScrollStateRef.current = {
+                        key: listAtPos.key,
+                        type: 'list',
+                        startY: touches[0].clientY,
+                        startScrollOffset: listAtPos.data.scrollOffset || 0
+                    };
+                    isTouchPanningRef.current = false; // Prevent pan
+                } else if (noteAtPos) {
+                    // Start note scroll mode
+                    noteScrollStateRef.current = {
+                        key: noteAtPos.key,
+                        type: 'note',
+                        startY: touches[0].clientY,
+                        startScrollOffset: noteAtPos.data.scrollOffset || 0
+                    };
+                    isTouchPanningRef.current = false; // Prevent pan
+                } else {
+                    // Normal pan behavior
+                    isTouchPanningRef.current = true;
+                    const info = engine.handlePanStart(touches[0].clientX, touches[0].clientY);
+                    panStartInfoRef.current = info;
+                    intermediatePanOffsetRef.current = { ...engine.viewOffset };
+                    panStartPosRef.current = { ...engine.viewOffset };
+                    setIsPanning(true);
+                    setPanDistance(0);
+                    lastPanMilestoneRef.current = 0;
+
+                    // Mark that user overrode viewport during playback
+                    if (engine.recorder?.isPlaying) {
+                        engine.recorder.userOverrodeViewport = true;
+                    }
                 }
             }
 
@@ -8279,7 +8542,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         }
 
         canvasRef.current?.focus();
-    }, [engine, findImageAtPosition]);
+    }, [engine, findImageAtPosition, findListAt]);
 
     const handleTouchMove = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -8575,6 +8838,108 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             }
 
             lastPinchDistanceRef.current = currentDistance;
+        } else if (touches.length === 1 && noteScrollStateRef.current) {
+            // Single-finger note/list scroll
+            e.preventDefault();
+
+            const scrollState = noteScrollStateRef.current;
+            const dyPixels = touches[0].clientY - scrollState.startY;
+
+            // Convert pixel delta to scroll offset (same sensitivity as mouse: 1 line per 40 pixels)
+            const scrollDelta = -Math.floor(dyPixels / 40);
+
+            if (scrollState.type === 'list') {
+                // Scroll list
+                const listData = engine.worldData[scrollState.key];
+                if (listData) {
+                    try {
+                        const parsedListData = JSON.parse(listData as string);
+                        const contentKey = `${scrollState.key}_content`;
+                        const contentData = engine.worldData[contentKey];
+
+                        if (contentData) {
+                            const content = JSON.parse(contentData as string);
+                            const totalLines = Object.keys(content).length;
+                            const visibleHeight = parsedListData.visibleHeight || 10;
+
+                            // Calculate new scroll offset with bounds
+                            const newScrollOffset = Math.max(
+                                0,
+                                Math.min(
+                                    totalLines - visibleHeight,
+                                    scrollState.startScrollOffset + scrollDelta
+                                )
+                            );
+
+                            // Update list scroll offset
+                            if (newScrollOffset !== parsedListData.scrollOffset) {
+                                engine.setWorldData(prev => ({
+                                    ...prev,
+                                    [scrollState.key]: JSON.stringify({
+                                        ...parsedListData,
+                                        scrollOffset: newScrollOffset
+                                    })
+                                }));
+                            }
+                        }
+                    } catch (e) {
+                        // Skip invalid data
+                    }
+                }
+            } else if (scrollState.type === 'note') {
+                // Scroll note (using GRID_CELL_SPAN units)
+                const noteData = engine.worldData[scrollState.key];
+                if (noteData) {
+                    try {
+                        const parsedNoteData = JSON.parse(noteData as string);
+
+                        // Calculate viewport and content dimensions
+                        const GRID_CELL_SPAN = 2;
+                        const visibleHeight = parsedNoteData.endY - parsedNoteData.startY + 1;
+                        const visibleHeightLines = Math.floor(visibleHeight / GRID_CELL_SPAN);
+
+                        // Calculate total content height from note.data
+                        let maxRelativeY = 0;
+                        if (parsedNoteData.data) {
+                            for (const coordKey in parsedNoteData.data) {
+                                const commaIndex = coordKey.indexOf(',');
+                                if (commaIndex !== -1) {
+                                    const relativeY = parseInt(coordKey.substring(commaIndex + 1), 10);
+                                    if (!isNaN(relativeY) && relativeY > maxRelativeY) {
+                                        maxRelativeY = relativeY;
+                                    }
+                                }
+                            }
+                        }
+
+                        const totalContentLines = Math.floor(maxRelativeY / GRID_CELL_SPAN) + 1;
+                        const maxScroll = Math.max(0, (totalContentLines - visibleHeightLines) * GRID_CELL_SPAN);
+
+                        // Calculate new scroll offset with bounds (scroll by GRID_CELL_SPAN units)
+                        const scrollDeltaWorld = scrollDelta * GRID_CELL_SPAN;
+                        const newScrollOffset = Math.max(
+                            0,
+                            Math.min(
+                                maxScroll,
+                                scrollState.startScrollOffset + scrollDeltaWorld
+                            )
+                        );
+
+                        // Update note scroll offset
+                        if (newScrollOffset !== parsedNoteData.scrollOffset) {
+                            engine.setWorldData(prev => ({
+                                ...prev,
+                                [scrollState.key]: JSON.stringify({
+                                    ...parsedNoteData,
+                                    scrollOffset: newScrollOffset
+                                })
+                            }));
+                        }
+                    } catch (e) {
+                        // Skip invalid data
+                    }
+                }
+            }
         } else if (touches.length === 1 && isTouchPanningRef.current && !isDoubleTapModeRef.current && panStartInfoRef.current) {
             // Single-finger pan (primary gesture)
             e.preventDefault();
@@ -8651,6 +9016,12 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 roomIndex: null
             });
             return; // Early return after resize complete
+        }
+
+        // Reset note scroll state if active
+        if (noteScrollStateRef.current) {
+            noteScrollStateRef.current = null;
+            return; // Early return after note scroll complete
         }
 
         // Stop painting on touch end

@@ -3448,7 +3448,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                 (async () => {
                     try {
-                        const { ref: storageRef, getDownloadURL, getBytes } = await import('firebase/storage');
+                        const { ref: storageRef, getDownloadURL, getBytes, listAll } = await import('firebase/storage');
                         const { storage } = await import('@/app/firebase');
 
                         // Check if walk.png exists
@@ -3458,11 +3458,120 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             setDialogueText(`${spriteId} already has walk animation. Use /be ${spriteId} to load.`);
                             return;
                         } catch {
-                            // walk.png doesn't exist, continue with animation
-                            console.log(`[/be --animate-continue] Walk sheet missing, continuing animation...`);
+                            // walk.png doesn't exist, check for partial frames
+                            console.log(`[/be --animate-continue] Walk sheet missing, checking for partial frames...`);
                         }
 
-                        // Read metadata to get characterId
+                        // Check walk_frames/ folder for existing frames
+                        const walkFramesRef = storageRef(storage, `sprites/${userUid}/${spriteId}/walk_frames`);
+                        let existingFrames: Record<string, string[]> = {};
+
+                        try {
+                            const framesList = await listAll(walkFramesRef);
+                            console.log(`[/be --animate-continue] Found ${framesList.items.length} existing frames`);
+
+                            // Group frames by direction
+                            for (const item of framesList.items) {
+                                const fileName = item.name; // e.g., "south_0.png"
+                                const match = fileName.match(/^(.+)_(\d+)\.png$/);
+                                if (match) {
+                                    const direction = match[1];
+                                    const frameUrl = await getDownloadURL(item);
+
+                                    if (!existingFrames[direction]) {
+                                        existingFrames[direction] = [];
+                                    }
+                                    existingFrames[direction].push(frameUrl);
+                                }
+                            }
+
+                            // Sort frames by index for each direction
+                            for (const direction in existingFrames) {
+                                existingFrames[direction].sort();
+                            }
+
+                            const existingDirs = Object.keys(existingFrames);
+                            if (existingDirs.length > 0) {
+                                console.log(`[/be --animate-continue] Found existing frames for: ${existingDirs.join(', ')}`);
+                                setDialogueText(`Found partial animation (${existingDirs.length} directions), creating walk sheet...`);
+
+                                // Use existing frames to create walk sheet
+                                const FRAME_WIDTH = 32;
+                                const FRAME_HEIGHT = 40;
+                                const FRAMES_PER_DIR = 8;
+
+                                const walkCanvas = document.createElement('canvas');
+                                walkCanvas.width = FRAME_WIDTH * FRAMES_PER_DIR;
+                                walkCanvas.height = FRAME_HEIGHT * SPRITE_DIRECTIONS.length;
+                                const walkCtx = walkCanvas.getContext('2d')!;
+
+                                for (let row = 0; row < SPRITE_DIRECTIONS.length; row++) {
+                                    const direction = SPRITE_DIRECTIONS[row];
+                                    const frames = existingFrames[direction];
+                                    if (!frames) continue;
+
+                                    for (let col = 0; col < frames.length && col < FRAMES_PER_DIR; col++) {
+                                        try {
+                                            const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+                                                const image = new Image();
+                                                image.crossOrigin = 'anonymous';
+                                                image.onload = () => resolve(image);
+                                                image.onerror = reject;
+                                                image.src = frames[col];
+                                            });
+
+                                            const scale = Math.min(FRAME_WIDTH / img.width, FRAME_HEIGHT / img.height);
+                                            const scaledWidth = img.width * scale;
+                                            const scaledHeight = img.height * scale;
+                                            const offsetX = (FRAME_WIDTH - scaledWidth) / 2;
+                                            const offsetY = (FRAME_HEIGHT - scaledHeight) / 2;
+
+                                            walkCtx.drawImage(img, col * FRAME_WIDTH + offsetX, row * FRAME_HEIGHT + offsetY, scaledWidth, scaledHeight);
+                                        } catch (err) {
+                                            console.warn(`Failed to load frame ${direction}_${col}:`, err);
+                                        }
+                                    }
+                                }
+
+                                const walkSheet = walkCanvas.toDataURL('image/png');
+                                const { uploadString: uploadStr } = await import('firebase/storage');
+                                await uploadStr(walkRef, walkSheet, 'data_url');
+
+                                // Load idle and set sprite
+                                const idleRef = storageRef(storage, `sprites/${userUid}/${spriteId}/idle.png`);
+                                const idleUrl = await getDownloadURL(idleRef);
+                                const idleImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+                                    const img = new Image();
+                                    img.crossOrigin = 'anonymous';
+                                    img.onload = () => resolve(img);
+                                    img.onerror = reject;
+                                    img.src = idleUrl;
+                                });
+                                const idleCanvas = document.createElement('canvas');
+                                idleCanvas.width = idleImg.width;
+                                idleCanvas.height = idleImg.height;
+                                idleCanvas.getContext('2d')!.drawImage(idleImg, 0, 0);
+                                const idleSheet = idleCanvas.toDataURL('image/png');
+
+                                setModeState(prev => ({
+                                    ...prev,
+                                    isCharacterEnabled: true,
+                                    characterSprite: { walkSheet, idleSheet, name: spriteId },
+                                }));
+
+                                const missingDirs = SPRITE_DIRECTIONS.filter(d => !existingFrames[d]);
+                                if (missingDirs.length > 0) {
+                                    setDialogueText(`Walk sheet created (${existingDirs.length}/${SPRITE_DIRECTIONS.length} dirs). Missing: ${missingDirs.join(', ')}`);
+                                } else {
+                                    setDialogueText(`${spriteId} animation complete!`);
+                                }
+                                return;
+                            }
+                        } catch (err) {
+                            console.log(`[/be --animate-continue] No existing frames, will request new animation`);
+                        }
+
+                        // No existing frames - read metadata and request new animation
                         const metadataRef = storageRef(storage, `sprites/${userUid}/${spriteId}/metadata.json`);
                         const metadataBytes = await getBytes(metadataRef);
                         const metadataText = new TextDecoder().decode(metadataBytes);
@@ -3473,7 +3582,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             return;
                         }
 
-                        setDialogueText(`Continuing animation for ${spriteId}...`);
+                        setDialogueText(`No partial frames found, requesting new animation...`);
 
                         // Same animation flow as --animate
                         const response = await fetch(
@@ -4332,12 +4441,19 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             // Toggle or set display mode
-            let newMode: 'expand' | 'scroll';
-            if (mode === 'expand' || mode === 'scroll') {
+            let newMode: 'expand' | 'scroll' | 'paint';
+            if (mode === 'expand' || mode === 'scroll' || mode === 'paint') {
                 newMode = mode;
             } else {
-                // Toggle between modes
-                newMode = foundNote.displayMode === 'scroll' ? 'expand' : 'scroll';
+                // Cycle through modes: expand -> scroll -> paint -> expand
+                const currentMode = foundNote.displayMode || 'expand';
+                if (currentMode === 'expand') {
+                    newMode = 'scroll';
+                } else if (currentMode === 'scroll') {
+                    newMode = 'paint';
+                } else {
+                    newMode = 'expand';
+                }
             }
 
             // Update note with new display mode
@@ -4351,7 +4467,28 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 [foundKey]: JSON.stringify(updatedNote)
             });
 
-            setDialogueText?.(`Display mode: ${newMode}`);
+            // Auto-detect painted region when entering paint mode
+            let message = `Display mode: ${newMode}`;
+            if (newMode === 'paint') {
+                // Check if there are paint cells within note bounds
+                let paintCellCount = 0;
+                for (let y = foundNote.startY; y <= foundNote.endY && paintCellCount < 10; y++) {
+                    for (let x = foundNote.startX; x <= foundNote.endX && paintCellCount < 10; x++) {
+                        const paintKey = `paint_${x}_${y}`;
+                        if (worldData[paintKey]) {
+                            paintCellCount++;
+                        }
+                    }
+                }
+
+                if (paintCellCount > 0) {
+                    message = `Paint mode: ${paintCellCount}+ cells detected`;
+                } else {
+                    message = `Paint mode: no paint detected (draw to create viewport)`;
+                }
+            }
+
+            setDialogueText?.(message);
             clearCommandState();
 
             return {

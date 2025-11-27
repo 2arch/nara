@@ -9080,7 +9080,7 @@ export function useWorldEngine({
                             // Expand mode: grow note downward to accommodate new line
                             updatedNoteData.endY = nextLineY;
                         } else {
-                            // Scroll mode: keep note size, auto-scroll down by GRID_CELL_SPAN
+                            // Scroll/Paint mode: keep note size, auto-scroll down by GRID_CELL_SPAN
                             const currentScrollOffset = noteData.scrollOffset || 0;
                             updatedNoteData.scrollOffset = currentScrollOffset + GRID_CELL_SPAN;
                             shouldScroll = true;
