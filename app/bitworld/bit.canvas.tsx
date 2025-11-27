@@ -118,7 +118,7 @@ interface Note {
     visibleHeight?: number;   // How many lines to show (viewport size)
     scrollOffset?: number;    // Which content line is at top of viewport (Y axis)
     scrollOffsetX?: number;   // Which content column is at left of viewport (X axis)
-    displayMode?: 'expand' | 'scroll' | 'paint'; // How note behaves when typing creates new lines
+    displayMode?: 'expand' | 'scroll' | 'paint' | 'wrap'; // How note behaves when typing creates new lines
 }
 
 // ============================================================================

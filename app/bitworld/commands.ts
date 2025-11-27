@@ -3492,80 +3492,18 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                             const existingDirs = Object.keys(existingFrames);
                             if (existingDirs.length > 0) {
-                                console.log(`[/be --animate-continue] Found existing frames for: ${existingDirs.join(', ')}`);
-                                setDialogueText(`Found partial animation (${existingDirs.length} directions), creating walk sheet...`);
-
-                                // Use existing frames to create walk sheet
-                                const FRAME_WIDTH = 32;
-                                const FRAME_HEIGHT = 40;
-                                const FRAMES_PER_DIR = 8;
-
-                                const walkCanvas = document.createElement('canvas');
-                                walkCanvas.width = FRAME_WIDTH * FRAMES_PER_DIR;
-                                walkCanvas.height = FRAME_HEIGHT * SPRITE_DIRECTIONS.length;
-                                const walkCtx = walkCanvas.getContext('2d')!;
-
-                                for (let row = 0; row < SPRITE_DIRECTIONS.length; row++) {
-                                    const direction = SPRITE_DIRECTIONS[row];
-                                    const frames = existingFrames[direction];
-                                    if (!frames) continue;
-
-                                    for (let col = 0; col < frames.length && col < FRAMES_PER_DIR; col++) {
-                                        try {
-                                            const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-                                                const image = new Image();
-                                                image.crossOrigin = 'anonymous';
-                                                image.onload = () => resolve(image);
-                                                image.onerror = reject;
-                                                image.src = frames[col];
-                                            });
-
-                                            const scale = Math.min(FRAME_WIDTH / img.width, FRAME_HEIGHT / img.height);
-                                            const scaledWidth = img.width * scale;
-                                            const scaledHeight = img.height * scale;
-                                            const offsetX = (FRAME_WIDTH - scaledWidth) / 2;
-                                            const offsetY = (FRAME_HEIGHT - scaledHeight) / 2;
-
-                                            walkCtx.drawImage(img, col * FRAME_WIDTH + offsetX, row * FRAME_HEIGHT + offsetY, scaledWidth, scaledHeight);
-                                        } catch (err) {
-                                            console.warn(`Failed to load frame ${direction}_${col}:`, err);
-                                        }
-                                    }
-                                }
-
-                                const walkSheet = walkCanvas.toDataURL('image/png');
-                                const { uploadString: uploadStr } = await import('firebase/storage');
-                                await uploadStr(walkRef, walkSheet, 'data_url');
-
-                                // Load idle and set sprite
-                                const idleRef = storageRef(storage, `sprites/${userUid}/${spriteId}/idle.png`);
-                                const idleUrl = await getDownloadURL(idleRef);
-                                const idleImg = await new Promise<HTMLImageElement>((resolve, reject) => {
-                                    const img = new Image();
-                                    img.crossOrigin = 'anonymous';
-                                    img.onload = () => resolve(img);
-                                    img.onerror = reject;
-                                    img.src = idleUrl;
-                                });
-                                const idleCanvas = document.createElement('canvas');
-                                idleCanvas.width = idleImg.width;
-                                idleCanvas.height = idleImg.height;
-                                idleCanvas.getContext('2d')!.drawImage(idleImg, 0, 0);
-                                const idleSheet = idleCanvas.toDataURL('image/png');
-
-                                setModeState(prev => ({
-                                    ...prev,
-                                    isCharacterEnabled: true,
-                                    characterSprite: { walkSheet, idleSheet, name: spriteId },
-                                }));
-
                                 const missingDirs = SPRITE_DIRECTIONS.filter(d => !existingFrames[d]);
-                                if (missingDirs.length > 0) {
-                                    setDialogueText(`Walk sheet created (${existingDirs.length}/${SPRITE_DIRECTIONS.length} dirs). Missing: ${missingDirs.join(', ')}`);
+                                console.log(`[/be --animate-continue] Found: ${existingDirs.join(', ')}`);
+                                console.log(`[/be --animate-continue] Missing: ${missingDirs.join(', ')}`);
+
+                                if (missingDirs.length === 0) {
+                                    // All directions already exist, skip animation request
+                                    setDialogueText(`All directions complete, creating walk sheet...`);
+                                    console.log(`[/be --animate-continue] All frames exist, skipping animation request`);
                                 } else {
-                                    setDialogueText(`${spriteId} animation complete!`);
+                                    // Some missing, will request animation after metadata check
+                                    setDialogueText(`Found ${existingDirs.length}/${SPRITE_DIRECTIONS.length} dirs. Requesting: ${missingDirs.join(', ')}...`);
                                 }
-                                return;
                             }
                         } catch (err) {
                             console.log(`[/be --animate-continue] No existing frames, will request new animation`);
@@ -4441,16 +4379,18 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             // Toggle or set display mode
-            let newMode: 'expand' | 'scroll' | 'paint';
-            if (mode === 'expand' || mode === 'scroll' || mode === 'paint') {
+            let newMode: 'expand' | 'scroll' | 'paint' | 'wrap';
+            if (mode === 'expand' || mode === 'scroll' || mode === 'paint' || mode === 'wrap') {
                 newMode = mode;
             } else {
-                // Cycle through modes: expand -> scroll -> paint -> expand
+                // Cycle through modes: expand -> scroll -> paint -> wrap -> expand
                 const currentMode = foundNote.displayMode || 'expand';
                 if (currentMode === 'expand') {
                     newMode = 'scroll';
                 } else if (currentMode === 'scroll') {
                     newMode = 'paint';
+                } else if (currentMode === 'paint') {
+                    newMode = 'wrap';
                 } else {
                     newMode = 'expand';
                 }

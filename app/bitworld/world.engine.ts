@@ -9060,14 +9060,20 @@ export function useWorldEngine({
             if (!worldDataChanged) {
                 const noteRegion = getNoteRegion(dataToDeleteFrom, cursorAfterDelete);
                 if (noteRegion && proposedCursorPos.x > noteRegion.endX) {
-                    // We would type past the right edge - wrap to next line
-                    const nextLineY = cursorAfterDelete.y + GRID_CELL_SPAN;
-
-                    // Get the containing note to access its data
+                    // Get the containing note to access its data and check wrapText setting
                     const noteAtCursor = findTextNoteContainingPoint(cursorAfterDelete.x, cursorAfterDelete.y, dataToDeleteFrom);
                     if (!noteAtCursor) return true;
 
                     const noteData = noteAtCursor.data;
+
+                    // Only wrap if in wrap display mode
+                    if (noteData.displayMode !== 'wrap') {
+                        // No wrapping - cursor just stops at edge
+                        return true;
+                    }
+
+                    // We would type past the right edge - wrap to next line
+                    const nextLineY = cursorAfterDelete.y + GRID_CELL_SPAN;
                     let updatedNoteData = { ...noteData };
                     let updatedWorldData = { ...dataToDeleteFrom };
 
@@ -9079,11 +9085,14 @@ export function useWorldEngine({
                         if (displayMode === 'expand') {
                             // Expand mode: grow note downward to accommodate new line
                             updatedNoteData.endY = nextLineY;
-                        } else {
+                        } else if (displayMode === 'scroll' || displayMode === 'paint') {
                             // Scroll/Paint mode: keep note size, auto-scroll down by GRID_CELL_SPAN
                             const currentScrollOffset = noteData.scrollOffset || 0;
                             updatedNoteData.scrollOffset = currentScrollOffset + GRID_CELL_SPAN;
                             shouldScroll = true;
+                        } else if (displayMode === 'wrap') {
+                            // Wrap mode: keep note size fixed, no auto-scroll (content wraps within bounds)
+                            // User can manually scroll if needed
                         }
                     }
 
