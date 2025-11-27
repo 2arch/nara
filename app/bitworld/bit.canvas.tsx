@@ -7490,7 +7490,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     const noteData = JSON.parse(engine.worldData[resizeState.key] as string);
 
                     // Update the note
-                    const updatedNoteData = {
+                    let updatedNoteData = {
                         ...noteData,
                         startX: newBounds.startX,
                         startY: newBounds.startY,
@@ -7799,6 +7799,22 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
             // Reset resize state if active
             if (resizeState.active) {
+                // If resizing a note in wrap mode, rewrap now that resize is complete
+                if (resizeState.type === 'note' && resizeState.key) {
+                    try {
+                        const noteData = JSON.parse(engine.worldData[resizeState.key] as string);
+                        if (noteData.displayMode === 'wrap') {
+                            const rewrapped = rewrapNoteText(noteData);
+                            engine.setWorldData(prev => ({
+                                ...prev,
+                                [resizeState.key!]: JSON.stringify(rewrapped)
+                            }));
+                        }
+                    } catch (e) {
+                        // Ignore errors
+                    }
+                }
+
                 setResizeState({
                     active: false,
                     type: null,
@@ -8668,7 +8684,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     const noteData = JSON.parse(engine.worldData[resizeState.key] as string);
 
                     // Update the note
-                    const updatedNoteData = {
+                    let updatedNoteData = {
                         ...noteData,
                         startX: newBounds.startX,
                         startY: newBounds.startY,
@@ -9038,6 +9054,22 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
         // Reset resize state if active
         if (resizeState.active) {
+            // If resizing a note in wrap mode, rewrap now that resize is complete
+            if (resizeState.type === 'note' && resizeState.key) {
+                try {
+                    const noteData = JSON.parse(engine.worldData[resizeState.key] as string);
+                    if (noteData.displayMode === 'wrap') {
+                        const rewrapped = rewrapNoteText(noteData);
+                        engine.setWorldData(prev => ({
+                            ...prev,
+                            [resizeState.key!]: JSON.stringify(rewrapped)
+                        }));
+                    }
+                } catch (e) {
+                    // Ignore errors
+                }
+            }
+
             setResizeState({
                 active: false,
                 type: null,

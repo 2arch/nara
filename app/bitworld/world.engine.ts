@@ -197,6 +197,12 @@ export const rewrapNoteText = (noteData: any): any => {
 
     const noteWidth = noteData.endX - noteData.startX;
 
+    // If note is too narrow (< 5 cells), don't rewrap - just use viewport culling
+    // This prevents character-by-character breaking on very narrow notes
+    if (noteWidth < 5) {
+        return noteData;
+    }
+
     // Group characters by their Y coordinate (lines)
     const lineMap: Map<number, Array<{ relativeX: number; char: string; style?: any }>> = new Map();
 
@@ -219,61 +225,139 @@ export const rewrapNoteText = (noteData: any): any => {
     // Sort lines by Y coordinate
     const sortedLines = Array.from(lineMap.entries()).sort((a, b) => a[0] - b[0]);
 
-    // Rewrap each line that exceeds the note width
-    const newData: any = {};
-    let currentY = 0;
+    // Group lines into paragraphs (separated by explicit breaks)
+    // A paragraph is a continuous stream of text
+    const paragraphs: Array<Array<{ char: string; style?: any }>> = [];
+    let currentParagraph: Array<{ char: string; style?: any }> = [];
 
-    for (const [originalY, characters] of sortedLines) {
+    for (let i = 0; i < sortedLines.length; i++) {
+        const [y, characters] = sortedLines[i];
+
         // Sort characters by X coordinate
         characters.sort((a, b) => a.relativeX - b.relativeX);
 
-        // Build array of characters for this line
-        const lineChars: Array<{ char: string; style?: any }> = [];
-        for (const { char, style } of characters) {
-            lineChars.push({ char, style });
+        // Detect if this is an explicit line break
+        let isExplicitBreak = false;
+
+        // Check 1: Empty line (no characters) = explicit break
+        if (characters.length === 0) {
+            isExplicitBreak = true;
         }
 
-        // Word-wrap this line
-        let currentX = 0;
-        let lineStart = 0; // Start index for current line being built
+        // Check 2: Gap in Y coordinates = explicit break (skipped lines)
+        if (i > 0) {
+            const prevY = sortedLines[i - 1][0];
+            if (y - prevY > GRID_CELL_SPAN) {
+                // Start new paragraph due to Y gap
+                if (currentParagraph.length > 0) {
+                    paragraphs.push(currentParagraph);
+                    currentParagraph = [];
+                }
+            }
+        }
 
-        for (let i = 0; i < lineChars.length; i++) {
-            const { char, style } = lineChars[i];
+        // Add characters from this line to current paragraph
+        // If merging with previous line content (not first line of paragraph), add a space
+        if (currentParagraph.length > 0 && characters.length > 0) {
+            // Check if previous line already ends with space or current line starts with space
+            const lastChar = currentParagraph[currentParagraph.length - 1];
+            const firstChar = characters[0];
+            if (lastChar.char !== ' ' && firstChar.char !== ' ') {
+                // Add space between merged lines
+                currentParagraph.push({ char: ' ' });
+            }
+        }
+
+        for (const { char, style } of characters) {
+            currentParagraph.push({ char, style });
+        }
+
+        // If explicit break, finalize current paragraph
+        if (isExplicitBreak) {
+            if (currentParagraph.length > 0) {
+                paragraphs.push(currentParagraph);
+                currentParagraph = [];
+            }
+            // Empty line creates empty paragraph (preserves blank lines)
+            if (characters.length === 0) {
+                paragraphs.push([]);
+            }
+        }
+    }
+
+    // Don't forget the last paragraph if it wasn't finalized
+    if (currentParagraph.length > 0) {
+        paragraphs.push(currentParagraph);
+    }
+
+    // Rewrap each paragraph based on new width
+    const newData: any = {};
+    let currentY = 0;
+
+    for (const paragraph of paragraphs) {
+        if (paragraph.length === 0) {
+            // Empty paragraph - preserve blank line
+            currentY += GRID_CELL_SPAN;
+            continue;
+        }
+
+        // Wrap this paragraph as a continuous stream
+        let currentX = 0;
+        let lineStartIndex = 0; // Track where current line started in paragraph
+
+        for (let i = 0; i < paragraph.length; i++) {
+            const { char, style } = paragraph[i];
 
             // Check if placing this character would exceed width
-            if (currentX > noteWidth) {
-                // Find last space in the range [lineStart, i)
+            if (currentX >= noteWidth) {
+                // Need to wrap - find last space on current line
                 let wrapIndex = -1;
-                for (let j = i - 1; j >= lineStart; j--) {
-                    if (lineChars[j].char === ' ') {
+
+                // Search backwards from current position to find a space
+                for (let j = i - 1; j >= lineStartIndex; j--) {
+                    if (paragraph[j].char === ' ') {
                         wrapIndex = j;
                         break;
                     }
                 }
 
-                // Wrap at space if found, otherwise wrap at current position
-                if (wrapIndex >= lineStart) {
-                    // Wrap at space - move to next line and skip the space
+                if (wrapIndex >= lineStartIndex) {
+                    // Found a space to wrap at - remove characters back to the space
+                    // and move them to next line
+
+                    // Remove characters from space onwards on current line
+                    for (let k = wrapIndex; k < i; k++) {
+                        const removeX = currentX - (i - k);
+                        const removeKey = `${removeX},${currentY}`;
+                        delete newData[removeKey];
+                    }
+
+                    // Move to next line
                     currentY += GRID_CELL_SPAN;
                     currentX = 0;
-                    lineStart = wrapIndex + 1; // Skip the space
-                    i = wrapIndex; // Will increment to wrapIndex + 1 on next iteration
-                    continue;
+                    lineStartIndex = wrapIndex + 1; // New line starts after the space
+
+                    // Re-add characters (except the space)
+                    for (let k = wrapIndex + 1; k < i; k++) {
+                        const coordKey = `${currentX},${currentY}`;
+                        const { char: c, style: s } = paragraph[k];
+                        newData[coordKey] = s ? { char: c, style: s } : c;
+                        currentX++;
+                    }
                 } else {
-                    // No space found - hard wrap at current position
-                    currentY += GRID_CELL_SPAN;
-                    currentX = 0;
-                    lineStart = i;
+                    // No space found = long word that doesn't fit
+                    // Don't hard-wrap! Just let it overflow and viewport cull
+                    // This preserves word structure
                 }
             }
 
-            // Place character
+            // Place current character (may overflow if long word)
             const coordKey = `${currentX},${currentY}`;
             newData[coordKey] = style ? { char, style } : char;
             currentX++;
         }
 
-        // Move to next line after this original line (preserve line breaks)
+        // Move to next line for next paragraph (explicit line break)
         currentY += GRID_CELL_SPAN;
     }
 
