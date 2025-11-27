@@ -1075,7 +1075,8 @@ async function processTilesetJob(
 ): Promise<void> {
     const jobRef = db.collection("tilesetJobs").doc(jobId);
     const apiKey = PIXELLAB_API_KEY;
-    const storagePath = `tilesets/${userUid}/${tilesetId}.png`;
+    const storagePath = `tilesets/${userUid}/${tilesetId}/tileset.png`;
+    const metadataPath = `tilesets/${userUid}/${tilesetId}/metadata.json`;
 
     try {
         await jobRef.update({
@@ -1240,6 +1241,23 @@ async function processTilesetJob(
             console.log(`[${jobId}] Tileset uploaded to ${publicUrl}`);
             resultUrl = publicUrl; // Normalize variable
         }
+
+        // Save metadata.json
+        const bucket = storage.bucket();
+        const metadataFile = bucket.file(metadataPath);
+        const metadata = {
+            id: tilesetId,
+            name: description,
+            description: description,
+            createdAt: new Date().toISOString(),
+            tileSize: 32,
+            gridSize: 4,
+        };
+        await metadataFile.save(JSON.stringify(metadata, null, 2), {
+            metadata: { contentType: "application/json" },
+        });
+        await metadataFile.makePublic();
+        console.log(`[${jobId}] Metadata saved to ${metadataPath}`);
 
         // Complete
         await jobRef.update({

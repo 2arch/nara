@@ -694,4 +694,199 @@ export const renameSprite = async (
   return { success: false, error: 'Rename not supported with Storage-only sprites' };
 };
 
+// Tileset management
+export interface SavedTileset {
+  id: string;
+  name: string;
+  description: string;
+  imageUrl: string;
+  createdAt: string;
+  tileSize?: number;
+  gridSize?: number; // 4 for 4x4 Wang tileset
+}
+
+export const saveTileset = async (
+  uid: string,
+  name: string,
+  description: string,
+  imageDataUrl: string,
+  existingTilesetId?: string
+): Promise<{ success: boolean; tileset?: SavedTileset; error?: string }> => {
+  try {
+    const tilesetId = existingTilesetId || `tileset_${Date.now()}`;
+    console.log('[saveTileset] Starting save for user:', uid, 'tileset:', tilesetId);
+
+    // Extract base64 data from data URL
+    const imageBase64 = imageDataUrl.split(',')[1];
+
+    if (!imageBase64) {
+      console.error('[saveTileset] Invalid data URL');
+      return { success: false, error: 'Invalid tileset data URL' };
+    }
+
+    // Upload tileset image to Storage
+    const imageRef = storageRef(storage, `tilesets/${uid}/${tilesetId}/tileset.png`);
+    console.log('[saveTileset] Uploading to Firebase Storage...');
+    await uploadString(imageRef, imageBase64, 'base64', { contentType: 'image/png' });
+
+    // Get download URL
+    const imageUrl = await getDownloadURL(imageRef);
+    console.log('[saveTileset] Download URL obtained');
+
+    // Save metadata.json
+    const metadata = {
+      id: tilesetId,
+      name,
+      description,
+      createdAt: new Date().toISOString(),
+      tileSize: 32,
+      gridSize: 4,
+    };
+    const metadataRef = storageRef(storage, `tilesets/${uid}/${tilesetId}/metadata.json`);
+    const metadataBlob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
+    await uploadBytes(metadataRef, metadataBlob);
+    console.log('[saveTileset] Metadata saved');
+
+    const tilesetData: SavedTileset = {
+      id: tilesetId,
+      name,
+      description,
+      imageUrl,
+      createdAt: metadata.createdAt,
+      tileSize: metadata.tileSize,
+      gridSize: metadata.gridSize,
+    };
+
+    console.log('[saveTileset] Tileset saved:', tilesetId);
+    logger.info(`Tileset saved to Storage: ${tilesetId} for user ${uid}`);
+    return { success: true, tileset: tilesetData };
+  } catch (error: any) {
+    console.error('[saveTileset] Error:', error);
+    logger.error('Error saving tileset:', error);
+    return { success: false, error: error.message || 'Failed to save tileset' };
+  }
+};
+
+export const getUserTilesets = async (uid: string | null): Promise<SavedTileset[]> => {
+  try {
+    const allTilesets: SavedTileset[] = [];
+    console.log('[getUserTilesets] Fetching tilesets for uid:', uid);
+
+    if (uid) {
+      const { listAll } = await import('firebase/storage');
+      const userTilesetsRef = storageRef(storage, `tilesets/${uid}`);
+      const result = await listAll(userTilesetsRef);
+      console.log('[getUserTilesets] Found', result.prefixes.length, 'tileset folders');
+
+      for (const folderRef of result.prefixes) {
+        const tilesetId = folderRef.name;
+        try {
+          const imageRef = storageRef(storage, `tilesets/${uid}/${tilesetId}/tileset.png`);
+          const metadataRef = storageRef(storage, `tilesets/${uid}/${tilesetId}/metadata.json`);
+
+          // Load metadata if exists
+          let name = tilesetId.replace('tileset_', '').replace(/_/g, ' ');
+          let description = '';
+          let createdAt = new Date().toISOString();
+          let tileSize = 32;
+          let gridSize = 4;
+
+          try {
+            const metadataUrl = await getDownloadURL(metadataRef);
+            const metadataRes = await fetch(metadataUrl);
+            const metadata = await metadataRes.json();
+            name = metadata.name || name;
+            description = metadata.description || '';
+            createdAt = metadata.createdAt || createdAt;
+            tileSize = metadata.tileSize || tileSize;
+            gridSize = metadata.gridSize || gridSize;
+          } catch (error) {
+            // No metadata file, use defaults
+          }
+
+          const imageUrl = await getDownloadURL(imageRef);
+
+          console.log(`[getUserTilesets] Loaded tileset: ${tilesetId} (name: ${name})`);
+          allTilesets.push({
+            id: tilesetId,
+            name,
+            description,
+            imageUrl,
+            createdAt,
+            tileSize,
+            gridSize,
+          });
+        } catch (error) {
+          console.warn(`Skipping tileset ${tilesetId}:`, error);
+        }
+      }
+    }
+
+    // Sort by tileset ID (newest first)
+    allTilesets.sort((a, b) => b.id.localeCompare(a.id));
+    console.log('[getUserTilesets] Returning', allTilesets.length, 'tilesets');
+
+    return allTilesets;
+  } catch (error) {
+    logger.error('Error fetching tilesets:', error);
+    return [];
+  }
+};
+
+export const loadTileset = async (uid: string, tilesetId: string): Promise<SavedTileset | null> => {
+  try {
+    const imageRef = storageRef(storage, `tilesets/${uid}/${tilesetId}/tileset.png`);
+    const metadataRef = storageRef(storage, `tilesets/${uid}/${tilesetId}/metadata.json`);
+
+    const imageUrl = await getDownloadURL(imageRef);
+
+    // Try to load metadata
+    let name = tilesetId.replace('tileset_', '').replace(/_/g, ' ');
+    let description = '';
+    let createdAt = new Date().toISOString();
+
+    try {
+      const metadataUrl = await getDownloadURL(metadataRef);
+      const metadataRes = await fetch(metadataUrl);
+      const metadata = await metadataRes.json();
+      name = metadata.name || name;
+      description = metadata.description || '';
+      createdAt = metadata.createdAt || createdAt;
+    } catch (error) {
+      // Use defaults
+    }
+
+    return {
+      id: tilesetId,
+      name,
+      description,
+      imageUrl,
+      createdAt,
+    };
+  } catch (error) {
+    logger.error('Error loading tileset:', error);
+    return null;
+  }
+};
+
+export const deleteTileset = async (uid: string, tilesetId: string): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const { deleteObject } = await import('firebase/storage');
+
+    const imageRef = storageRef(storage, `tilesets/${uid}/${tilesetId}/tileset.png`);
+    const metadataRef = storageRef(storage, `tilesets/${uid}/${tilesetId}/metadata.json`);
+
+    await Promise.all([
+      deleteObject(imageRef).catch(() => {}),
+      deleteObject(metadataRef).catch(() => {}),
+    ]);
+
+    logger.info(`Tileset deleted: ${tilesetId} for user ${uid}`);
+    return { success: true };
+  } catch (error: any) {
+    logger.error('Error deleting tileset:', error);
+    return { success: false, error: error.message || 'Failed to delete tileset' };
+  }
+};
+
 export { database, app, auth, storage, firestore };

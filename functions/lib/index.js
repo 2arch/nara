@@ -842,7 +842,8 @@ async function processTilesetJob(jobId, description, userUid, tilesetId) {
     var _a, _b, _c, _d, _e, _f;
     const jobRef = db.collection("tilesetJobs").doc(jobId);
     const apiKey = PIXELLAB_API_KEY;
-    const storagePath = `tilesets/${userUid}/${tilesetId}.png`;
+    const storagePath = `tilesets/${userUid}/${tilesetId}/tileset.png`;
+    const metadataPath = `tilesets/${userUid}/${tilesetId}/metadata.json`;
     try {
         await jobRef.update({
             status: "generating",
@@ -851,14 +852,14 @@ async function processTilesetJob(jobId, description, userUid, tilesetId) {
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         console.log(`[${jobId}] Starting tileset generation: "${description}"`);
-        // Step 1: Request tileset
-        // Endpoint is create-tileset
-        // We use the prompt for the 'upper' terrain (the feature) and a generic background for 'lower'
-        const response = await fetchPixellabV2(apiKey, "create-tileset", {
+        // Step 1: Request tileset using the topdown endpoint for proper Wang blob format
+        // Use MCP-style endpoint that returns corner-based Wang tiles
+        const response = await fetchPixellabV2(apiKey, "create-topdown-tileset", {
             upper_description: description,
             lower_description: "simple background",
             tile_size: { width: 32, height: 32 },
-            view: "low top-down"
+            view: "high top-down",
+            transition_size: 0 // No transition for simple Wang blob
         });
         if (!response.ok) {
             const errText = await response.text();
@@ -980,6 +981,22 @@ async function processTilesetJob(jobId, description, userUid, tilesetId) {
             console.log(`[${jobId}] Tileset uploaded to ${publicUrl}`);
             resultUrl = publicUrl; // Normalize variable
         }
+        // Save metadata.json
+        const bucket = storage.bucket();
+        const metadataFile = bucket.file(metadataPath);
+        const metadata = {
+            id: tilesetId,
+            name: description,
+            description: description,
+            createdAt: new Date().toISOString(),
+            tileSize: 32,
+            gridSize: 4,
+        };
+        await metadataFile.save(JSON.stringify(metadata, null, 2), {
+            metadata: { contentType: "application/json" },
+        });
+        await metadataFile.makePublic();
+        console.log(`[${jobId}] Metadata saved to ${metadataPath}`);
         // Complete
         await jobRef.update({
             status: "complete",
