@@ -839,7 +839,7 @@ exports.uploadSprites = (0, https_1.onRequest)({
 });
 // Process tileset job
 async function processTilesetJob(jobId, description, userUid, tilesetId) {
-    var _a, _b, _c, _d, _e, _f;
+    var _a;
     const jobRef = db.collection("tilesetJobs").doc(jobId);
     const apiKey = PIXELLAB_API_KEY;
     const storagePath = `tilesets/${userUid}/${tilesetId}/tileset.png`;
@@ -852,14 +852,11 @@ async function processTilesetJob(jobId, description, userUid, tilesetId) {
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         console.log(`[${jobId}] Starting tileset generation: "${description}"`);
-        // Step 1: Request tileset using the topdown endpoint for proper Wang blob format
-        // Use MCP-style endpoint that returns corner-based Wang tiles
-        const response = await fetchPixellabV2(apiKey, "create-topdown-tileset", {
+        // Step 1: Request tileset using the v2 tilesets endpoint
+        const response = await fetchPixellabV2(apiKey, "tilesets", {
             upper_description: description,
             lower_description: "simple background",
             tile_size: { width: 32, height: 32 },
-            view: "high top-down",
-            transition_size: 0 // No transition for simple Wang blob
         });
         if (!response.ok) {
             const errText = await response.text();
@@ -867,7 +864,8 @@ async function processTilesetJob(jobId, description, userUid, tilesetId) {
         }
         const data = await response.json();
         const backgroundJobId = data.background_job_id;
-        console.log(`[${jobId}] Tileset job started: ${backgroundJobId}`);
+        const pixellabTilesetId = data.tileset_id;
+        console.log(`[${jobId}] Tileset job started: ${backgroundJobId}, tileset_id: ${pixellabTilesetId}`);
         // Step 2: Poll job
         await jobRef.update({
             currentPhase: "generating tileset",
@@ -875,116 +873,89 @@ async function processTilesetJob(jobId, description, userUid, tilesetId) {
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         await pollBackgroundJob(apiKey, backgroundJobId, "tileset", jobRef);
-        console.log(`[${jobId}] Tileset generated! Fetching result...`);
-        // Step 3: Get result URL or Data
-        const jobResponse = await getPixellabV2(apiKey, `background-jobs/${backgroundJobId}`);
-        const jobData = await jobResponse.json();
-        console.log(`[${jobId}] Job data:`, JSON.stringify(jobData, null, 2));
-        let resultUrl = jobData.output_url || ((_a = jobData.last_response) === null || _a === void 0 ? void 0 : _a.output_url) || ((_b = jobData.last_response) === null || _b === void 0 ? void 0 : _b.image_url);
-        // Handle inline base64 image (most common case for v2 API)
-        if (!resultUrl && ((_d = (_c = jobData.last_response) === null || _c === void 0 ? void 0 : _c.image) === null || _d === void 0 ? void 0 : _d.base64)) {
-            console.log(`[${jobId}] Processing inline base64 tileset image`);
-            const base64Data = jobData.last_response.image.base64;
-            const rawBuffer = Buffer.from(base64Data, 'base64');
-            // Calculate dimensions (raw RGBA data: width * height * 4 bytes)
-            const totalPixels = rawBuffer.length / 4;
-            const dimension = Math.sqrt(totalPixels);
-            console.log(`[${jobId}] Raw image: ${dimension}x${dimension} pixels (${rawBuffer.length} bytes)`);
-            // Convert raw RGBA to PNG using Sharp
-            const pngBuffer = await (0, sharp_1.default)(rawBuffer, {
-                raw: {
-                    width: dimension,
-                    height: dimension,
-                    channels: 4
-                }
-            }).png().toBuffer();
-            console.log(`[${jobId}] Converted to PNG: ${pngBuffer.length} bytes`);
-            // Upload to Firebase Storage
-            const bucket = storage.bucket();
-            const file = bucket.file(storagePath);
-            await file.save(pngBuffer, {
-                metadata: { contentType: "image/png" },
-            });
-            await file.makePublic();
-            resultUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
-            console.log(`[${jobId}] Uploaded PNG tileset: ${resultUrl}`);
+        console.log(`[${jobId}] Tileset generated! Fetching and remapping...`);
+        // Step 3: Fetch PNG and metadata from MCP endpoints, then remap to corner-index order
+        // The MCP endpoints provide proper metadata with corner info for each tile
+        const mcpBaseUrl = "https://api.pixellab.ai/mcp/tilesets";
+        console.log(`[${jobId}] Fetching tileset image from MCP endpoint...`);
+        const pngResponse = await fetchWithTimeout(`${mcpBaseUrl}/${pixellabTilesetId}/image`, {
+            headers: { "Authorization": `Bearer ${apiKey}` }
+        });
+        if (!pngResponse.ok) {
+            throw new Error(`Failed to fetch tileset PNG: ${pngResponse.status}`);
         }
-        // Handle inline tileset data with individual tiles (less common)
-        const tilesetData = ((_e = jobData.last_response) === null || _e === void 0 ? void 0 : _e.tileset) || jobData.tileset;
-        if (!resultUrl && tilesetData && Array.isArray(tilesetData.tiles)) {
-            console.log(`[${jobId}] Processing inline tileset with ${tilesetData.tiles.length} tiles`);
-            // Create composite
-            const tileSize = 32;
-            const cols = 4;
-            const rows = 4;
-            const composite = (0, sharp_1.default)({
-                create: {
-                    width: cols * tileSize,
-                    height: rows * tileSize,
-                    channels: 4,
-                    background: { r: 0, g: 0, b: 0, alpha: 0 }
-                }
+        const originalPngBuffer = Buffer.from(await pngResponse.arrayBuffer());
+        console.log(`[${jobId}] Fetched PNG: ${originalPngBuffer.length} bytes`);
+        console.log(`[${jobId}] Fetching tileset metadata...`);
+        const metadataResponse = await fetchWithTimeout(`${mcpBaseUrl}/${pixellabTilesetId}/metadata`, {
+            headers: { "Authorization": `Bearer ${apiKey}` }
+        });
+        if (!metadataResponse.ok) {
+            throw new Error(`Failed to fetch tileset metadata: ${metadataResponse.status}`);
+        }
+        const metadata = await metadataResponse.json();
+        // Tiles are nested under tileset_data.tiles in the API response
+        const tiles = ((_a = metadata.tileset_data) === null || _a === void 0 ? void 0 : _a.tiles) || metadata.tiles || [];
+        console.log(`[${jobId}] Metadata tiles: ${tiles.length}`);
+        // Remap tiles to corner-index order (0-15)
+        // Corner encoding: NW*8 + NE*4 + SW*2 + SE*1 where upper=1, lower=0
+        const tileSize = 32;
+        const cols = 4;
+        // Create mapping from cornerIndex to source position
+        const tileMapping = [];
+        for (const tile of tiles) {
+            const corners = tile.corners || {};
+            const nw = corners.NW === 'upper' ? 1 : 0;
+            const ne = corners.NE === 'upper' ? 1 : 0;
+            const sw = corners.SW === 'upper' ? 1 : 0;
+            const se = corners.SE === 'upper' ? 1 : 0;
+            const cornerIndex = nw * 8 + ne * 4 + sw * 2 + se * 1;
+            const bbox = tile.bounding_box || {};
+            tileMapping.push({
+                cornerIndex,
+                srcX: bbox.x || 0,
+                srcY: bbox.y || 0
             });
-            const composites = [];
-            for (const tile of tilesetData.tiles) {
-                if (!((_f = tile.image) === null || _f === void 0 ? void 0 : _f.base64))
-                    continue;
-                const buffer = Buffer.from(tile.image.base64, 'base64');
-                // Determine index based on corners (heuristic mapping to 0-15)
-                // Assuming 'upper' is the foreground feature
-                const corners = tile.corners || {};
-                let index = 0;
-                if (corners.NW === 'upper')
-                    index |= 1;
-                if (corners.NE === 'upper')
-                    index |= 2;
-                if (corners.SW === 'upper')
-                    index |= 4;
-                if (corners.SE === 'upper')
-                    index |= 8;
-                // If the API returns duplicates or we need remapping, this might overwrite.
-                // But let's trust this mapping for a standard Wang set.
-                const tx = (index % cols) * tileSize;
-                const ty = Math.floor(index / cols) * tileSize;
-                composites.push({
-                    input: buffer,
-                    top: ty,
-                    left: tx
-                });
+        }
+        console.log(`[${jobId}] Tile mapping:`, tileMapping.map(t => `${t.cornerIndex}@(${t.srcX},${t.srcY})`).join(', '));
+        // Extract tiles from source and place in corner-index order
+        const composites = [];
+        for (const mapping of tileMapping) {
+            // Extract tile from source position
+            const tileBuffer = await (0, sharp_1.default)(originalPngBuffer)
+                .extract({ left: mapping.srcX, top: mapping.srcY, width: tileSize, height: tileSize })
+                .toBuffer();
+            // Calculate destination position based on corner index
+            const destX = (mapping.cornerIndex % cols) * tileSize;
+            const destY = Math.floor(mapping.cornerIndex / cols) * tileSize;
+            composites.push({
+                input: tileBuffer,
+                left: destX,
+                top: destY
+            });
+        }
+        // Create remapped tileset
+        const remappedBuffer = await (0, sharp_1.default)({
+            create: {
+                width: cols * tileSize,
+                height: cols * tileSize,
+                channels: 4,
+                background: { r: 0, g: 0, b: 0, alpha: 0 }
             }
-            const outputBuffer = await composite.composite(composites).png().toBuffer();
-            // Upload composite
-            const bucket = storage.bucket();
-            const file = bucket.file(storagePath);
-            await file.save(outputBuffer, {
-                metadata: { contentType: "image/png" },
-            });
-            await file.makePublic();
-            resultUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
-            console.log(`[${jobId}] Created and uploaded composite tileset: ${resultUrl}`);
-        }
-        else if (!resultUrl) {
-            // If we still don't have a URL and no tileset data
-            const keys = Object.keys(jobData).join(',');
-            const lrKeys = jobData.last_response ? Object.keys(jobData.last_response).join(',') : 'null';
-            throw new Error(`No output URL or tileset data. Keys: ${keys}. LR Keys: ${lrKeys}`);
-        }
-        else {
-            // We have a resultUrl from the API (fallback flow)
-            // Step 4: Upload to Firebase Storage
-            await jobRef.update({
-                currentPhase: "uploading to storage",
-                progress: 2,
-                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-            const publicUrl = await downloadAndUploadToStorage(resultUrl, storagePath);
-            console.log(`[${jobId}] Tileset uploaded to ${publicUrl}`);
-            resultUrl = publicUrl; // Normalize variable
-        }
-        // Save metadata.json
+        }).composite(composites).png().toBuffer();
+        console.log(`[${jobId}] Created remapped tileset: ${remappedBuffer.length} bytes`);
+        // Upload to Firebase Storage
         const bucket = storage.bucket();
+        const file = bucket.file(storagePath);
+        await file.save(remappedBuffer, {
+            metadata: { contentType: "image/png" },
+        });
+        await file.makePublic();
+        const resultUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+        console.log(`[${jobId}] Uploaded remapped tileset: ${resultUrl}`);
+        // Save metadata.json
         const metadataFile = bucket.file(metadataPath);
-        const metadata = {
+        const tilesetMetadata = {
             id: tilesetId,
             name: description,
             description: description,
@@ -992,7 +963,7 @@ async function processTilesetJob(jobId, description, userUid, tilesetId) {
             tileSize: 32,
             gridSize: 4,
         };
-        await metadataFile.save(JSON.stringify(metadata, null, 2), {
+        await metadataFile.save(JSON.stringify(tilesetMetadata, null, 2), {
             metadata: { contentType: "application/json" },
         });
         await metadataFile.makePublic();

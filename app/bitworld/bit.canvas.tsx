@@ -2,7 +2,7 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { WorldData, Point, WorldEngine, PanStartInfo, StyledCharacter } from './world.engine'; // Adjust path as needed
-import { getCharScale, rewrapNoteText } from './world.engine';
+import { getCharScale, rewrapNoteText, findConnectedPaintRegion } from './world.engine';
 import { useDialogue, useDebugDialogue } from './dialogue';
 import { useControllerSystem, createCameraController, createGridController, createTapeController, createCommandController } from './controllers';
 import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchicalFrames, HierarchicalFrame, HierarchyLevel, findTextBlockForSelection } from './bit.blocks';
@@ -1374,15 +1374,29 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const [selectedNoteKey, setSelectedNoteKey] = useState<string | null>(null);
     const [selectedPatternKey, setSelectedPatternKey] = useState<string | null>(null);
 
+    // Selected paint region (stores the connected paint blob info)
+    const [selectedPaintRegion, setSelectedPaintRegion] = useState<{
+        points: { x: number; y: number }[];
+        minX: number;
+        maxX: number;
+        minY: number;
+        maxY: number;
+        color: string;
+    } | null>(null);
+
     // Resize state
     type ResizeHandle = 'top-left' | 'top-right' | 'bottom-right' | 'bottom-left';
     const [resizeState, setResizeState] = useState<{
         active: boolean;
-        type: 'image' | 'note' | 'iframe' | 'pattern' | 'pack' | null;
+        type: 'image' | 'note' | 'iframe' | 'pattern' | 'pack' | 'paint' | null;
         key: string | null;
         handle: ResizeHandle | null;
         originalBounds: { startX: number; startY: number; endX: number; endY: number } | null;
         roomIndex: number | null; // For pattern type: which room in the rooms array (null = pattern boundary)
+        paintRegion?: { // For paint type: store the original paint points and color
+            points: { x: number; y: number }[];
+            color: string;
+        };
     }>({
         active: false,
         type: null,
@@ -5674,6 +5688,20 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             }
         }
 
+        // === Render Selected Paint Blob Border ===
+        if (selectedPaintRegion) {
+            renderEntitySelection(ctx, {
+                startX: selectedPaintRegion.minX,
+                startY: selectedPaintRegion.minY,
+                endX: selectedPaintRegion.maxX,
+                endY: selectedPaintRegion.maxY
+            }, {
+                showBorder: true,
+                borderColor: getTextColor(engine, 0.8),
+                thumbColor: getTextColor(engine, 1)
+            }, engine, currentZoom, currentOffset);
+        }
+
         // === Render Clipboard Flash ===
         if (clipboardFlashBounds.size > 0) {
             const recentItem = engine.clipboardItems[0];
@@ -6982,13 +7010,45 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     engine.handleSelectionEnd();
                     setSelectedImageKey(null);
                     setSelectedNoteKey(planAtPosition.key);
+                    setSelectedPaintRegion(null);
 
                     // Set flag to prevent trail creation
                     isClickMovementRef.current = true;
                 } else {
-                    // Clear any selections if clicking on empty space
-                    setSelectedImageKey(null);
-                    setSelectedNoteKey(null);
+                    // Check for paint blob
+                    const paintKey = `paint_${snappedWorldPos.x}_${snappedWorldPos.y}`;
+                    const paintCell = engine.worldData[paintKey];
+
+                    if (paintCell) {
+                        try {
+                            const paintData = JSON.parse(paintCell as string);
+                            if (paintData.type === 'paint') {
+                                // Find the connected paint region
+                                const region = findConnectedPaintRegion(engine.worldData, snappedWorldPos.x, snappedWorldPos.y);
+
+                                if (region) {
+                                    // Clear other selections and select the paint blob
+                                    engine.handleSelectionStart(0, 0);
+                                    engine.handleSelectionEnd();
+                                    setSelectedImageKey(null);
+                                    setSelectedNoteKey(null);
+                                    setSelectedPaintRegion(region);
+
+                                    // Set flag to prevent trail creation
+                                    isClickMovementRef.current = true;
+                                }
+                            }
+                        } catch (e) {
+                            // Invalid paint data, ignore
+                        }
+                    }
+
+                    if (!paintCell) {
+                        // Clear any selections if clicking on empty space
+                        setSelectedImageKey(null);
+                        setSelectedNoteKey(null);
+                        setSelectedPaintRegion(null);
+                    }
                 }
             }
         }
@@ -7128,6 +7188,45 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     }
                 } catch (e) {
                     // Skip invalid note data
+                }
+            }
+
+            // Check paint blob resize handles
+            if (selectedPaintRegion) {
+                const topLeftScreen = engine.worldToScreen(selectedPaintRegion.minX, selectedPaintRegion.minY, engine.zoomLevel, engine.viewOffset);
+                const bottomRightScreen = engine.worldToScreen(selectedPaintRegion.maxX + 1, selectedPaintRegion.maxY + 1, engine.zoomLevel, engine.viewOffset);
+
+                const left = topLeftScreen.x;
+                const right = bottomRightScreen.x;
+                const top = topLeftScreen.y;
+                const bottom = bottomRightScreen.y;
+
+                // Check each corner handle
+                let handle: ResizeHandle | null = null;
+                if (isWithinThumb(x, y, left, top)) handle = 'top-left';
+                else if (isWithinThumb(x, y, right, top)) handle = 'top-right';
+                else if (isWithinThumb(x, y, right, bottom)) handle = 'bottom-right';
+                else if (isWithinThumb(x, y, left, bottom)) handle = 'bottom-left';
+
+                if (handle) {
+                    setResizeState({
+                        active: true,
+                        type: 'paint',
+                        key: null, // Paint doesn't have a single key
+                        handle,
+                        originalBounds: {
+                            startX: selectedPaintRegion.minX,
+                            startY: selectedPaintRegion.minY,
+                            endX: selectedPaintRegion.maxX,
+                            endY: selectedPaintRegion.maxY
+                        },
+                        roomIndex: null,
+                        paintRegion: {
+                            points: selectedPaintRegion.points,
+                            color: selectedPaintRegion.color
+                        }
+                    });
+                    return; // Early return, don't process other mouse events
                 }
             }
 
@@ -7661,6 +7760,62 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     }
                 } catch (e) {
                     // Invalid pattern data
+                }
+            } else if (resizeState.type === 'paint' && resizeState.paintRegion) {
+                // Calculate scale factors
+                const originalWidth = originalBounds.endX - originalBounds.startX + 1;
+                const originalHeight = originalBounds.endY - originalBounds.startY + 1;
+                const newWidth = newBounds.endX - newBounds.startX + 1;
+                const newHeight = newBounds.endY - newBounds.startY + 1;
+
+                const scaleX = newWidth / originalWidth;
+                const scaleY = newHeight / originalHeight;
+
+                // Build update object with deleted old cells and new scaled cells
+                const updates: Record<string, any> = {};
+
+                // Delete all old paint cells
+                for (const point of resizeState.paintRegion.points) {
+                    const paintKey = `paint_${point.x}_${point.y}`;
+                    updates[paintKey] = null; // Mark for deletion
+                }
+
+                // Create new scaled paint cells
+                for (const point of resizeState.paintRegion.points) {
+                    // Calculate relative position in original bounds
+                    const relativeX = point.x - originalBounds.startX;
+                    const relativeY = point.y - originalBounds.startY;
+
+                    // Scale the relative position
+                    const scaledRelativeX = Math.round(relativeX * scaleX);
+                    const scaledRelativeY = Math.round(relativeY * scaleY);
+
+                    // Calculate new absolute position
+                    const newX = newBounds.startX + scaledRelativeX;
+                    const newY = newBounds.startY + scaledRelativeY;
+
+                    // Add new paint cell
+                    const newPaintKey = `paint_${newX}_${newY}`;
+                    updates[newPaintKey] = JSON.stringify({
+                        type: 'paint',
+                        color: resizeState.paintRegion.color
+                    });
+                }
+
+                // Apply all updates at once
+                engine.setWorldData(prev => ({
+                    ...prev,
+                    ...updates
+                }));
+
+                // Update selected paint region to reflect new bounds
+                const newRegion = findConnectedPaintRegion(
+                    { ...engine.worldData, ...updates },
+                    newBounds.startX,
+                    newBounds.startY
+                );
+                if (newRegion) {
+                    setSelectedPaintRegion(newRegion);
                 }
             }
 

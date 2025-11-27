@@ -1553,8 +1553,36 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             return [...baseOptions, ...publicSpriteOptions];
         }
 
+        // Handle make command suggestions (similar to be command)
+        if (lowerInput === 'make' || lowerInput.startsWith('make ')) {
+            const parts = input.split(' ');
+
+            if (parts.length > 1) {
+                // User is typing a tileset name or description
+                const tilesetInput = parts.slice(1).join(' ').toLowerCase();
+
+                // Match user tilesets by name
+                const matchingUserTilesets = userTilesets
+                    .filter(tileset => tileset.name.toLowerCase().includes(tilesetInput))
+                    .map(tileset => `make ${tileset.name}`);
+
+                if (matchingUserTilesets.length > 0) {
+                    // Show matching saved tilesets + allow new prompt
+                    return [...matchingUserTilesets, `make ${tilesetInput}`];
+                }
+                // No matches - just show what they're typing
+                return [`make ${tilesetInput}`];
+            }
+
+            // Show saved tilesets when just typing "make"
+            if (userTilesets.length > 0) {
+                return userTilesets.map(tileset => `make ${tileset.name}`);
+            }
+            return ['make'];
+        }
+
         return commandList.filter(cmd => cmd.toLowerCase().startsWith(lowerInput));
-    }, [getAllChips, getAllBounds, availableStates, clipboardItems, isReadOnly, userUid, membershipLevel, userSprites]);
+    }, [getAllChips, getAllBounds, availableStates, clipboardItems, isReadOnly, userUid, membershipLevel, userSprites, userTilesets]);
 
     // Mode switching functionality
     const switchMode = useCallback((newMode: CanvasMode) => {
@@ -3051,60 +3079,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 return null;
             }
 
-            // Check if using a public tileset (simple name without spaces)
-            const isPublicTileset = !prompt.includes(' ') && !prompt.startsWith('http');
-
-            if (isPublicTileset) {
-                // Try to load from public /tilesets/ folder
-                const tilesetName = prompt.endsWith('.png') ? prompt : `${prompt}.png`;
-                const tilesetUrl = `/tilesets/${tilesetName}`;
-
-                setDialogueText(`Applying tileset: ${tilesetName}...`);
-
-                // Apply tiles using CORNER-based Wang autotiling
-                // Each corner (NW, NE, SW, SE) is shared by 4 cells
-                // A corner is "grass" if ALL 4 cells sharing it are in the region
-                const updates: Record<string, string> = {};
-                const regionSet = new Set(region.points.map(p => `${p.x},${p.y}`));
-
-                const inRegion = (x: number, y: number) => regionSet.has(`${x},${y}`);
-
-                for (const p of region.points) {
-                    // For each corner, check if all 4 cells sharing it are in region
-                    // NW corner of (x,y) is shared with (x-1,y-1), (x,y-1), (x-1,y)
-                    const nw = inRegion(p.x, p.y) && inRegion(p.x-1, p.y) &&
-                               inRegion(p.x, p.y-1) && inRegion(p.x-1, p.y-1) ? 1 : 0;
-                    // NE corner shared with (x+1,y-1), (x,y-1), (x+1,y)
-                    const ne = inRegion(p.x, p.y) && inRegion(p.x+1, p.y) &&
-                               inRegion(p.x, p.y-1) && inRegion(p.x+1, p.y-1) ? 1 : 0;
-                    // SW corner shared with (x-1,y+1), (x,y+1), (x-1,y)
-                    const sw = inRegion(p.x, p.y) && inRegion(p.x-1, p.y) &&
-                               inRegion(p.x, p.y+1) && inRegion(p.x-1, p.y+1) ? 1 : 0;
-                    // SE corner shared with (x+1,y+1), (x,y+1), (x+1,y)
-                    const se = inRegion(p.x, p.y) && inRegion(p.x+1, p.y) &&
-                               inRegion(p.x, p.y+1) && inRegion(p.x+1, p.y+1) ? 1 : 0;
-
-                    // Corner index: NW=8, NE=4, SW=2, SE=1
-                    const cornerIndex = nw * 8 + ne * 4 + sw * 2 + se * 1;
-
-                    const key = `paint_${p.x}_${p.y}`;
-                    updates[key] = JSON.stringify({
-                        type: 'tile',
-                        x: p.x,
-                        y: p.y,
-                        tileset: tilesetUrl,
-                        tileIndex: cornerIndex
-                    });
-                }
-
-                if (setWorldData) {
-                    setWorldData((prev: any) => ({ ...prev, ...updates }));
-                }
-                setDialogueText(`Tileset applied: ${tilesetName}`);
-                clearCommandState();
-                return null;
-            }
-
+            // No saved tileset found - generate a new one
             if (!userUid) {
                 setDialogueWithRevert("Must be logged in to generate tiles", setDialogueText);
                 clearCommandState();
