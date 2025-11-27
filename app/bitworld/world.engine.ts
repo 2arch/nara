@@ -9256,13 +9256,8 @@ export function useWorldEngine({
 
                     const noteData = noteAtCursor.data;
 
-                    // Only wrap if in wrap display mode
-                    if (noteData.displayMode !== 'wrap') {
-                        // No wrapping - cursor just stops at edge
-                        return true;
-                    }
-
                     // We would type past the right edge - wrap to next line
+                    // (All display modes support wrapping, but behavior differs)
                     const nextLineY = cursorAfterDelete.y + GRID_CELL_SPAN;
                     let updatedNoteData = { ...noteData };
                     let updatedWorldData = { ...dataToDeleteFrom };

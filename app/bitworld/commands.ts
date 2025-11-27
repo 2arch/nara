@@ -4380,33 +4380,26 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             // Toggle or set display mode
-            let newMode: 'expand' | 'scroll' | 'paint' | 'wrap';
-            if (mode === 'expand' || mode === 'scroll' || mode === 'paint' || mode === 'wrap') {
+            let newMode: 'expand' | 'scroll' | 'paint';
+            if (mode === 'expand' || mode === 'scroll' || mode === 'paint') {
                 newMode = mode;
             } else {
-                // Cycle through modes: expand -> scroll -> paint -> wrap -> expand
+                // Cycle through modes: expand -> scroll -> paint -> expand
                 const currentMode = foundNote.displayMode || 'expand';
                 if (currentMode === 'expand') {
                     newMode = 'scroll';
                 } else if (currentMode === 'scroll') {
                     newMode = 'paint';
-                } else if (currentMode === 'paint') {
-                    newMode = 'wrap';
                 } else {
                     newMode = 'expand';
                 }
             }
 
             // Update note with new display mode
-            let updatedNote = {
+            const updatedNote = {
                 ...foundNote,
                 displayMode: newMode
             };
-
-            // If switching to wrap mode, rewrap existing text
-            if (newMode === 'wrap') {
-                updatedNote = rewrapNoteText(updatedNote);
-            }
 
             setWorldData({
                 ...worldData,
