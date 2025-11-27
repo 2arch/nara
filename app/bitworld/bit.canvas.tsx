@@ -605,8 +605,8 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
 
             renderStyledRect(baseRenderContext, screenBounds, style);
             ctx.restore();
-        } else {
-            // Default: semi-transparent overlay
+        } else if (note.displayMode !== 'paint') {
+            // Default: semi-transparent overlay (skip in paint mode - paint is the background)
             const planColor = getTextColor(engine, 0.15);
             ctx.fillStyle = planColor;
 
