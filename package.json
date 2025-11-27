@@ -4,7 +4,7 @@
   "private": true,
   "main": "electron/main.js",
   "scripts": {
-    "dev": "next dev -p 3000 -H 0.0.0.0",
+    "dev": "fuser -k 3000/tcp 2>/dev/null || true && next dev -p 3000 -H 0.0.0.0",
     "dev:watch": "nodemon --watch app --watch components --watch lib --ext ts,tsx,js,jsx --exec 'next dev -p 3000 -H 0.0.0.0'",
     "build": "fuser -k 3000/tcp 2>/dev/null || true && next build && (npm run dev > /dev/null 2>&1 &)",
     "build:only": "next build",

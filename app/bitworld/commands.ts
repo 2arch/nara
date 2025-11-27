@@ -3694,8 +3694,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                             const result = await poll();
 
-                            // Get frame paths from API result
-                            framePaths = result.framePaths as Record<string, string[]>;
+                            // Get frame paths from API result and merge with existing frames
+                            // This ensures we composite ALL directions, not just the newly generated ones
+                            framePaths = { ...existingFrames, ...(result.framePaths as Record<string, string[]>) };
                         } else {
                             // Use existing frames from storage
                             framePaths = existingFrames;

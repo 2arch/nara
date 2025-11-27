@@ -1,6 +1,7 @@
 import { onRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import JSZip from "jszip";
+import sharp from "sharp";
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -568,10 +569,17 @@ async function processAnimationJob(
         console.log(`[${jobId}] Starting animation for character ${characterId}`);
 
         // Step 1: Request walk animation
-        const animResponse = await fetchPixellabV2(apiKey, "animate-character", {
+        const animPayload: any = {
             character_id: characterId,
             template_animation_id: "walking-8-frames",
-        });
+        };
+
+        if (directionsToUpload && directionsToUpload.length > 0) {
+            animPayload.directions = directionsToUpload;
+            console.log(`[${jobId}] Requesting animation only for: ${directionsToUpload.join(", ")}`);
+        }
+
+        const animResponse = await fetchPixellabV2(apiKey, "animate-character", animPayload);
 
         if (!animResponse.ok) {
             const errText = await animResponse.text();
@@ -651,7 +659,7 @@ async function processAnimationJob(
         });
 
         // The /characters/{id}/zip endpoint is the ONLY way to get animation frame data
-        const zipResponse = await getPixellabV2(apiKey, `characters/${characterId}/zip`);
+        const zipResponse = await getPixellabV2(apiKey, `characters/${characterId}/zip`, 120000);
         if (!zipResponse.ok) {
             const errText = await zipResponse.text();
             throw new Error(`Failed to download character ZIP: ${zipResponse.status} - ${errText}`);
@@ -887,7 +895,7 @@ export const animateSprite = onRequest(
             // Optional: only upload specific directions (for retry/continue scenarios)
             let targetDirections: string[] | null = null;
             if (directionsToUpload && Array.isArray(directionsToUpload)) {
-                targetDirections = directionsToUpload.filter((d: any) => typeof d === "string" && DIRECTIONS.includes(d));
+                targetDirections = directionsToUpload.filter((d: any) => typeof d === "string" && DIRECTIONS.includes(d as any));
                 console.log(`[animateSprite] Will only upload directions: ${targetDirections.join(", ")}`);
             }
 
@@ -1037,6 +1045,11 @@ export const uploadSprites = onRequest(
         } catch (error) {
             const errMsg = error instanceof Error ? error.message : "Unknown error";
             console.error("Upload error:", errMsg);
+            res.status(500).json({ error: errMsg });
+        }
+    }
+);
+
 // ... (existing exports)
 
 // Tileset job interface
@@ -1075,10 +1088,13 @@ async function processTilesetJob(
         console.log(`[${jobId}] Starting tileset generation: "${description}"`);
 
         // Step 1: Request tileset
-        const response = await fetchPixellabV2(apiKey, "create-topdown-tileset", {
-            description,
-            style: "pixel art",
-            tile_size: 32 // Assuming 32x32 tiles
+        // Endpoint is create-tileset
+        // We use the prompt for the 'upper' terrain (the feature) and a generic background for 'lower'
+        const response = await fetchPixellabV2(apiKey, "create-tileset", {
+            upper_description: description,
+            lower_description: "simple background", 
+            tile_size: { width: 32, height: 32 },
+            view: "low top-down"
         });
 
         if (!response.ok) {
@@ -1102,30 +1118,96 @@ async function processTilesetJob(
 
         console.log(`[${jobId}] Tileset generated! Fetching result...`);
 
-        // Step 3: Get result URL
+        // Step 3: Get result URL or Data
         const jobResponse = await getPixellabV2(apiKey, `background-jobs/${backgroundJobId}`);
         const jobData = await jobResponse.json();
-        const resultUrl = jobData.last_response?.output_url || jobData.output_url;
+        
+        console.log(`[${jobId}] Job data:`, JSON.stringify(jobData, null, 2));
 
-        if (!resultUrl) {
-            throw new Error("No output URL in job response");
+        let resultUrl = jobData.output_url || jobData.last_response?.output_url || jobData.last_response?.image_url;
+
+        // Handle inline tileset data
+        const tilesetData = jobData.last_response?.tileset || jobData.tileset;
+        if (!resultUrl && tilesetData && Array.isArray(tilesetData.tiles)) {
+            console.log(`[${jobId}] Processing inline tileset with ${tilesetData.tiles.length} tiles`);
+            
+            // Create composite
+            const tileSize = 32;
+            const cols = 4;
+            const rows = 4;
+            const composite = sharp({
+                create: {
+                    width: cols * tileSize,
+                    height: rows * tileSize,
+                    channels: 4,
+                    background: { r: 0, g: 0, b: 0, alpha: 0 }
+                }
+            });
+
+            const composites: sharp.OverlayOptions[] = [];
+
+            for (const tile of tilesetData.tiles) {
+                if (!tile.image?.base64) continue;
+                
+                const buffer = Buffer.from(tile.image.base64, 'base64');
+                
+                // Determine index based on corners (heuristic mapping to 0-15)
+                // Assuming 'upper' is the foreground feature
+                const corners = tile.corners || {};
+                let index = 0;
+                if (corners.NW === 'upper') index |= 1;
+                if (corners.NE === 'upper') index |= 2;
+                if (corners.SW === 'upper') index |= 4;
+                if (corners.SE === 'upper') index |= 8;
+
+                // If the API returns duplicates or we need remapping, this might overwrite.
+                // But let's trust this mapping for a standard Wang set.
+                
+                const tx = (index % cols) * tileSize;
+                const ty = Math.floor(index / cols) * tileSize;
+
+                composites.push({
+                    input: buffer,
+                    top: ty,
+                    left: tx
+                });
+            }
+
+            const outputBuffer = await composite.composite(composites).png().toBuffer();
+            
+            // Upload composite
+            const bucket = storage.bucket();
+            const file = bucket.file(storagePath);
+            await file.save(outputBuffer, {
+                metadata: { contentType: "image/png" },
+            });
+            await file.makePublic();
+            
+            resultUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+            console.log(`[${jobId}] Created and uploaded composite tileset: ${resultUrl}`);
+        } else if (!resultUrl) {
+            // If we still don't have a URL and no tileset data
+            const keys = Object.keys(jobData).join(',');
+            const lrKeys = jobData.last_response ? Object.keys(jobData.last_response).join(',') : 'null';
+            throw new Error(`No output URL or tileset data. Keys: ${keys}. LR Keys: ${lrKeys}`);
+        } else {
+            // We have a resultUrl from the API (fallback flow)
+            // Step 4: Upload to Firebase Storage
+            await jobRef.update({
+                currentPhase: "uploading to storage",
+                progress: 2,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+
+            const publicUrl = await downloadAndUploadToStorage(resultUrl, storagePath);
+            console.log(`[${jobId}] Tileset uploaded to ${publicUrl}`);
+            resultUrl = publicUrl; // Normalize variable
         }
-
-        // Step 4: Upload to Firebase Storage
-        await jobRef.update({
-            currentPhase: "uploading to storage",
-            progress: 2,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-
-        const publicUrl = await downloadAndUploadToStorage(resultUrl, storagePath);
-
-        console.log(`[${jobId}] Tileset uploaded to ${publicUrl}`);
 
         // Complete
         await jobRef.update({
             status: "complete",
-            imageUrl: publicUrl,
+            imageUrl: resultUrl,
             currentPhase: null,
             progress: 3,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),

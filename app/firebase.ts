@@ -465,6 +465,7 @@ export interface SavedSprite {
   walkUrl: string;
   idleUrl: string;
   createdAt: string;
+  hasRotations?: boolean; // True if rotations/ folder exists (for --sheet command)
 }
 
 export const saveSprite = async (
@@ -542,14 +543,17 @@ export const saveSprite = async (
 export const getUserSprites = async (uid: string | null): Promise<SavedSprite[]> => {
   try {
     const allSprites: SavedSprite[] = [];
+    console.log('[getUserSprites] Fetching sprites for uid:', uid);
 
     // Fetch user sprites from Storage if authenticated
     if (uid) {
       const { listAll } = await import('firebase/storage');
       const userSpritesRef = storageRef(storage, `sprites/${uid}`);
       const result = await listAll(userSpritesRef);
+      console.log('[getUserSprites] Found', result.prefixes.length, 'sprite folders');
 
       // Each sprite has a folder with walk.png, idle.png, and metadata.json
+      // Sprites may be incomplete (only idle.png if animation hasn't been generated yet)
       for (const folderRef of result.prefixes) {
         const spriteId = folderRef.name;
         try {
@@ -573,11 +577,40 @@ export const getUserSprites = async (uid: string | null): Promise<SavedSprite[]>
             // No metadata file, use defaults
           }
 
-          const [walkUrl, idleUrl] = await Promise.all([
-            getDownloadURL(walkRef),
-            getDownloadURL(idleRef),
-          ]);
+          // Try to load walk, idle URLs and check for rotations folder
+          // Incomplete sprites may only have rotations/ folder (no idle.png yet)
+          let walkUrl = '';
+          let idleUrl = '';
+          let hasRotations = false;
 
+          try {
+            walkUrl = await getDownloadURL(walkRef);
+          } catch (error) {
+            // walk.png doesn't exist yet - sprite animation incomplete
+          }
+
+          try {
+            idleUrl = await getDownloadURL(idleRef);
+          } catch (error) {
+            // idle.png doesn't exist - check if rotations folder exists
+          }
+
+          // Check if rotations folder exists by looking for south.png
+          const rotationsSouthRef = storageRef(storage, `sprites/${uid}/${spriteId}/rotations/south.png`);
+          try {
+            await getDownloadURL(rotationsSouthRef);
+            hasRotations = true;
+          } catch (error) {
+            // No rotations folder
+          }
+
+          // Skip sprite only if it has neither idle.png nor rotations
+          if (!idleUrl && !hasRotations) {
+            console.warn(`Skipping sprite ${spriteId}: no idle.png or rotations found`);
+            continue;
+          }
+
+          console.log(`[getUserSprites] Loaded sprite: ${spriteId} (name: ${name}, hasWalk: ${!!walkUrl}, hasIdle: ${!!idleUrl}, hasRotations: ${hasRotations})`);
           allSprites.push({
             id: spriteId,
             name,
@@ -585,6 +618,7 @@ export const getUserSprites = async (uid: string | null): Promise<SavedSprite[]>
             walkUrl,
             idleUrl,
             createdAt,
+            hasRotations,
           });
         } catch (error) {
           console.warn(`Skipping sprite ${spriteId}:`, error);
@@ -594,6 +628,7 @@ export const getUserSprites = async (uid: string | null): Promise<SavedSprite[]>
 
     // Sort by sprite ID (newest first, based on timestamp in ID)
     allSprites.sort((a, b) => b.id.localeCompare(a.id));
+    console.log('[getUserSprites] Returning', allSprites.length, 'sprites');
 
     return allSprites;
   } catch (error) {
