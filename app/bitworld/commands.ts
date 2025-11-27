@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Point, WorldData } from './world.engine';
-import { rewrapNoteText } from './world.engine';
+import { rewrapNoteText, findConnectedPaintRegion } from './world.engine';
 import { generateImage, generateVideo, setDialogueWithRevert } from './ai';
 import { detectImageIntent } from './ai.utils';
 import type { WorldSettings } from './settings';
@@ -2981,6 +2981,117 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             return null;
         }
 
+        if (commandToExecute.startsWith('make')) {
+            const prompt = commandToExecute.slice(4).trim();
+            if (!prompt) {
+                setDialogueWithRevert("Usage: /make <description>", setDialogueText);
+                clearCommandState();
+                return null;
+            }
+
+            const cursorPos = commandState.originalCursorPos;
+            if (!cursorPos) {
+                setDialogueWithRevert("Cursor required", setDialogueText);
+                clearCommandState();
+                return null;
+            }
+
+            const region = findConnectedPaintRegion(worldData, cursorPos.x, cursorPos.y);
+            if (!region) {
+                setDialogueWithRevert("No painted region under cursor", setDialogueText);
+                clearCommandState();
+                return null;
+            }
+
+            if (!userUid) {
+                setDialogueWithRevert("Must be logged in to generate tiles", setDialogueText);
+                clearCommandState();
+                return null;
+            }
+
+            setDialogueText(`Generating tileset: "${prompt}"...`);
+
+            const tilesetApiUrl = process.env.NEXT_PUBLIC_TILESET_API_URL ||
+                'https://us-central1-nara-a65bc.cloudfunctions.net/generateTileset';
+            
+            const tilesetId = `tileset_${Date.now()}`;
+
+            fetch(tilesetApiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ description: prompt, userUid, tilesetId }),
+            })
+            .then(res => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json();
+            })
+            .then(async data => {
+                const jobId = data.jobId;
+                
+                // Poll loop
+                const pollInterval = 3000;
+                const maxPolls = 100;
+                let polls = 0;
+
+                const poll = async () => {
+                    polls++;
+                    if (polls > maxPolls) throw new Error("Timeout");
+
+                    const statusRes = await fetch(`${tilesetApiUrl}?jobId=${jobId}`);
+                    if (!statusRes.ok) throw new Error("Poll failed");
+                    const status = await statusRes.json();
+
+                    setDialogueText(`Generating: ${status.currentPhase || status.status} (${status.progress || 0}/3)`);
+
+                    if (status.status === 'complete' && status.imageUrl) {
+                        // Apply tiles
+                        const tilesetUrl = status.imageUrl;
+                        const updates: Record<string, string> = {};
+
+                        // Autotile logic (4-bit bitmasking)
+                        const regionSet = new Set(region.points.map(p => `${p.x},${p.y}`));
+
+                        for (const p of region.points) {
+                            let mask = 0;
+                            // N, E, S, W
+                            if (regionSet.has(`${p.x},${p.y-1}`)) mask |= 1;
+                            if (regionSet.has(`${p.x+1},${p.y}`)) mask |= 2;
+                            if (regionSet.has(`${p.x},${p.y+1}`)) mask |= 4;
+                            if (regionSet.has(`${p.x-1},${p.y}`)) mask |= 8;
+
+                            const key = `paint_${p.x}_${p.y}`;
+                            updates[key] = JSON.stringify({
+                                type: 'tile',
+                                x: p.x,
+                                y: p.y,
+                                tileset: tilesetUrl,
+                                tileIndex: mask
+                            });
+                        }
+
+                        if (setWorldData) {
+                            setWorldData((prev: any) => ({ ...prev, ...updates }));
+                        }
+                        setDialogueText(`Tileset applied!`);
+                        return;
+                    } else if (status.status === 'error') {
+                        throw new Error(status.error);
+                    } else {
+                        setTimeout(poll, pollInterval);
+                    }
+                };
+
+                poll();
+            })
+            .catch(err => {
+                setDialogueText(`Error: ${err.message}`);
+                console.error(err);
+            });
+
+            clearCommandState();
+            return null;
+        }
+
         if (commandToExecute.startsWith('indent')) {
             return executeToggleModeCommand('isIndentEnabled', "Smart indentation enabled", "Smart indentation disabled");
         }
@@ -3372,9 +3483,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         console.log(`[/be --animate] Walk sheet composited`);
 
                         // Upload walk sheet to Storage
-                        const { uploadString: uploadStr } = await import('firebase/storage');
+                        const { uploadString: upStr } = await import('firebase/storage');
                         const walkRef = storageRef(storage, `sprites/${userUid}/${spriteId}/walk.png`);
-                        await uploadStr(walkRef, walkSheet, 'data_url');
+                        await upStr(walkRef, walkSheet, 'data_url');
                         console.log(`[/be --animate] Walk sheet uploaded`);
 
                         // Load idle sheet
@@ -3449,11 +3560,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                 (async () => {
                     try {
-                        const { ref: storageRef, getDownloadURL, getBytes, listAll } = await import('firebase/storage');
+                        const { ref: storageRef, getDownloadURL, getBytes, listAll, uploadString: uploadStr } = await import('firebase/storage');
                         const { storage } = await import('@/app/firebase');
 
-                        // Check if walk.png exists
+                        // Define walkRef for later use
                         const walkRef = storageRef(storage, `sprites/${userUid}/${spriteId}/walk.png`);
+
+                        // Check if walk.png already exists
                         try {
                             await getDownloadURL(walkRef);
                             setDialogueText(`${spriteId} already has walk animation. Use /be ${spriteId} to load.`);
@@ -3466,6 +3579,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         // Check walk_frames/ folder for existing frames
                         const walkFramesRef = storageRef(storage, `sprites/${userUid}/${spriteId}/walk_frames`);
                         let existingFrames: Record<string, string[]> = {};
+                        let shouldRequestAnimation = true;
+                        let missingDirs: string[] = [...SPRITE_DIRECTIONS]; // Default to all directions
 
                         try {
                             const framesList = await listAll(walkFramesRef);
@@ -3493,7 +3608,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                             const existingDirs = Object.keys(existingFrames);
                             if (existingDirs.length > 0) {
-                                const missingDirs = SPRITE_DIRECTIONS.filter(d => !existingFrames[d]);
+                                missingDirs = SPRITE_DIRECTIONS.filter(d => !existingFrames[d]);
                                 console.log(`[/be --animate-continue] Found: ${existingDirs.join(', ')}`);
                                 console.log(`[/be --animate-continue] Missing: ${missingDirs.join(', ')}`);
 
@@ -3501,8 +3616,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                                     // All directions already exist, skip animation request
                                     setDialogueText(`All directions complete, creating walk sheet...`);
                                     console.log(`[/be --animate-continue] All frames exist, skipping animation request`);
+                                    shouldRequestAnimation = false;
                                 } else {
-                                    // Some missing, will request animation after metadata check
+                                    // Some missing, will request animation ONLY for missing directions
                                     setDialogueText(`Found ${existingDirs.length}/${SPRITE_DIRECTIONS.length} dirs. Requesting: ${missingDirs.join(', ')}...`);
                                 }
                             }
@@ -3510,72 +3626,83 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             console.log(`[/be --animate-continue] No existing frames, will request new animation`);
                         }
 
-                        // No existing frames - read metadata and request new animation
-                        const metadataRef = storageRef(storage, `sprites/${userUid}/${spriteId}/metadata.json`);
-                        const metadataBytes = await getBytes(metadataRef);
-                        const metadataText = new TextDecoder().decode(metadataBytes);
-                        const metadata = JSON.parse(metadataText);
+                        // Prepare framePaths for compositing
+                        let framePaths: Record<string, string[]> = {};
 
-                        if (!metadata.characterId) {
-                            setDialogueText(`No characterId for ${spriteId}. Use /be to regenerate.`);
-                            return;
-                        }
+                        if (shouldRequestAnimation) {
+                            // Read metadata and request new animation
+                            const metadataRef = storageRef(storage, `sprites/${userUid}/${spriteId}/metadata.json`);
+                            const metadataBytes = await getBytes(metadataRef);
+                            const metadataText = new TextDecoder().decode(metadataBytes);
+                            const metadata = JSON.parse(metadataText);
 
-                        setDialogueText(`No partial frames found, requesting new animation...`);
-
-                        // Same animation flow as --animate
-                        const response = await fetch(
-                            'https://us-central1-nara-a65bc.cloudfunctions.net/animateSprite',
-                            {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    characterId: metadata.characterId,
-                                    userUid,
-                                    spriteId,
-                                }),
+                            if (!metadata.characterId) {
+                                setDialogueText(`No characterId for ${spriteId}. Use /be to regenerate.`);
+                                return;
                             }
-                        );
 
-                        if (!response.ok) {
-                            const errText = await response.text();
-                            throw new Error(`Animation request failed: ${errText}`);
-                        }
+                            setDialogueText(`Requesting animation for: ${missingDirs.join(', ')}...`);
 
-                        const { jobId } = await response.json();
-                        console.log(`[/be --animate-continue] Animation job started: ${jobId}`);
-
-                        // Poll for completion
-                        const pollInterval = 3000;
-                        const maxPolls = 120;
-                        let pollCount = 0;
-
-                        const poll = async (): Promise<any> => {
-                            pollCount++;
-                            const statusRes = await fetch(
-                                `https://us-central1-nara-a65bc.cloudfunctions.net/animateSprite?jobId=${jobId}`
+                            // Same animation flow as --animate, but only for missing directions
+                            const response = await fetch(
+                                'https://us-central1-nara-a65bc.cloudfunctions.net/animateSprite',
+                                {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        characterId: metadata.characterId,
+                                        userUid,
+                                        spriteId,
+                                        directionsToUpload: missingDirs, // Only upload frames for missing directions
+                                    }),
+                                }
                             );
-                            const status = await statusRes.json();
 
-                            if (status.status === 'complete') return status;
-                            if (status.status === 'partial') {
-                                // Partial success - some directions completed
-                                console.log(`[/be --animate-continue] Partial: ${status.completedDirections?.length}/${status.totalDirections}`);
-                                return status;
+                            if (!response.ok) {
+                                const errText = await response.text();
+                                throw new Error(`Animation request failed: ${errText}`);
                             }
-                            if (status.status === 'error') throw new Error(status.error || 'Animation failed');
-                            if (pollCount >= maxPolls) throw new Error('Animation timed out');
 
-                            setDialogueText(`Animating ${spriteId}... (${status.currentPhase || 'processing'})`);
-                            await new Promise(r => setTimeout(r, pollInterval));
-                            return poll();
-                        };
+                            const { jobId } = await response.json();
+                            console.log(`[/be --animate-continue] Animation job started: ${jobId}`);
 
-                        const result = await poll();
+                            // Poll for completion
+                            const pollInterval = 3000;
+                            const maxPolls = 120;
+                            let pollCount = 0;
+
+                            const poll = async (): Promise<any> => {
+                                pollCount++;
+                                const statusRes = await fetch(
+                                    `https://us-central1-nara-a65bc.cloudfunctions.net/animateSprite?jobId=${jobId}`
+                                );
+                                const status = await statusRes.json();
+
+                                if (status.status === 'complete') return status;
+                                if (status.status === 'partial') {
+                                    // Partial success - some directions completed
+                                    console.log(`[/be --animate-continue] Partial: ${status.completedDirections?.length}/${status.totalDirections}`);
+                                    return status;
+                                }
+                                if (status.status === 'error') throw new Error(status.error || 'Animation failed');
+                                if (pollCount >= maxPolls) throw new Error('Animation timed out');
+
+                                setDialogueText(`Animating ${spriteId}... (${status.currentPhase || 'processing'})`);
+                                await new Promise(r => setTimeout(r, pollInterval));
+                                return poll();
+                            };
+
+                            const result = await poll();
+
+                            // Get frame paths from API result
+                            framePaths = result.framePaths as Record<string, string[]>;
+                        } else {
+                            // Use existing frames from storage
+                            framePaths = existingFrames;
+                        }
 
                         // Composite frames (same as --animate)
                         setDialogueText(`Compositing walk sheet...`);
-                        const framePaths = result.framePaths as Record<string, string[]>;
                         const FRAME_WIDTH = 32;
                         const FRAME_HEIGHT = 40;
                         const FRAMES_PER_DIR = 8;
@@ -3614,7 +3741,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         }
 
                         const walkSheet = walkCanvas.toDataURL('image/png');
-                        const { uploadString: uploadStr } = await import('firebase/storage');
                         await uploadStr(walkRef, walkSheet, 'data_url');
 
                         // Load idle and set sprite

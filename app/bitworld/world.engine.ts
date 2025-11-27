@@ -110,7 +110,86 @@ export const getCharScale = (data: string | StyledCharacter | ImageData): { w: n
     return { w: 1, h: 2 };
 };
 
-// Standalone helper to rewrap text in a note when switching to wrap mode or resizing
+// Helper to find connected paint region
+export const findConnectedPaintRegion = (worldData: WorldData, x: number, y: number): { points: Point[], minX: number, maxX: number, minY: number, maxY: number, color: string } | null => {
+    const startX = Math.floor(x);
+    const startY = Math.floor(y);
+    const startKey = `paint_${startX}_${startY}`;
+    const startCell = worldData[startKey];
+
+    if (!startCell) return null;
+
+    let startColor: string | null = null;
+    try {
+        const data = JSON.parse(startCell as string);
+        if (data.type === 'paint') {
+            startColor = data.color;
+        }
+    } catch (e) {
+        return null;
+    }
+
+    if (!startColor) return null;
+
+    const points: Point[] = [];
+    const queue: Point[] = [{ x: startX, y: startY }];
+    const visited = new Set<string>();
+    visited.add(`${startX},${startY}`);
+    points.push({ x: startX, y: startY });
+
+    let minX = startX, maxX = startX;
+    let minY = startY, maxY = startY;
+
+    while (queue.length > 0) {
+        const pos = queue.shift()!;
+        
+        // Update bounds
+        minX = Math.min(minX, pos.x);
+        maxX = Math.max(maxX, pos.x);
+        minY = Math.min(minY, pos.y);
+        maxY = Math.max(maxY, pos.y);
+
+        const dirs = [
+            { dx: 0, dy: -1 },
+            { dx: 0, dy: 1 },
+            { dx: -1, dy: 0 },
+            { dx: 1, dy: 0 }
+        ];
+
+        for (const dir of dirs) {
+            const nx = pos.x + dir.dx;
+            const ny = pos.y + dir.dy;
+            const key = `${nx},${ny}`;
+
+            if (visited.has(key)) continue;
+
+            const paintKey = `paint_${nx}_${ny}`;
+            const cell = worldData[paintKey];
+            
+            if (cell) {
+                try {
+                    const data = JSON.parse(cell as string);
+                    if (data.type === 'paint' && data.color === startColor) {
+                        visited.add(key);
+                        points.push({ x: nx, y: ny });
+                        queue.push({ x: nx, y: ny });
+                    }
+                } catch (e) {}
+            }
+        }
+    }
+
+    return {
+        points,
+        minX,
+        maxX,
+        minY,
+        maxY,
+        color: startColor
+    };
+};
+
+// Helper function to rewrap text within a note
 export const rewrapNoteText = (noteData: any): any => {
     if (!noteData.data || Object.keys(noteData.data).length === 0) {
         return noteData; // No text to rewrap
@@ -466,6 +545,8 @@ export interface WorldEngine {
     exitPaintMode: () => void;
     paintCell: (x: number, y: number, prevX?: number, prevY?: number) => void;
     fillPolygon: (points: Point[]) => void;
+    setTiles: (tiles: Record<string, string>) => void;
+    getConnectedPaintRegion: (x: number, y: number) => { points: Point[], minX: number, maxX: number, minY: number, maxY: number, color: string } | null;
     floodFill: (x: number, y: number) => void;
     lassoPoints: Point[];
     cameraMode: import('./commands').CameraMode;
@@ -11303,59 +11384,67 @@ export function useWorldEngine({
                 ...updates
             }));
         },
-        fillPolygon: (points: Point[]) => {
-            if (!isPaintMode || points.length < 3) return;
-
-            // Find bounding box
-            let minX = Infinity, maxX = -Infinity;
-            let minY = Infinity, maxY = -Infinity;
-
-            for (const p of points) {
-                minX = Math.min(minX, Math.floor(p.x));
-                maxX = Math.max(maxX, Math.floor(p.x));
-                minY = Math.min(minY, Math.floor(p.y));
-                maxY = Math.max(maxY, Math.floor(p.y));
-            }
-
-            // Point-in-polygon test using ray casting
-            const isInside = (px: number, py: number): boolean => {
-                let inside = false;
-                for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
-                    const xi = Math.floor(points[i].x);
-                    const yi = Math.floor(points[i].y);
-                    const xj = Math.floor(points[j].x);
-                    const yj = Math.floor(points[j].y);
-
-                    const intersect = ((yi > py) !== (yj > py)) &&
-                        (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
-                    if (intersect) inside = !inside;
-                }
-                return inside;
-            };
-
-            // Fill all cells inside the polygon
-            const updates: Record<string, string> = {};
-            for (let y = minY; y <= maxY; y++) {
-                for (let x = minX; x <= maxX; x++) {
-                    if (isInside(x, y)) {
-                        const key = `paint_${x}_${y}`;
-                        updates[key] = JSON.stringify({
-                            type: 'paint',
-                            x,
-                            y,
-                            color: paintColor
-                        });
-                    }
-                }
-            }
-
-            setWorldData(prev => ({
-                ...prev,
-                ...updates
-            }));
-        },
-        floodFill: (x: number, y: number) => {
-            if (!isPaintMode) return;
+                            fillPolygon: (points: Point[]) => {
+                                if (!isPaintMode || points.length < 3) return;
+                  
+                                // Find bounding box
+                                let minX = Infinity, maxX = -Infinity;
+                                let minY = Infinity, maxY = -Infinity;
+                  
+                                for (const p of points) {
+                                    minX = Math.min(minX, Math.floor(p.x));
+                                    maxX = Math.max(maxX, Math.floor(p.x));
+                                    minY = Math.min(minY, Math.floor(p.y));
+                                    maxY = Math.max(maxY, Math.floor(p.y));
+                                }
+                  
+                                // Point-in-polygon test using ray casting
+                                const isInside = (px: number, py: number): boolean => {
+                                    let inside = false;
+                                    for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+                                        const xi = Math.floor(points[i].x);
+                                        const yi = Math.floor(points[i].y);
+                                        const xj = Math.floor(points[j].x);
+                                        const yj = Math.floor(points[j].y);
+                  
+                                        const intersect = ((yi > py) !== (yj > py)) &&
+                                            (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+                                        if (intersect) inside = !inside;
+                                    }
+                                    return inside;
+                                };
+                  
+                                // Fill all cells inside the polygon
+                                const updates: Record<string, string> = {};
+                                for (let y = minY; y <= maxY; y++) {
+                                    for (let x = minX; x <= maxX; x++) {
+                                        if (isInside(x, y)) {
+                                            const key = `paint_${x}_${y}`;
+                                            updates[key] = JSON.stringify({
+                                                type: 'paint',
+                                                x,
+                                                y,
+                                                color: paintColor
+                                            });
+                                        }
+                                    }
+                                }
+                  
+                                setWorldData(prev => ({
+                                    ...prev,
+                                    ...updates
+                                }));
+                            },
+                                      setTiles: (tiles: Record<string, string>) => {
+                                          setWorldData(prev => ({
+                                              ...prev,
+                                              ...tiles
+                                          }));
+                                      },
+                                      getConnectedPaintRegion: (x: number, y: number) => {
+                                          return findConnectedPaintRegion(worldData, x, y);
+                                      },
+                                      floodFill: (x: number, y: number) => {            if (!isPaintMode) return;
             const startX = Math.floor(x);
             const startY = Math.floor(y);
 

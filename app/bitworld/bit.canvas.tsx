@@ -4148,16 +4148,47 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
             try {
                 const paintData = JSON.parse(engine.worldData[key] as string);
-                if (paintData.type !== 'paint') continue;
+                
+                if (paintData.type === 'paint') {
+                    const worldX = paintData.x;
+                    const worldY = paintData.y;
 
-                const worldX = paintData.x;
-                const worldY = paintData.y;
+                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
+                        worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                        ctx.fillStyle = paintData.color || '#000000';
+                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                    }
+                } else if (paintData.type === 'tile') {
+                    const worldX = paintData.x;
+                    const worldY = paintData.y;
 
-                if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
-                    worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                    ctx.fillStyle = paintData.color || '#000000';
-                    ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
+                        worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                        
+                        const img = imageCache.current.get(paintData.tileset);
+                        if (img && img.complete && img.naturalWidth > 0) {
+                            // Assume 4x4 tileset (16 tiles)
+                            const cols = 4;
+                            const rows = 4;
+                            const tileW = img.width / cols;
+                            const tileH = img.height / rows;
+                            
+                            const tileIndex = paintData.tileIndex || 0;
+                            const tx = (tileIndex % cols) * tileW;
+                            const ty = Math.floor(tileIndex / cols) * tileH;
+                            
+                            ctx.drawImage(img, tx, ty, tileW, tileH, screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                        } else if (!imageCache.current.has(paintData.tileset)) {
+                            // Load image
+                            const newImg = new Image();
+                            newImg.crossOrigin = "Anonymous";
+                            newImg.src = paintData.tileset;
+                            // Note: onLoad would ideally trigger a re-render
+                            imageCache.current.set(paintData.tileset, newImg);
+                        }
+                    }
                 }
             } catch (e) {
                 // Skip invalid paint data

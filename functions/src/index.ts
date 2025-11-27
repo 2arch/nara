@@ -1,5 +1,6 @@
 import { onRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
+import JSZip from "jszip";
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -514,6 +515,719 @@ export const generateSprite = onRequest(
                     jobId,
                     status: "pending",
                     message: `Poll GET /generateSprite?jobId=${jobId} for status`,
+                });
+
+            } catch (error) {
+                const errMsg = error instanceof Error ? error.message : "Unknown error";
+                console.error("Failed to create job:", errMsg);
+                res.status(500).json({ error: errMsg });
+            }
+            return;
+        }
+
+        res.status(405).json({ error: "Method not allowed" });
+    }
+);
+
+// Animation job interface
+interface AnimationJob {
+    status: "pending" | "generating" | "complete" | "partial" | "error";
+    characterId: string;
+    userUid: string;
+    spriteId: string;
+    progress: number;
+    total: number;
+    currentPhase?: string;
+    completedDirections?: string[];
+    missingDirections?: string[];
+    error?: string;
+    createdAt: admin.firestore.Timestamp;
+    updatedAt: admin.firestore.Timestamp;
+}
+
+// Process animation job
+async function processAnimationJob(
+    jobId: string,
+    characterId: string,
+    userUid: string,
+    spriteId: string,
+    directionsToUpload: string[] | null = null // Only upload these directions (null = all)
+): Promise<void> {
+    const jobRef = db.collection("animationJobs").doc(jobId);
+    const apiKey = PIXELLAB_API_KEY;
+    const storagePath = `sprites/${userUid}/${spriteId}`;
+
+    try {
+        await jobRef.update({
+            status: "generating",
+            currentPhase: "requesting animation",
+            progress: 0,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        console.log(`[${jobId}] Starting animation for character ${characterId}`);
+
+        // Step 1: Request walk animation
+        const animResponse = await fetchPixellabV2(apiKey, "animate-character", {
+            character_id: characterId,
+            template_animation_id: "walking-8-frames",
+        });
+
+        if (!animResponse.ok) {
+            const errText = await animResponse.text();
+            throw new Error(`Animation request failed: ${animResponse.status} - ${errText}`);
+        }
+
+        const animData = await animResponse.json();
+
+        // Log full response to debug field names
+        console.log(`[${jobId}] Animation API response:`, JSON.stringify(animData, null, 2));
+
+        // The animate-character endpoint returns:
+        // - background_job_ids: array of job IDs (one per direction)
+        // - directions: array of direction names being animated
+        const backgroundJobIds: string[] = animData.background_job_ids || [];
+        const animDirections: string[] = animData.directions || [];
+
+        if (backgroundJobIds.length === 0) {
+            // No jobs means all directions already have animations
+            console.log(`[${jobId}] All directions already have animations, fetching frames...`);
+        } else {
+            console.log(`[${jobId}] Animation jobs started for ${animDirections.length} directions:`, animDirections);
+            console.log(`[${jobId}] Job IDs:`, backgroundJobIds);
+
+            // Step 2: Poll ALL jobs until complete (track successes/failures)
+            await jobRef.update({
+                currentPhase: `generating ${animDirections.length} directions`,
+                progress: 1,
+                animatingDirections: animDirections,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+
+            const jobResults: { direction: string; jobId: string; success: boolean; error?: string }[] = [];
+
+            // Poll all jobs in parallel
+            const pollPromises = backgroundJobIds.map(async (bgJobId, index) => {
+                const direction = animDirections[index] || `direction_${index}`;
+                try {
+                    await pollBackgroundJob(apiKey, bgJobId, `animation-${direction}`, jobRef);
+                    console.log(`[${jobId}] Direction ${direction} completed successfully`);
+                    return { direction, jobId: bgJobId, success: true };
+                } catch (err) {
+                    const errMsg = err instanceof Error ? err.message : String(err);
+                    console.warn(`[${jobId}] Direction ${direction} failed: ${errMsg}`);
+                    return { direction, jobId: bgJobId, success: false, error: errMsg };
+                }
+            });
+
+            const results = await Promise.all(pollPromises);
+            jobResults.push(...results);
+
+            const succeeded = results.filter(r => r.success);
+            const failed = results.filter(r => !r.success);
+
+            console.log(`[${jobId}] Animation results: ${succeeded.length} succeeded, ${failed.length} failed`);
+
+            // Store which directions failed for potential retry
+            if (failed.length > 0) {
+                await jobRef.update({
+                    failedDirections: failed.map(f => f.direction),
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                });
+            }
+
+            if (succeeded.length === 0 && backgroundJobIds.length > 0) {
+                throw new Error(`All animation jobs failed. First error: ${failed[0]?.error || "Unknown error"}`);
+            }
+        }
+
+        console.log(`[${jobId}] Animation generation complete, downloading ZIP...`);
+
+        // Step 3: Download character ZIP (contains all animation frames)
+        await jobRef.update({
+            currentPhase: "downloading character ZIP",
+            progress: 2,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        // The /characters/{id}/zip endpoint is the ONLY way to get animation frame data
+        const zipResponse = await getPixellabV2(apiKey, `characters/${characterId}/zip`);
+        if (!zipResponse.ok) {
+            const errText = await zipResponse.text();
+            throw new Error(`Failed to download character ZIP: ${zipResponse.status} - ${errText}`);
+        }
+
+        const zipBuffer = await zipResponse.arrayBuffer();
+        console.log(`[${jobId}] Downloaded ZIP: ${zipBuffer.byteLength} bytes`);
+
+        // Step 4: Extract animation frames from ZIP
+        await jobRef.update({
+            currentPhase: "extracting animation frames",
+            progress: 3,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        const zip = await JSZip.loadAsync(zipBuffer);
+
+        // Parse metadata.json to get animation structure
+        const metadataFile = zip.file("metadata.json");
+        if (!metadataFile) {
+            throw new Error("No metadata.json found in ZIP");
+        }
+
+        const metadataJson = await metadataFile.async("string");
+        const metadata = JSON.parse(metadataJson);
+        console.log(`[${jobId}] ZIP metadata loaded`);
+
+        // Get walking animation frames from metadata
+        const walkAnimData = metadata.frames?.animations?.["walking-8-frames"];
+        if (!walkAnimData) {
+            console.error(`[${jobId}] No walking-8-frames in metadata. Available:`,
+                Object.keys(metadata.frames?.animations || {})
+            );
+            throw new Error("No walking-8-frames animation found in ZIP");
+        }
+
+        // Step 5: Upload animation frames to Firebase Storage
+        await jobRef.update({
+            currentPhase: "uploading animation frames",
+            progress: 4,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        const allFramePaths: Record<string, string[]> = {};
+        const bucket = storage.bucket();
+
+        // Determine which directions to process
+        const directionsToProcess = directionsToUpload || DIRECTIONS;
+        console.log(`[${jobId}] Processing directions: ${directionsToProcess.join(", ")}`);
+
+        for (const direction of directionsToProcess) {
+            const framePaths = walkAnimData[direction];
+            if (!framePaths || !Array.isArray(framePaths)) {
+                console.log(`[${jobId}] No frames for direction: ${direction}`);
+                continue;
+            }
+
+            // Deduplicate frame paths (ZIP metadata may repeat frames)
+            const uniqueFramePaths = [...new Set(framePaths)];
+            console.log(`[${jobId}] ${direction}: ${uniqueFramePaths.length} unique frames`);
+
+            allFramePaths[direction] = [];
+
+            for (let i = 0; i < uniqueFramePaths.length; i++) {
+                const zipPath = uniqueFramePaths[i]; // e.g., "animations/walking-8-frames/south/frame_000.png"
+                const frameFile = zip.file(zipPath);
+
+                if (!frameFile) {
+                    console.warn(`[${jobId}] Frame not found in ZIP: ${zipPath}`);
+                    continue;
+                }
+
+                try {
+                    const frameData = await frameFile.async("nodebuffer");
+                    const storageDest = `${storagePath}/walk_frames/${direction}_${i}.png`;
+
+                    const file = bucket.file(storageDest);
+                    await file.save(frameData, {
+                        metadata: { contentType: "image/png" },
+                    });
+                    await file.makePublic();
+
+                    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${storageDest}`;
+                    allFramePaths[direction].push(publicUrl);
+
+                    console.log(`[${jobId}] Uploaded ${direction} frame ${i}`);
+                } catch (err) {
+                    console.warn(`[${jobId}] Failed to upload ${direction} frame ${i}:`, err);
+                }
+            }
+        }
+
+        // Determine which directions were completed
+        const downloadedDirections = Object.keys(allFramePaths).filter(d => allFramePaths[d].length > 0);
+        const missingDirections = DIRECTIONS.filter(d => !allFramePaths[d] || allFramePaths[d].length === 0);
+        const isPartial = downloadedDirections.length < DIRECTIONS.length;
+
+        await jobRef.update({
+            status: isPartial ? "partial" : "complete",
+            currentPhase: null,
+            progress: downloadedDirections.length,
+            totalDirections: DIRECTIONS.length,
+            completedDirections: downloadedDirections,
+            missingDirections: missingDirections,
+            framePaths: allFramePaths,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        // Update metadata.json with animation status
+        try {
+            const metadataPath = `${storagePath}/metadata.json`;
+            const metadataFile = bucket.file(metadataPath);
+
+            // Read existing metadata
+            const [exists] = await metadataFile.exists();
+            let metadata: any = {};
+
+            if (exists) {
+                const [content] = await metadataFile.download();
+                metadata = JSON.parse(content.toString());
+            }
+
+            // Update with animation results
+            metadata.animation = {
+                status: isPartial ? "partial" : "complete",
+                completedDirections: downloadedDirections,
+                missingDirections: missingDirections,
+                framePaths: allFramePaths,
+                lastUpdated: new Date().toISOString(),
+            };
+
+            await metadataFile.save(JSON.stringify(metadata, null, 2), {
+                metadata: { contentType: "application/json" },
+            });
+
+            console.log(`[${jobId}] Metadata updated with animation status`);
+        } catch (err) {
+            console.warn(`[${jobId}] Failed to update metadata:`, err);
+        }
+
+        if (isPartial) {
+            console.log(`[${jobId}] Animation partially complete: ${downloadedDirections.length}/${DIRECTIONS.length} directions`);
+            console.log(`[${jobId}] Missing: ${missingDirections.join(', ')}`);
+        } else {
+            console.log(`[${jobId}] Animation complete! All ${DIRECTIONS.length} directions`);
+        }
+
+    } catch (error) {
+        const errMsg = error instanceof Error ? error.message : "Unknown error";
+        console.error(`[${jobId}] Animation error:`, errMsg);
+
+        await jobRef.update({
+            status: "error",
+            error: errMsg,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+    }
+}
+
+// Animation endpoint
+export const animateSprite = onRequest(
+    {
+        timeoutSeconds: 3600,
+        memory: "512MiB",
+        cors: true,
+    },
+    async (req, res) => {
+        // Handle preflight
+        if (req.method === "OPTIONS") {
+            res.status(204).send("");
+            return;
+        }
+
+        // GET - Poll job status
+        if (req.method === "GET") {
+            const jobId = req.query.jobId as string;
+
+            if (!jobId) {
+                res.status(400).json({ error: "jobId query parameter required" });
+                return;
+            }
+
+            try {
+                const jobDoc = await db.collection("animationJobs").doc(jobId).get();
+
+                if (!jobDoc.exists) {
+                    res.status(404).json({ error: "Job not found" });
+                    return;
+                }
+
+                const job = jobDoc.data() as AnimationJob & { framePaths?: Record<string, string[]> };
+
+                const response: any = {
+                    jobId,
+                    status: job.status,
+                    progress: job.progress,
+                    total: job.total,
+                };
+
+                if (job.status === "complete" || job.status === "partial") {
+                    response.framePaths = job.framePaths;
+                    response.completedDirections = job.completedDirections;
+                    response.missingDirections = job.missingDirections;
+                } else if (job.status === "error") {
+                    response.error = job.error;
+                } else {
+                    response.currentPhase = job.currentPhase;
+                }
+
+                res.status(200).json(response);
+
+            } catch (error) {
+                const errMsg = error instanceof Error ? error.message : "Unknown error";
+                res.status(500).json({ error: errMsg });
+            }
+            return;
+        }
+
+        // POST - Start new animation job
+        if (req.method === "POST") {
+            const { characterId, userUid, spriteId, directionsToUpload } = req.body;
+
+            if (!characterId || typeof characterId !== "string") {
+                res.status(400).json({ error: "characterId is required" });
+                return;
+            }
+
+            if (!userUid || typeof userUid !== "string") {
+                res.status(400).json({ error: "userUid is required" });
+                return;
+            }
+
+            // Optional: only upload specific directions (for retry/continue scenarios)
+            let targetDirections: string[] | null = null;
+            if (directionsToUpload && Array.isArray(directionsToUpload)) {
+                targetDirections = directionsToUpload.filter((d: any) => typeof d === "string" && DIRECTIONS.includes(d));
+                console.log(`[animateSprite] Will only upload directions: ${targetDirections.join(", ")}`);
+            }
+
+            if (!spriteId || typeof spriteId !== "string") {
+                res.status(400).json({ error: "spriteId is required" });
+                return;
+            }
+
+            try {
+                const jobRef = db.collection("animationJobs").doc();
+                const jobId = jobRef.id;
+
+                const now = admin.firestore.FieldValue.serverTimestamp();
+                await jobRef.set({
+                    status: "pending",
+                    characterId,
+                    userUid,
+                    spriteId,
+                    progress: 0,
+                    total: DIRECTIONS.length,
+                    createdAt: now,
+                    updatedAt: now,
+                });
+
+                console.log(`[${jobId}] Animation job created for character ${characterId}`);
+
+                // Start processing in background
+                processAnimationJob(jobId, characterId, userUid, spriteId, targetDirections).catch(err => {
+                    console.error(`[${jobId}] Background animation failed:`, err);
+                });
+
+                res.status(202).json({
+                    jobId,
+                    status: "pending",
+                    message: `Poll GET /animateSprite?jobId=${jobId} for status`,
+                });
+
+            } catch (error) {
+                const errMsg = error instanceof Error ? error.message : "Unknown error";
+                console.error("Failed to create animation job:", errMsg);
+                res.status(500).json({ error: errMsg });
+            }
+            return;
+        }
+
+        res.status(405).json({ error: "Method not allowed" });
+    }
+);
+
+// One-shot function to upload sprite sheets directly
+// POST /uploadSprites { characterId, userId, spriteId, idleBase64, walkBase64 }
+export const uploadSprites = onRequest(
+    {
+        timeoutSeconds: 60,
+        memory: "256MiB",
+        cors: true,
+    },
+    async (req, res) => {
+        if (req.method === "OPTIONS") {
+            res.status(204).send("");
+            return;
+        }
+
+        if (req.method !== "POST") {
+            res.status(405).json({ error: "Method not allowed" });
+            return;
+        }
+
+        try {
+            let { characterId, userId, spriteId, idleBase64, walkBase64 } = req.body;
+
+            if (!characterId) {
+                res.status(400).json({ error: "characterId required" });
+                return;
+            }
+
+            const bucket = storage.bucket("nara-a65bc.firebasestorage.app");
+
+            // If userId/spriteId not provided, search by characterId
+            if (!userId || !spriteId) {
+                console.log(`Searching for sprite with characterId: ${characterId}`);
+                const [files] = await bucket.getFiles({ prefix: "sprites/" });
+                let found = false;
+
+                for (const file of files) {
+                    if (file.name.endsWith("metadata.json")) {
+                        try {
+                            const [content] = await file.download();
+                            const metadata = JSON.parse(content.toString());
+                            if (metadata.characterId === characterId) {
+                                const parts = file.name.split("/");
+                                userId = parts[1];
+                                spriteId = parts[2];
+                                console.log(`Found sprite: userId=${userId}, spriteId=${spriteId}`);
+                                found = true;
+                                break;
+                            }
+                        } catch (e) {
+                            // Skip files that can't be parsed
+                        }
+                    }
+                }
+
+                if (!found) {
+                    res.status(404).json({ error: "Sprite not found for characterId: " + characterId });
+                    return;
+                }
+            }
+
+            const storagePath = `sprites/${userId}/${spriteId}`;
+            const results: string[] = [];
+
+            // Upload idle.png if provided
+            if (idleBase64) {
+                const idleBuffer = Buffer.from(idleBase64, "base64");
+                const idleFile = bucket.file(`${storagePath}/idle.png`);
+                await idleFile.save(idleBuffer, {
+                    metadata: {
+                        contentType: "image/png",
+                        metadata: { firebaseStorageDownloadTokens: require("crypto").randomUUID() }
+                    }
+                });
+                results.push("idle.png uploaded");
+                console.log(`Uploaded idle.png to ${storagePath}`);
+            }
+
+            // Upload walk.png if provided
+            if (walkBase64) {
+                const walkBuffer = Buffer.from(walkBase64, "base64");
+                const walkFile = bucket.file(`${storagePath}/walk.png`);
+                await walkFile.save(walkBuffer, {
+                    metadata: {
+                        contentType: "image/png",
+                        metadata: { firebaseStorageDownloadTokens: require("crypto").randomUUID() }
+                    }
+                });
+                results.push("walk.png uploaded");
+                console.log(`Uploaded walk.png to ${storagePath}`);
+            }
+
+            res.status(200).json({
+                success: true,
+                storagePath,
+                results
+            });
+
+        } catch (error) {
+            const errMsg = error instanceof Error ? error.message : "Unknown error";
+            console.error("Upload error:", errMsg);
+// ... (existing exports)
+
+// Tileset job interface
+interface TilesetJob {
+    status: "pending" | "generating" | "complete" | "error";
+    description: string;
+    userUid: string;
+    tilesetId: string;
+    progress: number;
+    currentPhase?: string;
+    imageUrl?: string;
+    error?: string;
+    createdAt: admin.firestore.Timestamp;
+    updatedAt: admin.firestore.Timestamp;
+}
+
+// Process tileset job
+async function processTilesetJob(
+    jobId: string,
+    description: string,
+    userUid: string,
+    tilesetId: string
+): Promise<void> {
+    const jobRef = db.collection("tilesetJobs").doc(jobId);
+    const apiKey = PIXELLAB_API_KEY;
+    const storagePath = `tilesets/${userUid}/${tilesetId}.png`;
+
+    try {
+        await jobRef.update({
+            status: "generating",
+            currentPhase: "requesting tileset",
+            progress: 0,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        console.log(`[${jobId}] Starting tileset generation: "${description}"`);
+
+        // Step 1: Request tileset
+        const response = await fetchPixellabV2(apiKey, "create-topdown-tileset", {
+            description,
+            style: "pixel art",
+            tile_size: 32 // Assuming 32x32 tiles
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Tileset request failed: ${response.status} - ${errText}`);
+        }
+
+        const data = await response.json();
+        const backgroundJobId = data.background_job_id;
+
+        console.log(`[${jobId}] Tileset job started: ${backgroundJobId}`);
+
+        // Step 2: Poll job
+        await jobRef.update({
+            currentPhase: "generating tileset",
+            progress: 1,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        await pollBackgroundJob(apiKey, backgroundJobId, "tileset", jobRef);
+
+        console.log(`[${jobId}] Tileset generated! Fetching result...`);
+
+        // Step 3: Get result URL
+        const jobResponse = await getPixellabV2(apiKey, `background-jobs/${backgroundJobId}`);
+        const jobData = await jobResponse.json();
+        const resultUrl = jobData.last_response?.output_url || jobData.output_url;
+
+        if (!resultUrl) {
+            throw new Error("No output URL in job response");
+        }
+
+        // Step 4: Upload to Firebase Storage
+        await jobRef.update({
+            currentPhase: "uploading to storage",
+            progress: 2,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        const publicUrl = await downloadAndUploadToStorage(resultUrl, storagePath);
+
+        console.log(`[${jobId}] Tileset uploaded to ${publicUrl}`);
+
+        // Complete
+        await jobRef.update({
+            status: "complete",
+            imageUrl: publicUrl,
+            currentPhase: null,
+            progress: 3,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+    } catch (error) {
+        const errMsg = error instanceof Error ? error.message : "Unknown error";
+        console.error(`[${jobId}] Tileset error:`, errMsg);
+
+        await jobRef.update({
+            status: "error",
+            error: errMsg,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+    }
+}
+
+// Tileset generation endpoint
+export const generateTileset = onRequest(
+    {
+        timeoutSeconds: 3600,
+        memory: "512MiB",
+        cors: true,
+    },
+    async (req, res) => {
+        // Handle preflight
+        if (req.method === "OPTIONS") {
+            res.status(204).send("");
+            return;
+        }
+
+        // GET - Poll job status
+        if (req.method === "GET") {
+            const jobId = req.query.jobId as string;
+
+            if (!jobId) {
+                res.status(400).json({ error: "jobId query parameter required" });
+                return;
+            }
+
+            try {
+                const jobDoc = await db.collection("tilesetJobs").doc(jobId).get();
+
+                if (!jobDoc.exists) {
+                    res.status(404).json({ error: "Job not found" });
+                    return;
+                }
+
+                const job = jobDoc.data() as TilesetJob;
+                res.status(200).json(job);
+
+            } catch (error) {
+                const errMsg = error instanceof Error ? error.message : "Unknown error";
+                res.status(500).json({ error: errMsg });
+            }
+            return;
+        }
+
+        // POST - Start new job
+        if (req.method === "POST") {
+            const { description, userUid, tilesetId } = req.body;
+
+            if (!description || typeof description !== "string") {
+                res.status(400).json({ error: "description is required" });
+                return;
+            }
+
+            if (!userUid || typeof userUid !== "string") {
+                res.status(400).json({ error: "userUid is required" });
+                return;
+            }
+
+            if (!tilesetId || typeof tilesetId !== "string") {
+                res.status(400).json({ error: "tilesetId is required" });
+                return;
+            }
+
+            try {
+                const jobRef = db.collection("tilesetJobs").doc();
+                const jobId = jobRef.id;
+
+                const now = admin.firestore.FieldValue.serverTimestamp();
+                await jobRef.set({
+                    status: "pending",
+                    description,
+                    userUid,
+                    tilesetId,
+                    progress: 0,
+                    createdAt: now,
+                    updatedAt: now,
+                });
+
+                console.log(`[${jobId}] Tileset job created: "${description}"`);
+
+                processTilesetJob(jobId, description, userUid, tilesetId).catch(err => {
+                    console.error(`[${jobId}] Background processing failed:`, err);
+                });
+
+                res.status(202).json({
+                    jobId,
+                    status: "pending",
+                    message: `Poll GET /generateTileset?jobId=${jobId} for status`,
                 });
 
             } catch (error) {
