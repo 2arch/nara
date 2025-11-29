@@ -4535,8 +4535,69 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         if (commandToExecute.startsWith('note')) {
             // /note command - one-shot note region creation from selection
             // Parse arguments: /note temp creates ephemeral notes with dashed borders
+            //                  /note #RRGGBB or /note #RRGGBBAA sets background color
             const args = inputParts.slice(1);
             const isTemp = args.includes('temp');
+
+            // Check if first arg is a color (starts with #)
+            const colorArg = args.find(arg => arg.startsWith('#'));
+
+            if (colorArg && worldData && setWorldData) {
+                // Setting background color on existing note at cursor
+                const cursorPos = commandState.commandStartPos;
+                const noteKeys = Object.keys(worldData).filter(k => k.startsWith('note_'));
+                let foundNote = null;
+                let foundKey = null;
+
+                for (const key of noteKeys) {
+                    try {
+                        const noteData = JSON.parse(worldData[key] as string);
+                        if (cursorPos.x >= noteData.startX && cursorPos.x <= noteData.endX &&
+                            cursorPos.y >= noteData.startY && cursorPos.y <= noteData.endY) {
+                            foundNote = noteData;
+                            foundKey = key;
+                            break;
+                        }
+                    } catch (e) {
+                        // Skip invalid note data
+                    }
+                }
+
+                if (foundNote && foundKey) {
+                    // Validate color format (6 or 8 hex chars after #)
+                    const hexColor = colorArg.replace('#', '');
+                    if (/^[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$/.test(hexColor)) {
+                        const updatedNote = {
+                            ...foundNote,
+                            backgroundColor: colorArg.toUpperCase()
+                        };
+                        setWorldData({
+                            ...worldData,
+                            [foundKey]: JSON.stringify(updatedNote)
+                        });
+                        setDialogueText?.(`Note background set to ${colorArg}`);
+                    } else {
+                        setDialogueText?.("Invalid color format. Use #RRGGBB or #RRGGBBAA");
+                    }
+
+                    clearCommandState();
+                    return {
+                        command: 'note',
+                        args: args,
+                        commandStartPos: commandState.commandStartPos,
+                        restoreCursor: true
+                    } as CommandExecution & { restoreCursor?: boolean };
+                } else {
+                    setDialogueText?.("Not inside a note region");
+                    clearCommandState();
+                    return {
+                        command: 'note',
+                        args: args,
+                        commandStartPos: commandState.commandStartPos,
+                        restoreCursor: true
+                    } as CommandExecution & { restoreCursor?: boolean };
+                }
+            }
 
             createRegionFromSelection('note', {
                 successMessage: (dims) => isTemp

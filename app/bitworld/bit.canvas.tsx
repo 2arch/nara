@@ -90,6 +90,7 @@ interface Note {
 
     // Visual styling
     style?: string;           // Style name (e.g., "glow", "solid", "glowing")
+    backgroundColor?: string; // Background color with alpha (e.g., "#FF000080" for 50% red)
     patternKey?: string;      // Reference to parent pattern if part of one
     originPatternKey?: string; // Original pattern before grafting (for lineage tracking)
 
@@ -472,6 +473,30 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
 
     // Get content type (with legacy fallback)
     const contentType = getNoteType(note);
+
+    // Render background color if specified
+    if (note.backgroundColor) {
+        const startScreenPos = engine.worldToScreen(startX, startY, currentZoom, currentOffset);
+        const endScreenPos = engine.worldToScreen(endX + 1, endY + 1, currentZoom, currentOffset);
+
+        // Parse color with alpha (supports #RRGGBB or #RRGGBBAA)
+        const color = note.backgroundColor;
+        if (color.startsWith('#')) {
+            const hex = color.replace('#', '');
+            const r = parseInt(hex.substring(0, 2), 16);
+            const g = parseInt(hex.substring(2, 4), 16);
+            const b = parseInt(hex.substring(4, 6), 16);
+            const a = hex.length >= 8 ? parseInt(hex.substring(6, 8), 16) / 255 : 1;
+
+            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${a})`;
+            ctx.fillRect(
+                startScreenPos.x,
+                startScreenPos.y,
+                endScreenPos.x - startScreenPos.x,
+                endScreenPos.y - startScreenPos.y
+            );
+        }
+    }
 
     // Handle different content types
     if (contentType === 'image' && (note.imageData || note.content?.imageData)) {
