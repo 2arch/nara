@@ -1,8 +1,8 @@
 // components/BitCanvas.tsx
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { WorldData, Point, WorldEngine, PanStartInfo, StyledCharacter } from './world.engine'; // Adjust path as needed
-import { getCharScale, rewrapNoteText, findConnectedPaintRegion } from './world.engine';
+import type { WorldData, Point, WorldEngine, PanStartInfo, StyledCharacter, PaintBlob } from './world.engine'; // Adjust path as needed
+import { getCharScale, rewrapNoteText, findConnectedPaintRegion, getAllPaintBlobs, isPaintedCell, getPaintColorAt, findBlobAt, resizePaintBlob } from './world.engine';
 import { useDialogue, useDebugDialogue } from './dialogue';
 import { useControllerSystem, createCameraController, createGridController, createTapeController, createCommandController } from './controllers';
 import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchicalFrames, HierarchicalFrame, HierarchyLevel, findTextBlockForSelection } from './bit.blocks';
@@ -609,10 +609,10 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
             // Check if wrap mode has paint (paint acts as background)
             let hasPaint = false;
             if (note.displayMode === 'wrap') {
-                // Quick check for any paint cells in note bounds
+                // Quick check for any paint cells in note bounds using blob storage
                 outerLoop: for (let y = startY; y <= endY && !hasPaint; y++) {
                     for (let x = startX; x <= endX && !hasPaint; x++) {
-                        if (engine.worldData[`paint_${x}_${y}`]) {
+                        if (isPaintedCell(engine.worldData, x, y)) {
                             hasPaint = true;
                             break outerLoop;
                         }
@@ -699,8 +699,8 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
                     const viewportColumn = relativeX - scrollOffsetX;
                     const worldX = startX + viewportColumn;
 
-                    // Paint mode: only render where paint cells exist
-                    if (isPaintMode && !engine.worldData[`paint_${worldX}_${renderY}`]) {
+                    // Paint mode: only render where paint cells exist (using blob storage)
+                    if (isPaintMode && !isPaintedCell(engine.worldData, worldX, renderY)) {
                         continue;
                     }
 
@@ -1382,6 +1382,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         minY: number;
         maxY: number;
         color: string;
+        blobId?: string;
     } | null>(null);
 
     // Resize state
@@ -1396,6 +1397,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         paintRegion?: { // For paint type: store the original paint points and color
             points: { x: number; y: number }[];
             color: string;
+            blobId?: string;
         };
     }>({
         active: false,
@@ -4173,31 +4175,42 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             hexToRgb
         };
 
-        // Render paint cells first (underneath text)
+        // Render paint blobs first (underneath text) - using efficient blob storage
+        const paintBlobs = getAllPaintBlobs(engine.worldData);
+        for (const blob of paintBlobs) {
+            // Quick bounds check - skip blob if completely outside viewport
+            if (blob.bounds.maxX < startWorldX - 5 || blob.bounds.minX > endWorldX + 5 ||
+                blob.bounds.maxY < startWorldY - 5 || blob.bounds.minY > endWorldY + 5) {
+                continue;
+            }
+
+            ctx.fillStyle = blob.color || '#000000';
+            for (const cellKey of blob.cells) {
+                const [worldX, worldY] = cellKey.split(',').map(Number);
+
+                if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
+                    worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+                    const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
+                    ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
+                }
+            }
+        }
+
+        // Render tiles (from /make command) - still stored as individual paint_ cells with type='tile'
         for (const key in engine.worldData) {
             if (!key.startsWith('paint_')) continue;
 
             try {
                 const paintData = JSON.parse(engine.worldData[key] as string);
-                
-                if (paintData.type === 'paint') {
+
+                if (paintData.type === 'tile') {
                     const worldX = paintData.x;
                     const worldY = paintData.y;
 
                     if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
                         worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
                         const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                        ctx.fillStyle = paintData.color || '#000000';
-                        ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
-                    }
-                } else if (paintData.type === 'tile') {
-                    const worldX = paintData.x;
-                    const worldY = paintData.y;
 
-                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
-                        worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
-                        const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
-                        
                         const img = imageCache.current.get(paintData.tileset);
                         if (img && img.complete && img.naturalWidth > 0) {
                             // Assume 4x4 tileset (16 tiles)
@@ -4205,11 +4218,11 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             const rows = 4;
                             const tileW = img.width / cols;
                             const tileH = img.height / rows;
-                            
+
                             const tileIndex = paintData.tileIndex || 0;
                             const tx = (tileIndex % cols) * tileW;
                             const ty = Math.floor(tileIndex / cols) * tileH;
-                            
+
                             ctx.drawImage(img, tx, ty, tileW, tileH, screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
                         } else if (!imageCache.current.has(paintData.tileset)) {
                             // Load image
@@ -4228,8 +4241,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
         ctx.fillStyle = engine.textColor;
         for (const key in engine.worldData) {
-            // Skip block, chip, image, and paint data - we render those separately
-            if (key.startsWith('block_') || key.startsWith('chip_') || key.startsWith('image_') || key.startsWith('paint_')) continue;
+            // Skip block, chip, image, paint, and paintblob data - we render those separately
+            if (key.startsWith('block_') || key.startsWith('chip_') || key.startsWith('image_') || key.startsWith('paint_') || key.startsWith('paintblob_')) continue;
 
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10);
@@ -7015,35 +7028,25 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     // Set flag to prevent trail creation
                     isClickMovementRef.current = true;
                 } else {
-                    // Check for paint blob
-                    const paintKey = `paint_${snappedWorldPos.x}_${snappedWorldPos.y}`;
-                    const paintCell = engine.worldData[paintKey];
+                    // Check for paint blob using blob storage
+                    const blob = findBlobAt(engine.worldData, snappedWorldPos.x, snappedWorldPos.y);
 
-                    if (paintCell) {
-                        try {
-                            const paintData = JSON.parse(paintCell as string);
-                            if (paintData.type === 'paint') {
-                                // Find the connected paint region
-                                const region = findConnectedPaintRegion(engine.worldData, snappedWorldPos.x, snappedWorldPos.y);
+                    if (blob) {
+                        // Find the connected paint region (now O(1) with blob storage)
+                        const region = findConnectedPaintRegion(engine.worldData, snappedWorldPos.x, snappedWorldPos.y);
 
-                                if (region) {
-                                    // Clear other selections and select the paint blob
-                                    engine.handleSelectionStart(0, 0);
-                                    engine.handleSelectionEnd();
-                                    setSelectedImageKey(null);
-                                    setSelectedNoteKey(null);
-                                    setSelectedPaintRegion(region);
+                        if (region) {
+                            // Clear other selections and select the paint blob
+                            engine.handleSelectionStart(0, 0);
+                            engine.handleSelectionEnd();
+                            setSelectedImageKey(null);
+                            setSelectedNoteKey(null);
+                            setSelectedPaintRegion(region);
 
-                                    // Set flag to prevent trail creation
-                                    isClickMovementRef.current = true;
-                                }
-                            }
-                        } catch (e) {
-                            // Invalid paint data, ignore
+                            // Set flag to prevent trail creation
+                            isClickMovementRef.current = true;
                         }
-                    }
-
-                    if (!paintCell) {
+                    } else {
                         // Clear any selections if clicking on empty space
                         setSelectedImageKey(null);
                         setSelectedNoteKey(null);
@@ -7223,7 +7226,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                         roomIndex: null,
                         paintRegion: {
                             points: selectedPaintRegion.points,
-                            color: selectedPaintRegion.color
+                            color: selectedPaintRegion.color,
+                            blobId: selectedPaintRegion.blobId
                         }
                     });
                     return; // Early return, don't process other mouse events
@@ -7762,60 +7766,41 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     // Invalid pattern data
                 }
             } else if (resizeState.type === 'paint' && resizeState.paintRegion) {
-                // Calculate scale factors
-                const originalWidth = originalBounds.endX - originalBounds.startX + 1;
-                const originalHeight = originalBounds.endY - originalBounds.startY + 1;
-                const newWidth = newBounds.endX - newBounds.startX + 1;
-                const newHeight = newBounds.endY - newBounds.startY + 1;
+                // Use blob-based resize (much faster than deleting/creating individual cells)
+                const blobId = resizeState.paintRegion.blobId;
+                if (blobId) {
+                    // Find the blob and resize it
+                    const blobKey = `paintblob_${blobId}`;
+                    const blobData = engine.worldData[blobKey];
 
-                const scaleX = newWidth / originalWidth;
-                const scaleY = newHeight / originalHeight;
+                    if (blobData) {
+                        try {
+                            const blob = JSON.parse(blobData as string) as PaintBlob;
+                            const resizedBlob = resizePaintBlob(blob, {
+                                minX: newBounds.startX,
+                                maxX: newBounds.endX,
+                                minY: newBounds.startY,
+                                maxY: newBounds.endY
+                            });
 
-                // Build update object with deleted old cells and new scaled cells
-                const updates: Record<string, any> = {};
+                            engine.setWorldData(prev => ({
+                                ...prev,
+                                [blobKey]: JSON.stringify(resizedBlob)
+                            }));
 
-                // Delete all old paint cells
-                for (const point of resizeState.paintRegion.points) {
-                    const paintKey = `paint_${point.x}_${point.y}`;
-                    updates[paintKey] = null; // Mark for deletion
-                }
-
-                // Create new scaled paint cells
-                for (const point of resizeState.paintRegion.points) {
-                    // Calculate relative position in original bounds
-                    const relativeX = point.x - originalBounds.startX;
-                    const relativeY = point.y - originalBounds.startY;
-
-                    // Scale the relative position
-                    const scaledRelativeX = Math.round(relativeX * scaleX);
-                    const scaledRelativeY = Math.round(relativeY * scaleY);
-
-                    // Calculate new absolute position
-                    const newX = newBounds.startX + scaledRelativeX;
-                    const newY = newBounds.startY + scaledRelativeY;
-
-                    // Add new paint cell
-                    const newPaintKey = `paint_${newX}_${newY}`;
-                    updates[newPaintKey] = JSON.stringify({
-                        type: 'paint',
-                        color: resizeState.paintRegion.color
-                    });
-                }
-
-                // Apply all updates at once
-                engine.setWorldData(prev => ({
-                    ...prev,
-                    ...updates
-                }));
-
-                // Update selected paint region to reflect new bounds
-                const newRegion = findConnectedPaintRegion(
-                    { ...engine.worldData, ...updates },
-                    newBounds.startX,
-                    newBounds.startY
-                );
-                if (newRegion) {
-                    setSelectedPaintRegion(newRegion);
+                            // Update selected paint region to reflect new bounds
+                            const newRegion = findConnectedPaintRegion(
+                                { ...engine.worldData, [blobKey]: JSON.stringify(resizedBlob) },
+                                newBounds.startX,
+                                newBounds.startY
+                            );
+                            if (newRegion) {
+                                setSelectedPaintRegion(newRegion);
+                            }
+                        } catch (e) {
+                            console.error('Failed to resize paint blob:', e);
+                        }
+                    }
                 }
             }
 

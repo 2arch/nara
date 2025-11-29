@@ -110,82 +110,258 @@ export const getCharScale = (data: string | StyledCharacter | ImageData): { w: n
     return { w: 1, h: 2 };
 };
 
-// Helper to find connected paint region
-export const findConnectedPaintRegion = (worldData: WorldData, x: number, y: number): { points: Point[], minX: number, maxX: number, minY: number, maxY: number, color: string } | null => {
-    const startX = Math.floor(x);
-    const startY = Math.floor(y);
-    const startKey = `paint_${startX}_${startY}`;
-    const startCell = worldData[startKey];
+// --- Paint Blob Storage System ---
+// Efficient blob-based storage replacing cell-by-cell approach
+// OLD: worldData["paint_10_20"] = '{"type":"paint","color":"#ff0000"}' (~55 bytes per cell)
+// NEW: worldData["paintblob_id"] = '{"type":"paint-blob",...,cells:["10,20",...]}' (~6 bytes per cell)
 
-    if (!startCell) return null;
+export interface PaintBlob {
+    type: 'paint-blob';
+    id: string;
+    color: string;
+    bounds: {
+        minX: number;
+        maxX: number;
+        minY: number;
+        maxY: number;
+    };
+    cells: string[]; // Array of "x,y" coordinate strings
+}
 
-    let startColor: string | null = null;
-    try {
-        const data = JSON.parse(startCell as string);
-        if (data.type === 'paint') {
-            startColor = data.color;
-        }
-    } catch (e) {
-        return null;
-    }
-
-    if (!startColor) return null;
-
-    const points: Point[] = [];
-    const queue: Point[] = [{ x: startX, y: startY }];
-    const visited = new Set<string>();
-    visited.add(`${startX},${startY}`);
-    points.push({ x: startX, y: startY });
-
-    let minX = startX, maxX = startX;
-    let minY = startY, maxY = startY;
-
-    while (queue.length > 0) {
-        const pos = queue.shift()!;
-        
-        // Update bounds
-        minX = Math.min(minX, pos.x);
-        maxX = Math.max(maxX, pos.x);
-        minY = Math.min(minY, pos.y);
-        maxY = Math.max(maxY, pos.y);
-
-        const dirs = [
-            { dx: 0, dy: -1 },
-            { dx: 0, dy: 1 },
-            { dx: -1, dy: 0 },
-            { dx: 1, dy: 0 }
-        ];
-
-        for (const dir of dirs) {
-            const nx = pos.x + dir.dx;
-            const ny = pos.y + dir.dy;
-            const key = `${nx},${ny}`;
-
-            if (visited.has(key)) continue;
-
-            const paintKey = `paint_${nx}_${ny}`;
-            const cell = worldData[paintKey];
-            
-            if (cell) {
-                try {
-                    const data = JSON.parse(cell as string);
-                    if (data.type === 'paint' && data.color === startColor) {
-                        visited.add(key);
-                        points.push({ x: nx, y: ny });
-                        queue.push({ x: nx, y: ny });
-                    }
-                } catch (e) {}
+// Get all paint blobs from worldData
+export const getAllPaintBlobs = (worldData: Record<string, any>): PaintBlob[] => {
+    const blobs: PaintBlob[] = [];
+    for (const key in worldData) {
+        if (key.startsWith('paintblob_')) {
+            try {
+                const blob = JSON.parse(worldData[key] as string);
+                if (blob.type === 'paint-blob') {
+                    blobs.push(blob);
+                }
+            } catch (e) {
+                console.error(`Failed to parse paint blob ${key}:`, e);
             }
         }
     }
+    return blobs;
+};
+
+// Check if a specific cell is painted (used by rendering, note modes, etc.)
+export const isPaintedCell = (worldData: Record<string, any>, x: number, y: number): boolean => {
+    const cellKey = `${x},${y}`;
+    const blobs = getAllPaintBlobs(worldData);
+    for (const blob of blobs) {
+        // Quick bounds check first (fast rejection)
+        if (x < blob.bounds.minX || x > blob.bounds.maxX ||
+            y < blob.bounds.minY || y > blob.bounds.maxY) {
+            continue;
+        }
+        if (blob.cells.includes(cellKey)) {
+            return true;
+        }
+    }
+    return false;
+};
+
+// Get paint color at a specific cell
+export const getPaintColorAt = (worldData: Record<string, any>, x: number, y: number): string | null => {
+    const cellKey = `${x},${y}`;
+    const blobs = getAllPaintBlobs(worldData);
+    for (const blob of blobs) {
+        if (x < blob.bounds.minX || x > blob.bounds.maxX ||
+            y < blob.bounds.minY || y > blob.bounds.maxY) {
+            continue;
+        }
+        if (blob.cells.includes(cellKey)) {
+            return blob.color;
+        }
+    }
+    return null;
+};
+
+// Find the blob that contains a specific cell
+export const findBlobAt = (worldData: Record<string, any>, x: number, y: number): PaintBlob | null => {
+    const cellKey = `${x},${y}`;
+    const blobs = getAllPaintBlobs(worldData);
+    for (const blob of blobs) {
+        if (x < blob.bounds.minX || x > blob.bounds.maxX ||
+            y < blob.bounds.minY || y > blob.bounds.maxY) {
+            continue;
+        }
+        if (blob.cells.includes(cellKey)) {
+            return blob;
+        }
+    }
+    return null;
+};
+
+// Create a new paint blob
+export const createPaintBlob = (color: string, initialCells: Array<{x: number, y: number}>): PaintBlob => {
+    if (initialCells.length === 0) {
+        throw new Error('Cannot create empty blob');
+    }
+    const id = `blob_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    let minX = initialCells[0].x, maxX = initialCells[0].x;
+    let minY = initialCells[0].y, maxY = initialCells[0].y;
+    for (const cell of initialCells) {
+        minX = Math.min(minX, cell.x);
+        maxX = Math.max(maxX, cell.x);
+        minY = Math.min(minY, cell.y);
+        maxY = Math.max(maxY, cell.y);
+    }
+    return {
+        type: 'paint-blob',
+        id,
+        color,
+        bounds: { minX, maxX, minY, maxY },
+        cells: initialCells.map(p => `${p.x},${p.y}`)
+    };
+};
+
+// Add cells to an existing blob and return updated blob
+export const addCellsToBlob = (blob: PaintBlob, newCells: Array<{x: number, y: number}>): PaintBlob => {
+    const existingSet = new Set(blob.cells);
+    let { minX, maxX, minY, maxY } = blob.bounds;
+    const addedCells: string[] = [];
+
+    for (const cell of newCells) {
+        const cellKey = `${cell.x},${cell.y}`;
+        if (!existingSet.has(cellKey)) {
+            addedCells.push(cellKey);
+            existingSet.add(cellKey);
+            minX = Math.min(minX, cell.x);
+            maxX = Math.max(maxX, cell.x);
+            minY = Math.min(minY, cell.y);
+            maxY = Math.max(maxY, cell.y);
+        }
+    }
+
+    if (addedCells.length === 0) return blob;
+
+    return {
+        ...blob,
+        bounds: { minX, maxX, minY, maxY },
+        cells: [...blob.cells, ...addedCells]
+    };
+};
+
+// Remove cells from a blob, returns null if blob becomes empty
+export const removeCellsFromBlob = (blob: PaintBlob, cellsToRemove: Array<{x: number, y: number}>): PaintBlob | null => {
+    const removeSet = new Set(cellsToRemove.map(c => `${c.x},${c.y}`));
+    const remainingCells = blob.cells.filter(c => !removeSet.has(c));
+
+    if (remainingCells.length === 0) return null;
+
+    // Recalculate bounds
+    const firstCell = remainingCells[0].split(',').map(Number);
+    let minX = firstCell[0], maxX = firstCell[0];
+    let minY = firstCell[1], maxY = firstCell[1];
+
+    for (const cellKey of remainingCells) {
+        const [x, y] = cellKey.split(',').map(Number);
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+    }
+
+    return {
+        ...blob,
+        bounds: { minX, maxX, minY, maxY },
+        cells: remainingCells
+    };
+};
+
+// Find or create a blob for painting at a specific cell
+export const findOrCreateBlobForCell = (
+    worldData: Record<string, any>,
+    x: number,
+    y: number,
+    color: string
+): { blob: PaintBlob; isNew: boolean; existingBlobKey?: string } => {
+    // Check if already painted in a blob of same color
+    const existingBlob = findBlobAt(worldData, x, y);
+    if (existingBlob && existingBlob.color === color) {
+        return { blob: existingBlob, isNew: false, existingBlobKey: `paintblob_${existingBlob.id}` };
+    }
+
+    // Check for adjacent blob of same color to merge into
+    const directions = [
+        { dx: 0, dy: -1 }, { dx: 0, dy: 1 },
+        { dx: -1, dy: 0 }, { dx: 1, dy: 0 }
+    ];
+    for (const dir of directions) {
+        const adjBlob = findBlobAt(worldData, x + dir.dx, y + dir.dy);
+        if (adjBlob && adjBlob.color === color) {
+            return { blob: adjBlob, isNew: false, existingBlobKey: `paintblob_${adjBlob.id}` };
+        }
+    }
+
+    // No adjacent blob - create new one
+    const newBlob = createPaintBlob(color, [{ x, y }]);
+    return { blob: newBlob, isNew: true };
+};
+
+// Resize a blob to new bounds
+export const resizePaintBlob = (
+    blob: PaintBlob,
+    newBounds: { minX: number; maxX: number; minY: number; maxY: number }
+): PaintBlob => {
+    const oldWidth = blob.bounds.maxX - blob.bounds.minX;
+    const oldHeight = blob.bounds.maxY - blob.bounds.minY;
+    const newWidth = newBounds.maxX - newBounds.minX;
+    const newHeight = newBounds.maxY - newBounds.minY;
+
+    if (oldWidth === 0 || oldHeight === 0) return blob;
+
+    const scaleX = newWidth / oldWidth;
+    const scaleY = newHeight / oldHeight;
+
+    const newCells: string[] = [];
+    const cellSet = new Set<string>();
+
+    for (const cellKey of blob.cells) {
+        const [x, y] = cellKey.split(',').map(Number);
+        const relX = x - blob.bounds.minX;
+        const relY = y - blob.bounds.minY;
+        const newRelX = Math.round(relX * scaleX);
+        const newRelY = Math.round(relY * scaleY);
+        const newX = newBounds.minX + newRelX;
+        const newY = newBounds.minY + newRelY;
+        const newCellKey = `${newX},${newY}`;
+        if (!cellSet.has(newCellKey)) {
+            cellSet.add(newCellKey);
+            newCells.push(newCellKey);
+        }
+    }
+
+    return { ...blob, bounds: newBounds, cells: newCells };
+};
+
+// Helper to find connected paint region (used by /make command, selection, etc.)
+// Now reads from blob storage instead of individual cells
+export const findConnectedPaintRegion = (worldData: Record<string, any>, x: number, y: number): { points: Array<{x: number, y: number}>, minX: number, maxX: number, minY: number, maxY: number, color: string, blobId?: string } | null => {
+    const startX = Math.floor(x);
+    const startY = Math.floor(y);
+
+    // Find blob at this position
+    const blob = findBlobAt(worldData, startX, startY);
+    if (!blob) return null;
+
+    // Convert blob cells to points array
+    const points = blob.cells.map(cellKey => {
+        const [px, py] = cellKey.split(',').map(Number);
+        return { x: px, y: py };
+    });
 
     return {
         points,
-        minX,
-        maxX,
-        minY,
-        maxY,
-        color: startColor
+        minX: blob.bounds.minX,
+        maxX: blob.bounds.maxX,
+        minY: blob.bounds.minY,
+        maxY: blob.bounds.maxY,
+        color: blob.color,
+        blobId: blob.id
     };
 };
 
@@ -195,7 +371,6 @@ export const getPaintBoundsAtY = (noteData: any, relativeY: number, worldData: R
     const noteStartX = noteData.startX;
     const noteStartY = noteData.startY;
     const noteWidth = noteData.endX - noteData.startX;
-
     const worldY = noteStartY + relativeY;
 
     let minPaintX = -1;
@@ -204,15 +379,13 @@ export const getPaintBoundsAtY = (noteData: any, relativeY: number, worldData: R
     // Find leftmost and rightmost paint cells at this Y
     for (let relativeX = 0; relativeX < noteWidth; relativeX++) {
         const worldX = noteStartX + relativeX;
-        const paintKey = `paint_${worldX}_${worldY}`;
-        if (worldData[paintKey]) {
+        if (isPaintedCell(worldData, worldX, worldY)) {
             if (minPaintX === -1) minPaintX = relativeX;
             maxPaintX = relativeX;
         }
     }
 
     if (minPaintX === -1) return null;
-
     return { startX: minPaintX, endX: maxPaintX };
 };
 
@@ -11479,104 +11652,78 @@ export function useWorldEngine({
             const cellX = Math.floor(x);
             const cellY = Math.floor(y);
 
-            // Helper to paint a single cell
-            const paintSingleCell = (px: number, py: number, updates: Record<string, string>) => {
-                const key = `paint_${px}_${py}`;
-                updates[key] = JSON.stringify({
-                    type: 'paint',
-                    x: px,
-                    y: py,
-                    color: paintColor
-                });
-            };
+            // Collect all cells to paint
+            const cellsToPaint: Array<{x: number, y: number}> = [];
 
             // Bresenham's line algorithm for interpolation
-            const drawLine = (x0: number, y0: number, x1: number, y1: number, updates: Record<string, string>) => {
+            const collectLine = (x0: number, y0: number, x1: number, y1: number) => {
                 const dx = Math.abs(x1 - x0);
                 const dy = Math.abs(y1 - y0);
                 const sx = x0 < x1 ? 1 : -1;
                 const sy = y0 < y1 ? 1 : -1;
                 let err = dx - dy;
-
                 let cx = x0;
                 let cy = y0;
 
                 while (true) {
-                    paintSingleCell(cx, cy, updates);
-
+                    cellsToPaint.push({ x: cx, y: cy });
                     if (cx === x1 && cy === y1) break;
-
                     const e2 = 2 * err;
-                    if (e2 > -dy) {
-                        err -= dy;
-                        cx += sx;
-                    }
-                    if (e2 < dx) {
-                        err += dx;
-                        cy += sy;
-                    }
+                    if (e2 > -dy) { err -= dy; cx += sx; }
+                    if (e2 < dx) { err += dx; cy += sy; }
                 }
             };
 
-            // For brush size 1, paint single pixel with line interpolation
+            // Collect cells based on brush size
             if (paintBrushSize <= 1) {
-                const updates: Record<string, string> = {};
                 if (prevX !== undefined && prevY !== undefined) {
-                    const prevCellX = Math.floor(prevX);
-                    const prevCellY = Math.floor(prevY);
-                    // Draw line from previous position to current
-                    drawLine(prevCellX, prevCellY, cellX, cellY, updates);
+                    collectLine(Math.floor(prevX), Math.floor(prevY), cellX, cellY);
                 } else {
-                    // Just paint current cell
-                    paintSingleCell(cellX, cellY, updates);
+                    cellsToPaint.push({ x: cellX, y: cellY });
                 }
-
-                setWorldData(prev => ({
-                    ...prev,
-                    ...updates
-                }));
-                return;
-            }
-
-            // For larger brush sizes, paint a circular area
-            const radius = paintBrushSize;
-            const updates: Record<string, string> = {};
-            for (let dy = -radius; dy <= radius; dy++) {
-                for (let dx = -radius; dx <= radius; dx++) {
-                    // Check if within circular brush (strict < for clean edges)
-                    if (dx * dx + dy * dy < radius * radius) {
-                        const px = cellX + dx;
-                        const py = cellY + dy;
-                        const key = `paint_${px}_${py}`;
-                        updates[key] = JSON.stringify({
-                            type: 'paint',
-                            x: px,
-                            y: py,
-                            color: paintColor
-                        });
+            } else {
+                // Circular brush
+                const radius = paintBrushSize;
+                for (let dy = -radius; dy <= radius; dy++) {
+                    for (let dx = -radius; dx <= radius; dx++) {
+                        if (dx * dx + dy * dy < radius * radius) {
+                            cellsToPaint.push({ x: cellX + dx, y: cellY + dy });
+                        }
                     }
                 }
             }
-            // Batch update world data with all painted cells
-            setWorldData(prev => ({
-                ...prev,
-                ...updates
-            }));
+
+            if (cellsToPaint.length === 0) return;
+
+            // Update world data with blob-based storage
+            setWorldData(prev => {
+                // Find or create blob for the first cell
+                const { blob, isNew, existingBlobKey } = findOrCreateBlobForCell(prev, cellsToPaint[0].x, cellsToPaint[0].y, paintColor);
+
+                // Add all cells to the blob
+                const updatedBlob = addCellsToBlob(blob, cellsToPaint);
+                const blobKey = `paintblob_${updatedBlob.id}`;
+
+                return {
+                    ...prev,
+                    [blobKey]: JSON.stringify(updatedBlob)
+                };
+            });
         },
                             fillPolygon: (points: Point[]) => {
                                 if (!isPaintMode || points.length < 3) return;
-                  
+
                                 // Find bounding box
                                 let minX = Infinity, maxX = -Infinity;
                                 let minY = Infinity, maxY = -Infinity;
-                  
+
                                 for (const p of points) {
                                     minX = Math.min(minX, Math.floor(p.x));
                                     maxX = Math.max(maxX, Math.floor(p.x));
                                     minY = Math.min(minY, Math.floor(p.y));
                                     maxY = Math.max(maxY, Math.floor(p.y));
                                 }
-                  
+
                                 // Point-in-polygon test using ray casting
                                 const isInside = (px: number, py: number): boolean => {
                                     let inside = false;
@@ -11585,34 +11732,35 @@ export function useWorldEngine({
                                         const yi = Math.floor(points[i].y);
                                         const xj = Math.floor(points[j].x);
                                         const yj = Math.floor(points[j].y);
-                  
+
                                         const intersect = ((yi > py) !== (yj > py)) &&
                                             (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
                                         if (intersect) inside = !inside;
                                     }
                                     return inside;
                                 };
-                  
-                                // Fill all cells inside the polygon
-                                const updates: Record<string, string> = {};
+
+                                // Collect all cells inside the polygon
+                                const cellsToPaint: Array<{x: number, y: number}> = [];
                                 for (let y = minY; y <= maxY; y++) {
                                     for (let x = minX; x <= maxX; x++) {
                                         if (isInside(x, y)) {
-                                            const key = `paint_${x}_${y}`;
-                                            updates[key] = JSON.stringify({
-                                                type: 'paint',
-                                                x,
-                                                y,
-                                                color: paintColor
-                                            });
+                                            cellsToPaint.push({ x, y });
                                         }
                                     }
                                 }
-                  
-                                setWorldData(prev => ({
-                                    ...prev,
-                                    ...updates
-                                }));
+
+                                if (cellsToPaint.length === 0) return;
+
+                                // Update world data with blob-based storage
+                                setWorldData(prev => {
+                                    const { blob } = findOrCreateBlobForCell(prev, cellsToPaint[0].x, cellsToPaint[0].y, paintColor);
+                                    const updatedBlob = addCellsToBlob(blob, cellsToPaint);
+                                    return {
+                                        ...prev,
+                                        [`paintblob_${updatedBlob.id}`]: JSON.stringify(updatedBlob)
+                                    };
+                                });
                             },
                                       setTiles: (tiles: Record<string, string>) => {
                                           setWorldData(prev => ({
@@ -11623,25 +11771,13 @@ export function useWorldEngine({
                                       getConnectedPaintRegion: (x: number, y: number) => {
                                           return findConnectedPaintRegion(worldData, x, y);
                                       },
-                                      floodFill: (x: number, y: number) => {            if (!isPaintMode) return;
+                                      floodFill: (x: number, y: number) => {
+            if (!isPaintMode) return;
             const startX = Math.floor(x);
             const startY = Math.floor(y);
 
-            // Get the color at the start point
-            const startKey = `paint_${startX}_${startY}`;
-            const startCell = worldData[startKey];
-            let targetColor: string | null = null;
-
-            if (startCell) {
-                try {
-                    const data = JSON.parse(startCell as string);
-                    if (data.type === 'paint') {
-                        targetColor = data.color;
-                    }
-                } catch (e) {
-                    // Invalid data
-                }
-            }
+            // Get the color at the start point using blob storage
+            const targetColor = getPaintColorAt(worldData, startX, startY);
 
             // If clicking on same color as paint color, do nothing
             if (targetColor === paintColor) return;
@@ -11650,32 +11786,19 @@ export function useWorldEngine({
             // If targetColor is null, fill empty regions (stop at any painted boundary)
             // If targetColor is a color, fill only cells of that color
             const fillEmpty = targetColor === null;
-            const queue: Point[] = [{ x: startX, y: startY }];
+            const queue: Array<{x: number, y: number}> = [{ x: startX, y: startY }];
             const visited = new Set<string>();
-            const updates: Record<string, string> = {};
+            const cellsToFill: Array<{x: number, y: number}> = [];
             const maxCells = 10000; // Safety limit
 
-            while (queue.length > 0 && Object.keys(updates).length < maxCells) {
+            while (queue.length > 0 && cellsToFill.length < maxCells) {
                 const pos = queue.shift()!;
                 const key = `${pos.x},${pos.y}`;
 
                 if (visited.has(key)) continue;
                 visited.add(key);
 
-                const paintKey = `paint_${pos.x}_${pos.y}`;
-                const cell = worldData[paintKey];
-                let cellColor: string | null = null;
-
-                if (cell) {
-                    try {
-                        const data = JSON.parse(cell as string);
-                        if (data.type === 'paint') {
-                            cellColor = data.color;
-                        }
-                    } catch (e) {
-                        // Invalid data
-                    }
-                }
+                const cellColor = getPaintColorAt(worldData, pos.x, pos.y);
 
                 // Fill logic depends on whether we're filling empty or colored cells
                 if (fillEmpty) {
@@ -11686,13 +11809,8 @@ export function useWorldEngine({
                     if (cellColor !== targetColor) continue;
                 }
 
-                // Paint this cell
-                updates[paintKey] = JSON.stringify({
-                    type: 'paint',
-                    x: pos.x,
-                    y: pos.y,
-                    color: paintColor
-                });
+                // Add this cell to fill list
+                cellsToFill.push({ x: pos.x, y: pos.y });
 
                 // Add neighbors to queue
                 queue.push({ x: pos.x + 1, y: pos.y });
@@ -11701,11 +11819,17 @@ export function useWorldEngine({
                 queue.push({ x: pos.x, y: pos.y - 1 });
             }
 
-            // Apply updates
-            setWorldData(prev => ({
-                ...prev,
-                ...updates
-            }));
+            if (cellsToFill.length === 0) return;
+
+            // Update world data with blob-based storage
+            setWorldData(prev => {
+                const { blob } = findOrCreateBlobForCell(prev, cellsToFill[0].x, cellsToFill[0].y, paintColor);
+                const updatedBlob = addCellsToBlob(blob, cellsToFill);
+                return {
+                    ...prev,
+                    [`paintblob_${updatedBlob.id}`]: JSON.stringify(updatedBlob)
+                };
+            });
         },
         paintTool,
         lassoPoints: lassoPointsRef.current,
