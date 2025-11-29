@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Point, WorldData } from './world.engine';
-import { rewrapNoteText, findConnectedPaintRegion } from './world.engine';
+import { rewrapNoteText, findConnectedPaintRegion, getAllPaintBlobs } from './world.engine';
 import { generateImage, generateVideo, setDialogueWithRevert } from './ai';
 import { detectImageIntent } from './ai.utils';
 import type { WorldSettings } from './settings';
@@ -425,7 +425,7 @@ const AVAILABLE_COMMANDS = [
     // Navigation & View
     'nav', 'search', 'cam', 'indent', 'zoom', 'map', 'full', 'focus',
     // Content Creation
-    'chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint', 'pattern', 'connect',
+    'chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint', 'pattern', 'connect', 'export',
     // Special
     'mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help',
     // Styling & Display
@@ -445,7 +445,7 @@ const AVAILABLE_COMMANDS = [
 // Category mapping for visual organization
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map', 'full', 'focus'],
-    'create': ['chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint'],
+    'create': ['chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint', 'export'],
     'special': ['mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help'],
     'style': ['bg', 'text', 'font', 'style', 'display', 'be'],
     'state': ['state', 'random', 'clear', 'replay', 'record'],
@@ -475,6 +475,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'link': 'Create a clickable link from selected text. Select text, then type /link [url]. Click the underlined link to open the URL in a new tab. URLs are auto-detected when pasted.',
     'pack': 'Pack selected world data into a collapsible chip. Select a region (including notes, text, etc), then type /pack [color]. Click the pack chip to toggle between collapsed (hidden) and expanded (visible) states.',
     'clip': 'Save selected text to your clipboard. Select text, then type /clip to capture it. Access your clips later to paste them anywhere on the canvas.',
+    'export': 'Export selected area as a PNG image. Make a selection, then type /export to download it as an image. Use /export --grid to include grid lines in the export.',
     'upload': 'Upload an image to your canvas. Type /upload, then select an image file. The image will be placed at your current cursor position and saved to your canvas.',
     'paint': 'Enter paint mode to draw filled regions on the canvas. Drag to draw a continuous stroke, double-click/double-tap to fill the enclosed area. Press ESC to exit.',
     'mode': 'Switch canvas modes. /mode default for standard writing, /mode air for ephemeral text that doesn\'t save, /mode chat to talk with AI, /mode note for focused note-taking.',
@@ -5501,6 +5502,361 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     setDialogueWithRevert(`Invalid ${targetType} data`, setDialogueText);
                 }
             }
+
+            // Clear command mode
+            clearCommandState();
+
+            return null;
+        }
+
+        if (commandName === 'export') {
+            // Export selected area as PNG image (async to handle image loading)
+            const existingSelection = getNormalizedSelection?.();
+
+            if (!existingSelection) {
+                setDialogueWithRevert("Make a selection first, then type /export", setDialogueText);
+                clearCommandState();
+                return null;
+            }
+
+            // Check for --grid argument
+            const includeGrid = inputParts.includes('--grid');
+
+            // Normalize selection bounds
+            const selectionStartX = Math.min(existingSelection.startX, existingSelection.endX);
+            const selectionEndX = Math.max(existingSelection.startX, existingSelection.endX);
+            const selectionStartY = Math.min(existingSelection.startY, existingSelection.endY);
+            const selectionEndY = Math.max(existingSelection.startY, existingSelection.endY);
+
+            const selectionWidth = selectionEndX - selectionStartX + 1;
+            const selectionHeight = selectionEndY - selectionStartY + 1;
+
+            // Show loading message
+            setDialogueWithRevert(`Exporting ${selectionWidth}×${selectionHeight} selection...`, setDialogueText);
+
+            // Perform export asynchronously
+            (async () => {
+                try {
+                    // Get character dimensions
+                    const charDims = getEffectiveCharDims(zoomLevel);
+                    const charWidth = charDims.width;
+                    const charHeight = charDims.height;
+
+                    // Create export canvas
+                    const exportCanvas = document.createElement('canvas');
+                    const dpr = window.devicePixelRatio || 1;
+                    const canvasWidth = Math.floor(selectionWidth * charWidth);
+                    const canvasHeight = Math.floor(selectionHeight * charHeight);
+
+                    exportCanvas.width = canvasWidth * dpr;
+                    exportCanvas.height = canvasHeight * dpr;
+
+                    const ctx = exportCanvas.getContext('2d');
+                    if (!ctx) {
+                        setDialogueWithRevert("Failed to create export canvas", setDialogueText);
+                        return;
+                    }
+
+                    // Scale context for device pixel ratio
+                    ctx.scale(dpr, dpr);
+
+                    // Fill background with current background color
+                    ctx.fillStyle = modeState.backgroundColor || '#FFFFFF';
+                    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+                    // Helper to convert world coords to canvas coords
+                    const worldToCanvas = (x: number, y: number) => ({
+                        x: (x - selectionStartX) * charWidth,
+                        y: (y - selectionStartY) * charHeight
+                    });
+
+                    if (!worldData) {
+                        setDialogueWithRevert("No world data to export", setDialogueText);
+                        return;
+                    }
+
+                    // STEP 1: Render paint blobs (underneath everything)
+                    const paintBlobs = getAllPaintBlobs(worldData);
+                    for (const blob of paintBlobs) {
+                        // Check if blob overlaps with selection
+                        if (blob.bounds.maxX < selectionStartX || blob.bounds.minX > selectionEndX ||
+                            blob.bounds.maxY < selectionStartY || blob.bounds.minY > selectionEndY) {
+                            continue;
+                        }
+
+                        ctx.fillStyle = blob.color || '#000000';
+                        for (const cellKey of blob.cells) {
+                            const [x, y] = cellKey.split(',').map(Number);
+                            if (x >= selectionStartX && x <= selectionEndX &&
+                                y >= selectionStartY && y <= selectionEndY) {
+                                const canvasPos = worldToCanvas(x, y);
+                                ctx.fillRect(canvasPos.x, canvasPos.y, charWidth, charHeight);
+                            }
+                        }
+                    }
+
+                    // STEP 2: Render tiles (from /make command) - need to load images
+                    const tileImages = new Map<string, HTMLImageElement>();
+                    const tileLoadPromises: Promise<void>[] = [];
+
+                    // Collect all tiles in selection and start loading their images
+                    const tilesToRender: Array<{x: number, y: number, tileset: string, tileIndex: number}> = [];
+                    for (const key in worldData) {
+                        if (!key.startsWith('paint_')) continue;
+
+                        try {
+                            const paintData = JSON.parse(worldData[key] as string);
+                            if (paintData.type === 'tile') {
+                                const x = paintData.x;
+                                const y = paintData.y;
+
+                                if (x >= selectionStartX && x <= selectionEndX &&
+                                    y >= selectionStartY && y <= selectionEndY) {
+
+                                    tilesToRender.push({
+                                        x, y,
+                                        tileset: paintData.tileset,
+                                        tileIndex: paintData.tileIndex || 0
+                                    });
+
+                                    // Load tileset image if not already loading
+                                    if (!tileImages.has(paintData.tileset)) {
+                                        const img = new Image();
+                                        img.crossOrigin = "anonymous";
+                                        tileImages.set(paintData.tileset, img);
+
+                                        const loadPromise = new Promise<void>((resolve) => {
+                                            img.onload = () => resolve();
+                                            img.onerror = () => resolve(); // Resolve anyway to not block export
+                                            img.src = paintData.tileset;
+                                        });
+                                        tileLoadPromises.push(loadPromise);
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            // Skip invalid paint data
+                        }
+                    }
+
+                    // Wait for all tile images to load
+                    await Promise.all(tileLoadPromises);
+
+                    // Render tiles
+                    for (const tile of tilesToRender) {
+                        const img = tileImages.get(tile.tileset);
+                        if (img && img.complete && img.naturalWidth > 0) {
+                            const cols = 4;
+                            const rows = 4;
+                            const tileW = img.width / cols;
+                            const tileH = img.height / rows;
+
+                            const tx = (tile.tileIndex % cols) * tileW;
+                            const ty = Math.floor(tile.tileIndex / cols) * tileH;
+
+                            const canvasPos = worldToCanvas(tile.x, tile.y);
+                            ctx.drawImage(img, tx, ty, tileW, tileH, canvasPos.x, canvasPos.y, charWidth, charHeight);
+                        }
+                    }
+
+                    // STEP 3: Render note backgrounds/overlays
+                    const notes: any[] = [];
+                    for (const key in worldData) {
+                        if (key.startsWith('note_')) {
+                            try {
+                                const noteData = JSON.parse(worldData[key] as string);
+                                const noteStartX = Math.min(noteData.startX, noteData.endX);
+                                const noteEndX = Math.max(noteData.startX, noteData.endX);
+                                const noteStartY = Math.min(noteData.startY, noteData.endY);
+                                const noteEndY = Math.max(noteData.startY, noteData.endY);
+
+                                // Check if note overlaps with selection
+                                if (noteStartX <= selectionEndX && noteEndX >= selectionStartX &&
+                                    noteStartY <= selectionEndY && noteEndY >= selectionStartY) {
+                                    notes.push(noteData);
+                                }
+                            } catch (e) {
+                                // Skip invalid notes
+                            }
+                        }
+                    }
+
+                    // Render note overlays (semi-transparent backgrounds)
+                    for (const note of notes) {
+                        const noteStartX = Math.max(Math.min(note.startX, note.endX), selectionStartX);
+                        const noteEndX = Math.min(Math.max(note.startX, note.endX), selectionEndX);
+                        const noteStartY = Math.max(Math.min(note.startY, note.endY), selectionStartY);
+                        const noteEndY = Math.min(Math.max(note.startY, note.endY), selectionEndY);
+
+                        const contentType = note.contentType || (note.imageData ? 'image' : 'text');
+
+                        if (contentType === 'text' && !note.imageData) {
+                            // Render semi-transparent overlay for text notes
+                            ctx.fillStyle = `rgba(0, 0, 0, 0.05)`;
+
+                            for (let y = noteStartY; y <= noteEndY; y += GRID_CELL_SPAN) {
+                                for (let x = noteStartX; x <= noteEndX; x++) {
+                                    const canvasPos = worldToCanvas(x, y);
+                                    ctx.fillRect(canvasPos.x, canvasPos.y, charWidth, charHeight * GRID_CELL_SPAN);
+                                }
+                            }
+                        }
+                    }
+
+                    // STEP 4: Render text content
+                    ctx.font = `${charDims.fontSize}px ${modeState.fontFamily}`;
+                    ctx.textBaseline = 'top';
+
+                    const isKoreanChar = (char: string) => {
+                        const code = char.charCodeAt(0);
+                        return code >= 0xAC00 && code <= 0xD7AF;
+                    };
+
+                    for (let y = selectionStartY; y <= selectionEndY; y++) {
+                        for (let x = selectionStartX; x <= selectionEndX; x++) {
+                            const key = `${x},${y}`;
+                            const cellData = worldData[key];
+
+                            if (cellData) {
+                                const canvasPos = worldToCanvas(x, y);
+
+                                if (typeof cellData === 'string') {
+                                    // Simple text character
+                                    ctx.fillStyle = modeState.textColor || '#000000';
+                                    const kScale = isKoreanChar(cellData) ? 0.8 : 1.0;
+                                    ctx.save();
+                                    ctx.translate(canvasPos.x, canvasPos.y);
+                                    ctx.scale(kScale, 1);
+                                    ctx.fillText(cellData, 0, 0);
+                                    ctx.restore();
+                                } else if (typeof cellData === 'object' && 'char' in cellData) {
+                                    // Styled character
+                                    const styledChar = cellData as any;
+                                    const char = styledChar.char;
+                                    const scale = styledChar.scale || { w: 1, h: 1 };
+
+                                    // Draw background if present
+                                    if (styledChar.style?.background) {
+                                        ctx.fillStyle = styledChar.style.background;
+                                        ctx.fillRect(canvasPos.x, canvasPos.y, charWidth * scale.w, charHeight * scale.h);
+                                    }
+
+                                    // Draw character
+                                    ctx.fillStyle = styledChar.style?.color || modeState.textColor || '#000000';
+                                    const kScale = isKoreanChar(char) ? 0.8 : 1.0;
+                                    ctx.save();
+                                    ctx.translate(canvasPos.x, canvasPos.y);
+                                    ctx.scale(kScale * scale.w, scale.h);
+                                    ctx.fillText(char, 0, 0);
+                                    ctx.restore();
+                                }
+                            }
+                        }
+                    }
+
+                    // STEP 5: Render note images
+                    const noteImagePromises: Promise<void>[] = [];
+                    const noteImagesToRender: Array<{note: any, img: HTMLImageElement}> = [];
+
+                    for (const note of notes) {
+                        const imageData = note.imageData || note.content?.imageData;
+                        if (imageData && imageData.src) {
+                            const img = new Image();
+                            img.crossOrigin = "anonymous";
+
+                            const loadPromise = new Promise<void>((resolve) => {
+                                img.onload = () => {
+                                    noteImagesToRender.push({ note, img });
+                                    resolve();
+                                };
+                                img.onerror = () => resolve();
+                                img.src = imageData.src;
+                            });
+                            noteImagePromises.push(loadPromise);
+                        }
+                    }
+
+                    // Wait for all note images to load
+                    await Promise.all(noteImagePromises);
+
+                    // Render note images
+                    for (const { note, img } of noteImagesToRender) {
+                        if (img.complete && img.naturalWidth > 0) {
+                            const noteStartX = Math.max(Math.min(note.startX, note.endX), selectionStartX);
+                            const noteEndX = Math.min(Math.max(note.startX, note.endX), selectionEndX);
+                            const noteStartY = Math.max(Math.min(note.startY, note.endY), selectionStartY);
+                            const noteEndY = Math.min(Math.max(note.startY, note.endY), selectionEndY);
+
+                            const startPos = worldToCanvas(noteStartX, noteStartY);
+                            const endPos = worldToCanvas(noteEndX + 1, noteEndY + 1);
+                            const targetWidth = endPos.x - startPos.x;
+                            const targetHeight = endPos.y - startPos.y;
+
+                            const aspectRatio = img.width / img.height;
+                            const targetAspectRatio = targetWidth / targetHeight;
+
+                            let drawWidth = targetWidth;
+                            let drawHeight = targetHeight;
+                            let offsetX = 0;
+                            let offsetY = 0;
+
+                            if (aspectRatio > targetAspectRatio) {
+                                const scaledWidth = targetHeight * aspectRatio;
+                                offsetX = (targetWidth - scaledWidth) / 2;
+                                drawWidth = scaledWidth;
+                            } else {
+                                const scaledHeight = targetWidth / aspectRatio;
+                                offsetY = (targetHeight - scaledHeight) / 2;
+                                drawHeight = scaledHeight;
+                            }
+
+                            ctx.save();
+                            ctx.beginPath();
+                            ctx.rect(startPos.x, startPos.y, targetWidth, targetHeight);
+                            ctx.clip();
+                            ctx.drawImage(img, startPos.x + offsetX, startPos.y + offsetY, drawWidth, drawHeight);
+                            ctx.restore();
+                        }
+                    }
+
+                    // STEP 6: Draw grid if requested
+                    if (includeGrid) {
+                        ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+                        ctx.lineWidth = 1 / dpr;
+
+                        // Vertical lines
+                        for (let i = 0; i <= selectionWidth; i++) {
+                            const x = i * charWidth;
+                            ctx.beginPath();
+                            ctx.moveTo(x, 0);
+                            ctx.lineTo(x, canvasHeight);
+                            ctx.stroke();
+                        }
+
+                        // Horizontal lines
+                        for (let i = 0; i <= selectionHeight; i++) {
+                            const y = i * charHeight;
+                            ctx.beginPath();
+                            ctx.moveTo(0, y);
+                            ctx.lineTo(canvasWidth, y);
+                            ctx.stroke();
+                        }
+                    }
+
+                    // STEP 7: Export as PNG and download
+                    const dataUrl = exportCanvas.toDataURL('image/png');
+                    const link = document.createElement('a');
+                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                    link.download = `nara-export-${timestamp}.png`;
+                    link.href = dataUrl;
+                    link.click();
+
+                    setDialogueWithRevert(`Exported ${selectionWidth}×${selectionHeight} selection as PNG`, setDialogueText);
+                } catch (error) {
+                    console.error('Export failed:', error);
+                    setDialogueWithRevert("Export failed - check console for details", setDialogueText);
+                }
+            })();
 
             // Clear command mode
             clearCommandState();
