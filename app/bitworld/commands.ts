@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Point, WorldData } from './world.engine';
-import { rewrapNoteText, findConnectedPaintRegion, getAllPaintBlobs } from './world.engine';
+import { rewrapNoteText, findConnectedPaintRegion, getAllPaintBlobs, calculatePatternBorderCells, createPaintBlob, regeneratePatternPaint } from './world.engine';
 import { generateImage, generateVideo, setDialogueWithRevert } from './ai';
 import { detectImageIntent } from './ai.utils';
 import type { WorldSettings } from './settings';
@@ -366,9 +366,10 @@ export interface ModeState {
         isTracked?: boolean; // True if from MediaPipe tracking, false if autonomous
     };
     isPaintMode: boolean; // Whether paint mode is active
-    paintTool: 'brush' | 'fill' | 'lasso'; // Current paint tool
+    paintTool: 'brush' | 'fill' | 'lasso' | 'eraser'; // Current paint tool
     paintColor: string; // Current paint brush color
     paintBrushSize: number; // Paint brush radius in cells
+    paintType: 'color' | 'obstacle'; // Type of paint: color (default) or obstacle (blocks pathfinding)
 }
 
 interface UseCommandSystemProps {
@@ -592,6 +593,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         paintTool: 'brush', // Default to brush tool
         paintColor: '#000000', // Default black paint
         paintBrushSize: 1, // Default brush size (1 cell radius)
+        paintType: 'color', // Default to color paint (not obstacle)
     });
 
     // User's saved sprites
@@ -4792,48 +4794,81 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('paint')) {
-            // Parse arguments: /paint [brush|fill|lasso] [color]
-            const paintArgs = commandToExecute.slice(5).trim();
-            const parts = paintArgs.split(/\s+/);
-
-            let tool: 'brush' | 'fill' | 'lasso' = modeState.paintTool; // Keep current tool
-            let color: string | null = null;
-
-            // Parse tool type
-            if (parts[0] === 'brush' || parts[0] === 'fill' || parts[0] === 'lasso') {
-                tool = parts[0];
-                // Check for color after tool
-                if (parts[1]) {
-                    const colorResult = validateColor(parts[1]);
-                    if (colorResult.valid && colorResult.hexColor) {
-                        color = colorResult.hexColor;
-                    }
-                }
-            } else if (parts[0]) {
-                // No tool specified, might be just a color
-                const colorResult = validateColor(parts[0]);
-                if (colorResult.valid && colorResult.hexColor) {
-                    color = colorResult.hexColor;
-                }
-            }
-
-            // If we have arguments, enable paint mode and update settings
-            if (paintArgs) {
-                const toolNames = { brush: 'Brush', fill: 'Fill', lasso: 'Lasso' };
-                const colorStr = color ? ` (${parts.find(p => validateColor(p).valid) || color})` : '';
+            // If already in paint mode, toggle it off
+            if (modeState.isPaintMode) {
                 setModeState(prev => ({
                     ...prev,
-                    isPaintMode: true,
-                    paintTool: tool,
-                    paintColor: color || prev.paintColor
+                    isPaintMode: false
                 }));
-                setDialogueWithRevert(`Paint ${toolNames[tool]} enabled${colorStr}. ${tool === 'fill' ? 'Click to fill.' : tool === 'lasso' ? 'Draw outline then release.' : 'Click/drag to paint.'} Press ESC to exit.`, setDialogueText);
+                setDialogueWithRevert("Paint mode disabled", setDialogueText);
                 clearCommandState();
                 return null;
             }
 
-            // No arguments, toggle paint mode with current settings
-            return executeToggleModeCommand('isPaintMode', `Paint ${tool.charAt(0).toUpperCase() + tool.slice(1)} enabled. Press ESC to exit.`, "Paint mode disabled");
+            // Parse arguments: /paint [brush|fill|lasso|eraser] [color|obstacle]
+            const paintArgs = commandToExecute.slice(5).trim();
+            const parts = paintArgs.split(/\s+/);
+
+            let tool: 'brush' | 'fill' | 'lasso' | 'eraser' = modeState.paintTool; // Keep current tool
+            let color: string | null = null;
+            let paintType: 'color' | 'obstacle' = modeState.paintType; // Keep current paint type
+
+            // Parse tool type
+            if (parts[0] === 'brush' || parts[0] === 'fill' || parts[0] === 'lasso' || parts[0] === 'eraser') {
+                tool = parts[0];
+                // Check for color or obstacle after tool
+                if (parts[1]) {
+                    if (parts[1] === 'obstacle') {
+                        paintType = 'obstacle';
+                        color = '#000000'; // Default black for obstacles
+                    } else {
+                        const colorResult = validateColor(parts[1]);
+                        if (colorResult.valid && colorResult.hexColor) {
+                            color = colorResult.hexColor;
+                            paintType = 'color';
+                        }
+                    }
+                }
+            } else if (parts[0]) {
+                // No tool specified, might be just a color or obstacle
+                if (parts[0] === 'obstacle') {
+                    paintType = 'obstacle';
+                    color = '#000000'; // Default black for obstacles
+                } else {
+                    const colorResult = validateColor(parts[0]);
+                    if (colorResult.valid && colorResult.hexColor) {
+                        color = colorResult.hexColor;
+                        paintType = 'color';
+                    }
+                }
+            }
+
+            // Enable paint mode with specified settings
+            if (paintArgs) {
+                const toolNames = { brush: 'Brush', fill: 'Fill', lasso: 'Lasso', eraser: 'Eraser' };
+                const paintTypeStr = paintType === 'obstacle' ? ' obstacle' : (color ? ` (${parts.find(p => validateColor(p).valid) || color})` : '');
+                setModeState(prev => ({
+                    ...prev,
+                    isPaintMode: true,
+                    paintTool: tool,
+                    paintColor: color || prev.paintColor,
+                    paintType: paintType
+                }));
+                const actionText = tool === 'fill' ? 'Click to fill.' : tool === 'lasso' ? 'Draw outline then release.' : tool === 'eraser' ? 'Click/drag to erase.' : 'Click/drag to paint.';
+                setDialogueWithRevert(`Paint ${toolNames[tool]} enabled${paintTypeStr}. ${actionText} Press ESC to exit.`, setDialogueText);
+                clearCommandState();
+                return null;
+            }
+
+            // No arguments, enable paint mode with current settings
+            const toolNames = { brush: 'Brush', fill: 'Fill', lasso: 'Lasso', eraser: 'Eraser' };
+            setModeState(prev => ({
+                ...prev,
+                isPaintMode: true
+            }));
+            setDialogueWithRevert(`Paint ${toolNames[tool]} enabled. Press ESC to exit.`, setDialogueText);
+            clearCommandState();
+            return null;
         }
 
         if (commandToExecute.startsWith('upgrade')) {
@@ -5150,13 +5185,22 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     }
                 };
 
+                // Calculate outer border cells for obstacle paint
+                const borderCells = calculatePatternBorderCells(rooms, seed);
+                let paintBlobData: Record<string, string> = {};
+                if (borderCells.length > 0) {
+                    const paintBlob = createPaintBlob('#000000', borderCells, 'obstacle', patternKey);
+                    paintBlobData[`paintblob_${paintBlob.id}`] = JSON.stringify(paintBlob);
+                }
+
                 setWorldData((prev: WorldData) => ({
                     ...prev,
                     [patternKey]: JSON.stringify(patternData),
-                    ...noteObjects  // Add all note objects
+                    ...noteObjects,  // Add all note objects
+                    ...paintBlobData  // Add the linked paint blob
                 }));
 
-                setDialogueWithRevert(`Pattern generated with ${noteKeys.length} notes`, setDialogueText);
+                setDialogueWithRevert(`Pattern generated with ${noteKeys.length} rooms and obstacle walls`, setDialogueText);
             }
 
             // Clear command mode
@@ -6409,6 +6453,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         paintTool: modeState.paintTool,
         paintColor: modeState.paintColor,
         paintBrushSize: modeState.paintBrushSize,
+        paintType: modeState.paintType,
         exitPaintMode: () => setModeState(prev => ({ ...prev, isPaintMode: false })),
         setPaintColor: (color: string) => setModeState(prev => ({ ...prev, paintColor: color })),
         setPaintBrushSize: (size: number) => setModeState(prev => ({ ...prev, paintBrushSize: size })),

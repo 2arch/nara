@@ -19,6 +19,7 @@ import { parseGIFFromArrayBuffer, getCurrentFrame, isGIFUrl } from './gif.parser
 import type { AgentState } from './agent';
 import { AgentController } from './agent';
 import { findSmoothPath, type Point as PathPoint } from './paths';
+import { BubbleState, createInitialBubbleState, showBubble, hideBubble, isBubbleExpired } from './bubble';
 
 // API route helper functions for AI operations
 const callTransformAPI = async (text: string, instructions: string, userId?: string): Promise<string> => {
@@ -118,6 +119,8 @@ export const getCharScale = (data: string | StyledCharacter | ImageData): { w: n
 export interface PaintBlob {
     type: 'paint-blob';
     id: string;
+    paintType?: 'color' | 'obstacle'; // Type of paint: color (default) or obstacle (blocks pathfinding)
+    patternKey?: string; // Link to pattern - paint will regenerate when pattern changes
     color: string;
     bounds: {
         minX: number;
@@ -179,6 +182,32 @@ export const getPaintColorAt = (worldData: Record<string, any>, x: number, y: nu
     return null;
 };
 
+// Check if a position contains an obstacle that blocks character movement
+export const isObstacleAt = (worldData: Record<string, any>, x: number, y: number): boolean => {
+    const cellKey = `${Math.round(x)},${Math.round(y)}`;
+    const blobs = getAllPaintBlobs(worldData);
+
+    for (const blob of blobs) {
+        // Only check obstacle blobs
+        if (blob.paintType !== 'obstacle') continue;
+
+        // Quick bounds check
+        const roundedX = Math.round(x);
+        const roundedY = Math.round(y);
+        if (roundedX < blob.bounds.minX || roundedX > blob.bounds.maxX ||
+            roundedY < blob.bounds.minY || roundedY > blob.bounds.maxY) {
+            continue;
+        }
+
+        // Check if cell is in this obstacle blob
+        if (blob.cells.includes(cellKey)) {
+            return true;
+        }
+    }
+
+    return false;
+};
+
 // Find the blob that contains a specific cell
 export const findBlobAt = (worldData: Record<string, any>, x: number, y: number): PaintBlob | null => {
     const cellKey = `${x},${y}`;
@@ -196,7 +225,12 @@ export const findBlobAt = (worldData: Record<string, any>, x: number, y: number)
 };
 
 // Create a new paint blob
-export const createPaintBlob = (color: string, initialCells: Array<{x: number, y: number}>): PaintBlob => {
+export const createPaintBlob = (
+    color: string,
+    initialCells: Array<{x: number, y: number}>,
+    paintType?: 'color' | 'obstacle',
+    patternKey?: string
+): PaintBlob => {
     if (initialCells.length === 0) {
         throw new Error('Cannot create empty blob');
     }
@@ -212,6 +246,8 @@ export const createPaintBlob = (color: string, initialCells: Array<{x: number, y
     return {
         type: 'paint-blob',
         id,
+        paintType,
+        patternKey,
         color,
         bounds: { minX, maxX, minY, maxY },
         cells: initialCells.map(p => `${p.x},${p.y}`)
@@ -272,33 +308,285 @@ export const removeCellsFromBlob = (blob: PaintBlob, cellsToRemove: Array<{x: nu
     };
 };
 
+// Room type for pattern boundary calculation
+interface PatternRoom {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+/**
+ * Calculate outer border cells for a pattern (rooms + corridors)
+ * Uses same MST algorithm as rendering for consistent corridors
+ */
+export const calculatePatternBorderCells = (
+    rooms: PatternRoom[],
+    seed: number
+): Array<{x: number, y: number}> => {
+    if (rooms.length === 0) return [];
+
+    // Seeded random function (same as rendering)
+    const random = (n: number) => {
+        const x = Math.sin(seed + n) * 10000;
+        return x - Math.floor(x);
+    };
+
+    // Build grid of all filled cells (rooms + corridors)
+    const gridCells = new Set<string>();
+
+    // Add all room cells
+    for (const room of rooms) {
+        for (let x = room.x; x < room.x + room.width; x++) {
+            for (let y = room.y; y < room.y + room.height; y++) {
+                gridCells.add(`${x},${y}`);
+            }
+        }
+    }
+
+    // Draw corridors using MST (same algorithm as rendering)
+    const corridorWidth = 3;
+    const corridorHeight = 3;
+
+    const drawCorridor = (room1: PatternRoom, room2: PatternRoom, rngSeed: number) => {
+        const startX = room1.x + Math.floor(room1.width / 2);
+        const startY = room1.y + Math.floor(room1.height / 2);
+        const endX = room2.x + Math.floor(room2.width / 2);
+        const endY = room2.y + Math.floor(room2.height / 2);
+
+        // L-shaped corridor
+        if (random(rngSeed) > 0.5) {
+            // Horizontal first
+            const minX = Math.min(startX, endX);
+            const maxX = Math.max(startX, endX);
+            for (let x = minX; x <= maxX; x++) {
+                for (let w = 0; w < corridorWidth; w++) {
+                    gridCells.add(`${x},${startY + w - Math.floor(corridorWidth / 2)}`);
+                }
+            }
+            // Then vertical
+            const minY = Math.min(startY, endY);
+            const maxY = Math.max(startY, endY);
+            for (let y = minY; y <= maxY; y++) {
+                for (let h = 0; h < corridorHeight; h++) {
+                    gridCells.add(`${endX + h - Math.floor(corridorHeight / 2)},${y}`);
+                }
+            }
+        } else {
+            // Vertical first
+            const minY = Math.min(startY, endY);
+            const maxY = Math.max(startY, endY);
+            for (let y = minY; y <= maxY; y++) {
+                for (let h = 0; h < corridorHeight; h++) {
+                    gridCells.add(`${startX + h - Math.floor(corridorHeight / 2)},${y}`);
+                }
+            }
+            // Then horizontal
+            const minX = Math.min(startX, endX);
+            const maxX = Math.max(startX, endX);
+            for (let x = minX; x <= maxX; x++) {
+                for (let w = 0; w < corridorWidth; w++) {
+                    gridCells.add(`${x},${endY + w - Math.floor(corridorWidth / 2)}`);
+                }
+            }
+        }
+    };
+
+    // MST using Prim's algorithm (same as rendering)
+    if (rooms.length > 1) {
+        const connected = new Set<number>([0]);
+
+        while (connected.size < rooms.length) {
+            let bestEdge: { from: number; to: number; dist: number } | null = null;
+
+            for (const i of connected) {
+                for (let j = 0; j < rooms.length; j++) {
+                    if (!connected.has(j)) {
+                        const dx = Math.abs(rooms[j].x - rooms[i].x);
+                        const dy = Math.abs(rooms[j].y - rooms[i].y);
+                        const dist = dx + dy;
+
+                        if (!bestEdge || dist < bestEdge.dist) {
+                            bestEdge = { from: i, to: j, dist };
+                        }
+                    }
+                }
+            }
+
+            if (bestEdge) {
+                connected.add(bestEdge.to);
+                drawCorridor(rooms[bestEdge.from], rooms[bestEdge.to], bestEdge.from * 7 + bestEdge.to);
+            } else {
+                break;
+            }
+        }
+
+        // Add 1-2 extra corridors for loops
+        const extraCorridors = Math.floor(random(200) * 2) + 1;
+        for (let e = 0; e < extraCorridors && rooms.length > 2; e++) {
+            const i = Math.floor(random(300 + e) * rooms.length);
+            const j = Math.floor(random(400 + e) * rooms.length);
+            if (i !== j) {
+                drawCorridor(rooms[i], rooms[j], i * 13 + j);
+            }
+        }
+    }
+
+    // Find outer border cells (adjacent to grid but not in grid)
+    const borderCells: Array<{x: number, y: number}> = [];
+    const borderSet = new Set<string>();
+
+    for (const cellKey of gridCells) {
+        const [x, y] = cellKey.split(',').map(Number);
+
+        // Check all 8 neighbors
+        const neighbors = [
+            { dx: -1, dy: -1 }, { dx: 0, dy: -1 }, { dx: 1, dy: -1 },
+            { dx: -1, dy: 0 },                      { dx: 1, dy: 0 },
+            { dx: -1, dy: 1 },  { dx: 0, dy: 1 },  { dx: 1, dy: 1 }
+        ];
+
+        for (const { dx, dy } of neighbors) {
+            const nx = x + dx;
+            const ny = y + dy;
+            const neighborKey = `${nx},${ny}`;
+
+            // If neighbor is not in grid and not already in border
+            if (!gridCells.has(neighborKey) && !borderSet.has(neighborKey)) {
+                borderSet.add(neighborKey);
+                borderCells.push({ x: nx, y: ny });
+            }
+        }
+    }
+
+    return borderCells;
+};
+
+/**
+ * Get paint blob linked to a pattern
+ */
+export const getPatternPaintBlob = (worldData: Record<string, any>, patternKey: string): { blob: PaintBlob; key: string } | null => {
+    for (const key in worldData) {
+        if (key.startsWith('paintblob_')) {
+            try {
+                const blob = JSON.parse(worldData[key] as string);
+                if (blob.type === 'paint-blob' && blob.patternKey === patternKey) {
+                    return { blob, key };
+                }
+            } catch (e) {
+                // Skip invalid blobs
+            }
+        }
+    }
+    return null;
+};
+
+/**
+ * Regenerate paint blob for a pattern based on current note positions
+ */
+export const regeneratePatternPaint = (
+    worldData: Record<string, any>,
+    patternKey: string
+): { updatedBlob: PaintBlob; blobKey: string } | null => {
+    // Get pattern data
+    const patternData = worldData[patternKey];
+    if (!patternData) return null;
+
+    let pattern;
+    try {
+        pattern = JSON.parse(patternData);
+    } catch (e) {
+        return null;
+    }
+
+    if (!pattern.noteKeys || pattern.noteKeys.length === 0) return null;
+
+    // Get rooms from notes
+    const rooms: PatternRoom[] = [];
+    for (const noteKey of pattern.noteKeys) {
+        const noteData = worldData[noteKey];
+        if (!noteData) continue;
+
+        try {
+            const note = JSON.parse(noteData);
+            if (note.startX !== undefined && note.startY !== undefined &&
+                note.endX !== undefined && note.endY !== undefined) {
+                rooms.push({
+                    x: note.startX,
+                    y: note.startY,
+                    width: note.endX - note.startX,
+                    height: note.endY - note.startY
+                });
+            }
+        } catch (e) {
+            // Skip invalid notes
+        }
+    }
+
+    if (rooms.length === 0) return null;
+
+    // Calculate border cells
+    const seed = pattern.timestamp || Date.now();
+    const borderCells = calculatePatternBorderCells(rooms, seed);
+
+    if (borderCells.length === 0) return null;
+
+    // Find existing paint blob for this pattern
+    const existingPaint = getPatternPaintBlob(worldData, patternKey);
+
+    if (existingPaint) {
+        // Update existing blob's cells and bounds
+        let minX = borderCells[0].x, maxX = borderCells[0].x;
+        let minY = borderCells[0].y, maxY = borderCells[0].y;
+        for (const cell of borderCells) {
+            minX = Math.min(minX, cell.x);
+            maxX = Math.max(maxX, cell.x);
+            minY = Math.min(minY, cell.y);
+            maxY = Math.max(maxY, cell.y);
+        }
+
+        const updatedBlob: PaintBlob = {
+            ...existingPaint.blob,
+            bounds: { minX, maxX, minY, maxY },
+            cells: borderCells.map(c => `${c.x},${c.y}`)
+        };
+
+        return { updatedBlob, blobKey: existingPaint.key };
+    } else {
+        // Create new paint blob
+        const newBlob = createPaintBlob('#000000', borderCells, 'obstacle', patternKey);
+        return { updatedBlob: newBlob, blobKey: `paintblob_${newBlob.id}` };
+    }
+};
+
 // Find or create a blob for painting at a specific cell
 export const findOrCreateBlobForCell = (
     worldData: Record<string, any>,
     x: number,
     y: number,
-    color: string
+    color: string,
+    paintType?: 'color' | 'obstacle'
 ): { blob: PaintBlob; isNew: boolean; existingBlobKey?: string } => {
-    // Check if already painted in a blob of same color
+    // Check if already painted in a blob of same color and type
     const existingBlob = findBlobAt(worldData, x, y);
-    if (existingBlob && existingBlob.color === color) {
+    if (existingBlob && existingBlob.color === color && existingBlob.paintType === paintType) {
         return { blob: existingBlob, isNew: false, existingBlobKey: `paintblob_${existingBlob.id}` };
     }
 
-    // Check for adjacent blob of same color to merge into
+    // Check for adjacent blob of same color and type to merge into
     const directions = [
         { dx: 0, dy: -1 }, { dx: 0, dy: 1 },
         { dx: -1, dy: 0 }, { dx: 1, dy: 0 }
     ];
     for (const dir of directions) {
         const adjBlob = findBlobAt(worldData, x + dir.dx, y + dir.dy);
-        if (adjBlob && adjBlob.color === color) {
+        if (adjBlob && adjBlob.color === color && adjBlob.paintType === paintType) {
             return { blob: adjBlob, isNew: false, existingBlobKey: `paintblob_${adjBlob.id}` };
         }
     }
 
     // No adjacent blob - create new one
-    const newBlob = createPaintBlob(color, [{ x, y }]);
+    const newBlob = createPaintBlob(color, [{ x, y }], paintType);
     return { blob: newBlob, isNew: true };
 };
 
@@ -891,11 +1179,13 @@ export interface WorldEngine {
     updateClusterLabels: () => Promise<void>;
     isMoveMode: boolean;
     isPaintMode: boolean;
-    paintTool: 'brush' | 'fill' | 'lasso';
+    paintTool: 'brush' | 'fill' | 'lasso' | 'eraser';
     paintColor: string;
     paintBrushSize: number;
+    paintType: 'color' | 'obstacle'; // Type of paint being applied
     exitPaintMode: () => void;
     paintCell: (x: number, y: number, prevX?: number, prevY?: number) => void;
+    eraseCell: (x: number, y: number, prevX?: number, prevY?: number) => void;
     fillPolygon: (points: Point[]) => void;
     setTiles: (tiles: Record<string, string>) => void;
     getConnectedPaintRegion: (x: number, y: number) => { points: Point[], minX: number, maxX: number, minY: number, maxY: number, color: string } | null;
@@ -939,6 +1229,10 @@ export interface WorldEngine {
     spriteProgress?: number;
     spritePreview?: string;
     spriteDebugLog?: string[];
+    // Chat bubble attached to character
+    bubbleState: BubbleState;
+    showBubbleMessage: (text: string, duration?: number) => void;
+    hideBubbleMessage: () => void;
     // Spatial indexing for efficient viewport-based rendering
     spatialIndex: React.MutableRefObject<Map<string, Set<string>>>;
     queryVisibleEntities: (startWorldX: number, startWorldY: number, endWorldX: number, endWorldY: number) => Set<string>;
@@ -1419,105 +1713,6 @@ export function useWorldEngine({
         cursorPosRef.current = cursorPos;
     }, [cursorPos]);
 
-    // Calculate path when cursor target changes
-    useEffect(() => {
-        const target = cursorPosRef.current;
-        const current = visualCursorPosRef.current;
-
-        // Calculate new path using A* with obstacle avoidance
-        const path = findSmoothPath(current, target, worldData);
-        currentPathRef.current = path;
-        pathIndexRef.current = 0;
-        pathDistanceTraveledRef.current = 0;
-        lastAnimationTimeRef.current = 0;
-    }, [cursorPos, worldData]);
-
-    // Animate visual cursor position following the path at constant speed
-    useEffect(() => {
-        const animate = (currentTime: number) => {
-            const path = currentPathRef.current;
-
-            // No path or already at end
-            if (path.length === 0 || pathIndexRef.current >= path.length - 1) {
-                animationFrameRef.current = null;
-                return;
-            }
-
-            // Initialize time on first frame
-            if (lastAnimationTimeRef.current === 0) {
-                lastAnimationTimeRef.current = currentTime;
-                animationFrameRef.current = requestAnimationFrame(animate);
-                return;
-            }
-
-            // Calculate time delta
-            const deltaTime = (currentTime - lastAnimationTimeRef.current) / 1000; // Convert to seconds
-            lastAnimationTimeRef.current = currentTime;
-
-            // Constant speed (cells per second) - adjust this value to change speed
-            const speed = 15; // 15 cells per second
-            const distanceToMove = speed * deltaTime;
-
-            // Move along the path
-            let remainingDistance = distanceToMove;
-            let currentPos = visualCursorPosRef.current;
-
-            while (remainingDistance > 0 && pathIndexRef.current < path.length - 1) {
-                const currentWaypoint = path[pathIndexRef.current];
-                const nextWaypoint = path[pathIndexRef.current + 1];
-
-                // Distance to next waypoint
-                const dx = nextWaypoint.x - currentPos.x;
-                const dy = nextWaypoint.y - currentPos.y;
-                const distanceToNext = Math.sqrt(dx * dx + dy * dy);
-
-                if (distanceToNext <= remainingDistance) {
-                    // Move to next waypoint
-                    currentPos = { x: nextWaypoint.x, y: nextWaypoint.y };
-                    remainingDistance -= distanceToNext;
-                    pathIndexRef.current++;
-                } else {
-                    // Move partway to next waypoint
-                    const ratio = remainingDistance / distanceToNext;
-                    currentPos = {
-                        x: currentPos.x + dx * ratio,
-                        y: currentPos.y + dy * ratio
-                    };
-                    remainingDistance = 0;
-                }
-            }
-
-            // Update position
-            setVisualCursorPos(currentPos);
-            visualCursorPosRef.current = currentPos;
-
-            // Check if we've reached the end
-            if (pathIndexRef.current >= path.length - 1) {
-                const finalPos = path[path.length - 1];
-                setVisualCursorPos(finalPos);
-                visualCursorPosRef.current = finalPos;
-                animationFrameRef.current = null;
-                return;
-            }
-
-            // Continue animation
-            animationFrameRef.current = requestAnimationFrame(animate);
-        };
-
-        // Start animation if not already running
-        if (!animationFrameRef.current && currentPathRef.current.length > 0) {
-            animationFrameRef.current = requestAnimationFrame(animate);
-        }
-
-        // Cleanup
-        return () => {
-            if (animationFrameRef.current) {
-                cancelAnimationFrame(animationFrameRef.current);
-                animationFrameRef.current = null;
-            }
-        };
-    }, [cursorPos]);
-
     // Fetch user membership level
     useEffect(() => {
         const fetchMembership = async () => {
@@ -1589,6 +1784,34 @@ export function useWorldEngine({
     const [searchData, setSearchData] = useState<WorldData>({});
     const [hostData, setHostData] = useState<{ text: string; color?: string; centerPos: Point; timestamp?: number } | null>(null);
     const [clipboardItems, setClipboardItems] = useState<ClipboardItem[]>([]); // Clipboard items from Cmd+click on bounds
+
+    // === Chat Bubble State ===
+    const [bubbleState, setBubbleState] = useState<BubbleState>(createInitialBubbleState());
+
+    const showBubbleMessage = useCallback((text: string, duration?: number) => {
+        setBubbleState(showBubble(text, duration));
+    }, []);
+
+    const hideBubbleMessage = useCallback(() => {
+        setBubbleState(hideBubble());
+    }, []);
+
+    // Auto-hide bubble when duration expires
+    useEffect(() => {
+        if (!bubbleState.isVisible || bubbleState.duration === 0) return;
+
+        const remainingTime = bubbleState.duration - (Date.now() - bubbleState.timestamp);
+        if (remainingTime <= 0) {
+            setBubbleState(hideBubble());
+            return;
+        }
+
+        const timeout = setTimeout(() => {
+            setBubbleState(hideBubble());
+        }, remainingTime);
+
+        return () => clearTimeout(timeout);
+    }, [bubbleState]);
 
     // === IME Composition State ===
     const [isComposing, setIsComposing] = useState<boolean>(false);
@@ -2121,6 +2344,7 @@ export function useWorldEngine({
         paintTool,
         paintColor,
         paintBrushSize,
+        paintType,
         exitPaintMode,
         gridMode,
         cycleGridMode,
@@ -2171,6 +2395,139 @@ export function useWorldEngine({
             commandValidationHandlerRef.current(command, args, worldState);
         }
     } });
+
+    // Calculate path when cursor target changes (placed after isCharacterEnabled is available)
+    useEffect(() => {
+        const target = cursorPosRef.current;
+        const current = visualCursorPosRef.current;
+
+        // Only use smooth pathfinding when character sprite is enabled
+        if (isCharacterEnabled) {
+            // Calculate new path using A* with obstacle avoidance
+            const path = findSmoothPath(current, target, worldData);
+            currentPathRef.current = path;
+            pathIndexRef.current = 0;
+            pathDistanceTraveledRef.current = 0;
+            lastAnimationTimeRef.current = 0;
+        } else {
+            // Instant movement - snap cursor directly to target
+            setVisualCursorPos(target);
+            visualCursorPosRef.current = target;
+            currentPathRef.current = [];
+        }
+    }, [cursorPos, worldData, isCharacterEnabled]);
+
+    // Animate visual cursor position following the path at constant speed
+    useEffect(() => {
+        // Only animate when character sprite is enabled
+        if (!isCharacterEnabled) {
+            // Cancel any running animation
+            if (animationFrameRef.current) {
+                cancelAnimationFrame(animationFrameRef.current);
+                animationFrameRef.current = null;
+            }
+            return;
+        }
+
+        const animate = (currentTime: number) => {
+            const path = currentPathRef.current;
+
+            // No path or already at end
+            if (path.length === 0 || pathIndexRef.current >= path.length - 1) {
+                animationFrameRef.current = null;
+                return;
+            }
+
+            // Initialize time on first frame
+            if (lastAnimationTimeRef.current === 0) {
+                lastAnimationTimeRef.current = currentTime;
+                animationFrameRef.current = requestAnimationFrame(animate);
+                return;
+            }
+
+            // Calculate time delta
+            const deltaTime = (currentTime - lastAnimationTimeRef.current) / 1000; // Convert to seconds
+            lastAnimationTimeRef.current = currentTime;
+
+            // Constant speed (cells per second) - adjust this value to change speed
+            const speed = 15; // 15 cells per second
+            const distanceToMove = speed * deltaTime;
+
+            // Move along the path
+            let remainingDistance = distanceToMove;
+            let currentPos = visualCursorPosRef.current;
+
+            while (remainingDistance > 0 && pathIndexRef.current < path.length - 1) {
+                const currentWaypoint = path[pathIndexRef.current];
+                const nextWaypoint = path[pathIndexRef.current + 1];
+
+                // Distance to next waypoint
+                const dx = nextWaypoint.x - currentPos.x;
+                const dy = nextWaypoint.y - currentPos.y;
+                const distanceToNext = Math.sqrt(dx * dx + dy * dy);
+
+                if (distanceToNext <= remainingDistance) {
+                    // Check if next waypoint is an obstacle
+                    if (isObstacleAt(worldData, nextWaypoint.x, nextWaypoint.y)) {
+                        // Stop movement - can't enter obstacle
+                        remainingDistance = 0;
+                        break;
+                    }
+
+                    // Move to next waypoint
+                    currentPos = { x: nextWaypoint.x, y: nextWaypoint.y };
+                    remainingDistance -= distanceToNext;
+                    pathIndexRef.current++;
+                } else {
+                    // Move partway to next waypoint
+                    const ratio = remainingDistance / distanceToNext;
+                    const newPos = {
+                        x: currentPos.x + dx * ratio,
+                        y: currentPos.y + dy * ratio
+                    };
+
+                    // Check if new position would be in an obstacle
+                    if (isObstacleAt(worldData, newPos.x, newPos.y)) {
+                        // Stop movement - can't enter obstacle
+                        remainingDistance = 0;
+                        break;
+                    }
+
+                    currentPos = newPos;
+                    remainingDistance = 0;
+                }
+            }
+
+            // Update position
+            setVisualCursorPos(currentPos);
+            visualCursorPosRef.current = currentPos;
+
+            // Check if we've reached the end
+            if (pathIndexRef.current >= path.length - 1) {
+                const finalPos = path[path.length - 1];
+                setVisualCursorPos(finalPos);
+                visualCursorPosRef.current = finalPos;
+                animationFrameRef.current = null;
+                return;
+            }
+
+            // Continue animation
+            animationFrameRef.current = requestAnimationFrame(animate);
+        };
+
+        // Start animation if not already running
+        if (!animationFrameRef.current && currentPathRef.current.length > 0) {
+            animationFrameRef.current = requestAnimationFrame(animate);
+        }
+
+        // Cleanup
+        return () => {
+            if (animationFrameRef.current) {
+                cancelAnimationFrame(animationFrameRef.current);
+                animationFrameRef.current = null;
+            }
+        };
+    }, [cursorPos, isCharacterEnabled, worldData]);
 
     // Wire up agent controller with command system for playback
     useEffect(() => {
@@ -6760,10 +7117,16 @@ export function useWorldEngine({
                 } else if (metaKey || ctrlKey) {
                     // Cmd+Enter (or Ctrl+Enter): Send chat message and write response directly to canvas
                     if (chatMode.currentInput.trim() && !chatMode.isProcessing) {
+                        const userMessage = chatMode.currentInput.trim();
                         setChatMode(prev => ({ ...prev, isProcessing: true }));
                         setDialogueWithRevert("Processing...", setDialogueText);
 
-                        callChatAPI(chatMode.currentInput.trim(), true, userUid || undefined).then((response) => {
+                        // Show user message in bubble when character sprite is enabled
+                        if (isCharacterEnabled) {
+                            showBubbleMessage(userMessage, 3000); // Show for 3 seconds initially
+                        }
+
+                        callChatAPI(userMessage, true, userUid || undefined).then((response) => {
                             // Check if quota exceeded
                             if (response.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
@@ -6783,7 +7146,7 @@ export function useWorldEngine({
                             };
                             
                             // Calculate dynamic wrap width based on input
-                            const inputLines = chatMode.currentInput.trim().split('\n');
+                            const inputLines = userMessage.split('\n');
                             const maxInputLineLength = Math.max(...inputLines.map(line => line.length));
                             const wrapWidth = Math.max(30, maxInputLineLength);
                             
@@ -6867,10 +7230,16 @@ export function useWorldEngine({
                 } else {
                     // Regular Enter: Send chat message and show ephemeral response
                     if (chatMode.currentInput.trim() && !chatMode.isProcessing) {
+                        const userMessage = chatMode.currentInput.trim();
                         setChatMode(prev => ({ ...prev, isProcessing: true }));
                         setDialogueWithRevert("Processing...", setDialogueText);
 
-                        callChatAPI(chatMode.currentInput.trim(), true, userUid || undefined).then((response) => {
+                        // Show user message in bubble when character sprite is enabled
+                        if (isCharacterEnabled) {
+                            showBubbleMessage(userMessage, 3000); // Show for 3 seconds initially
+                        }
+
+                        callChatAPI(userMessage, true, userUid || undefined).then((response) => {
                             // Check if quota exceeded
                             if (response.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
@@ -7455,7 +7824,7 @@ export function useWorldEngine({
                             const noteData = JSON.parse(worldData[key] as string);
                             if (cursorPos.x >= noteData.startX && cursorPos.x <= noteData.endX &&
                                 cursorPos.y >= noteData.startY && cursorPos.y <= noteData.endY) {
-                                targetRegion = noteData;
+                                targetRegion = { ...noteData, _noteKey: key }; // Track the note key for cleanup
                                 break;
                             }
                         } catch (e) {
@@ -7490,11 +7859,12 @@ export function useWorldEngine({
             }
 
             if (targetRegion) {
-                // Check for existing image in the region
+                // Check for existing image in the region (both old image_ format and new note_ format)
                 let existingImageData: string | null = null;
                 let existingImageKey: string | null = null;
 
                 for (const key in worldData) {
+                    // Check old image_ format
                     if (key.startsWith('image_')) {
                         const imgData = worldData[key];
                         if (imgData && typeof imgData === 'object' && 'type' in imgData && imgData.type === 'image') {
@@ -7508,24 +7878,69 @@ export function useWorldEngine({
                             }
                         }
                     }
+                    // Check new note_ format with contentType: 'image'
+                    if (key.startsWith('note_')) {
+                        try {
+                            const noteData = typeof worldData[key] === 'string' ? JSON.parse(worldData[key] as string) : worldData[key];
+                            if (noteData && noteData.contentType === 'image' && noteData.src) {
+                                // Check if note overlaps with target region
+                                if (noteData.startX <= targetRegion.endX && noteData.endX >= targetRegion.startX &&
+                                    noteData.startY <= targetRegion.endY && noteData.endY >= targetRegion.startY) {
+                                    existingImageData = noteData.src;
+                                    existingImageKey = key;
+                                    break;
+                                }
+                            }
+                        } catch (e) {
+                            // Skip invalid note data
+                        }
+                    }
                 }
 
                 // Extract text from target region
                 let textToSend = '';
-                for (let y = targetRegion.startY; y <= targetRegion.endY; y++) {
-                    let lineText = '';
-                    for (let x = targetRegion.startX; x <= targetRegion.endX; x++) {
-                        const key = `${x},${y}`;
-                        const charData = worldData[key];
-                        if (charData && !isImageData(charData)) {
-                            const char = getCharacter(charData);
-                            lineText += char;
-                        } else {
-                            lineText += ' ';
+
+                // Check if targetRegion has embedded note data (from note_ key)
+                const noteData = (targetRegion as any).data;
+
+                if (noteData && typeof noteData === 'object') {
+                    // Extract text from note's embedded data (relative coordinates)
+                    const noteHeight = targetRegion.endY - targetRegion.startY + 1;
+                    const noteWidth = targetRegion.endX - targetRegion.startX + 1;
+
+                    for (let relY = 0; relY < noteHeight; relY++) {
+                        let lineText = '';
+                        for (let relX = 0; relX < noteWidth; relX++) {
+                            const key = `${relX},${relY}`;
+                            const charData = noteData[key];
+                            if (charData) {
+                                const char = typeof charData === 'string' ? charData :
+                                    (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : ' ';
+                                lineText += char;
+                            } else {
+                                lineText += ' ';
+                            }
                         }
+                        textToSend += lineText.trimEnd();
+                        if (relY < noteHeight - 1) textToSend += '\n';
                     }
-                    textToSend += lineText.trimEnd();
-                    if (y < targetRegion.endY) textToSend += '\n';
+                } else {
+                    // Fall back to extracting from worldData (absolute coordinates)
+                    for (let y = targetRegion.startY; y <= targetRegion.endY; y++) {
+                        let lineText = '';
+                        for (let x = targetRegion.startX; x <= targetRegion.endX; x++) {
+                            const key = `${x},${y}`;
+                            const charData = worldData[key];
+                            if (charData && !isImageData(charData)) {
+                                const char = getCharacter(charData);
+                                lineText += char;
+                            } else {
+                                lineText += ' ';
+                            }
+                        }
+                        textToSend += lineText.trimEnd();
+                        if (y < targetRegion.endY) textToSend += '\n';
+                    }
                 }
 
                 if (textToSend.trim() || existingImageData) {
@@ -7536,10 +7951,12 @@ export function useWorldEngine({
                     if (hasImageIntent) {
                         // Image generation/editing path
                         setDialogueWithRevert("Generating image...", setDialogueText);
+                        setProcessingRegion(targetRegion);
 
                         callGenerateImageAPI(textToSend.trim(), existingImageData || undefined, userUid || undefined).then(async (result) => {
                             // Check if quota exceeded
                             if (result.text && result.text.startsWith('AI limit reached')) {
+                                setProcessingRegion(null);
                                 if (upgradeFlowHandlerRef.current) {
                                     upgradeFlowHandlerRef.current();
                                 }
@@ -7547,6 +7964,7 @@ export function useWorldEngine({
                             }
 
                             if (!result.imageData) {
+                                setProcessingRegion(null);
                                 setDialogueWithRevert("Image generation failed", setDialogueText);
                                 return true;
                             }
@@ -7611,7 +8029,13 @@ export function useWorldEngine({
                                     delete newWorldData[existingImageKey];
                                 }
 
-                                // Clear text in target region
+                                // Remove source note if this came from a note
+                                const sourceNoteKey = (targetRegion as any)._noteKey;
+                                if (sourceNoteKey && newWorldData[sourceNoteKey]) {
+                                    delete newWorldData[sourceNoteKey];
+                                }
+
+                                // Clear text in target region (for non-note text)
                                 for (let y = targetRegion.startY; y <= targetRegion.endY; y++) {
                                     for (let x = targetRegion.startX; x <= targetRegion.endX; x++) {
                                         const key = `${x},${y}`;
@@ -7624,6 +8048,7 @@ export function useWorldEngine({
                                 // Add new note
                                 newWorldData[noteKey] = JSON.stringify(noteData);
                                 setWorldData(newWorldData);
+                                setProcessingRegion(null);
 
                                 // Clear selection if we were using a selection (not a saved plan region)
                                 if (currentSelectionActive) {
@@ -7636,25 +8061,30 @@ export function useWorldEngine({
                             };
 
                             img.onerror = () => {
+                                setProcessingRegion(null);
                                 logger.error('Error loading generated image');
                                 setDialogueWithRevert("Error loading generated image", setDialogueText);
                             };
 
                             img.src = result.imageData!;
                         }).catch((error) => {
+                            setProcessingRegion(null);
                             logger.error('Error in image generation:', error);
                             setDialogueWithRevert("Could not generate image", setDialogueText);
                         });
                     } else {
                         // Text generation path (existing logic)
                         setDialogueWithRevert("Processing region...", setDialogueText);
+                        setProcessingRegion(targetRegion);
 
                         // Calculate target region dimensions
                         const regionWidth = targetRegion.endX - targetRegion.startX + 1;
                         const regionHeight = targetRegion.endY - targetRegion.startY + 1;
 
                         // Calculate approximate target character count (80% fill to account for wrapping)
-                        const targetChars = Math.floor(regionWidth * regionHeight * 0.8);
+                        // Account for GRID_CELL_SPAN - each text line occupies multiple Y cells
+                        const effectiveLines = Math.floor(regionHeight / GRID_CELL_SPAN);
+                        const targetChars = Math.floor(regionWidth * effectiveLines * 0.8);
 
                         // Update world context
                         const currentChips = getAllChips();
@@ -7676,6 +8106,7 @@ export function useWorldEngine({
                         callChatAPI(enhancedPrompt, true, userUid || undefined, worldContext).then((response) => {
                             // Check if quota exceeded
                             if (response.startsWith('AI limit reached')) {
+                                setProcessingRegion(null);
                                 if (upgradeFlowHandlerRef.current) {
                                     upgradeFlowHandlerRef.current();
                                 }
@@ -7684,6 +8115,7 @@ export function useWorldEngine({
 
                             // Don't show response in dialogue - write directly to target region
                             setDialogueWithRevert("AI response filled", setDialogueText);
+                            setProcessingRegion(null);
 
                             // Wrap text to fit within target region width
                             const wrapText = (text: string, maxWidth: number): string[] => {
@@ -7719,6 +8151,14 @@ export function useWorldEngine({
 
                             // Clear existing text in target region
                             const newWorldData = { ...worldData };
+
+                            // Remove source note if this came from a note
+                            const sourceNoteKey = (targetRegion as any)._noteKey;
+                            if (sourceNoteKey && newWorldData[sourceNoteKey]) {
+                                delete newWorldData[sourceNoteKey];
+                            }
+
+                            // Clear any standalone text in target region
                             for (let y = targetRegion.startY; y <= targetRegion.endY; y++) {
                                 for (let x = targetRegion.startX; x <= targetRegion.endX; x++) {
                                     const key = `${x},${y}`;
@@ -7729,12 +8169,14 @@ export function useWorldEngine({
                             }
 
                             // Write response into target region
-                            for (let lineIndex = 0; lineIndex < Math.min(wrappedLines.length, regionHeight); lineIndex++) {
+                            // Each line occupies GRID_CELL_SPAN vertical cells
+                            const maxLines = Math.floor(regionHeight / GRID_CELL_SPAN);
+                            for (let lineIndex = 0; lineIndex < Math.min(wrappedLines.length, maxLines); lineIndex++) {
                                 const line = wrappedLines[lineIndex];
                                 for (let charIndex = 0; charIndex < Math.min(line.length, regionWidth); charIndex++) {
                                     const char = line[charIndex];
                                     const x = targetRegion.startX + charIndex;
-                                    const y = targetRegion.startY + lineIndex;
+                                    const y = targetRegion.startY + (lineIndex * GRID_CELL_SPAN);
                                     const key = `${x},${y}`;
                                     newWorldData[key] = char;
                                 }
@@ -7750,6 +8192,7 @@ export function useWorldEngine({
                             // Keep cursor position
                             setCursorPos(cursorPos);
                         }).catch((error) => {
+                            setProcessingRegion(null);
                             logger.error('Error in region AI fill:', error);
                             setDialogueWithRevert("Could not process region", setDialogueText);
                         });
@@ -11646,6 +12089,7 @@ export function useWorldEngine({
         isPaintMode,
         paintColor,
         paintBrushSize,
+        paintType,
         exitPaintMode,
         paintCell: (x: number, y: number, prevX?: number, prevY?: number) => {
             if (!isPaintMode) return;
@@ -11698,7 +12142,7 @@ export function useWorldEngine({
             // Update world data with blob-based storage
             setWorldData(prev => {
                 // Find or create blob for the first cell
-                const { blob, isNew, existingBlobKey } = findOrCreateBlobForCell(prev, cellsToPaint[0].x, cellsToPaint[0].y, paintColor);
+                const { blob, isNew, existingBlobKey } = findOrCreateBlobForCell(prev, cellsToPaint[0].x, cellsToPaint[0].y, paintColor, paintType);
 
                 // Add all cells to the blob
                 const updatedBlob = addCellsToBlob(blob, cellsToPaint);
@@ -11708,6 +12152,87 @@ export function useWorldEngine({
                     ...prev,
                     [blobKey]: JSON.stringify(updatedBlob)
                 };
+            });
+        },
+        eraseCell: (x: number, y: number, prevX?: number, prevY?: number) => {
+            if (!isPaintMode) return;
+            const cellX = Math.floor(x);
+            const cellY = Math.floor(y);
+
+            // Collect all cells to erase
+            const cellsToErase: Array<{x: number, y: number}> = [];
+
+            // Bresenham's line algorithm for interpolation
+            const collectLine = (x0: number, y0: number, x1: number, y1: number) => {
+                const dx = Math.abs(x1 - x0);
+                const dy = Math.abs(y1 - y0);
+                const sx = x0 < x1 ? 1 : -1;
+                const sy = y0 < y1 ? 1 : -1;
+                let err = dx - dy;
+                let cx = x0;
+                let cy = y0;
+
+                while (true) {
+                    cellsToErase.push({ x: cx, y: cy });
+                    if (cx === x1 && cy === y1) break;
+                    const e2 = 2 * err;
+                    if (e2 > -dy) { err -= dy; cx += sx; }
+                    if (e2 < dx) { err += dx; cy += sy; }
+                }
+            };
+
+            // Collect cells based on brush size
+            if (paintBrushSize <= 1) {
+                if (prevX !== undefined && prevY !== undefined) {
+                    collectLine(Math.floor(prevX), Math.floor(prevY), cellX, cellY);
+                } else {
+                    cellsToErase.push({ x: cellX, y: cellY });
+                }
+            } else {
+                // Circular eraser matching brush size
+                const radius = paintBrushSize;
+                for (let dy = -radius; dy <= radius; dy++) {
+                    for (let dx = -radius; dx <= radius; dx++) {
+                        if (dx * dx + dy * dy < radius * radius) {
+                            cellsToErase.push({ x: cellX + dx, y: cellY + dy });
+                        }
+                    }
+                }
+            }
+
+            if (cellsToErase.length === 0) return;
+
+            // Remove cells from blobs
+            setWorldData(prev => {
+                const updates: Record<string, any> = {};
+                const blobs = getAllPaintBlobs(prev);
+
+                // Group cells to erase by which blob they belong to
+                for (const blob of blobs) {
+                    const cellsInThisBlob: Array<{x: number, y: number}> = [];
+
+                    for (const cell of cellsToErase) {
+                        const cellKey = `${cell.x},${cell.y}`;
+                        if (blob.cells.includes(cellKey)) {
+                            cellsInThisBlob.push(cell);
+                        }
+                    }
+
+                    if (cellsInThisBlob.length > 0) {
+                        const updatedBlob = removeCellsFromBlob(blob, cellsInThisBlob);
+                        const blobKey = `paintblob_${blob.id}`;
+
+                        if (updatedBlob === null) {
+                            // Blob is now empty, delete it
+                            updates[blobKey] = null;
+                        } else {
+                            // Update blob with remaining cells
+                            updates[blobKey] = JSON.stringify(updatedBlob);
+                        }
+                    }
+                }
+
+                return { ...prev, ...updates };
             });
         },
                             fillPolygon: (points: Point[]) => {
@@ -11754,7 +12279,7 @@ export function useWorldEngine({
 
                                 // Update world data with blob-based storage
                                 setWorldData(prev => {
-                                    const { blob } = findOrCreateBlobForCell(prev, cellsToPaint[0].x, cellsToPaint[0].y, paintColor);
+                                    const { blob } = findOrCreateBlobForCell(prev, cellsToPaint[0].x, cellsToPaint[0].y, paintColor, paintType);
                                     const updatedBlob = addCellsToBlob(blob, cellsToPaint);
                                     return {
                                         ...prev,
@@ -11823,7 +12348,7 @@ export function useWorldEngine({
 
             // Update world data with blob-based storage
             setWorldData(prev => {
-                const { blob } = findOrCreateBlobForCell(prev, cellsToFill[0].x, cellsToFill[0].y, paintColor);
+                const { blob } = findOrCreateBlobForCell(prev, cellsToFill[0].x, cellsToFill[0].y, paintColor, paintType);
                 const updatedBlob = addCellsToBlob(blob, cellsToFill);
                 return {
                     ...prev,
@@ -11858,6 +12383,10 @@ export function useWorldEngine({
         isGeneratingSprite,
         spriteProgress,
         spriteDebugLog,
+        // Chat bubble
+        bubbleState,
+        showBubbleMessage,
+        hideBubbleMessage,
         // Spatial indexing
         spatialIndex: spatialIndexRef,
         queryVisibleEntities,

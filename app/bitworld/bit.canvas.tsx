@@ -2,7 +2,7 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { WorldData, Point, WorldEngine, PanStartInfo, StyledCharacter, PaintBlob } from './world.engine'; // Adjust path as needed
-import { getCharScale, rewrapNoteText, findConnectedPaintRegion, getAllPaintBlobs, isPaintedCell, getPaintColorAt, findBlobAt, resizePaintBlob } from './world.engine';
+import { getCharScale, rewrapNoteText, findConnectedPaintRegion, getAllPaintBlobs, isPaintedCell, getPaintColorAt, findBlobAt, resizePaintBlob, regeneratePatternPaint } from './world.engine';
 import { useDialogue, useDebugDialogue } from './dialogue';
 import { useControllerSystem, createCameraController, createGridController, createTapeController, createCommandController } from './controllers';
 import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchicalFrames, HierarchicalFrame, HierarchyLevel, findTextBlockForSelection } from './bit.blocks';
@@ -13,6 +13,7 @@ import { CanvasRecorder } from './tape';
 import { renderStyledRect, getRectStyle, type CellBounds, type BaseRenderContext } from './styles';
 import { useMonogram } from './monogram';
 import { faceOrientationToRotation } from './face';
+import { renderBubble } from './bubble';
 
 // --- Constants --- (Copied and relevant ones kept)
 const GRID_COLOR = '#F2F2F233';
@@ -4184,7 +4185,15 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 continue;
             }
 
-            ctx.fillStyle = blob.color || '#000000';
+            // Set fill style based on paint type
+            if (blob.paintType === 'obstacle') {
+                // Obstacles rendered with slight transparency to indicate they block pathfinding
+                ctx.fillStyle = blob.color || '#000000';
+                ctx.globalAlpha = 0.7;
+            } else {
+                ctx.fillStyle = blob.color || '#000000';
+            }
+
             for (const cellKey of blob.cells) {
                 const [worldX, worldY] = cellKey.split(',').map(Number);
 
@@ -4193,6 +4202,11 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     const screenPos = engine.worldToScreen(worldX, worldY, currentZoom, currentOffset);
                     ctx.fillRect(screenPos.x, screenPos.y, effectiveCharWidth, effectiveCharHeight);
                 }
+            }
+
+            // Reset alpha after rendering obstacles
+            if (blob.paintType === 'obstacle') {
+                ctx.globalAlpha = 1.0;
             }
         }
 
@@ -4431,13 +4445,13 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 const topScreenPos = engine.worldToScreen(worldX, worldY - (scale.h - 1), currentZoom, currentOffset);
                 if (bottomScreenPos.x > -charPixelWidth * 2 && bottomScreenPos.x < cssWidth + charPixelWidth && topScreenPos.y > -charPixelHeight * 2 && bottomScreenPos.y < cssHeight + charPixelHeight) {
                     if (char) {
-                        // Draw background using scaled dimensions (chat input always has inverted colors)
-                        ctx.fillStyle = engine.textColor;
+                        // Draw background - bright yellow when character sprite enabled, otherwise inverted colors
+                        ctx.fillStyle = engine.isCharacterEnabled ? '#ffff00' : engine.textColor;
                         ctx.fillRect(topScreenPos.x, topScreenPos.y, charPixelWidth, charPixelHeight);
 
-                        // Draw text using background color (inverse of accent)
+                        // Draw text using background color (inverse of accent) or black on yellow
                         if (char.trim() !== '') {
-                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                            ctx.fillStyle = engine.isCharacterEnabled ? '#000000' : (engine.backgroundColor || '#FFFFFF');
                             renderText(ctx, char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
                         }
                     }
@@ -4464,16 +4478,17 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                         screenPos.y > -charPixelHeight * 2 && screenPos.y < cssHeight + charPixelHeight) {
 
                         if (char && char.trim() !== '') {
-                            // Draw background using accent color (engine.textColor)
-                            ctx.fillStyle = engine.textColor;
+                            // Draw background - bright yellow when character sprite enabled, otherwise inverted colors
+                            ctx.fillStyle = engine.isCharacterEnabled ? '#ffff00' : engine.textColor;
                             ctx.fillRect(screenPos.x, screenPos.y, charPixelWidth, charPixelHeight);
 
-                            // Draw text using background color (inverse of accent)
-                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                            // Draw text using background color (inverse of accent) or black on yellow
+                            const textColor = engine.isCharacterEnabled ? '#000000' : (engine.backgroundColor || '#FFFFFF');
+                            ctx.fillStyle = textColor;
                             renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset);
 
                             // Draw underline to indicate composition state
-                            ctx.fillStyle = engine.backgroundColor || '#FFFFFF';
+                            ctx.fillStyle = textColor;
                             ctx.fillRect(
                                 screenPos.x,
                                 screenPos.y + charPixelHeight - 2,
@@ -5920,6 +5935,21 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             );
 
                             ctx.globalAlpha = savedAlpha;
+
+                            // Render chat bubble above character sprite (grid-aligned)
+                            if (engine.bubbleState.isVisible && engine.bubbleState.text) {
+                                const characterCenterX = destX + destWidth / 2;
+                                const characterTopY = destY;
+                                renderBubble({
+                                    ctx,
+                                    state: engine.bubbleState,
+                                    characterCenterX,
+                                    characterTopY,
+                                    cellWidth: effectiveCharWidth,
+                                    cellHeight: effectiveCharHeight,
+                                    renderTextFn: (ctx, char, x, y) => renderText(ctx, char, x, y + verticalTextOffset),
+                                });
+                            }
                         }
                     } else if (engine.isGeneratingSprite) {
                         // Show sprite preview while generating (if available)
@@ -7097,6 +7127,12 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     lastPaintPosRef.current = worldPos;
                     isPaintingRef.current = true;
                     return;
+                } else if (engine.paintTool === 'eraser') {
+                    // Start erasing
+                    engine.eraseCell(worldPos.x, worldPos.y);
+                    lastPaintPosRef.current = worldPos;
+                    isPaintingRef.current = true;
+                    return;
                 } else if (engine.paintTool === 'lasso') {
                     // Start lasso - clear previous points and begin tracking
                     lassoPointsRef.current = [worldPos];
@@ -7513,6 +7549,9 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                         lassoPointsRef.current.push(worldPos);
                     }
                 }
+            } else if (engine.paintTool === 'eraser') {
+                engine.eraseCell(worldPos.x, worldPos.y, prev?.x, prev?.y); // Interpolate from last position
+                lastPaintPosRef.current = worldPos; // Update for next move
             }
 
             return;
@@ -8102,6 +8141,12 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                                                 width: actualWidth,
                                                 height: actualHeight
                                             });
+
+                                            // Regenerate linked paint blob for the pattern
+                                            const paintResult = regeneratePatternPaint(newData, noteData.patternKey);
+                                            if (paintResult) {
+                                                newData[paintResult.blobKey] = JSON.stringify(paintResult.updatedBlob);
+                                            }
                                         } catch (e) {
                                             // Pattern update failed, but note move still succeeds
                                         }
@@ -8571,6 +8616,12 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     isPaintingRef.current = true;
                     e.preventDefault();
                     return;
+                } else if (engine.paintTool === 'eraser') {
+                    engine.eraseCell(worldPos.x, worldPos.y);
+                    lastPaintPosRef.current = worldPos;
+                    isPaintingRef.current = true;
+                    e.preventDefault();
+                    return;
                 } else if (engine.paintTool === 'lasso') {
                     lassoPointsRef.current = [worldPos];
                     engine.paintCell(worldPos.x, worldPos.y);
@@ -8785,6 +8836,9 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                         lassoPointsRef.current.push(worldPos);
                     }
                 }
+            } else if (engine.paintTool === 'eraser') {
+                engine.eraseCell(worldPos.x, worldPos.y, prev?.x, prev?.y);
+                lastPaintPosRef.current = worldPos;
             }
 
             e.preventDefault();
@@ -9374,6 +9428,12 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                                             width: actualWidth,
                                             height: actualHeight
                                         });
+
+                                        // Regenerate linked paint blob for the pattern
+                                        const paintResult = regeneratePatternPaint(newData, noteData.patternKey);
+                                        if (paintResult) {
+                                            newData[paintResult.blobKey] = JSON.stringify(paintResult.updatedBlob);
+                                        }
                                     } catch (e) {
                                         // Pattern update failed, but note move still succeeds
                                     }

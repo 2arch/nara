@@ -3,6 +3,8 @@
  * Uses A* algorithm with obstacle avoidance and path smoothing
  */
 
+import { getAllPaintBlobs } from './world.engine';
+
 export interface Point {
     x: number;
     y: number;
@@ -83,6 +85,35 @@ function isInsideNoteRegion(x: number, y: number, worldData: WorldData): boolean
 }
 
 /**
+ * Check if position contains obstacle paint
+ */
+function isObstaclePaint(x: number, y: number, worldData: WorldData): boolean {
+    // Round to integer cell coordinates
+    const roundedX = Math.round(x);
+    const roundedY = Math.round(y);
+    const cellKey = `${roundedX},${roundedY}`;
+    const blobs = getAllPaintBlobs(worldData);
+
+    for (const blob of blobs) {
+        // Only check blobs marked as obstacles
+        if (blob.paintType !== 'obstacle') continue;
+
+        // Quick bounds check first
+        if (roundedX < blob.bounds.minX || roundedX > blob.bounds.maxX ||
+            roundedY < blob.bounds.minY || roundedY > blob.bounds.maxY) {
+            continue;
+        }
+
+        // Check if cell is in this obstacle blob
+        if (blob.cells.includes(cellKey)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
  * Manhattan distance heuristic
  */
 function heuristic(a: Point, b: Point): number {
@@ -113,11 +144,7 @@ export function findPath(
         return [start];
     }
 
-    // If distance is very short, just return direct path
-    const directDistance = euclideanDistance(start, end);
-    if (directDistance < 3) {
-        return [start, end];
-    }
+    // Note: We no longer skip A* for short distances - need to check for obstacles even for short paths
 
     const openSet: PathNode[] = [];
     const closedSet = new Set<string>();
@@ -188,12 +215,29 @@ export function findPath(
 
             // Skip if obstacle (but allow target position)
             const isTarget = Math.abs(nx - end.x) < 1 && Math.abs(ny - end.y) < 1;
-            if (!isTarget && isInsideNoteRegion(nx, ny, worldData)) {
+            if (!isTarget && (isInsideNoteRegion(nx, ny, worldData) || isObstaclePaint(nx, ny, worldData))) {
                 continue;
             }
 
-            // Calculate costs
+            // Calculate costs - check if diagonal movement
             const isDiagonal = dir.x !== 0 && dir.y !== 0;
+
+            // For diagonal movement, check that we're not squeezing through corner-connected obstacles
+            if (isDiagonal) {
+                // Check both orthogonal neighbors - if either is blocked, can't move diagonally
+                const side1X = current.x + dir.x;
+                const side1Y = current.y;
+                const side2X = current.x;
+                const side2Y = current.y + dir.y;
+
+                const side1Blocked = isInsideNoteRegion(side1X, side1Y, worldData) || isObstaclePaint(side1X, side1Y, worldData);
+                const side2Blocked = isInsideNoteRegion(side2X, side2Y, worldData) || isObstaclePaint(side2X, side2Y, worldData);
+
+                // If either orthogonal side is blocked, can't squeeze through diagonally
+                if (side1Blocked || side2Blocked) {
+                    continue;
+                }
+            }
             const moveCost = isDiagonal ? 1.414 : 1.0; // Diagonal movement costs more
             const g = current.g + moveCost;
             const h = heuristic({ x: nx, y: ny }, end);
@@ -347,6 +391,13 @@ export function findSmoothPath(
 
     // If path is very short, don't smooth
     if (rawPath.length < 3) return rawPath;
+
+    // Check if there are any obstacles - if so, don't smooth (smoothing can cut through obstacles)
+    const hasObstacles = getAllPaintBlobs(worldData).some(blob => blob.paintType === 'obstacle');
+    if (hasObstacles) {
+        // Return raw A* path without smoothing to avoid cutting through obstacles
+        return rawPath;
+    }
 
     // Simplify to remove unnecessary waypoints
     const simplified = simplifyPath(rawPath, 1.0);
