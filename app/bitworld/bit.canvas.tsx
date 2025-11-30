@@ -7512,11 +7512,11 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                                     ? JSON.parse(engine.worldData[key] as string)
                                     : engine.worldData[key];
 
-                                // Check if it's a text note with scrolling enabled
+                                // Check if it's a text note in scroll/paint display mode
                                 const isTextNote = !noteData.contentType || noteData.contentType === 'text';
-                                const hasScrolling = noteData.data && (noteData.scrollOffset !== undefined || noteData.scrollOffsetX !== undefined);
+                                const isScrollableMode = noteData.displayMode === 'scroll' || noteData.displayMode === 'paint';
 
-                                if (isTextNote && hasScrolling &&
+                                if (isTextNote && isScrollableMode &&
                                     snappedWorldPos.x >= noteData.startX && snappedWorldPos.x <= noteData.endX &&
                                     snappedWorldPos.y >= noteData.startY && snappedWorldPos.y <= noteData.endY) {
                                     noteAtPos = { key, data: noteData };
@@ -8659,11 +8659,11 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                                     ? JSON.parse(engine.worldData[key] as string)
                                     : engine.worldData[key];
 
-                                // Check if it's a text note with scrolling enabled
+                                // Check if it's a text note in scroll/paint display mode
                                 const isTextNote = !noteData.contentType || noteData.contentType === 'text';
-                                const hasScrolling = noteData.data && (noteData.scrollOffset !== undefined || noteData.scrollOffsetX !== undefined);
+                                const isScrollableMode = noteData.displayMode === 'scroll' || noteData.displayMode === 'paint';
 
-                                if (isTextNote && hasScrolling &&
+                                if (isTextNote && isScrollableMode &&
                                     snappedWorldPos.x >= noteData.startX && snappedWorldPos.x <= noteData.endX &&
                                     snappedWorldPos.y >= noteData.startY && snappedWorldPos.y <= noteData.endY) {
                                     noteAtPos = { key, data: noteData };
