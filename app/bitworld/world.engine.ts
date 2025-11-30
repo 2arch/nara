@@ -1249,6 +1249,15 @@ export interface WorldEngine {
     recorder: DataRecorder;
     // Note text wrapping
     rewrapNoteText: (noteData: any) => any;
+    // View overlay for fullscreen note viewing
+    viewOverlay?: {
+        noteKey: string;
+        content: string;
+        scrollOffset: number;
+        maxScroll: number;
+    };
+    exitViewOverlay: () => void;
+    setViewOverlayScroll: (scrollOffset: number) => void;
 }
 
 // --- Hook Input ---
@@ -2375,6 +2384,9 @@ export function useWorldEngine({
         isGeneratingSprite,
         spriteProgress,
         spriteDebugLog,
+        viewOverlay,
+        exitViewOverlay,
+        setViewOverlayScroll,
     } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid: authenticatedUserUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, currentScale, setCurrentScale, recorder, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
@@ -4469,6 +4481,13 @@ export function useWorldEngine({
         if (key === 'Escape' && isMoveMode) {
             exitMoveMode();
             setDialogueWithRevert("Move mode disabled", setDialogueText);
+            return true;
+        }
+
+        // === View Overlay Exit ===
+        if (key === 'Escape' && viewOverlay) {
+            exitViewOverlay();
+            setDialogueWithRevert("Exited view mode", setDialogueText);
             return true;
         }
 
@@ -11043,6 +11062,49 @@ export function useWorldEngine({
     }, [zoomLevel, viewOffset, screenToWorld, selectionStart, selectionEnd, chatMode, worldData, setDialogueText, clipboardItems, getCharacter, isImageData]);
 
     const handleCanvasWheel = useCallback((deltaX: number, deltaY: number, canvasRelativeX: number, canvasRelativeY: number, ctrlOrMetaKey: boolean): void => {
+        // Handle view overlay scrolling first
+        if (viewOverlay) {
+            const scrollSpeed = 30; // Pixels per scroll tick
+            const scrollDelta = Math.sign(deltaY) * scrollSpeed;
+
+            // Calculate max scroll based on content
+            // We need to calculate this dynamically since content wraps
+            const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
+            const isPortrait = viewportHeight > (typeof window !== 'undefined' ? window.innerWidth : 800);
+            const verticalMargin = isPortrait ? 48 : Math.max(60, viewportHeight * 0.1);
+            const contentAreaHeight = viewportHeight - (verticalMargin * 2);
+
+            // Estimate content height (wrapped lines * line height)
+            const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
+            const horizontalMargin = isPortrait ? 24 : Math.max(60, (typeof window !== 'undefined' ? window.innerWidth : 800) * 0.1);
+            const contentAreaWidth = (typeof window !== 'undefined' ? window.innerWidth : 800) - (horizontalMargin * 2);
+            const charsPerLine = Math.floor(contentAreaWidth / effectiveCharWidth);
+
+            // Count wrapped lines
+            const content = viewOverlay.content;
+            const paragraphs = content.split('\n');
+            let totalLines = 0;
+            for (const paragraph of paragraphs) {
+                if (paragraph === '') {
+                    totalLines++;
+                } else {
+                    totalLines += Math.ceil(paragraph.length / charsPerLine) || 1;
+                }
+            }
+
+            const totalContentHeight = totalLines * effectiveCharHeight;
+            const maxScroll = Math.max(0, totalContentHeight - contentAreaHeight);
+
+            const currentScroll = viewOverlay.scrollOffset || 0;
+            const newScroll = Math.max(0, Math.min(maxScroll, currentScroll + scrollDelta));
+
+            if (newScroll !== currentScroll) {
+                setViewOverlayScroll(newScroll);
+            }
+
+            return; // Don't process other scroll actions
+        }
+
         // First, check if mouse is over a list (unless zooming with ctrl/meta)
         if (!ctrlOrMetaKey) {
             const worldPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
@@ -11281,7 +11343,7 @@ export function useWorldEngine({
                 setViewOffset(prev => ({ x: prev.x + deltaWorldX, y: prev.y + deltaWorldY }));
             }
         }
-    }, [zoomLevel, viewOffset, screenToWorld, getEffectiveCharDims, findListAt, worldData, isFullscreenMode, fullscreenRegion, isFocusMode, focusRegion]);
+    }, [zoomLevel, viewOffset, screenToWorld, getEffectiveCharDims, findListAt, worldData, isFullscreenMode, fullscreenRegion, isFocusMode, focusRegion, viewOverlay, setViewOverlayScroll]);
 
     const handlePanStart = useCallback((clientX: number, clientY: number): PanStartInfo | null => {
         isPanningRef.current = true;
@@ -12396,5 +12458,9 @@ export function useWorldEngine({
         recorder,
         // Note text wrapping
         rewrapNoteText: rewrapNoteTextInternal,
+        // View overlay
+        viewOverlay,
+        exitViewOverlay,
+        setViewOverlayScroll,
     };
 }

@@ -370,6 +370,12 @@ export interface ModeState {
     paintColor: string; // Current paint brush color
     paintBrushSize: number; // Paint brush radius in cells
     paintType: 'color' | 'obstacle'; // Type of paint: color (default) or obstacle (blocks pathfinding)
+    viewOverlay?: { // View overlay state for fullscreen note viewing
+        noteKey: string; // Key of the note being viewed
+        content: string; // Wrapped text content for the overlay
+        scrollOffset: number; // Current scroll position
+        maxScroll: number; // Maximum scroll value
+    };
 }
 
 interface UseCommandSystemProps {
@@ -424,7 +430,7 @@ const READ_ONLY_COMMANDS = ['signin', 'share'];
 // Commands organized by category for logical ordering
 const AVAILABLE_COMMANDS = [
     // Navigation & View
-    'nav', 'search', 'cam', 'indent', 'zoom', 'map', 'full', 'focus',
+    'nav', 'search', 'cam', 'indent', 'zoom', 'map', 'view', 'focus',
     // Content Creation
     'chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint', 'pattern', 'connect', 'export',
     // Special
@@ -445,7 +451,7 @@ const AVAILABLE_COMMANDS = [
 
 // Category mapping for visual organization
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
-    'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map', 'full', 'focus'],
+    'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map', 'view', 'focus'],
     'create': ['chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint', 'export'],
     'special': ['mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help'],
     'style': ['bg', 'text', 'font', 'style', 'display', 'be'],
@@ -469,7 +475,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'map': 'Generate a procedural map of ephemeral labels around your viewport. Creates a tasteful exploration terrain with temporary waypoints that disappear when you press Escape.',
     'cam': 'Control camera behavior. Use /cam focus to enable focus mode, which smoothly follows your cursor. Use /cam default to return to normal panning.',
     'indent': 'Toggle text indentation. This affects how new lines are indented when you press Enter, helping you organize thoughts hierarchically.',
-    'full': 'Enter fullscreen mode for lists. Position cursor inside a list, type /full to constrain viewport to list bounds with generous margins. Press Escape or /full again to exit.',
+    'view': 'View a note as a fullscreen overlay. Position cursor inside a note and type /view. The note content appears centered with margins, text wrapped to fit. Scroll if content overflows. Press Escape to exit.',
     'focus': 'Constrain viewport to a region. Position cursor in a note OR make a selection, then type /focus. Viewport locks to region bounds (strict, no margins). Great for reliable rendering. Press Escape to exit.',
     'chip': 'Create a spatial chip at your current selection. Type /chip \'text\' [color]. Defaults to current text color (accent). Custom colors: /chip \'text\' crimson. Chips show as colored cells with cutout text.',
     'task': 'Create a toggleable task from selected text. Select text, then type /task [color]. Click the highlighted task to toggle completion (adds strikethrough). Click again to un-complete it.',
@@ -4792,6 +4798,89 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             };
         }
 
+        if (commandToExecute.startsWith('view')) {
+            // /view command - show note as fullscreen overlay
+            const cursorPos = commandState.commandStartPos;
+
+            // If already viewing, exit
+            if (modeState.viewOverlay) {
+                setModeState(prev => ({ ...prev, viewOverlay: undefined }));
+                setDialogueText?.("Exited view mode");
+                clearCommandState();
+                return null;
+            }
+
+            // Find note at cursor position
+            for (const key in worldData) {
+                if (key.startsWith('note_')) {
+                    try {
+                        const noteData = JSON.parse(worldData[key] as string);
+                        const { startX, endX, startY, endY } = noteData;
+
+                        // Check if cursor is within note bounds
+                        if (cursorPos.x >= startX && cursorPos.x <= endX &&
+                            cursorPos.y >= startY && cursorPos.y <= endY) {
+
+                            // Extract text content from note
+                            const noteContent = noteData.data || {};
+                            const lines: string[] = [];
+
+                            // Find all text in the note region
+                            let minY = Infinity, maxY = -Infinity;
+                            for (const cellKey in noteContent) {
+                                const [, yStr] = cellKey.split(',');
+                                const y = parseInt(yStr, 10);
+                                if (!isNaN(y)) {
+                                    minY = Math.min(minY, y);
+                                    maxY = Math.max(maxY, y);
+                                }
+                            }
+
+                            // Extract lines
+                            for (let y = minY; y <= maxY; y++) {
+                                let line = '';
+                                for (let x = startX; x <= endX; x++) {
+                                    const cellKey = `${x},${y}`;
+                                    const cellData = noteContent[cellKey];
+                                    if (cellData) {
+                                        const char = typeof cellData === 'string' ? cellData : cellData.char || ' ';
+                                        line += char;
+                                    } else {
+                                        line += ' ';
+                                    }
+                                }
+                                lines.push(line.trimEnd());
+                            }
+
+                            // Join lines and calculate wrapped content
+                            const rawContent = lines.join('\n').trim();
+
+                            // Set view overlay state
+                            setModeState(prev => ({
+                                ...prev,
+                                viewOverlay: {
+                                    noteKey: key,
+                                    content: rawContent,
+                                    scrollOffset: 0,
+                                    maxScroll: 0 // Will be calculated during render
+                                }
+                            }));
+
+                            setDialogueText?.("View mode - press Esc to exit");
+                            clearCommandState();
+                            return null;
+                        }
+                    } catch (e) {
+                        // Skip invalid note data
+                    }
+                }
+            }
+
+            setDialogueText?.("Position cursor inside a note first");
+            clearCommandState();
+            return null;
+        }
+
         if (commandToExecute.startsWith('focus')) {
             // /focus command - constrain viewport to note or selection bounds
             const cursorPos = commandState.commandStartPos;
@@ -6572,5 +6661,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         setPaintColor: (color: string) => setModeState(prev => ({ ...prev, paintColor: color })),
         setPaintBrushSize: (size: number) => setModeState(prev => ({ ...prev, paintBrushSize: size })),
         setPaintTool: (tool: 'brush' | 'fill' | 'lasso') => setModeState(prev => ({ ...prev, paintTool: tool })),
+        // View overlay
+        viewOverlay: modeState.viewOverlay,
+        exitViewOverlay: () => setModeState(prev => ({ ...prev, viewOverlay: undefined })),
+        setViewOverlayScroll: (scrollOffset: number) => setModeState(prev => ({
+            ...prev,
+            viewOverlay: prev.viewOverlay ? { ...prev.viewOverlay, scrollOffset } : undefined
+        })),
     };
 }

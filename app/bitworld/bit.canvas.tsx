@@ -1188,6 +1188,166 @@ function renderHostDialogue(
     }
 }
 
+/**
+ * Renders a fullscreen view overlay for a note
+ * Shows note content centered with margins, scrollable if content overflows
+ */
+function renderViewOverlay(
+    ctx: CanvasRenderingContext2D,
+    params: {
+        engine: any;
+        cssWidth: number;
+        cssHeight: number;
+        effectiveCharWidth: number;
+        effectiveCharHeight: number;
+        renderText: (ctx: CanvasRenderingContext2D, text: string, x: number, y: number) => void;
+    }
+): { contentHeight: number; visibleHeight: number } | null {
+    const {
+        engine,
+        cssWidth,
+        cssHeight,
+        effectiveCharWidth,
+        effectiveCharHeight,
+        renderText
+    } = params;
+
+    if (!engine.viewOverlay) return null;
+
+    const { content, scrollOffset } = engine.viewOverlay;
+
+    // Calculate margins (responsive)
+    const viewportWidth = cssWidth;
+    const viewportHeight = cssHeight;
+    const isPortrait = viewportHeight > viewportWidth;
+    const horizontalMargin = isPortrait ? 24 : Math.max(60, viewportWidth * 0.1);
+    const verticalMargin = isPortrait ? 48 : Math.max(60, viewportHeight * 0.1);
+
+    // Available content area
+    const contentAreaWidth = viewportWidth - (horizontalMargin * 2);
+    const contentAreaHeight = viewportHeight - (verticalMargin * 2);
+
+    // Calculate chars per line
+    const charsPerLine = Math.floor(contentAreaWidth / effectiveCharWidth);
+
+    // Text wrapping
+    const wrapText = (text: string, maxWidth: number): string[] => {
+        const paragraphs = text.split('\n');
+        const lines: string[] = [];
+        for (const paragraph of paragraphs) {
+            if (paragraph === '') {
+                lines.push('');
+                continue;
+            }
+            const words = paragraph.split(' ');
+            let currentLine = '';
+            for (const word of words) {
+                const testLine = currentLine ? `${currentLine} ${word}` : word;
+                if (testLine.length <= maxWidth) {
+                    currentLine = testLine;
+                } else {
+                    if (currentLine) {
+                        lines.push(currentLine);
+                        currentLine = word;
+                    } else {
+                        // Word is longer than maxWidth, break it
+                        let remaining = word;
+                        while (remaining.length > maxWidth) {
+                            lines.push(remaining.substring(0, maxWidth));
+                            remaining = remaining.substring(maxWidth);
+                        }
+                        currentLine = remaining;
+                    }
+                }
+            }
+            if (currentLine) lines.push(currentLine);
+        }
+        return lines;
+    };
+
+    const wrappedLines = wrapText(content, charsPerLine);
+    const totalContentHeight = wrappedLines.length * effectiveCharHeight;
+    const visibleLines = Math.floor(contentAreaHeight / effectiveCharHeight);
+
+    // Draw semi-transparent background overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, cssWidth, cssHeight);
+
+    // Draw content area background (slightly lighter)
+    const bgColor = engine.backgroundColor || '#000000';
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(horizontalMargin, verticalMargin, contentAreaWidth, contentAreaHeight);
+
+    // Draw border around content area
+    ctx.strokeStyle = engine.textColor || '#FFFFFF';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(horizontalMargin, verticalMargin, contentAreaWidth, contentAreaHeight);
+
+    // Clip to content area for text
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(horizontalMargin, verticalMargin, contentAreaWidth, contentAreaHeight);
+    ctx.clip();
+
+    // Calculate which lines to show based on scroll
+    const startLine = Math.floor(scrollOffset / effectiveCharHeight);
+    const endLine = Math.min(wrappedLines.length, startLine + visibleLines + 1);
+
+    // Render visible lines
+    const textColor = engine.textColor || '#FFFFFF';
+    ctx.fillStyle = textColor;
+
+    for (let i = startLine; i < endLine; i++) {
+        const line = wrappedLines[i];
+        const lineY = verticalMargin + (i * effectiveCharHeight) - scrollOffset + 8; // 8px padding
+
+        // Skip if outside visible area
+        if (lineY < verticalMargin - effectiveCharHeight || lineY > verticalMargin + contentAreaHeight) {
+            continue;
+        }
+
+        // Render each character
+        for (let j = 0; j < line.length; j++) {
+            const char = line[j];
+            const charX = horizontalMargin + (j * effectiveCharWidth) + 8; // 8px padding
+            if (char && char.trim() !== '') {
+                renderText(ctx, char, charX, lineY);
+            }
+        }
+    }
+
+    ctx.restore();
+
+    // Draw scroll indicator if content overflows
+    if (totalContentHeight > contentAreaHeight) {
+        const scrollbarWidth = 4;
+        const scrollbarHeight = Math.max(20, (contentAreaHeight / totalContentHeight) * contentAreaHeight);
+        const maxScroll = totalContentHeight - contentAreaHeight;
+        const scrollProgress = Math.min(1, scrollOffset / maxScroll);
+        const scrollbarY = verticalMargin + scrollProgress * (contentAreaHeight - scrollbarHeight);
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.fillRect(
+            horizontalMargin + contentAreaWidth - scrollbarWidth - 4,
+            scrollbarY,
+            scrollbarWidth,
+            scrollbarHeight
+        );
+    }
+
+    // Draw hint at bottom
+    const hintText = 'ESC to exit • scroll to navigate';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.font = `12px monospace`;
+    const hintWidth = ctx.measureText(hintText).width;
+    ctx.fillText(hintText, (cssWidth - hintWidth) / 2, cssHeight - 20);
+
+    return {
+        contentHeight: totalContentHeight,
+        visibleHeight: contentAreaHeight
+    };
+}
+
 // ============================================================================
 
 interface CursorTrailPosition {
@@ -4443,6 +4603,15 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             drawArrow
         });
 
+        // === Render View Overlay (Fullscreen Note View) ===
+        renderViewOverlay(ctx, {
+            engine,
+            cssWidth,
+            cssHeight,
+            effectiveCharWidth,
+            effectiveCharHeight,
+            renderText
+        });
 
         // === Render Chat Data (Black Background, White Text) ===
         // Check if we need to mask passwords in host mode (only if not toggled to visible)
