@@ -372,9 +372,18 @@ export interface ModeState {
     paintType: 'color' | 'obstacle'; // Type of paint: color (default) or obstacle (blocks pathfinding)
     viewOverlay?: { // View overlay state for fullscreen note viewing
         noteKey: string; // Key of the note being viewed
-        content: string; // Wrapped text content for the overlay
-        scrollOffset: number; // Current scroll position
-        maxScroll: number; // Maximum scroll value
+        // Original note bounds (for restoration on exit)
+        originalStartX: number;
+        originalStartY: number;
+        originalEndX: number;
+        originalEndY: number;
+        // Expanded bounds for the overlay view
+        expandedStartX: number;
+        expandedStartY: number;
+        expandedEndX: number;
+        expandedEndY: number;
+        // Original note data for restoration
+        originalData: Record<string, any>;
     };
 }
 
@@ -513,7 +522,8 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'account': 'Manage your account settings. Use /account reset to reset your password.',
     'upgrade': 'Upgrade to Nara Pro for unlimited AI operations. Starts a guided conversation to learn about Pro benefits and pricing before upgrading.',
     'debug': 'Toggle debug mode. Shows technical information about canvas state, performance, and rendering. Useful for troubleshooting or understanding the system.',
-    'be': 'Toggle character sprite cursor. When enabled, your cursor becomes an animated character that walks when you move and idles when stationary.'
+    'be': 'Toggle character sprite cursor. When enabled, your cursor becomes an animated character that walks when you move and idles when stationary.',
+    'shell': 'Convert a note region into an interactive terminal. Position cursor inside a note and type /shell to open a shell session. Connects to the local terminal server for command-line access.'
 };
 
 // Standardized color mapping used throughout the application
@@ -3343,6 +3353,215 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 return null;
             }
 
+            // Handle --post flag (apply post-processing effects to sprite sheets)
+            if (beArgs.startsWith('--post ')) {
+                const postArgs = beArgs.slice(7).trim().split(' ');
+
+                // Parse arguments: /be --post [effectName] [spriteName]
+                let effectName = 'monochrome'; // default
+                let spriteName: string;
+
+                if (postArgs.length === 1) {
+                    // Just sprite name, use default monochrome
+                    spriteName = postArgs[0];
+                } else if (postArgs.length >= 2) {
+                    // Effect name and sprite name
+                    effectName = postArgs[0].toLowerCase();
+                    spriteName = postArgs[1];
+                } else {
+                    setDialogueWithRevert("Usage: /be --post [effect] <sprite> (effects: monochrome, sepia, invert, ghost)", setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                // Validate effect name
+                const validEffects = ['monochrome', 'sepia', 'invert', 'ghost'];
+                if (!validEffects.includes(effectName)) {
+                    setDialogueWithRevert(`Unknown effect: ${effectName}. Valid: ${validEffects.join(', ')}`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                if (!userUid) {
+                    setDialogueWithRevert("Must be logged in to post-process", setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                // Look up sprite by name to get ID
+                const sprite = userSprites.find(s => s.name.toLowerCase() === spriteName.toLowerCase());
+                if (!sprite) {
+                    setDialogueWithRevert(`Sprite "${spriteName}" not found`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+                const spriteId = sprite.id;
+
+                setDialogueText(`Applying ${effectName} effect to ${spriteName}...`);
+                console.log(`[/be --post] Post-processing sprite: ${spriteName} (id: ${spriteId}) with effect: ${effectName}`);
+
+                (async () => {
+                    try {
+                        const { ref: storageRef, getDownloadURL, uploadString } = await import('firebase/storage');
+                        const { storage } = await import('@/app/firebase');
+
+                        // Load the sprite sheets (idle and walk if available)
+                        const sheets: Array<{ name: string; url: string }> = [];
+
+                        try {
+                            const idleRef = storageRef(storage, `sprites/${userUid}/${spriteId}/idle.png`);
+                            const idleUrl = await getDownloadURL(idleRef);
+                            sheets.push({ name: 'idle', url: idleUrl });
+                        } catch (err) {
+                            console.log(`[/be --post] No idle.png found`);
+                        }
+
+                        try {
+                            const walkRef = storageRef(storage, `sprites/${userUid}/${spriteId}/walk.png`);
+                            const walkUrl = await getDownloadURL(walkRef);
+                            sheets.push({ name: 'walk', url: walkUrl });
+                        } catch (err) {
+                            console.log(`[/be --post] No walk.png found`);
+                        }
+
+                        if (sheets.length === 0) {
+                            setDialogueText(`No sprite sheets found for ${spriteName}`);
+                            return;
+                        }
+
+                        console.log(`[/be --post] Found ${sheets.length} sheet(s) to process`);
+
+                        // Process each sheet
+                        for (const sheet of sheets) {
+                            console.log(`[/be --post] Processing ${sheet.name}.png...`);
+
+                            // Fetch the image
+                            const response = await fetch(sheet.url);
+                            const blob = await response.blob();
+
+                            // Apply effect using canvas (client-side)
+                            const img = new Image();
+                            img.crossOrigin = 'anonymous';
+
+                            const processedDataUrl = await new Promise<string>((resolve, reject) => {
+                                img.onload = () => {
+                                    // Create canvas
+                                    const canvas = document.createElement('canvas');
+                                    canvas.width = img.width;
+                                    canvas.height = img.height;
+                                    const ctx = canvas.getContext('2d');
+
+                                    if (!ctx) {
+                                        reject(new Error('Failed to get canvas context'));
+                                        return;
+                                    }
+
+                                    // Draw image
+                                    ctx.drawImage(img, 0, 0);
+
+                                    // Get image data
+                                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                                    const data = imageData.data;
+
+                                    // Apply effect based on effectName
+                                    if (effectName === 'monochrome') {
+                                        // Convert to grayscale
+                                        for (let i = 0; i < data.length; i += 4) {
+                                            const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                                            data[i] = gray;     // R
+                                            data[i + 1] = gray; // G
+                                            data[i + 2] = gray; // B
+                                            // data[i + 3] is alpha, leave unchanged
+                                        }
+                                    } else if (effectName === 'sepia') {
+                                        // Apply sepia tone
+                                        for (let i = 0; i < data.length; i += 4) {
+                                            const r = data[i];
+                                            const g = data[i + 1];
+                                            const b = data[i + 2];
+
+                                            data[i] = Math.min(255, (r * 0.393) + (g * 0.769) + (b * 0.189));     // R
+                                            data[i + 1] = Math.min(255, (r * 0.349) + (g * 0.686) + (b * 0.168)); // G
+                                            data[i + 2] = Math.min(255, (r * 0.272) + (g * 0.534) + (b * 0.131)); // B
+                                        }
+                                    } else if (effectName === 'invert') {
+                                        // Invert colors
+                                        for (let i = 0; i < data.length; i += 4) {
+                                            data[i] = 255 - data[i];         // R
+                                            data[i + 1] = 255 - data[i + 1]; // G
+                                            data[i + 2] = 255 - data[i + 2]; // B
+                                            // data[i + 3] is alpha, leave unchanged
+                                        }
+                                    } else if (effectName === 'ghost') {
+                                        // Ghost effect: flatten to single color silhouette (semi-transparent white)
+                                        const ghostColor = { r: 255, g: 255, b: 255 }; // White ghost
+                                        const ghostOpacity = 0.7; // 70% opacity for ghostly effect
+
+                                        for (let i = 0; i < data.length; i += 4) {
+                                            const alpha = data[i + 3];
+
+                                            if (alpha > 0) {
+                                                // Preserve silhouette but flatten to ghost color
+                                                data[i] = ghostColor.r;         // R
+                                                data[i + 1] = ghostColor.g;     // G
+                                                data[i + 2] = ghostColor.b;     // B
+                                                data[i + 3] = alpha * ghostOpacity; // Reduce opacity for ghostly effect
+                                            }
+                                        }
+                                    }
+
+                                    // Put processed data back
+                                    ctx.putImageData(imageData, 0, 0);
+
+                                    // Convert to data URL
+                                    resolve(canvas.toDataURL('image/png'));
+                                };
+                                img.onerror = () => reject(new Error('Failed to load image'));
+                                img.src = sheet.url;
+                            });
+
+                            // Upload processed image back to storage
+                            const uploadRef = storageRef(storage, `sprites/${userUid}/${spriteId}/${sheet.name}.png`);
+                            await uploadString(uploadRef, processedDataUrl, 'data_url');
+
+                            console.log(`[/be --post] Processed and uploaded ${sheet.name}.png`);
+                        }
+
+                        // Reload the sprite
+                        const idleRef = storageRef(storage, `sprites/${userUid}/${spriteId}/idle.png`);
+                        const idleUrl = await getDownloadURL(idleRef);
+
+                        let walkUrl = idleUrl; // Fallback to idle
+                        try {
+                            const walkRef = storageRef(storage, `sprites/${userUid}/${spriteId}/walk.png`);
+                            walkUrl = await getDownloadURL(walkRef);
+                        } catch (err) {
+                            console.log(`[/be --post] Using idle for walk`);
+                        }
+
+                        // Set as current cursor
+                        setModeState(prev => ({
+                            ...prev,
+                            isCharacterEnabled: true,
+                            characterSprite: {
+                                walkSheet: walkUrl,
+                                idleSheet: idleUrl,
+                                name: spriteName,
+                            },
+                        }));
+
+                        setDialogueText(`${effectName.charAt(0).toUpperCase() + effectName.slice(1)} effect applied to ${spriteName}!`);
+                    } catch (err) {
+                        const errMsg = err instanceof Error ? err.message : String(err);
+                        console.error('[/be --post] Error:', err);
+                        setDialogueText(`Failed to post-process: ${errMsg}`);
+                    }
+                })();
+
+                clearCommandState();
+                return null;
+            }
+
             // Handle --sheet flag (create idle sheet from existing rotations)
             if (beArgs.startsWith('--sheet ')) {
                 const spriteName = beArgs.slice(8).trim();
@@ -4799,16 +5018,137 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('view')) {
-            // /view command - show note as fullscreen overlay
+            // /view command - show note as fullscreen overlay with expanded width
             const cursorPos = commandState.commandStartPos;
 
-            // If already viewing, exit
+            // If already viewing, exit and restore original note bounds (preserving edits)
             if (modeState.viewOverlay) {
+                const overlay = modeState.viewOverlay;
+
+                // Restore original note bounds but keep edited data
+                if (setWorldData && worldData[overlay.noteKey]) {
+                    try {
+                        const currentNote = JSON.parse(worldData[overlay.noteKey] as string);
+                        // Keep the current data (with edits), just restore the bounds
+                        const restoredNote = {
+                            ...currentNote,
+                            startX: overlay.originalStartX,
+                            startY: overlay.originalStartY,
+                            endX: overlay.originalEndX,
+                            endY: overlay.originalEndY,
+                            // Keep currentNote.data (the edited version) instead of overlay.originalData
+                        };
+                        // Rewrap back to original width
+                        const rewrappedNote = rewrapNoteText(restoredNote, worldData);
+                        setWorldData((prev: Record<string, any>) => ({
+                            ...prev,
+                            [overlay.noteKey]: JSON.stringify(rewrappedNote)
+                        }));
+                    } catch (e) {
+                        console.error('Failed to restore note on view exit:', e);
+                    }
+                }
+
                 setModeState(prev => ({ ...prev, viewOverlay: undefined }));
                 setDialogueText?.("Exited view mode");
                 clearCommandState();
                 return null;
             }
+
+            // Find note at cursor position
+            for (const key in worldData) {
+                if (key.startsWith('note_')) {
+                    try {
+                        const noteData = JSON.parse(worldData[key] as string);
+                        const { startX, endX, startY, endY, data } = noteData;
+
+                        // Check if cursor is within note bounds
+                        if (cursorPos.x >= startX && cursorPos.x <= endX &&
+                            cursorPos.y >= startY && cursorPos.y <= endY) {
+
+                            // Calculate expanded bounds based on viewport
+                            const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
+                            const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
+                            const { width: charWidth, height: charHeight } = getEffectiveCharDims(zoomLevel);
+
+                            // Calculate margin in cells (equal on all sides)
+                            const minDimension = Math.min(viewportWidth, viewportHeight);
+                            const marginPixels = Math.max(48, minDimension * 0.08);
+                            const marginCells = Math.ceil(marginPixels / charWidth);
+
+                            // Calculate expanded width in cells
+                            const availableWidthCells = Math.floor((viewportWidth - marginPixels * 2) / charWidth);
+                            const availableHeightCells = Math.floor((viewportHeight - marginPixels * 2) / charHeight);
+
+                            // Center the expanded note in the viewport
+                            // The expanded note starts at a position that centers it
+                            const expandedStartX = Math.floor(-availableWidthCells / 2);
+                            const expandedEndX = expandedStartX + availableWidthCells;
+                            const expandedStartY = Math.floor(-availableHeightCells / 2);
+                            const expandedEndY = expandedStartY + availableHeightCells;
+
+                            // Store original data before modification
+                            const originalData = data ? JSON.parse(JSON.stringify(data)) : {};
+
+                            // Create expanded note and rewrap
+                            const expandedNote = {
+                                ...noteData,
+                                startX: expandedStartX,
+                                startY: expandedStartY,
+                                endX: expandedEndX,
+                                endY: expandedEndY
+                            };
+                            const rewrappedNote = rewrapNoteText(expandedNote, worldData);
+
+                            // Save expanded note to worldData
+                            if (setWorldData) {
+                                setWorldData((prev: Record<string, any>) => ({
+                                    ...prev,
+                                    [key]: JSON.stringify(rewrappedNote)
+                                }));
+                            }
+
+                            // Set view overlay state
+                            setModeState(prev => ({
+                                ...prev,
+                                viewOverlay: {
+                                    noteKey: key,
+                                    originalStartX: startX,
+                                    originalStartY: startY,
+                                    originalEndX: endX,
+                                    originalEndY: endY,
+                                    expandedStartX,
+                                    expandedStartY,
+                                    expandedEndX,
+                                    expandedEndY,
+                                    originalData
+                                }
+                            }));
+
+                            setDialogueText?.("View mode - press Esc to exit, edit normally");
+                            clearCommandState();
+                            return null;
+                        }
+                    } catch (e) {
+                        // Skip invalid note data
+                    }
+                }
+            }
+
+            setDialogueText?.("Position cursor inside a note first");
+            clearCommandState();
+            return null;
+        }
+
+        if (commandToExecute.startsWith('shell')) {
+            // /shell command - convert note to interactive terminal
+            if (!worldData || !setWorldData) {
+                setDialogueText?.("Cannot modify world data");
+                clearCommandState();
+                return null;
+            }
+
+            const cursorPos = commandState.commandStartPos;
 
             // Find note at cursor position
             for (const key in worldData) {
@@ -4821,52 +5161,27 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         if (cursorPos.x >= startX && cursorPos.x <= endX &&
                             cursorPos.y >= startY && cursorPos.y <= endY) {
 
-                            // Extract text content from note
-                            const noteContent = noteData.data || {};
-                            const lines: string[] = [];
-
-                            // Find all text in the note region
-                            let minY = Infinity, maxY = -Infinity;
-                            for (const cellKey in noteContent) {
-                                const [, yStr] = cellKey.split(',');
-                                const y = parseInt(yStr, 10);
-                                if (!isNaN(y)) {
-                                    minY = Math.min(minY, y);
-                                    maxY = Math.max(maxY, y);
-                                }
-                            }
-
-                            // Extract lines
-                            for (let y = minY; y <= maxY; y++) {
-                                let line = '';
-                                for (let x = startX; x <= endX; x++) {
-                                    const cellKey = `${x},${y}`;
-                                    const cellData = noteContent[cellKey];
-                                    if (cellData) {
-                                        const char = typeof cellData === 'string' ? cellData : cellData.char || ' ';
-                                        line += char;
-                                    } else {
-                                        line += ' ';
+                            // Convert note to terminal type
+                            const updatedNote = {
+                                ...noteData,
+                                contentType: 'terminal',
+                                content: {
+                                    ...noteData.content,
+                                    terminalData: {
+                                        sessionId: `term_${Date.now()}`,
+                                        wsUrl: `ws://${window.location.hostname}:8767`
                                     }
-                                }
-                                lines.push(line.trimEnd());
-                            }
+                                },
+                                // Clear text data - terminal takes over
+                                data: {}
+                            };
 
-                            // Join lines and calculate wrapped content
-                            const rawContent = lines.join('\n').trim();
-
-                            // Set view overlay state
-                            setModeState(prev => ({
+                            setWorldData((prev: any) => ({
                                 ...prev,
-                                viewOverlay: {
-                                    noteKey: key,
-                                    content: rawContent,
-                                    scrollOffset: 0,
-                                    maxScroll: 0 // Will be calculated during render
-                                }
+                                [key]: JSON.stringify(updatedNote)
                             }));
 
-                            setDialogueText?.("View mode - press Esc to exit");
+                            setDialogueText?.("Terminal activated");
                             clearCommandState();
                             return null;
                         }
@@ -6663,10 +6978,35 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         setPaintTool: (tool: 'brush' | 'fill' | 'lasso') => setModeState(prev => ({ ...prev, paintTool: tool })),
         // View overlay
         viewOverlay: modeState.viewOverlay,
-        exitViewOverlay: () => setModeState(prev => ({ ...prev, viewOverlay: undefined })),
+        exitViewOverlay: () => {
+            // Restore original note before exiting
+            const overlay = modeState.viewOverlay;
+            if (overlay && setWorldData && worldData?.[overlay.noteKey]) {
+                try {
+                    const currentNote = JSON.parse(worldData[overlay.noteKey] as string);
+                    const restoredNote = {
+                        ...currentNote,
+                        startX: overlay.originalStartX,
+                        startY: overlay.originalStartY,
+                        endX: overlay.originalEndX,
+                        endY: overlay.originalEndY,
+                        data: overlay.originalData
+                    };
+                    // Rewrap back to original width
+                    const rewrappedNote = rewrapNoteText(restoredNote, worldData);
+                    setWorldData((prev: Record<string, any>) => ({
+                        ...prev,
+                        [overlay.noteKey]: JSON.stringify(rewrappedNote)
+                    }));
+                } catch (e) {
+                    console.error('Failed to restore note on view exit:', e);
+                }
+            }
+            setModeState(prev => ({ ...prev, viewOverlay: undefined }));
+        },
         setViewOverlayScroll: (scrollOffset: number) => setModeState(prev => ({
             ...prev,
-            viewOverlay: prev.viewOverlay ? { ...prev.viewOverlay, scrollOffset } : undefined
+            viewOverlay: prev.viewOverlay ? { ...prev.viewOverlay } : undefined
         })),
     };
 }
