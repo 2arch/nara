@@ -2660,6 +2660,23 @@ Camera & Viewport Controls:
         startScrollOffset: number;
     } | null>(null);
 
+    // Ref for note drag preview (smooth dragging without re-renders)
+    const noteDragPreviewRef = useRef<{
+        key: string;
+        originalData: any;
+        offsetX: number;
+        offsetY: number;
+    } | null>(null);
+
+    // Ref for resize preview (smooth resizing without re-renders)
+    // Stores the current preview bounds during drag - only committed on mouseUp/touchEnd
+    const resizePreviewRef = useRef<{
+        startX: number;
+        startY: number;
+        endX: number;
+        endY: number;
+    } | null>(null);
+
     // --- Resize Handler (Canvas specific) ---
     const handleResize = useCallback(() => {
         const dpr = window.devicePixelRatio || 1;
@@ -5722,7 +5739,11 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         if (selectedImageKey) {
             const selectedImageData = engine.worldData[selectedImageKey];
             if (engine.isImageData(selectedImageData)) {
-                renderEntitySelection(ctx, selectedImageData, {
+                // Use preview bounds during resize, otherwise use actual data
+                const displayBounds = (resizeState.active && resizeState.type === 'image' && resizeState.key === selectedImageKey && resizePreviewRef.current)
+                    ? { ...selectedImageData, ...resizePreviewRef.current }
+                    : selectedImageData;
+                renderEntitySelection(ctx, displayBounds, {
                     showBorder: true,
                     borderColor: getTextColor(engine, 0.8),
                     thumbColor: getTextColor(engine, 1)
@@ -5734,7 +5755,11 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         if (selectedNoteKey) {
             const selectedPlanData = safeParseEntityData(engine.worldData, selectedNoteKey);
             if (selectedPlanData) {
-                renderEntitySelection(ctx, selectedPlanData, {
+                // Use preview bounds during resize, otherwise use actual data
+                const displayBounds = (resizeState.active && resizeState.type === 'note' && resizeState.key === selectedNoteKey && resizePreviewRef.current)
+                    ? { ...selectedPlanData, ...resizePreviewRef.current }
+                    : selectedPlanData;
+                renderEntitySelection(ctx, displayBounds, {
                     showBorder: false, // Notes only show thumbs, no border
                     thumbColor: getTextColor(engine, 1)
                 }, engine, currentZoom, currentOffset);
@@ -5743,12 +5768,16 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
         // === Render Selected Paint Blob Border ===
         if (selectedPaintRegion) {
-            renderEntitySelection(ctx, {
-                startX: selectedPaintRegion.minX,
-                startY: selectedPaintRegion.minY,
-                endX: selectedPaintRegion.maxX,
-                endY: selectedPaintRegion.maxY
-            }, {
+            // Use preview bounds during resize, otherwise use actual data
+            const displayBounds = (resizeState.active && resizeState.type === 'paint' && resizePreviewRef.current)
+                ? resizePreviewRef.current
+                : {
+                    startX: selectedPaintRegion.minX,
+                    startY: selectedPaintRegion.minY,
+                    endX: selectedPaintRegion.maxX,
+                    endY: selectedPaintRegion.maxY
+                };
+            renderEntitySelection(ctx, displayBounds, {
                 showBorder: true,
                 borderColor: getTextColor(engine, 0.8),
                 thumbColor: getTextColor(engine, 1)
@@ -7625,7 +7654,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             }
         }
 
-        // Handle resize drag
+        // Handle resize drag - just update preview ref, no state changes
         if (resizeState.active && resizeState.handle && resizeState.originalBounds) {
             const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
             const snappedX = Math.floor(worldPos.x);
@@ -7654,221 +7683,11 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     break;
             }
 
-            // Apply the resize to the appropriate object type
-            if (resizeState.type === 'image' && resizeState.key) {
-                const imageData = engine.worldData[resizeState.key];
-                if (engine.isImageData(imageData)) {
-                    engine.setWorldData(prev => ({
-                        ...prev,
-                        [resizeState.key!]: {
-                            ...imageData,
-                            startX: newBounds.startX,
-                            startY: newBounds.startY,
-                            endX: newBounds.endX,
-                            endY: newBounds.endY
-                        }
-                    }));
-                }
-            } else if (resizeState.type === 'note' && resizeState.key) {
-                try {
-                    const noteData = JSON.parse(engine.worldData[resizeState.key] as string);
-
-                    // Update the note
-                    let updatedNoteData = {
-                        ...noteData,
-                        startX: newBounds.startX,
-                        startY: newBounds.startY,
-                        endX: newBounds.endX,
-                        endY: newBounds.endY
-                    };
-
-                    // If this note is part of a pattern, recalculate pattern boundary
-                    if (noteData.patternKey) {
-                        try {
-                            const patternData = JSON.parse(engine.worldData[noteData.patternKey] as string);
-                            const noteKeys = patternData.noteKeys || [];
-
-                            // Calculate boundary from all notes in pattern
-                            const corridorPadding = 3;
-                            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-
-                            for (const noteKey of noteKeys) {
-                                try {
-                                    // Use updated data for the note being resized, otherwise fetch from worldData
-                                    const currentNoteData = noteKey === resizeState.key
-                                        ? updatedNoteData
-                                        : JSON.parse(engine.worldData[noteKey] as string);
-
-                                    const noteMinX = currentNoteData.startX;
-                                    const noteMinY = currentNoteData.startY;
-                                    // endX/endY are inclusive, add 1 to get exclusive boundary (like legacy rooms)
-                                    const noteMaxX = currentNoteData.endX + 1;
-                                    const noteMaxY = currentNoteData.endY + 1;
-                                    const noteCenterX = (noteMinX + noteMaxX) / 2;
-                                    const noteCenterY = (noteMinY + noteMaxY) / 2;
-
-                                    minX = Math.min(minX, noteMinX, noteCenterX - corridorPadding);
-                                    minY = Math.min(minY, noteMinY, noteCenterY - corridorPadding);
-                                    maxX = Math.max(maxX, noteMaxX, noteCenterX + corridorPadding);
-                                    maxY = Math.max(maxY, noteMaxY, noteCenterY + corridorPadding);
-                                } catch (e) {
-                                    // Skip invalid notes
-                                }
-                            }
-
-                            const actualWidth = maxX - minX;
-                            const actualHeight = maxY - minY;
-                            const actualCenterX = minX + actualWidth / 2;
-                            const actualCenterY = minY + actualHeight / 2;
-
-                            // Update both note and pattern
-                            engine.setWorldData(prev => ({
-                                ...prev,
-                                [resizeState.key!]: JSON.stringify(updatedNoteData),
-                                [noteData.patternKey]: JSON.stringify({
-                                    ...patternData,
-                                    centerX: actualCenterX,
-                                    centerY: actualCenterY,
-                                    width: actualWidth,
-                                    height: actualHeight
-                                })
-                            }));
-                        } catch (e) {
-                            // Pattern data invalid, just update note
-                            engine.setWorldData(prev => ({
-                                ...prev,
-                                [resizeState.key!]: JSON.stringify(updatedNoteData)
-                            }));
-                        }
-                    } else {
-                        // Note not part of pattern, just update note
-                        engine.setWorldData(prev => ({
-                            ...prev,
-                            [resizeState.key!]: JSON.stringify(updatedNoteData)
-                        }));
-                    }
-                } catch (e) {
-                    // Invalid note data
-                }
-            } else if (resizeState.type === 'pack' && resizeState.key) {
-                try {
-                    const packData = JSON.parse(engine.worldData[resizeState.key] as string);
-
-                    // Update pack chip bounds (content stays at same relative position)
-                    engine.setWorldData(prev => ({
-                        ...prev,
-                        [resizeState.key!]: JSON.stringify({
-                            ...packData,
-                            startX: newBounds.startX,
-                            startY: newBounds.startY,
-                            endX: newBounds.endX,
-                            endY: newBounds.endY
-                        })
-                    }));
-                } catch (e) {
-                    // Invalid pack data
-                }
-            } else if (resizeState.type === 'pattern' && resizeState.key) {
-                try {
-                    const patternData = JSON.parse(engine.worldData[resizeState.key] as string);
-
-                    if (resizeState.roomIndex !== null && resizeState.roomIndex !== undefined) {
-                        // Resizing a specific room
-                        const rooms = patternData.rooms || [];
-
-                        // Bounds check for safety
-                        if (resizeState.roomIndex < 0 || resizeState.roomIndex >= rooms.length) {
-                            return;
-                        }
-
-                        const updatedRooms = [...rooms];
-
-                        // Update the specific room
-                        updatedRooms[resizeState.roomIndex] = {
-                            x: newBounds.startX,
-                            y: newBounds.startY,
-                            width: newBounds.endX - newBounds.startX,
-                            height: newBounds.endY - newBounds.startY
-                        };
-
-                        // Recalculate pattern boundary to enclose all rooms + corridors
-                        const corridorPadding = 3;
-                        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-
-                        for (const room of updatedRooms) {
-                            const roomMinX = room.x;
-                            const roomMinY = room.y;
-                            const roomMaxX = room.x + room.width;
-                            const roomMaxY = room.y + room.height;
-                            const centerX = room.x + Math.floor(room.width / 2);
-                            const centerY = room.y + Math.floor(room.height / 2);
-
-                            minX = Math.min(minX, roomMinX, centerX - corridorPadding);
-                            minY = Math.min(minY, roomMinY, centerY - corridorPadding);
-                            maxX = Math.max(maxX, roomMaxX, centerX + corridorPadding);
-                            maxY = Math.max(maxY, roomMaxY, centerY + corridorPadding);
-                        }
-
-                        const actualWidth = maxX - minX;
-                        const actualHeight = maxY - minY;
-                        const actualCenterX = minX + actualWidth / 2;
-                        const actualCenterY = minY + actualHeight / 2;
-
-                        engine.setWorldData(prev => ({
-                            ...prev,
-                            [resizeState.key!]: JSON.stringify({
-                                ...patternData,
-                                centerX: actualCenterX,
-                                centerY: actualCenterY,
-                                width: actualWidth,
-                                height: actualHeight,
-                                rooms: updatedRooms
-                            })
-                        }));
-                    }
-                } catch (e) {
-                    // Invalid pattern data
-                }
-            } else if (resizeState.type === 'paint' && resizeState.paintRegion) {
-                // Use blob-based resize (much faster than deleting/creating individual cells)
-                const blobId = resizeState.paintRegion.blobId;
-                if (blobId) {
-                    // Find the blob and resize it
-                    const blobKey = `paintblob_${blobId}`;
-                    const blobData = engine.worldData[blobKey];
-
-                    if (blobData) {
-                        try {
-                            const blob = JSON.parse(blobData as string) as PaintBlob;
-                            const resizedBlob = resizePaintBlob(blob, {
-                                minX: newBounds.startX,
-                                maxX: newBounds.endX,
-                                minY: newBounds.startY,
-                                maxY: newBounds.endY
-                            });
-
-                            engine.setWorldData(prev => ({
-                                ...prev,
-                                [blobKey]: JSON.stringify(resizedBlob)
-                            }));
-
-                            // Update selected paint region to reflect new bounds
-                            const newRegion = findConnectedPaintRegion(
-                                { ...engine.worldData, [blobKey]: JSON.stringify(resizedBlob) },
-                                newBounds.startX,
-                                newBounds.startY
-                            );
-                            if (newRegion) {
-                                setSelectedPaintRegion(newRegion);
-                            }
-                        } catch (e) {
-                            console.error('Failed to resize paint blob:', e);
-                        }
-                    }
-                }
-            }
-
-            return; // Don't process other mouse move events during resize
+            // Just update the preview ref - no state changes during drag
+            // The render loop will read from this ref to show the preview
+            // Final commit happens on mouseUp
+            resizePreviewRef.current = newBounds;
+            return; // Early return - don't process other mouse move events during resize
         }
 
         if (isMiddleMouseDownRef.current && panStartInfoRef.current) {
@@ -8018,24 +7837,172 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 lastPaintPosRef.current = null; // Reset for next stroke
             }
 
-            // Reset resize state if active
-            if (resizeState.active) {
-                // If resizing a note in wrap mode, rewrap now that resize is complete
-                if (resizeState.type === 'note' && resizeState.key) {
+            // Reset resize state if active - commit preview bounds to worldData
+            if (resizeState.active && resizePreviewRef.current) {
+                const newBounds = resizePreviewRef.current;
+
+                // Commit the resize to worldData based on type
+                if (resizeState.type === 'image' && resizeState.key) {
+                    const imageData = engine.worldData[resizeState.key];
+                    if (engine.isImageData(imageData)) {
+                        engine.setWorldData(prev => ({
+                            ...prev,
+                            [resizeState.key!]: {
+                                ...imageData,
+                                startX: newBounds.startX,
+                                startY: newBounds.startY,
+                                endX: newBounds.endX,
+                                endY: newBounds.endY
+                            }
+                        }));
+                    }
+                } else if (resizeState.type === 'note' && resizeState.key) {
                     try {
                         const noteData = JSON.parse(engine.worldData[resizeState.key] as string);
+                        let updatedNoteData = {
+                            ...noteData,
+                            startX: newBounds.startX,
+                            startY: newBounds.startY,
+                            endX: newBounds.endX,
+                            endY: newBounds.endY
+                        };
+
+                        // If note is in wrap mode, rewrap now that resize is complete
                         if (noteData.displayMode === 'wrap') {
-                            // Pass worldData to enable paint-aware wrapping if paint exists
-                            const rewrapped = rewrapNoteText(noteData, engine.worldData);
+                            updatedNoteData = rewrapNoteText(updatedNoteData, engine.worldData);
+                        }
+
+                        // If this note is part of a pattern, recalculate pattern boundary
+                        if (noteData.patternKey) {
+                            try {
+                                const patternData = JSON.parse(engine.worldData[noteData.patternKey] as string);
+                                const noteKeys = patternData.noteKeys || [];
+                                const corridorPadding = 3;
+                                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+                                for (const noteKey of noteKeys) {
+                                    try {
+                                        const currentNoteData = noteKey === resizeState.key
+                                            ? updatedNoteData
+                                            : JSON.parse(engine.worldData[noteKey] as string);
+                                        const noteMinX = currentNoteData.startX;
+                                        const noteMinY = currentNoteData.startY;
+                                        const noteMaxX = currentNoteData.endX + 1;
+                                        const noteMaxY = currentNoteData.endY + 1;
+                                        const noteCenterX = (noteMinX + noteMaxX) / 2;
+                                        const noteCenterY = (noteMinY + noteMaxY) / 2;
+                                        minX = Math.min(minX, noteMinX, noteCenterX - corridorPadding);
+                                        minY = Math.min(minY, noteMinY, noteCenterY - corridorPadding);
+                                        maxX = Math.max(maxX, noteMaxX, noteCenterX + corridorPadding);
+                                        maxY = Math.max(maxY, noteMaxY, noteCenterY + corridorPadding);
+                                    } catch (e) { /* Skip invalid notes */ }
+                                }
+
+                                const actualWidth = maxX - minX;
+                                const actualHeight = maxY - minY;
+                                engine.setWorldData(prev => ({
+                                    ...prev,
+                                    [resizeState.key!]: JSON.stringify(updatedNoteData),
+                                    [noteData.patternKey]: JSON.stringify({
+                                        ...patternData,
+                                        centerX: minX + actualWidth / 2,
+                                        centerY: minY + actualHeight / 2,
+                                        width: actualWidth,
+                                        height: actualHeight
+                                    })
+                                }));
+                            } catch (e) {
+                                engine.setWorldData(prev => ({
+                                    ...prev,
+                                    [resizeState.key!]: JSON.stringify(updatedNoteData)
+                                }));
+                            }
+                        } else {
                             engine.setWorldData(prev => ({
                                 ...prev,
-                                [resizeState.key!]: JSON.stringify(rewrapped)
+                                [resizeState.key!]: JSON.stringify(updatedNoteData)
                             }));
                         }
-                    } catch (e) {
-                        // Ignore errors
+                    } catch (e) { /* Ignore errors */ }
+                } else if (resizeState.type === 'pack' && resizeState.key) {
+                    try {
+                        const packData = JSON.parse(engine.worldData[resizeState.key] as string);
+                        engine.setWorldData(prev => ({
+                            ...prev,
+                            [resizeState.key!]: JSON.stringify({
+                                ...packData,
+                                startX: newBounds.startX,
+                                startY: newBounds.startY,
+                                endX: newBounds.endX,
+                                endY: newBounds.endY
+                            })
+                        }));
+                    } catch (e) { /* Ignore errors */ }
+                } else if (resizeState.type === 'pattern' && resizeState.key && resizeState.roomIndex !== null) {
+                    try {
+                        const patternData = JSON.parse(engine.worldData[resizeState.key] as string);
+                        const rooms = patternData.rooms || [];
+                        if (resizeState.roomIndex >= 0 && resizeState.roomIndex < rooms.length) {
+                            const updatedRooms = [...rooms];
+                            updatedRooms[resizeState.roomIndex] = {
+                                x: newBounds.startX,
+                                y: newBounds.startY,
+                                width: newBounds.endX - newBounds.startX,
+                                height: newBounds.endY - newBounds.startY
+                            };
+
+                            const corridorPadding = 3;
+                            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                            for (const room of updatedRooms) {
+                                const centerX = room.x + Math.floor(room.width / 2);
+                                const centerY = room.y + Math.floor(room.height / 2);
+                                minX = Math.min(minX, room.x, centerX - corridorPadding);
+                                minY = Math.min(minY, room.y, centerY - corridorPadding);
+                                maxX = Math.max(maxX, room.x + room.width, centerX + corridorPadding);
+                                maxY = Math.max(maxY, room.y + room.height, centerY + corridorPadding);
+                            }
+
+                            engine.setWorldData(prev => ({
+                                ...prev,
+                                [resizeState.key!]: JSON.stringify({
+                                    ...patternData,
+                                    centerX: minX + (maxX - minX) / 2,
+                                    centerY: minY + (maxY - minY) / 2,
+                                    width: maxX - minX,
+                                    height: maxY - minY,
+                                    rooms: updatedRooms
+                                })
+                            }));
+                        }
+                    } catch (e) { /* Ignore errors */ }
+                } else if (resizeState.type === 'paint' && resizeState.paintRegion?.blobId) {
+                    const blobKey = `paintblob_${resizeState.paintRegion.blobId}`;
+                    const blobData = engine.worldData[blobKey];
+                    if (blobData) {
+                        try {
+                            const blob = JSON.parse(blobData as string) as PaintBlob;
+                            const resizedBlob = resizePaintBlob(blob, {
+                                minX: newBounds.startX,
+                                maxX: newBounds.endX,
+                                minY: newBounds.startY,
+                                maxY: newBounds.endY
+                            });
+                            engine.setWorldData(prev => ({
+                                ...prev,
+                                [blobKey]: JSON.stringify(resizedBlob)
+                            }));
+                            const newRegion = findConnectedPaintRegion(
+                                { ...engine.worldData, [blobKey]: JSON.stringify(resizedBlob) },
+                                newBounds.startX,
+                                newBounds.startY
+                            );
+                            if (newRegion) setSelectedPaintRegion(newRegion);
+                        } catch (e) { /* Ignore errors */ }
                     }
                 }
+
+                // Clear the preview ref
+                resizePreviewRef.current = null;
 
                 setResizeState({
                     active: false,
@@ -8046,6 +8013,18 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     roomIndex: null
                 });
                 return; // Early return after resize complete
+            } else if (resizeState.active) {
+                // Resize was active but no preview (user didn't move) - just reset
+                resizePreviewRef.current = null;
+                setResizeState({
+                    active: false,
+                    type: null,
+                    key: null,
+                    handle: null,
+                    originalBounds: null,
+                    roomIndex: null
+                });
+                return;
             }
 
             // Reset note scroll state if active
@@ -8870,7 +8849,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             return;
         }
 
-        // Handle resize drag (highest priority)
+        // Handle resize drag (highest priority) - just update preview ref, no state changes
         if (resizeState.active && resizeState.handle && resizeState.originalBounds && touches.length === 1) {
             const x = touches[0].x;
             const y = touches[0].y;
@@ -8901,183 +8880,10 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     break;
             }
 
-            // Apply the resize to the appropriate object type
-            if (resizeState.type === 'image' && resizeState.key) {
-                const imageData = engine.worldData[resizeState.key];
-                if (engine.isImageData(imageData)) {
-                    engine.setWorldData(prev => ({
-                        ...prev,
-                        [resizeState.key!]: {
-                            ...imageData,
-                            startX: newBounds.startX,
-                            startY: newBounds.startY,
-                            endX: newBounds.endX,
-                            endY: newBounds.endY
-                        }
-                    }));
-                }
-            } else if (resizeState.type === 'note' && resizeState.key) {
-                try {
-                    const noteData = JSON.parse(engine.worldData[resizeState.key] as string);
-
-                    // Update the note
-                    let updatedNoteData = {
-                        ...noteData,
-                        startX: newBounds.startX,
-                        startY: newBounds.startY,
-                        endX: newBounds.endX,
-                        endY: newBounds.endY
-                    };
-
-                    // If this note is part of a pattern, recalculate pattern boundary
-                    if (noteData.patternKey) {
-                        try {
-                            const patternData = JSON.parse(engine.worldData[noteData.patternKey] as string);
-                            const noteKeys = patternData.noteKeys || [];
-
-                            // Calculate boundary from all notes in pattern
-                            const corridorPadding = 3;
-                            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-
-                            for (const noteKey of noteKeys) {
-                                try {
-                                    // Use updated data for the note being resized, otherwise fetch from worldData
-                                    const currentNoteData = noteKey === resizeState.key
-                                        ? updatedNoteData
-                                        : JSON.parse(engine.worldData[noteKey] as string);
-
-                                    const noteMinX = currentNoteData.startX;
-                                    const noteMinY = currentNoteData.startY;
-                                    // endX/endY are inclusive, add 1 to get exclusive boundary (like legacy rooms)
-                                    const noteMaxX = currentNoteData.endX + 1;
-                                    const noteMaxY = currentNoteData.endY + 1;
-                                    const noteCenterX = (noteMinX + noteMaxX) / 2;
-                                    const noteCenterY = (noteMinY + noteMaxY) / 2;
-
-                                    minX = Math.min(minX, noteMinX, noteCenterX - corridorPadding);
-                                    minY = Math.min(minY, noteMinY, noteCenterY - corridorPadding);
-                                    maxX = Math.max(maxX, noteMaxX, noteCenterX + corridorPadding);
-                                    maxY = Math.max(maxY, noteMaxY, noteCenterY + corridorPadding);
-                                } catch (e) {
-                                    // Skip invalid notes
-                                }
-                            }
-
-                            const actualWidth = maxX - minX;
-                            const actualHeight = maxY - minY;
-                            const actualCenterX = minX + actualWidth / 2;
-                            const actualCenterY = minY + actualHeight / 2;
-
-                            // Update both note and pattern
-                            engine.setWorldData(prev => ({
-                                ...prev,
-                                [resizeState.key!]: JSON.stringify(updatedNoteData),
-                                [noteData.patternKey]: JSON.stringify({
-                                    ...patternData,
-                                    centerX: actualCenterX,
-                                    centerY: actualCenterY,
-                                    width: actualWidth,
-                                    height: actualHeight
-                                })
-                            }));
-                        } catch (e) {
-                            // Pattern data invalid, just update note
-                            engine.setWorldData(prev => ({
-                                ...prev,
-                                [resizeState.key!]: JSON.stringify(updatedNoteData)
-                            }));
-                        }
-                    } else {
-                        // Note not part of pattern, just update note
-                        engine.setWorldData(prev => ({
-                            ...prev,
-                            [resizeState.key!]: JSON.stringify(updatedNoteData)
-                        }));
-                    }
-                } catch (e) {
-                    // Invalid note data
-                }
-            } else if (resizeState.type === 'pack' && resizeState.key) {
-                try {
-                    const packData = JSON.parse(engine.worldData[resizeState.key] as string);
-
-                    // Update pack chip bounds (content stays at same relative position)
-                    engine.setWorldData(prev => ({
-                        ...prev,
-                        [resizeState.key!]: JSON.stringify({
-                            ...packData,
-                            startX: newBounds.startX,
-                            startY: newBounds.startY,
-                            endX: newBounds.endX,
-                            endY: newBounds.endY
-                        })
-                    }));
-                } catch (e) {
-                    // Invalid pack data
-                }
-            } else if (resizeState.type === 'pattern' && resizeState.key) {
-                try {
-                    const patternData = JSON.parse(engine.worldData[resizeState.key] as string);
-
-                    if (resizeState.roomIndex !== null && resizeState.roomIndex !== undefined) {
-                        // Resizing a specific room
-                        const rooms = patternData.rooms || [];
-
-                        // Bounds check for safety
-                        if (resizeState.roomIndex < 0 || resizeState.roomIndex >= rooms.length) {
-                            return;
-                        }
-
-                        const updatedRooms = [...rooms];
-
-                        // Update the specific room
-                        updatedRooms[resizeState.roomIndex] = {
-                            x: newBounds.startX,
-                            y: newBounds.startY,
-                            width: newBounds.endX - newBounds.startX,
-                            height: newBounds.endY - newBounds.startY
-                        };
-
-                        // Recalculate pattern boundary to enclose all rooms + corridors
-                        const corridorPadding = 3;
-                        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-
-                        for (const room of updatedRooms) {
-                            const roomMinX = room.x;
-                            const roomMinY = room.y;
-                            const roomMaxX = room.x + room.width;
-                            const roomMaxY = room.y + room.height;
-                            const centerX = room.x + Math.floor(room.width / 2);
-                            const centerY = room.y + Math.floor(room.height / 2);
-
-                            minX = Math.min(minX, roomMinX, centerX - corridorPadding);
-                            minY = Math.min(minY, roomMinY, centerY - corridorPadding);
-                            maxX = Math.max(maxX, roomMaxX, centerX + corridorPadding);
-                            maxY = Math.max(maxY, roomMaxY, centerY + corridorPadding);
-                        }
-
-                        const actualWidth = maxX - minX;
-                        const actualHeight = maxY - minY;
-                        const actualCenterX = minX + actualWidth / 2;
-                        const actualCenterY = minY + actualHeight / 2;
-
-                        engine.setWorldData(prev => ({
-                            ...prev,
-                            [resizeState.key!]: JSON.stringify({
-                                ...patternData,
-                                centerX: actualCenterX,
-                                centerY: actualCenterY,
-                                width: actualWidth,
-                                height: actualHeight,
-                                rooms: updatedRooms
-                            })
-                        }));
-                    }
-                } catch (e) {
-                    // Invalid pattern data
-                }
-            }
-
+            // Just update the preview ref - no state changes during drag
+            // The render loop will read from this ref to show the preview
+            // Final commit happens on touchEnd
+            resizePreviewRef.current = newBounds;
             return; // Don't process other touch move events during resize
         }
 
@@ -9289,24 +9095,172 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             longPressTimerRef.current = null;
         }
 
-        // Reset resize state if active
-        if (resizeState.active) {
-            // If resizing a note in wrap mode, rewrap now that resize is complete
-            if (resizeState.type === 'note' && resizeState.key) {
+        // Reset resize state if active - commit preview bounds to worldData
+        if (resizeState.active && resizePreviewRef.current) {
+            const newBounds = resizePreviewRef.current;
+
+            // Commit the resize to worldData based on type
+            if (resizeState.type === 'image' && resizeState.key) {
+                const imageData = engine.worldData[resizeState.key];
+                if (engine.isImageData(imageData)) {
+                    engine.setWorldData(prev => ({
+                        ...prev,
+                        [resizeState.key!]: {
+                            ...imageData,
+                            startX: newBounds.startX,
+                            startY: newBounds.startY,
+                            endX: newBounds.endX,
+                            endY: newBounds.endY
+                        }
+                    }));
+                }
+            } else if (resizeState.type === 'note' && resizeState.key) {
                 try {
                     const noteData = JSON.parse(engine.worldData[resizeState.key] as string);
+                    let updatedNoteData = {
+                        ...noteData,
+                        startX: newBounds.startX,
+                        startY: newBounds.startY,
+                        endX: newBounds.endX,
+                        endY: newBounds.endY
+                    };
+
+                    // If note is in wrap mode, rewrap now that resize is complete
                     if (noteData.displayMode === 'wrap') {
-                        // Pass worldData to enable paint-aware wrapping if paint exists
-                        const rewrapped = rewrapNoteText(noteData, engine.worldData);
+                        updatedNoteData = rewrapNoteText(updatedNoteData, engine.worldData);
+                    }
+
+                    // If this note is part of a pattern, recalculate pattern boundary
+                    if (noteData.patternKey) {
+                        try {
+                            const patternData = JSON.parse(engine.worldData[noteData.patternKey] as string);
+                            const noteKeys = patternData.noteKeys || [];
+                            const corridorPadding = 3;
+                            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+                            for (const noteKey of noteKeys) {
+                                try {
+                                    const currentNoteData = noteKey === resizeState.key
+                                        ? updatedNoteData
+                                        : JSON.parse(engine.worldData[noteKey] as string);
+                                    const noteMinX = currentNoteData.startX;
+                                    const noteMinY = currentNoteData.startY;
+                                    const noteMaxX = currentNoteData.endX + 1;
+                                    const noteMaxY = currentNoteData.endY + 1;
+                                    const noteCenterX = (noteMinX + noteMaxX) / 2;
+                                    const noteCenterY = (noteMinY + noteMaxY) / 2;
+                                    minX = Math.min(minX, noteMinX, noteCenterX - corridorPadding);
+                                    minY = Math.min(minY, noteMinY, noteCenterY - corridorPadding);
+                                    maxX = Math.max(maxX, noteMaxX, noteCenterX + corridorPadding);
+                                    maxY = Math.max(maxY, noteMaxY, noteCenterY + corridorPadding);
+                                } catch (e) { /* Skip invalid notes */ }
+                            }
+
+                            const actualWidth = maxX - minX;
+                            const actualHeight = maxY - minY;
+                            engine.setWorldData(prev => ({
+                                ...prev,
+                                [resizeState.key!]: JSON.stringify(updatedNoteData),
+                                [noteData.patternKey]: JSON.stringify({
+                                    ...patternData,
+                                    centerX: minX + actualWidth / 2,
+                                    centerY: minY + actualHeight / 2,
+                                    width: actualWidth,
+                                    height: actualHeight
+                                })
+                            }));
+                        } catch (e) {
+                            engine.setWorldData(prev => ({
+                                ...prev,
+                                [resizeState.key!]: JSON.stringify(updatedNoteData)
+                            }));
+                        }
+                    } else {
                         engine.setWorldData(prev => ({
                             ...prev,
-                            [resizeState.key!]: JSON.stringify(rewrapped)
+                            [resizeState.key!]: JSON.stringify(updatedNoteData)
                         }));
                     }
-                } catch (e) {
-                    // Ignore errors
+                } catch (e) { /* Ignore errors */ }
+            } else if (resizeState.type === 'pack' && resizeState.key) {
+                try {
+                    const packData = JSON.parse(engine.worldData[resizeState.key] as string);
+                    engine.setWorldData(prev => ({
+                        ...prev,
+                        [resizeState.key!]: JSON.stringify({
+                            ...packData,
+                            startX: newBounds.startX,
+                            startY: newBounds.startY,
+                            endX: newBounds.endX,
+                            endY: newBounds.endY
+                        })
+                    }));
+                } catch (e) { /* Ignore errors */ }
+            } else if (resizeState.type === 'pattern' && resizeState.key && resizeState.roomIndex !== null) {
+                try {
+                    const patternData = JSON.parse(engine.worldData[resizeState.key] as string);
+                    const rooms = patternData.rooms || [];
+                    if (resizeState.roomIndex >= 0 && resizeState.roomIndex < rooms.length) {
+                        const updatedRooms = [...rooms];
+                        updatedRooms[resizeState.roomIndex] = {
+                            x: newBounds.startX,
+                            y: newBounds.startY,
+                            width: newBounds.endX - newBounds.startX,
+                            height: newBounds.endY - newBounds.startY
+                        };
+
+                        const corridorPadding = 3;
+                        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                        for (const room of updatedRooms) {
+                            const centerX = room.x + Math.floor(room.width / 2);
+                            const centerY = room.y + Math.floor(room.height / 2);
+                            minX = Math.min(minX, room.x, centerX - corridorPadding);
+                            minY = Math.min(minY, room.y, centerY - corridorPadding);
+                            maxX = Math.max(maxX, room.x + room.width, centerX + corridorPadding);
+                            maxY = Math.max(maxY, room.y + room.height, centerY + corridorPadding);
+                        }
+
+                        engine.setWorldData(prev => ({
+                            ...prev,
+                            [resizeState.key!]: JSON.stringify({
+                                ...patternData,
+                                centerX: minX + (maxX - minX) / 2,
+                                centerY: minY + (maxY - minY) / 2,
+                                width: maxX - minX,
+                                height: maxY - minY,
+                                rooms: updatedRooms
+                            })
+                        }));
+                    }
+                } catch (e) { /* Ignore errors */ }
+            } else if (resizeState.type === 'paint' && resizeState.paintRegion?.blobId) {
+                const blobKey = `paintblob_${resizeState.paintRegion.blobId}`;
+                const blobData = engine.worldData[blobKey];
+                if (blobData) {
+                    try {
+                        const blob = JSON.parse(blobData as string) as PaintBlob;
+                        const resizedBlob = resizePaintBlob(blob, {
+                            minX: newBounds.startX,
+                            maxX: newBounds.endX,
+                            minY: newBounds.startY,
+                            maxY: newBounds.endY
+                        });
+                        engine.setWorldData(prev => ({
+                            ...prev,
+                            [blobKey]: JSON.stringify(resizedBlob)
+                        }));
+                        const newRegion = findConnectedPaintRegion(
+                            { ...engine.worldData, [blobKey]: JSON.stringify(resizedBlob) },
+                            newBounds.startX,
+                            newBounds.startY
+                        );
+                        if (newRegion) setSelectedPaintRegion(newRegion);
+                    } catch (e) { /* Ignore errors */ }
                 }
             }
+
+            // Clear the preview ref
+            resizePreviewRef.current = null;
 
             setResizeState({
                 active: false,
@@ -9317,6 +9271,18 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 roomIndex: null
             });
             return; // Early return after resize complete
+        } else if (resizeState.active) {
+            // Resize was active but no preview (user didn't move) - just reset
+            resizePreviewRef.current = null;
+            setResizeState({
+                active: false,
+                type: null,
+                key: null,
+                handle: null,
+                originalBounds: null,
+                roomIndex: null
+            });
+            return;
         }
 
         // Reset note scroll state if active
