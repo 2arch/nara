@@ -1185,6 +1185,54 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             return ['search'];
         }
 
+        if (lowerInput === 'paint' || lowerInput.startsWith('paint ')) {
+            const parts = input.toLowerCase().split(' ');
+            const paintTools = ['brush', 'fill', 'lasso', 'eraser'];
+            const paintTypes = ['obstacle'];
+            const colorNames = Object.keys(COLOR_MAP);
+
+            if (parts.length > 1) {
+                const firstArg = parts[1];
+
+                // Check if first arg is a tool
+                if (paintTools.includes(firstArg)) {
+                    // After tool, suggest colors and obstacle
+                    if (parts.length > 2) {
+                        const secondArg = parts[2];
+                        const allOptions = [...paintTypes, ...colorNames];
+                        const suggestions = allOptions
+                            .filter(opt => opt.startsWith(secondArg))
+                            .map(opt => `paint ${firstArg} ${opt}`);
+
+                        const currentCommand = `paint ${firstArg} ${secondArg}`;
+                        if (secondArg.length > 0 && !suggestions.some(s => s === currentCommand)) {
+                            return [currentCommand, ...suggestions];
+                        }
+                        return suggestions.length > 0 ? suggestions : [currentCommand];
+                    }
+                    // Just typed tool, show colors and obstacle
+                    const allOptions = [...paintTypes, ...colorNames];
+                    return allOptions.map(opt => `paint ${firstArg} ${opt}`);
+                }
+
+                // First arg is not a complete tool - suggest tools, obstacle, and colors
+                const allOptions = [...paintTools, ...paintTypes, ...colorNames];
+                const suggestions = allOptions
+                    .filter(opt => opt.startsWith(firstArg))
+                    .map(opt => `paint ${opt}`);
+
+                const currentCommand = `paint ${firstArg}`;
+                if (firstArg.length > 0 && !suggestions.some(s => s === currentCommand)) {
+                    return [currentCommand, ...suggestions];
+                }
+                return suggestions.length > 0 ? suggestions : [currentCommand];
+            }
+
+            // Just typed 'paint', show tools first, then obstacle, then colors
+            const allOptions = [...paintTools, ...paintTypes, ...colorNames];
+            return allOptions.map(opt => `paint ${opt}`);
+        }
+
         if (lowerInput === 'state') {
             const parts = input.toLowerCase().split(' ');
             
@@ -4855,17 +4903,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('paint')) {
-            // If already in paint mode, toggle it off
-            if (modeState.isPaintMode) {
-                setModeState(prev => ({
-                    ...prev,
-                    isPaintMode: false
-                }));
-                setDialogueWithRevert("Paint mode disabled", setDialogueText);
-                clearCommandState();
-                return null;
-            }
-
             // Parse arguments: /paint [brush|fill|lasso|eraser] [color|obstacle]
             const paintArgs = commandToExecute.slice(5).trim();
             const parts = paintArgs.split(/\s+/);
@@ -4873,10 +4910,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             let tool: 'brush' | 'fill' | 'lasso' | 'eraser' = modeState.paintTool; // Keep current tool
             let color: string | null = null;
             let paintType: 'color' | 'obstacle' = modeState.paintType; // Keep current paint type
+            let hasToolOrColorArg = false;
 
             // Parse tool type
             if (parts[0] === 'brush' || parts[0] === 'fill' || parts[0] === 'lasso' || parts[0] === 'eraser') {
                 tool = parts[0];
+                hasToolOrColorArg = true;
                 // Check for color or obstacle after tool
                 if (parts[1]) {
                     if (parts[1] === 'obstacle') {
@@ -4895,13 +4934,27 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 if (parts[0] === 'obstacle') {
                     paintType = 'obstacle';
                     color = '#000000'; // Default black for obstacles
+                    hasToolOrColorArg = true;
                 } else {
                     const colorResult = validateColor(parts[0]);
                     if (colorResult.valid && colorResult.hexColor) {
                         color = colorResult.hexColor;
                         paintType = 'color';
+                        hasToolOrColorArg = true;
                     }
                 }
+            }
+
+            // If already in paint mode and no arguments, toggle it off
+            // But if there are tool/color arguments, switch to that tool instead
+            if (modeState.isPaintMode && !hasToolOrColorArg) {
+                setModeState(prev => ({
+                    ...prev,
+                    isPaintMode: false
+                }));
+                setDialogueWithRevert("Paint mode disabled", setDialogueText);
+                clearCommandState();
+                return null;
             }
 
             // Enable paint mode with specified settings
