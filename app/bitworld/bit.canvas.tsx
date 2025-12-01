@@ -17,6 +17,7 @@ import { renderBubble } from './bubble';
 import { terminalManager, type TerminalBuffer } from './terminal.manager';
 import { findSmoothPath } from './paths';
 import { ghostEffect } from './skins';
+import { useMcpBridge } from '../hooks/useMcpBridge';
 
 // --- Constants --- (Copied and relevant ones kept)
 const GRID_COLOR = '#F2F2F233';
@@ -1280,10 +1281,6 @@ function renderViewOverlay(
 
     const { content, scrollOffset } = engine.viewOverlay;
 
-    // Debug logging
-    console.log('[renderViewOverlay] Rendering overlay, content length:', content.length);
-    console.log('[renderViewOverlay] Content preview:', content.slice(0, 100));
-
     // Calculate margins (responsive)
     const viewportWidth = cssWidth;
     const viewportHeight = cssHeight;
@@ -1612,9 +1609,10 @@ interface BitCanvasProps {
     hostDimBackground?: boolean; // Whether to dim background when host dialogue appears
     isPublicWorld?: boolean; // Whether this is a public world (affects sign-up flow)
     monogram?: ReturnType<typeof useMonogram>; // Monogram system for visual effects
+    mcpEnabled?: boolean; // Enable MCP bridge for AI paint tools
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, onTutorialComplete, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true, isPublicWorld = false, monogram: externalMonogram }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, onTutorialComplete, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true, isPublicWorld = false, monogram: externalMonogram, mcpEnabled = false }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -1747,6 +1745,144 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             console.log(`[Agent] Selected ${agentsInSelection.size} agents via selection box`);
         }
     }, [engine.selectionStart, engine.selectionEnd, engine.worldData, agentVisualPositions]);
+
+    // MCP Bridge for AI paint tools
+    useMcpBridge({
+        enabled: mcpEnabled,
+        mcpPaintCells: engine.mcpPaintCells,
+        mcpEraseCells: engine.mcpEraseCells,
+        getCursorPosition: () => engine.cursorPos,
+        getCanvasInfo: (region) => {
+            // Return basic canvas info
+            const info: any = {
+                cursorPos: engine.cursorPos,
+                viewOffset: engine.viewOffset,
+                zoomLevel: engine.zoomLevel,
+            };
+            if (region) {
+                // Query painted cells in region
+                const paintedCells: Array<{ x: number; y: number; color: string }> = [];
+                for (let y = region.y; y < region.y + region.height; y++) {
+                    for (let x = region.x; x < region.x + region.width; x++) {
+                        const color = getPaintColorAt(engine.worldData, x, y);
+                        if (color) {
+                            paintedCells.push({ x, y, color });
+                        }
+                    }
+                }
+                info.paintedCells = paintedCells;
+            }
+            return info;
+        },
+        getAgents: () => {
+            // Return all agents with their positions
+            const agents: Array<{ id: string; x: number; y: number; name?: string; spriteUrl?: string; visualX?: number; visualY?: number }> = [];
+            for (const key in engine.worldData) {
+                if (key.startsWith('agent_')) {
+                    try {
+                        const agentDataStr = engine.worldData[key];
+                        const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+                        if (agentData && typeof agentData.x === 'number' && typeof agentData.y === 'number') {
+                            const visualPos = agentVisualPositions[key] || { x: agentData.x, y: agentData.y };
+                            agents.push({
+                                id: key,
+                                x: agentData.x,
+                                y: agentData.y,
+                                name: agentData.name,
+                                spriteUrl: agentData.spriteUrl,
+                                visualX: visualPos.x,
+                                visualY: visualPos.y,
+                            });
+                        }
+                    } catch (e) {
+                        // Skip invalid agent data
+                    }
+                }
+            }
+            return agents;
+        },
+        moveAgents: (agentIds, destination) => {
+            // Move agents to destination with animation
+            const moved: string[] = [];
+            const errors: string[] = [];
+
+            for (const agentId of agentIds) {
+                const agentDataStr = engine.worldData[agentId];
+                if (!agentDataStr) {
+                    errors.push(`Agent ${agentId} not found`);
+                    continue;
+                }
+
+                try {
+                    const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+
+                    // Get current visual position or fall back to stored position
+                    let startPos = agentVisualPositions[agentId];
+                    if (!startPos) {
+                        startPos = { x: agentData.x, y: agentData.y };
+                        setAgentVisualPositions(prev => ({ ...prev, [agentId]: startPos }));
+                    }
+
+                    // Calculate path using pathfinding
+                    const targetPos = { x: destination.x, y: destination.y };
+                    const path = findSmoothPath(startPos, targetPos, engine.worldData);
+                    agentPathsRef.current[agentId] = path;
+                    agentPathIndicesRef.current[agentId] = 0;
+
+                    // Start animation
+                    agentMovingRef.current = { ...agentMovingRef.current, [agentId]: true };
+                    setAgentMoving(prev => ({ ...prev, [agentId]: true }));
+
+                    moved.push(agentId);
+                } catch (e: any) {
+                    errors.push(`Error moving ${agentId}: ${e.message}`);
+                }
+            }
+
+            return { moved, errors };
+        },
+        setCursorPosition: (pos) => {
+            engine.setCursorPos(pos);
+        },
+        createAgent: (pos, spriteName) => {
+            // Check max agents
+            const MAX_AGENTS = 50;
+            const currentAgentCount = Object.keys(engine.worldData).filter(k => k.startsWith('agent_')).length;
+
+            if (currentAgentCount >= MAX_AGENTS) {
+                return { error: `Max agents (${MAX_AGENTS}) reached, cannot spawn more` };
+            }
+
+            // Spawn new agent
+            const agentId = `agent_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+            const agentData = {
+                x: pos.x,
+                y: pos.y,
+                spriteName: spriteName || 'default',
+                createdAt: new Date().toISOString(),
+            };
+
+            engine.setWorldData(prev => ({
+                ...prev,
+                [agentId]: JSON.stringify(agentData),
+            }));
+
+            // Initialize visual position
+            const spawnPos = { x: pos.x, y: pos.y };
+            agentVisualPositionsRef.current = {
+                ...agentVisualPositionsRef.current,
+                [agentId]: spawnPos
+            };
+            setAgentVisualPositions(prev => ({
+                ...prev,
+                [agentId]: spawnPos
+            }));
+
+            console.log(`[MCP] Spawned agent ${agentId} at (${pos.x}, ${pos.y})`);
+            return { agentId };
+        },
+    });
 
     // Spinner for sprite generation
     const SPINNER_CHARS = ['/', '|', '\\', '—'];
@@ -6489,216 +6625,10 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 }
             }
 
-            // === Collect agents and cursor for packing/spreading ===
-            // When multiple entities (agents + cursor) are at the same position, spread them out
-            const agentCursorScale = engine.currentScale || { w: 1, h: 2 };
-            const agentCursorPixelWidth = effectiveCharWidth * agentCursorScale.w;
-            const agentCursorPixelHeight = effectiveCharHeight * agentCursorScale.h;
-
-            // Collect all agents with their positions
-            type EntityInfo = {
-                type: 'agent' | 'cursor';
-                key: string;
-                worldX: number;
-                worldY: number;
-                isMoving: boolean;
-                isSelected: boolean;
-                direction: number;
-                frame: number;
-            };
-            const allEntities: EntityInfo[] = [];
-
-            // Add main cursor as an entity (if sprite is enabled)
-            const mainCursorHasSprite = engine.isCharacterEnabled && (walkSpriteSheet || idleSpriteSheet);
-            if (mainCursorHasSprite) {
-                allEntities.push({
-                    type: 'cursor',
-                    key: 'main_cursor',
-                    worldX: engine.visualCursorPos.x,
-                    worldY: engine.visualCursorPos.y,
-                    isMoving: isCharacterMoving,
-                    isSelected: false,
-                    direction: characterDirection,
-                    frame: characterFrame,
-                });
-            }
-
-            // Add all agents
-            for (const key in engine.worldData) {
-                if (key.startsWith('agent_')) {
-                    try {
-                        const agentDataStr = engine.worldData[key];
-                        const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
-
-                        if (agentData && typeof agentData.x === 'number' && typeof agentData.y === 'number') {
-                            const visualPos = agentVisualPositionsRef.current[key] || { x: agentData.x, y: agentData.y };
-                            allEntities.push({
-                                type: 'agent',
-                                key,
-                                worldX: visualPos.x,
-                                worldY: visualPos.y,
-                                isMoving: agentMovingRef.current[key] || false,
-                                isSelected: selectedAgentIds.has(key),
-                                direction: agentDirectionsRef.current[key] ?? 4,
-                                frame: agentFramesRef.current[key] || 0,
-                            });
-                        }
-                    } catch (err) {
-                        // Skip malformed agent data
-                    }
-                }
-            }
-
-            // Group entities by position (rounded to nearest cell)
-            const positionGroups: Record<string, EntityInfo[]> = {};
-            for (const entity of allEntities) {
-                const posKey = `${Math.round(entity.worldX)},${Math.round(entity.worldY)}`;
-                if (!positionGroups[posKey]) {
-                    positionGroups[posKey] = [];
-                }
-                positionGroups[posKey].push(entity);
-            }
-
-            // Helper to calculate spread offset for entities at same position
-            const getSpreadOffsetForRender = (index: number, total: number): { x: number; y: number } => {
-                if (total === 1) return { x: 0, y: 0 };
-
-                // Spread horizontally with slight y stagger
-                const spreadX = effectiveCharWidth * 0.6; // Tighter horizontal spread
-                const spreadY = effectiveCharHeight * 0.15; // Slight vertical stagger
-
-                // Center the group
-                const centerOffset = (total - 1) / 2;
-                return {
-                    x: (index - centerOffset) * spreadX,
-                    y: index * spreadY * 0.5 // Slight stagger for depth
-                };
-            };
-
-            // Render all agents (not cursor yet - that comes after)
-            for (const key in engine.worldData) {
-                if (key.startsWith('agent_')) {
-                    try {
-                        const agentDataStr = engine.worldData[key];
-                        const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
-
-                        if (agentData && typeof agentData.x === 'number' && typeof agentData.y === 'number') {
-                            const visualPos = agentVisualPositionsRef.current[key] || { x: agentData.x, y: agentData.y };
-                            const agentWorldX = visualPos.x;
-                            const agentWorldY = visualPos.y;
-                            const isThisAgentMoving = agentMovingRef.current[key] || false;
-                            const isSelected = selectedAgentIds.has(key);
-
-                            // Check if agent is within viewport
-                            if (agentWorldX >= startWorldX - 5 && agentWorldX <= endWorldX + 5 &&
-                                agentWorldY >= startWorldY - 5 && agentWorldY <= endWorldY + 5) {
-
-                                // Find spread offset based on position group
-                                const posKey = `${Math.round(agentWorldX)},${Math.round(agentWorldY)}`;
-                                const group = positionGroups[posKey] || [];
-                                const entityIndex = group.findIndex(e => e.key === key);
-                                const spreadOffset = getSpreadOffsetForRender(entityIndex >= 0 ? entityIndex : 0, group.length);
-
-                                const agentBottomScreenPos = engine.worldToScreen(agentWorldX, agentWorldY, currentZoom, currentOffset);
-                                const agentTopScreenPos = engine.worldToScreen(agentWorldX, agentWorldY - (agentCursorScale.h - 1), currentZoom, currentOffset);
-
-                                // Apply spread offset to screen position
-                                agentBottomScreenPos.x += spreadOffset.x;
-                                agentBottomScreenPos.y += spreadOffset.y;
-                                agentTopScreenPos.x += spreadOffset.x;
-                                agentTopScreenPos.y += spreadOffset.y;
-
-                                const agentPixelWidth = agentCursorPixelWidth;
-                                const agentPixelHeight = agentCursorPixelHeight;
-
-                                if (agentBottomScreenPos.x >= -agentPixelWidth * 2 &&
-                                    agentBottomScreenPos.x <= cssWidth + agentPixelWidth &&
-                                    agentBottomScreenPos.y >= -agentPixelHeight * 2 &&
-                                    agentBottomScreenPos.y <= cssHeight + agentPixelHeight) {
-
-                                    const hasAvailableSpriteSheet = walkSpriteSheet || idleSpriteSheet;
-
-                                    if (hasAvailableSpriteSheet) {
-                                        const sheetToDraw = isThisAgentMoving && walkSpriteSheet ? walkSpriteSheet : (idleSpriteSheet || walkSpriteSheet)!;
-                                        const frameWidth = (isThisAgentMoving && walkSpriteSheet) ? CHARACTER_FRAME_WIDTH : CHARACTER_IDLE_FRAME_WIDTH;
-                                        const frameHeight = CHARACTER_FRAME_HEIGHT;
-                                        const maxFrames = (isThisAgentMoving && walkSpriteSheet) ? CHARACTER_FRAMES_PER_DIRECTION : CHARACTER_IDLE_FRAMES_PER_DIRECTION;
-                                        const direction = agentDirectionsRef.current[key] ?? 4;
-                                        const rawFrame = agentFramesRef.current[key] || 0;
-                                        const frameNum = isThisAgentMoving ? (rawFrame % maxFrames) : 0;
-
-                                        const sourceX = frameNum * frameWidth;
-                                        const sourceY = direction * frameHeight;
-
-                                        const spriteAspect = frameWidth / frameHeight;
-                                        const destHeight = effectiveCharHeight * CHARACTER_SPRITE_SCALE;
-                                        const destWidth = destHeight * spriteAspect;
-
-                                        const agentCursorBottomY = agentBottomScreenPos.y + agentPixelHeight;
-                                        const destX = agentTopScreenPos.x + (agentPixelWidth - destWidth) / 2;
-                                        const destY = agentCursorBottomY - destHeight;
-
-                                        const savedAlpha = ctx.globalAlpha;
-
-                                        if (isSelected) {
-                                            const offscreen = document.createElement('canvas');
-                                            offscreen.width = destWidth;
-                                            offscreen.height = destHeight;
-                                            const offCtx = offscreen.getContext('2d');
-                                            if (offCtx) {
-                                                offCtx.drawImage(
-                                                    sheetToDraw,
-                                                    sourceX, sourceY, frameWidth, frameHeight,
-                                                    0, 0, destWidth, destHeight
-                                                );
-                                                ghostEffect(offscreen, offCtx, { color: '#00ff00' });
-                                                ctx.drawImage(offscreen, destX, destY);
-                                            }
-                                        } else {
-                                            ctx.globalAlpha = 1.0;
-                                            ctx.drawImage(
-                                                sheetToDraw,
-                                                sourceX, sourceY, frameWidth, frameHeight,
-                                                destX, destY, destWidth, destHeight
-                                            );
-                                        }
-
-                                        ctx.globalAlpha = savedAlpha;
-                                    } else {
-                                        ctx.fillStyle = isSelected ? 'rgba(0, 255, 0, 0.5)' : 'rgba(255, 255, 255, 0.7)';
-                                        ctx.fillRect(agentTopScreenPos.x, agentTopScreenPos.y, agentPixelWidth, agentPixelHeight);
-
-                                        ctx.strokeStyle = isSelected ? 'rgba(0, 255, 0, 0.8)' : 'rgba(255, 255, 255, 0.5)';
-                                        ctx.lineWidth = isSelected ? 2 : 1;
-                                        ctx.strokeRect(agentTopScreenPos.x, agentTopScreenPos.y, agentPixelWidth, agentPixelHeight);
-                                    }
-                                }
-                            }
-                        }
-                    } catch (err) {
-                        console.log(`[Agent] Failed to parse agent ${key}:`, err);
-                    }
-                }
-            }
-
-            // Calculate cursor spread offset (if cursor shares position with agents)
-            const cursorPosKey = `${Math.round(engine.visualCursorPos.x)},${Math.round(engine.visualCursorPos.y)}`;
-            const cursorGroup = positionGroups[cursorPosKey] || [];
-            const cursorEntityIndex = cursorGroup.findIndex(e => e.key === 'main_cursor');
-            const cursorSpreadOffset = mainCursorHasSprite && cursorGroup.length > 1
-                ? getSpreadOffsetForRender(cursorEntityIndex >= 0 ? cursorEntityIndex : cursorGroup.length, cursorGroup.length)
-                : { x: 0, y: 0 };
-
             // Cursor spans cursorScale.h cells: bottom cell at cursorPos.y and top cell at cursorPos.y - (h-1)
             // Use visualCursorPos for smooth animated rendering
             const cursorBottomScreenPos = engine.worldToScreen(engine.visualCursorPos.x, engine.visualCursorPos.y, currentZoom, currentOffset);
             const cursorTopScreenPos = engine.worldToScreen(engine.visualCursorPos.x, engine.visualCursorPos.y - (cursorScale.h - 1), currentZoom, currentOffset);
-
-            // Apply spread offset to cursor
-            cursorBottomScreenPos.x += cursorSpreadOffset.x;
-            cursorBottomScreenPos.y += cursorSpreadOffset.y;
-            cursorTopScreenPos.x += cursorSpreadOffset.x;
-            cursorTopScreenPos.y += cursorSpreadOffset.y;
 
             if (cursorBottomScreenPos.x >= -effectiveCharWidth && cursorBottomScreenPos.x <= cssWidth &&
                 cursorTopScreenPos.y >= -effectiveCharHeight && cursorBottomScreenPos.y <= cssHeight) {
@@ -6884,6 +6814,123 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // === Render Spawned Agents (from worldData) ===
+        // Find and render all agents stored in worldData with "agent_" prefix
+        // Use same cursor scale as main cursor for consistent sizing
+        const agentCursorScale = engine.currentScale || { w: 1, h: 2 };
+        const agentCursorPixelWidth = effectiveCharWidth * agentCursorScale.w;
+        const agentCursorPixelHeight = effectiveCharHeight * agentCursorScale.h;
+
+        for (const key in engine.worldData) {
+            if (key.startsWith('agent_')) {
+                try {
+                    const agentDataStr = engine.worldData[key];
+                    const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+
+                    if (agentData && typeof agentData.x === 'number' && typeof agentData.y === 'number') {
+                        // Use visual position for smooth animation - read from refs for 60fps smoothness
+                        const visualPos = agentVisualPositionsRef.current[key] || { x: agentData.x, y: agentData.y };
+                        const agentWorldX = visualPos.x;
+                        const agentWorldY = visualPos.y;
+                        const isThisAgentMoving = agentMovingRef.current[key] || false;
+                        const isSelected = selectedAgentIds.has(key);
+
+                        // Check if agent is within viewport (with some padding)
+                        if (agentWorldX >= startWorldX - 5 && agentWorldX <= endWorldX + 5 &&
+                            agentWorldY >= startWorldY - 5 && agentWorldY <= endWorldY + 5) {
+
+                            const agentBottomScreenPos = engine.worldToScreen(agentWorldX, agentWorldY, currentZoom, currentOffset);
+                            const agentTopScreenPos = engine.worldToScreen(agentWorldX, agentWorldY - (agentCursorScale.h - 1), currentZoom, currentOffset);
+
+                            const agentPixelWidth = agentCursorPixelWidth;
+                            const agentPixelHeight = agentCursorPixelHeight;
+
+                            if (agentBottomScreenPos.x >= -agentPixelWidth * 2 &&
+                                agentBottomScreenPos.x <= cssWidth + agentPixelWidth &&
+                                agentBottomScreenPos.y >= -agentPixelHeight * 2 &&
+                                agentBottomScreenPos.y <= cssHeight + agentPixelHeight) {
+
+                                // Render agent with character sprite and ghost effect
+                                // Agents always use sprite if available (independent of cursor's isCharacterEnabled)
+                                const hasAvailableSpriteSheet = walkSpriteSheet || idleSpriteSheet;
+
+                                if (hasAvailableSpriteSheet) {
+                                    // Use walk sprite when moving, idle when stationary
+                                    const sheetToDraw = isThisAgentMoving && walkSpriteSheet ? walkSpriteSheet : (idleSpriteSheet || walkSpriteSheet)!;
+                                    const frameWidth = (isThisAgentMoving && walkSpriteSheet) ? CHARACTER_FRAME_WIDTH : CHARACTER_IDLE_FRAME_WIDTH;
+                                    const frameHeight = CHARACTER_FRAME_HEIGHT;
+                                    // Use correct frame count for walk vs idle sprites
+                                    const maxFrames = (isThisAgentMoving && walkSpriteSheet) ? CHARACTER_FRAMES_PER_DIRECTION : CHARACTER_IDLE_FRAMES_PER_DIRECTION;
+                                    // Use agent's direction and frame for animation - read from refs for 60fps smoothness
+                                    const direction = agentDirectionsRef.current[key] ?? 4; // Default south
+                                    const rawFrame = agentFramesRef.current[key] || 0;
+                                    const frameNum = isThisAgentMoving ? (rawFrame % maxFrames) : 0;
+
+                                    // Source rectangle from sprite sheet
+                                    const sourceX = frameNum * frameWidth;
+                                    const sourceY = direction * frameHeight;
+
+                                    // Scale sprite to fixed size based on single cell
+                                    const spriteAspect = frameWidth / frameHeight;
+                                    const destHeight = effectiveCharHeight * CHARACTER_SPRITE_SCALE;
+                                    const destWidth = destHeight * spriteAspect;
+
+                                    // Center sprite horizontally, bottom-align with agent position
+                                    const agentCursorBottomY = agentBottomScreenPos.y + agentPixelHeight;
+                                    const destX = agentTopScreenPos.x + (agentPixelWidth - destWidth) / 2;
+                                    const destY = agentCursorBottomY - destHeight;
+
+                                    const savedAlpha = ctx.globalAlpha;
+
+                                    if (isSelected) {
+                                        // Selected agents: Draw with solid green ghost effect using skins.ts
+                                        const offscreen = document.createElement('canvas');
+                                        offscreen.width = destWidth;
+                                        offscreen.height = destHeight;
+                                        const offCtx = offscreen.getContext('2d');
+                                        if (offCtx) {
+                                            // Draw sprite frame to offscreen
+                                            offCtx.drawImage(
+                                                sheetToDraw,
+                                                sourceX, sourceY, frameWidth, frameHeight,
+                                                0, 0, destWidth, destHeight
+                                            );
+                                            // Apply ghost effect with green color
+                                            ghostEffect(offscreen, offCtx, { color: '#00ff00' });
+                                            // Draw ghost sprite to main canvas
+                                            ctx.drawImage(offscreen, destX, destY);
+                                        }
+                                    } else {
+                                        // Unselected agents: Draw normal sprite
+                                        ctx.globalAlpha = 1.0;
+                                        ctx.drawImage(
+                                            sheetToDraw,
+                                            sourceX, sourceY, frameWidth, frameHeight,
+                                            destX, destY, destWidth, destHeight
+                                        );
+                                    }
+
+                                    ctx.globalAlpha = savedAlpha;
+                                } else {
+                                    // Fallback: Draw ghost agent as white semi-transparent rectangle
+                                    ctx.fillStyle = isSelected ? 'rgba(0, 255, 0, 0.5)' : 'rgba(255, 255, 255, 0.7)';
+                                    ctx.fillRect(agentTopScreenPos.x, agentTopScreenPos.y, agentPixelWidth, agentPixelHeight);
+
+                                    // Add a subtle border
+                                    ctx.strokeStyle = isSelected ? 'rgba(0, 255, 0, 0.8)' : 'rgba(255, 255, 255, 0.5)';
+                                    ctx.lineWidth = isSelected ? 2 : 1;
+                                    ctx.strokeRect(agentTopScreenPos.x, agentTopScreenPos.y, agentPixelWidth, agentPixelHeight);
+                                }
+                            }
+                        }
+                    }
+                } catch (err) {
+                    // Silently ignore malformed agent data
+                    console.log(`[Agent] Failed to parse agent ${key}:`, err);
                 }
             }
         }
@@ -7669,19 +7716,13 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         if (!canvas) return;
         
         const wheelHandler = (e: WheelEvent) => {
-            // Block wheel scrolling when view overlay is active
-            if (engine.viewOverlay) {
-                e.preventDefault();
-                return;
-            }
-
             const rect = canvas.getBoundingClientRect();
             engine.handleCanvasWheel(
                 e.deltaX, e.deltaY,
                 e.clientX - rect.left, e.clientY - rect.top,
                 e.ctrlKey || e.metaKey
             );
-
+            
             // Prevent default if we're handling this ourselves
             if (e.ctrlKey || e.metaKey) {
                 e.preventDefault();
@@ -7700,11 +7741,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
     // --- Event Handlers (Attached to Canvas) ---
     const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         if (e.button !== 0) return; // Only left clicks
-
-        // Block all canvas interactions when view overlay is active
-        if (engine.viewOverlay) {
-            return; // View overlay handles its own interactions
-        }
 
         // Don't process click if it was the end of a pan
         if (panStartInfoRef.current) {
@@ -7782,7 +7818,102 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         // Set flag to prevent trail creation from click movement
         isClickMovementRef.current = true;
 
-        // Handle agent spawning if in agent mode
+        // Handle agent movement (works outside of agent mode when agents are selected)
+        if (selectedAgentIds.size > 0 && !engine.isAgentMode) {
+            const worldPos = engine.screenToWorld(clickX, clickY, engine.zoomLevel, engine.viewOffset);
+            const clickWorldX = Math.round(worldPos.x);
+            const clickWorldY = Math.round(worldPos.y);
+
+            // Cancel any pending move (allows double-tap to prevent move)
+            if (pendingAgentMoveRef.current) {
+                clearTimeout(pendingAgentMoveRef.current);
+                pendingAgentMoveRef.current = null;
+            }
+
+            // Delay move to allow double-tap to cancel selection instead
+            const MOVE_DELAY = 250;
+            const selectedArray = Array.from(selectedAgentIds);
+            const agentCount = selectedArray.length;
+
+            pendingAgentMoveRef.current = setTimeout(() => {
+                pendingAgentMoveRef.current = null;
+
+                // Check if agents are still selected (double-tap might have cleared them)
+                if (selectedAgentIds.size === 0) {
+                    console.log('[Agent] Move cancelled - agents deselected');
+                    return;
+                }
+
+                const cursorScale = engine.currentScale || { w: 1, h: 2 };
+                const spreadX = cursorScale.w * 1.2;
+                const spreadY = cursorScale.h * 1.2;
+
+                const getSpreadOffset = (index: number, total: number): { x: number; y: number } => {
+                    if (total === 1) return { x: 0, y: 0 };
+                    const cols = Math.ceil(Math.sqrt(total));
+                    const row = Math.floor(index / cols);
+                    const col = index % cols;
+                    const totalRows = Math.ceil(total / cols);
+                    const centerCol = (cols - 1) / 2;
+                    const centerRow = (totalRows - 1) / 2;
+                    return {
+                        x: (col - centerCol) * spreadX,
+                        y: (row - centerRow) * spreadY
+                    };
+                };
+
+                selectedArray.forEach((agentId, index) => {
+                    const agentDataStr = engine.worldData[agentId];
+                    if (agentDataStr) {
+                        const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+                        const offset = getSpreadOffset(index, agentCount);
+                        const newX = clickWorldX + offset.x;
+                        const newY = clickWorldY + offset.y;
+
+                        engine.setWorldData(prev => ({
+                            ...prev,
+                            [agentId]: JSON.stringify({
+                                ...agentData,
+                                x: newX,
+                                y: newY,
+                            }),
+                        }));
+
+                        agentTargetsRef.current = {
+                            ...agentTargetsRef.current,
+                            [agentId]: { x: newX, y: newY }
+                        };
+
+                        let startPos = agentVisualPositionsRef.current[agentId];
+                        if (!startPos) {
+                            startPos = { x: agentData.x, y: agentData.y };
+                            agentVisualPositionsRef.current = {
+                                ...agentVisualPositionsRef.current,
+                                [agentId]: startPos
+                            };
+                            setAgentVisualPositions(prev => ({ ...prev, [agentId]: startPos }));
+                        }
+
+                        const targetPos = { x: newX, y: newY };
+                        const path = findSmoothPath(startPos, targetPos, engine.worldData);
+                        agentPathsRef.current[agentId] = path;
+                        agentPathIndicesRef.current[agentId] = 0;
+
+                        agentMovingRef.current = { ...agentMovingRef.current, [agentId]: true };
+                        setAgentMoving(prev => ({ ...prev, [agentId]: true }));
+                    }
+                });
+                console.log(`[Agent] Moving ${agentCount} agents to (${clickWorldX}, ${clickWorldY}) with grid spread`);
+            }, MOVE_DELAY);
+
+            // Focus hidden input to keep virtual keyboard accessible
+            if (hiddenInputRef.current && !hostDialogue.isHostActive) {
+                hiddenInputRef.current.focus();
+            }
+            return;
+        }
+
+        // Handle agent spawning/selection/deletion if in agent mode
         if (engine.isAgentMode) {
             const worldPos = engine.screenToWorld(clickX, clickY, engine.zoomLevel, engine.viewOffset);
             const clickWorldX = Math.round(worldPos.x);
@@ -8142,11 +8273,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
     }, [engine, findTextBlock, findImageAtPosition, findPlanAtPosition]);
     
     const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-        // Block all canvas interactions when view overlay is active
-        if (engine.viewOverlay) {
-            return; // View overlay handles its own interactions
-        }
-
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return;
 
@@ -11084,13 +11210,28 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         // Patterns cannot be deleted directly with backspace
         // They are deleted automatically when all their notes are removed
 
+        // Handle ESC to deselect agents (before engine handles other ESC actions)
+        if (e.key === 'Escape' && selectedAgentIds.size > 0) {
+            // Cancel any pending move
+            if (pendingAgentMoveRef.current) {
+                clearTimeout(pendingAgentMoveRef.current);
+                pendingAgentMoveRef.current = null;
+            }
+            selectedAgentIdsRef.current = new Set();
+            setSelectedAgentIds(new Set());
+            console.log('[Agent] Cleared agent selection via ESC');
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+
         // Let engine handle all key input (including regular typing)
         const preventDefault = await engine.handleKeyDown(e.key, e.ctrlKey, e.metaKey, e.shiftKey, e.altKey);
         if (preventDefault) {
             e.preventDefault();
             e.stopPropagation();
         }
-    }, [engine, handleKeyDownFromController, selectedImageKey, selectedNoteKey, selectedPatternKey, hostDialogue, activeTerminalKey]);
+    }, [engine, handleKeyDownFromController, selectedImageKey, selectedNoteKey, selectedPatternKey, hostDialogue, activeTerminalKey, selectedAgentIds]);
 
     // Continuous render loop for processing effects
     useEffect(() => {

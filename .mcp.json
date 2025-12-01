@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "nara": {
+      "command": "npx",
+      "args": ["tsx", "/home/ubuntu/nara/mcp-server/index.ts"]
+    }
+  }
+}
