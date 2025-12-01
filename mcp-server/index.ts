@@ -249,6 +249,80 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "move_agents_path",
+        description: "Move one or more agents along a custom path (array of points). Use this for custom movement patterns like sine waves, circles, spirals, etc.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            agentIds: {
+              type: "array",
+              description: "Array of agent IDs to move (e.g., ['agent_abc123'])",
+              items: { type: "string" },
+            },
+            path: {
+              type: "array",
+              description: "Array of points defining the path to follow",
+              items: {
+                type: "object",
+                properties: {
+                  x: { type: "number", description: "X coordinate" },
+                  y: { type: "number", description: "Y coordinate" },
+                },
+                required: ["x", "y"],
+              },
+            },
+          },
+          required: ["agentIds", "path"],
+        },
+      },
+      {
+        name: "move_agents_expr",
+        description: "Move agents using mathematical expressions evaluated each frame. Expressions can use variables: x, y (current position), t (time in seconds), vx, vy (velocity), startX, startY (initial position), avgX, avgY (average position of all agents). Math functions: sin, cos, tan, sqrt, abs, pow, min, max, etc. Example: xExpr='startX + t * 5', yExpr='startY + sin(t * 2) * 10' for a sine wave.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            agentIds: {
+              type: "array",
+              description: "Array of agent IDs to move",
+              items: { type: "string" },
+            },
+            xExpr: {
+              type: "string",
+              description: "Math expression for x position (e.g., 'startX + t * 5')",
+            },
+            yExpr: {
+              type: "string",
+              description: "Math expression for y position (e.g., 'startY + sin(t * 2) * 10')",
+            },
+            vars: {
+              type: "object",
+              description: "Optional custom variables to use in expressions (e.g., {speed: 5, amplitude: 10})",
+              additionalProperties: { type: "number" },
+            },
+            duration: {
+              type: "number",
+              description: "Optional duration in seconds. Movement stops after this time.",
+            },
+          },
+          required: ["agentIds", "xExpr", "yExpr"],
+        },
+      },
+      {
+        name: "stop_agents_expr",
+        description: "Stop expression-based movement for specified agents",
+        inputSchema: {
+          type: "object",
+          properties: {
+            agentIds: {
+              type: "array",
+              description: "Array of agent IDs to stop",
+              items: { type: "string" },
+            },
+          },
+          required: ["agentIds"],
+        },
+      },
+      {
         name: "set_cursor_position",
         description: "Move the cursor to a specific position on the canvas",
         inputSchema: {
@@ -271,6 +345,211 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             spriteName: { type: "string", description: "Optional sprite name for the agent (default: 'default')" },
           },
           required: ["x", "y"],
+        },
+      },
+      // Viewport tools
+      {
+        name: "get_viewport",
+        description: "Get current viewport information including offset, zoom level, and visible bounds",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "set_viewport",
+        description: "Set the viewport offset and optionally zoom level to pan/zoom the canvas view",
+        inputSchema: {
+          type: "object",
+          properties: {
+            x: { type: "number", description: "X offset for viewport" },
+            y: { type: "number", description: "Y offset for viewport" },
+            zoomLevel: { type: "number", description: "Optional zoom level (default: current)" },
+          },
+          required: ["x", "y"],
+        },
+      },
+      // Selection tools
+      {
+        name: "get_selection",
+        description: "Get the current selection rectangle (start and end coordinates)",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "set_selection",
+        description: "Set the selection rectangle to a specific region",
+        inputSchema: {
+          type: "object",
+          properties: {
+            startX: { type: "number", description: "Start X coordinate" },
+            startY: { type: "number", description: "Start Y coordinate" },
+            endX: { type: "number", description: "End X coordinate" },
+            endY: { type: "number", description: "End Y coordinate" },
+          },
+          required: ["startX", "startY", "endX", "endY"],
+        },
+      },
+      {
+        name: "clear_selection",
+        description: "Clear the current selection",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      // Notes and Chips
+      {
+        name: "get_notes",
+        description: "Get all notes on the canvas with their positions, dimensions, and content preview",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "get_chips",
+        description: "Get all chips (small labels) on the canvas with their positions, text, and color",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      // Text tools
+      {
+        name: "get_text_at",
+        description: "Get text content within a specified rectangular region",
+        inputSchema: {
+          type: "object",
+          properties: {
+            x: { type: "number", description: "Top-left X coordinate" },
+            y: { type: "number", description: "Top-left Y coordinate" },
+            width: { type: "number", description: "Width in cells" },
+            height: { type: "number", description: "Height in cells" },
+          },
+          required: ["x", "y", "width", "height"],
+        },
+      },
+      {
+        name: "write_text",
+        description: "Write text at a specific position on the canvas",
+        inputSchema: {
+          type: "object",
+          properties: {
+            x: { type: "number", description: "X coordinate to start writing" },
+            y: { type: "number", description: "Y coordinate to start writing" },
+            text: { type: "string", description: "Text content to write" },
+          },
+          required: ["x", "y", "text"],
+        },
+      },
+      // Command execution
+      {
+        name: "run_command",
+        description: "Execute a Nara command string (e.g., '/color red', '/brush 3', '/agent create')",
+        inputSchema: {
+          type: "object",
+          properties: {
+            command: { type: "string", description: "Command string to execute (starting with /)" },
+          },
+          required: ["command"],
+        },
+      },
+      // Agent-based command execution
+      {
+        name: "agent_command",
+        description: "Execute a command at a specific agent's position. The cursor is temporarily moved to the agent's location, the command is executed, then the cursor is restored. This allows agents to perform actions like creating notes, chips, or paint at their location.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            agentId: { type: "string", description: "The ID of the agent (e.g., 'agent_1234567890_xyz')" },
+            command: { type: "string", description: "Command string to execute (e.g., '/chip Hello', '/note', '/paint')" },
+            restoreCursor: { type: "boolean", description: "If true, restore cursor to original position after command. Default: true", default: true },
+          },
+          required: ["agentId", "command"],
+        },
+      },
+      // Agent action with optional selection (atomic operation)
+      {
+        name: "agent_action",
+        description: "Execute a command at an agent's position with optional selection. This is an atomic operation that: 1) saves cursor/selection state, 2) moves cursor to agent, 3) optionally creates a selection relative to the agent, 4) executes the command, 5) clears selection, 6) restores original state. Use this for selection-based commands like /note, /paint that need a region.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            agentId: { type: "string", description: "The ID of the agent" },
+            command: { type: "string", description: "Command string to execute (e.g., '/note', '/paint')" },
+            selection: {
+              type: "object",
+              description: "Optional selection region relative to agent position. If provided, creates a selection from (agentX, agentY) to (agentX + width, agentY + height)",
+              properties: {
+                width: { type: "number", description: "Width of selection in cells" },
+                height: { type: "number", description: "Height of selection in cells" },
+              },
+              required: ["width", "height"],
+            },
+          },
+          required: ["agentId", "command"],
+        },
+      },
+      // Sequence tool for executing multiple operations in order
+      {
+        name: "sequence",
+        description: "Execute multiple operations in sequence with proper timing. Each operation completes before the next begins. Supports all MCP operations. Use this for coordinated multi-step actions like: move agent, set selection, create note. Optional delay between operations (default: 50ms).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            operations: {
+              type: "array",
+              description: "Array of operations to execute in order. Each operation has a 'type' matching MCP tool names and the relevant parameters.",
+              items: {
+                type: "object",
+                properties: {
+                  type: { type: "string", description: "Operation type (e.g., 'set_selection', 'run_command', 'move_agents', 'set_viewport')" },
+                },
+                required: ["type"],
+                additionalProperties: true,
+              },
+            },
+            delayMs: {
+              type: "number",
+              description: "Delay in milliseconds between operations (default: 50)",
+              default: 50,
+            },
+          },
+          required: ["operations"],
+        },
+      },
+      // Direct note creation
+      {
+        name: "create_note",
+        description: "Create a note directly at a specified position with given dimensions. This bypasses the need to set selection and run /note command separately.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            x: { type: "number", description: "X coordinate (top-left)" },
+            y: { type: "number", description: "Y coordinate (top-left)" },
+            width: { type: "number", description: "Width in cells" },
+            height: { type: "number", description: "Height in cells" },
+            content: { type: "string", description: "Optional initial content for the note" },
+          },
+          required: ["x", "y", "width", "height"],
+        },
+      },
+      // Direct chip creation
+      {
+        name: "create_chip",
+        description: "Create a chip (small label) directly at a specified position.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            x: { type: "number", description: "X coordinate" },
+            y: { type: "number", description: "Y coordinate" },
+            text: { type: "string", description: "Text content for the chip" },
+            color: { type: "string", description: "Optional hex color for the chip" },
+          },
+          required: ["x", "y", "text"],
         },
       },
     ],
@@ -439,6 +718,41 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case "move_agents_path": {
+        const { agentIds, path } = args as { agentIds: string[]; path: { x: number; y: number }[] };
+        const response = await sendToNara({ type: "move_agents_path", agentIds, path });
+        const result = {
+          moved: response.moved || [],
+          errors: response.errors || [],
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(result) }],
+        };
+      }
+
+      case "move_agents_expr": {
+        const { agentIds, xExpr, yExpr, vars, duration } = args as { agentIds: string[]; xExpr: string; yExpr: string; vars?: Record<string, number>; duration?: number };
+        const response = await sendToNara({ type: "move_agents_expr", agentIds, xExpr, yExpr, vars, duration });
+        const result = {
+          moved: response.moved || [],
+          errors: response.errors || [],
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(result) }],
+        };
+      }
+
+      case "stop_agents_expr": {
+        const { agentIds } = args as { agentIds: string[] };
+        const response = await sendToNara({ type: "stop_agents_expr", agentIds });
+        const result = {
+          stopped: response.stopped || [],
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(result) }],
+        };
+      }
+
       case "set_cursor_position": {
         const { x, y } = args as { x: number; y: number };
         const response = await sendToNara({ type: "set_cursor_position", position: { x, y } });
@@ -458,6 +772,242 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         return {
           content: [{ type: "text", text: JSON.stringify({ agentId: response.agentId, position: { x, y } }) }],
+        };
+      }
+
+      // Viewport tools
+      case "get_viewport": {
+        const response = await sendToNara({ type: "get_viewport" });
+        return {
+          content: [{ type: "text", text: JSON.stringify(response.viewport) }],
+        };
+      }
+
+      case "set_viewport": {
+        const { x, y, zoomLevel } = args as { x: number; y: number; zoomLevel?: number };
+        const response = await sendToNara({ type: "set_viewport", offset: { x, y }, zoomLevel });
+        return {
+          content: [{ type: "text", text: `Viewport set to offset (${x}, ${y})${zoomLevel !== undefined ? ` zoom ${zoomLevel}` : ''}` }],
+        };
+      }
+
+      // Selection tools
+      case "get_selection": {
+        const response = await sendToNara({ type: "get_selection" });
+        return {
+          content: [{ type: "text", text: JSON.stringify(response.selection) }],
+        };
+      }
+
+      case "set_selection": {
+        const { startX, startY, endX, endY } = args as { startX: number; startY: number; endX: number; endY: number };
+        const response = await sendToNara({ type: "set_selection", start: { x: startX, y: startY }, end: { x: endX, y: endY } });
+        return {
+          content: [{ type: "text", text: `Selection set from (${startX}, ${startY}) to (${endX}, ${endY})` }],
+        };
+      }
+
+      case "clear_selection": {
+        const response = await sendToNara({ type: "clear_selection" });
+        return {
+          content: [{ type: "text", text: "Selection cleared" }],
+        };
+      }
+
+      // Notes and Chips
+      case "get_notes": {
+        const response = await sendToNara({ type: "get_notes" });
+        return {
+          content: [{ type: "text", text: JSON.stringify(response.notes) }],
+        };
+      }
+
+      case "get_chips": {
+        const response = await sendToNara({ type: "get_chips" });
+        return {
+          content: [{ type: "text", text: JSON.stringify(response.chips) }],
+        };
+      }
+
+      // Text tools
+      case "get_text_at": {
+        const { x, y, width, height } = args as { x: number; y: number; width: number; height: number };
+        const response = await sendToNara({ type: "get_text_at", region: { x, y, width, height } });
+        return {
+          content: [{ type: "text", text: JSON.stringify(response.lines) }],
+        };
+      }
+
+      case "write_text": {
+        const { x, y, text } = args as { x: number; y: number; text: string };
+        const response = await sendToNara({ type: "write_text", position: { x, y }, text });
+        return {
+          content: [{ type: "text", text: `Wrote "${text}" at (${x}, ${y})` }],
+        };
+      }
+
+      // Command execution
+      case "run_command": {
+        const { command } = args as { command: string };
+        const response = await sendToNara({ type: "run_command", command });
+        return {
+          content: [{ type: "text", text: `Executed command: ${command}` }],
+        };
+      }
+
+      // Agent-based command execution
+      case "agent_command": {
+        const { agentId, command, restoreCursor = true } = args as { agentId: string; command: string; restoreCursor?: boolean };
+        const response = await sendToNara({ type: "agent_command", agentId, command, restoreCursor });
+        if (!response.success) {
+          return {
+            content: [{ type: "text", text: `Error: ${response.error}` }],
+            isError: true,
+          };
+        }
+        return {
+          content: [{ type: "text", text: `Agent ${agentId} executed: ${command} at (${response.agentPos?.x}, ${response.agentPos?.y})` }],
+        };
+      }
+
+      // Agent action with optional selection (atomic operation)
+      case "agent_action": {
+        const { agentId, command, selection } = args as {
+          agentId: string;
+          command: string;
+          selection?: { width: number; height: number };
+        };
+        const response = await sendToNara({ type: "agent_action", agentId, command, selection });
+        if (!response.success) {
+          return {
+            content: [{ type: "text", text: `Error: ${response.error}` }],
+            isError: true,
+          };
+        }
+        const selectionInfo = selection ? ` with selection ${selection.width}x${selection.height}` : '';
+        return {
+          content: [{ type: "text", text: `Agent ${agentId} executed: ${command}${selectionInfo} at (${response.agentPos?.x}, ${response.agentPos?.y})` }],
+        };
+      }
+
+      // Sequence tool - executes multiple operations in order
+      case "sequence": {
+        const { operations, delayMs = 50 } = args as {
+          operations: Array<{ type: string; [key: string]: any }>;
+          delayMs?: number;
+        };
+
+        const results: Array<{ type: string; success: boolean; result?: any; error?: string }> = [];
+
+        for (const op of operations) {
+          const { type, ...params } = op;
+
+          try {
+            // Small delay between operations for React state to settle
+            if (results.length > 0 && delayMs > 0) {
+              await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+
+            let response: any;
+
+            // Route to appropriate handler based on operation type
+            switch (type) {
+              case "set_selection": {
+                const { startX, startY, endX, endY } = params;
+                response = await sendToNara({ type: "set_selection", start: { x: startX, y: startY }, end: { x: endX, y: endY } });
+                break;
+              }
+              case "clear_selection": {
+                response = await sendToNara({ type: "clear_selection" });
+                break;
+              }
+              case "run_command": {
+                response = await sendToNara({ type: "run_command", command: params.command });
+                break;
+              }
+              case "set_viewport": {
+                response = await sendToNara({ type: "set_viewport", offset: { x: params.x, y: params.y }, zoomLevel: params.zoomLevel });
+                break;
+              }
+              case "set_cursor_position": {
+                response = await sendToNara({ type: "set_cursor_position", position: { x: params.x, y: params.y } });
+                break;
+              }
+              case "move_agents": {
+                response = await sendToNara({ type: "move_agents", agentIds: params.agentIds, destination: params.destination });
+                break;
+              }
+              case "paint_cells": {
+                response = await sendToNara({ type: "paint_cells", cells: params.cells });
+                break;
+              }
+              case "erase_cells": {
+                response = await sendToNara({ type: "erase_cells", cells: params.cells });
+                break;
+              }
+              case "write_text": {
+                response = await sendToNara({ type: "write_text", position: { x: params.x, y: params.y }, text: params.text });
+                break;
+              }
+              case "create_note": {
+                response = await sendToNara({ type: "create_note", x: params.x, y: params.y, width: params.width, height: params.height, content: params.content });
+                break;
+              }
+              case "create_chip": {
+                response = await sendToNara({ type: "create_chip", x: params.x, y: params.y, text: params.text, color: params.color });
+                break;
+              }
+              default:
+                // Generic passthrough for other operations
+                response = await sendToNara({ type, ...params });
+            }
+
+            results.push({ type, success: response.success !== false, result: response });
+          } catch (error: any) {
+            results.push({ type, success: false, error: error.message });
+          }
+        }
+
+        const successCount = results.filter(r => r.success).length;
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              completed: successCount,
+              total: operations.length,
+              results
+            }, null, 2)
+          }],
+        };
+      }
+
+      // Direct note creation
+      case "create_note": {
+        const { x, y, width, height, content } = args as { x: number; y: number; width: number; height: number; content?: string };
+        const response = await sendToNara({ type: "create_note", x, y, width, height, content });
+        if (!response.success) {
+          return {
+            content: [{ type: "text", text: `Error: ${response.error || 'Failed to create note'}` }],
+            isError: true,
+          };
+        }
+        return {
+          content: [{ type: "text", text: `Created note at (${x}, ${y}) with size ${width}x${height}` }],
+        };
+      }
+
+      // Direct chip creation
+      case "create_chip": {
+        const { x, y, text, color } = args as { x: number; y: number; text: string; color?: string };
+        const response = await sendToNara({ type: "create_chip", x, y, text, color });
+        if (!response.success) {
+          return {
+            content: [{ type: "text", text: `Error: ${response.error || 'Failed to create chip'}` }],
+            isError: true,
+          };
+        }
+        return {
+          content: [{ type: "text", text: `Created chip "${text}" at (${x}, ${y})` }],
         };
       }
 

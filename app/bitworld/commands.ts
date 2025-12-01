@@ -5002,14 +5002,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             // Join lines and calculate wrapped content
                             const rawContent = lines.join('\n').trim();
 
-                            // Debug logging
-                            console.log('[/view] Found note:', key);
-                            console.log('[/view] Note bounds:', { startX, endX, startY, endY });
-                            console.log('[/view] Note content data keys:', Object.keys(noteContent).slice(0, 10));
-                            console.log('[/view] Extracted lines:', lines.slice(0, 5));
-                            console.log('[/view] Raw content length:', rawContent.length);
-                            console.log('[/view] Raw content preview:', rawContent.slice(0, 100));
-
                             // Set view overlay state
                             setModeState(prev => ({
                                 ...prev,
@@ -6625,8 +6617,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         // Record command execution for playback
         recorder?.recordAction('command_execute', { command: commandString });
 
+        // Strip leading '/' if present
+        const normalizedCommand = commandString.startsWith('/') ? commandString.slice(1) : commandString;
+
         // Parse the command
-        const inputParts = commandString.split(/\s+/);
+        const inputParts = normalizedCommand.split(/\s+/);
         const commandName = inputParts[0];
 
         // Directly execute based on command name
@@ -6734,8 +6729,43 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             // Execute publish command
             // TODO: Implement publish logic or call existing publish function
             setDialogueWithRevert("Publishing canvas...", setDialogueText);
+        } else if (commandName === 'bg') {
+            // Handle bg command - change background color
+            const bgArg = inputParts[1];
+            const textColor = inputParts[2];
+            const textBackground = inputParts[3];
+
+            if (bgArg) {
+                // Check for special cases
+                if (bgArg.toLowerCase() === 'video' || bgArg.toLowerCase().endsWith('.mp4')) {
+                    const videoUrl = bgArg.toLowerCase() === 'video' ? '/forest.mp4' :
+                        (bgArg.startsWith('http') || bgArg.startsWith('/')) ? bgArg : `/${bgArg}`;
+                    switchBackgroundMode('video', videoUrl, textColor, textBackground);
+                } else {
+                    // Color background
+                    switchBackgroundMode('color', bgArg, textColor, textBackground);
+                }
+            } else {
+                // Default to white
+                switchBackgroundMode('color', '#FFFFFF');
+            }
+        } else if (commandName === 'chip') {
+            // Handle chip command - create a chip at cursor position
+            const chipText = inputParts.slice(1).join(' ') || 'chip';
+            const chipCursorPos = commandState.commandStartPos;
+            if (setWorldData && worldData && chipCursorPos) {
+                const chipKey = `chip_${chipCursorPos.x},${chipCursorPos.y}_${Date.now()}`;
+                const chipData = {
+                    x: chipCursorPos.x,
+                    y: chipCursorPos.y,
+                    text: chipText,
+                    timestamp: Date.now()
+                };
+                setWorldData({ ...worldData, [chipKey]: JSON.stringify(chipData) });
+                setDialogueWithRevert(`Chip created: ${chipText}`, setDialogueText);
+            }
         }
-    }, [getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, setDialogueText, selectedNoteKey, commandState.commandStartPos]);
+    }, [getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, setDialogueText, selectedNoteKey, commandState.commandStartPos, switchBackgroundMode]);
 
     // Helper method to activate command with pre-filled input (for Cmd+F search)
     const startCommandWithInput = useCallback((cursorPos: Point, input: string) => {

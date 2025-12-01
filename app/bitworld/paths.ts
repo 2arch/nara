@@ -407,3 +407,168 @@ export function findSmoothPath(
 
     return smoothed;
 }
+
+// ============================================================================
+// EXPRESSION-BASED MOVEMENT SYSTEM
+// ============================================================================
+// Allows agents to move based on mathematical expressions evaluated each frame.
+// Supports variables like x, y, t, vx, vy, and swarm variables like avgX, avgY.
+
+export interface AgentExpressionState {
+    id: string;
+    xExpr: string;          // Expression for new x position
+    yExpr: string;          // Expression for new y position
+    vars: Record<string, number>;  // Custom variables
+    startTime: number;      // When the expression started (for t)
+    active: boolean;        // Whether expression is running
+    duration?: number;      // Optional max duration in seconds
+}
+
+export interface ExpressionContext {
+    x: number;              // Current x position
+    y: number;              // Current y position
+    t: number;              // Time since expression started (seconds)
+    vx: number;             // Current velocity x
+    vy: number;             // Current velocity y
+    startX: number;         // Starting x position
+    startY: number;         // Starting y position
+    // Swarm variables (set externally for multi-agent coordination)
+    avgX?: number;          // Average x of all agents
+    avgY?: number;          // Average y of all agents
+    nearestX?: number;      // Nearest other agent x
+    nearestY?: number;      // Nearest other agent y
+    nearestDist?: number;   // Distance to nearest agent
+    [key: string]: number | undefined;  // Custom variables
+}
+
+/**
+ * Simple math expression evaluator
+ * Supports: +, -, *, /, ^, (, ), sin, cos, tan, sqrt, abs, min, max, pow, exp, log
+ * Variables: x, y, t, vx, vy, startX, startY, avgX, avgY, etc.
+ */
+export function evaluateExpression(expr: string, context: ExpressionContext): number {
+    // Create a safe evaluation context with math functions
+    const mathFns: Record<string, (...args: number[]) => number> = {
+        sin: Math.sin,
+        cos: Math.cos,
+        tan: Math.tan,
+        asin: Math.asin,
+        acos: Math.acos,
+        atan: Math.atan,
+        atan2: Math.atan2,
+        sqrt: Math.sqrt,
+        abs: Math.abs,
+        floor: Math.floor,
+        ceil: Math.ceil,
+        round: Math.round,
+        min: Math.min,
+        max: Math.max,
+        pow: Math.pow,
+        exp: Math.exp,
+        log: Math.log,
+        sign: Math.sign,
+        random: Math.random,
+    };
+
+    // Replace variable names with their values
+    let processedExpr = expr;
+
+    // Sort keys by length (longest first) to avoid partial replacements
+    const sortedKeys = Object.keys(context).sort((a, b) => b.length - a.length);
+
+    for (const key of sortedKeys) {
+        const value = context[key];
+        if (value !== undefined) {
+            // Use word boundary to avoid partial matches
+            const regex = new RegExp(`\\b${key}\\b`, 'g');
+            processedExpr = processedExpr.replace(regex, `(${value})`);
+        }
+    }
+
+    // Replace PI and E
+    processedExpr = processedExpr.replace(/\bPI\b/g, `(${Math.PI})`);
+    processedExpr = processedExpr.replace(/\bE\b/g, `(${Math.E})`);
+
+    // Replace ^ with ** for exponentiation
+    processedExpr = processedExpr.replace(/\^/g, '**');
+
+    // Build function string with math functions in scope
+    const fnNames = Object.keys(mathFns);
+    const fnValues = Object.values(mathFns);
+
+    try {
+        // Create function with math functions as parameters
+        const fn = new Function(...fnNames, `return (${processedExpr});`);
+        const result = fn(...fnValues);
+
+        // Validate result
+        if (typeof result !== 'number' || isNaN(result) || !isFinite(result)) {
+            console.warn(`Expression "${expr}" returned invalid value:`, result);
+            return context.x; // Return current position as fallback
+        }
+
+        return result;
+    } catch (e) {
+        console.error(`Error evaluating expression "${expr}":`, e);
+        return context.x; // Return current position as fallback
+    }
+}
+
+/**
+ * Evaluate an agent's movement expression and return new position
+ */
+export function evaluateAgentMovement(
+    state: AgentExpressionState,
+    currentPos: Point,
+    velocity: Point,
+    startPos: Point,
+    swarmContext?: Partial<ExpressionContext>
+): Point {
+    const now = Date.now();
+    const t = (now - state.startTime) / 1000; // Time in seconds
+
+    // Check if duration exceeded
+    if (state.duration && t > state.duration) {
+        return currentPos; // Stop moving
+    }
+
+    // Build evaluation context
+    const context: ExpressionContext = {
+        x: currentPos.x,
+        y: currentPos.y,
+        t,
+        vx: velocity.x,
+        vy: velocity.y,
+        startX: startPos.x,
+        startY: startPos.y,
+        ...swarmContext,
+        ...state.vars,
+    };
+
+    // Evaluate expressions
+    const newX = evaluateExpression(state.xExpr, context);
+    const newY = evaluateExpression(state.yExpr, context);
+
+    return { x: newX, y: newY };
+}
+
+/**
+ * Create an expression state for an agent
+ */
+export function createAgentExpression(
+    id: string,
+    xExpr: string,
+    yExpr: string,
+    vars: Record<string, number> = {},
+    duration?: number
+): AgentExpressionState {
+    return {
+        id,
+        xExpr,
+        yExpr,
+        vars,
+        startTime: Date.now(),
+        active: true,
+        duration,
+    };
+}

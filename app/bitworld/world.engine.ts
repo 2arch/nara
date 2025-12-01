@@ -1004,6 +1004,7 @@ export interface WorldEngine {
     viewOffset: Point;
     effectiveViewOffset: Point;
     cursorPos: Point;
+    setCursorPos: (pos: Point) => void;
     visualCursorPos: Point;
     zoomLevel: number;
     backgroundMode: BackgroundMode;
@@ -1039,6 +1040,8 @@ export interface WorldEngine {
     setZoomLevel: React.Dispatch<React.SetStateAction<number>>;
     selectionStart: Point | null;
     selectionEnd: Point | null;
+    setSelectionStart: React.Dispatch<React.SetStateAction<Point | null>>;
+    setSelectionEnd: React.Dispatch<React.SetStateAction<Point | null>>;
     processingRegion: { startX: number, endX: number, startY: number, endY: number } | null;
     selectedNoteKey: string | null; // Track selected note region from canvas
     setSelectedNoteKey: React.Dispatch<React.SetStateAction<string | null>>; // Allow canvas to update selected note
@@ -1188,6 +1191,9 @@ export interface WorldEngine {
     paintCell: (x: number, y: number, prevX?: number, prevY?: number) => void;
     eraseCell: (x: number, y: number, prevX?: number, prevY?: number) => void;
     fillPolygon: (points: Point[]) => void;
+    // MCP direct paint methods (bypasses paint mode check, allows custom color)
+    mcpPaintCells: (cells: Array<{ x: number; y: number; color: string }>) => void;
+    mcpEraseCells: (cells: Array<{ x: number; y: number }>) => void;
     setTiles: (tiles: Record<string, string>) => void;
     getConnectedPaintRegion: (x: number, y: number) => { points: Point[], minX: number, maxX: number, minY: number, maxY: number, color: string } | null;
     floodFill: (x: number, y: number) => void;
@@ -11986,6 +11992,7 @@ export function useWorldEngine({
         viewOffset,
         effectiveViewOffset,
         cursorPos,
+        setCursorPos,
         visualCursorPos,
         zoomLevel,
         currentScale,
@@ -12017,7 +12024,9 @@ export function useWorldEngine({
         setViewOffset, // Expose setter
         setZoomLevel, // Expose zoom setter
         selectionStart,
+        setSelectionStart,
         selectionEnd,
+        setSelectionEnd,
         processingRegion,
         selectedNoteKey, // Expose selected note key for canvas
         setSelectedNoteKey, // Allow canvas to update selected note
@@ -12397,6 +12406,73 @@ export function useWorldEngine({
                     ...prev,
                     [`paintblob_${updatedBlob.id}`]: JSON.stringify(updatedBlob)
                 };
+            });
+        },
+        // MCP direct paint methods - bypasses paint mode, allows custom colors per cell
+        mcpPaintCells: (cells: Array<{ x: number; y: number; color: string }>) => {
+            if (cells.length === 0) return;
+
+            // Group cells by color for efficient blob storage
+            const cellsByColor = new Map<string, Array<{ x: number; y: number }>>();
+            for (const cell of cells) {
+                const existing = cellsByColor.get(cell.color) || [];
+                existing.push({ x: Math.floor(cell.x), y: Math.floor(cell.y) });
+                cellsByColor.set(cell.color, existing);
+            }
+
+            setWorldData(prev => {
+                let updated = { ...prev };
+
+                for (const [color, colorCells] of cellsByColor) {
+                    const { blob } = findOrCreateBlobForCell(updated, colorCells[0].x, colorCells[0].y, color, 'color');
+                    const updatedBlob = addCellsToBlob(blob, colorCells);
+                    updated[`paintblob_${updatedBlob.id}`] = JSON.stringify(updatedBlob);
+                }
+
+                return updated;
+            });
+        },
+        mcpEraseCells: (cells: Array<{ x: number; y: number }>) => {
+            if (cells.length === 0) return;
+
+            setWorldData(prev => {
+                let updated = { ...prev };
+
+                for (const cell of cells) {
+                    const cellX = Math.floor(cell.x);
+                    const cellY = Math.floor(cell.y);
+
+                    // Find blob containing this cell and remove it
+                    const blob = findBlobAt(updated, cellX, cellY);
+                    if (blob) {
+                        const cellKey = `${cellX},${cellY}`;
+                        // cells is a string[], filter it
+                        const newCells = blob.cells.filter(c => c !== cellKey);
+
+                        if (newCells.length > 0) {
+                            // Recalculate bounds
+                            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                            for (const key of newCells) {
+                                const [x, y] = key.split(',').map(Number);
+                                minX = Math.min(minX, x);
+                                minY = Math.min(minY, y);
+                                maxX = Math.max(maxX, x);
+                                maxY = Math.max(maxY, y);
+                            }
+                            const updatedBlob = {
+                                ...blob,
+                                cells: newCells,
+                                bounds: { minX, minY, maxX, maxY }
+                            };
+                            updated[`paintblob_${blob.id}`] = JSON.stringify(updatedBlob);
+                        } else {
+                            // Blob is empty, remove it
+                            delete updated[`paintblob_${blob.id}`];
+                        }
+                    }
+                }
+
+                return updated;
             });
         },
         paintTool,

@@ -15,7 +15,7 @@ import { useMonogram } from './monogram';
 import { faceOrientationToRotation } from './face';
 import { renderBubble } from './bubble';
 import { terminalManager, type TerminalBuffer } from './terminal.manager';
-import { findSmoothPath } from './paths';
+import { findSmoothPath, evaluateExpression, ExpressionContext } from './paths';
 import { ghostEffect } from './skins';
 import { useMcpBridge } from '../hooks/useMcpBridge';
 
@@ -1698,6 +1698,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Pathfinding state for agents (like cursor's currentPathRef/pathIndexRef)
     const agentPathsRef = useRef<Record<string, Point[]>>({});
     const agentPathIndicesRef = useRef<Record<string, number>>({});
+    // Expression-based movement state for agents
+    const agentExpressionsRef = useRef<Record<string, { xExpr: string; yExpr: string; vars: Record<string, number>; startTime: number; startPos: Point; duration?: number }>>({});
+    const agentVelocitiesRef = useRef<Record<string, Point>>({});
     const agentLastAnimTimeRef = useRef<number>(0);
     // Pending agent move (to allow double-tap to cancel)
     const pendingAgentMoveRef = useRef<NodeJS.Timeout | null>(null);
@@ -1841,6 +1844,46 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
             return { moved, errors };
         },
+        moveAgentsPath: (agentIds, path) => {
+            // Move agents along a custom path (no pathfinding - use provided path directly)
+            const moved: string[] = [];
+            const errors: string[] = [];
+
+            if (!path || path.length === 0) {
+                return { moved: [], errors: ['Path is empty'] };
+            }
+
+            for (const agentId of agentIds) {
+                const agentDataStr = engine.worldData[agentId];
+                if (!agentDataStr) {
+                    errors.push(`Agent ${agentId} not found`);
+                    continue;
+                }
+
+                try {
+                    const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+
+                    // Initialize visual position if needed
+                    if (!agentVisualPositions[agentId]) {
+                        setAgentVisualPositions(prev => ({ ...prev, [agentId]: { x: agentData.x, y: agentData.y } }));
+                    }
+
+                    // Use the provided path directly (no pathfinding)
+                    agentPathsRef.current[agentId] = path;
+                    agentPathIndicesRef.current[agentId] = 0;
+
+                    // Start animation
+                    agentMovingRef.current = { ...agentMovingRef.current, [agentId]: true };
+                    setAgentMoving(prev => ({ ...prev, [agentId]: true }));
+
+                    moved.push(agentId);
+                } catch (e: any) {
+                    errors.push(`Error moving ${agentId}: ${e.message}`);
+                }
+            }
+
+            return { moved, errors };
+        },
         setCursorPosition: (pos) => {
             engine.setCursorPos(pos);
         },
@@ -1881,6 +1924,332 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
             console.log(`[MCP] Spawned agent ${agentId} at (${pos.x}, ${pos.y})`);
             return { agentId };
+        },
+        moveAgentsExpr: (agentIds, xExpr, yExpr, vars = {}, duration) => {
+            // Move agents using mathematical expressions evaluated each frame
+            const moved: string[] = [];
+            const errors: string[] = [];
+
+            for (const agentId of agentIds) {
+                const agentDataStr = engine.worldData[agentId];
+                if (!agentDataStr) {
+                    errors.push(`Agent ${agentId} not found`);
+                    continue;
+                }
+
+                try {
+                    const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+
+                    // Get current visual position or fall back to stored position
+                    let startPos = agentVisualPositions[agentId];
+                    if (!startPos) {
+                        startPos = { x: agentData.x, y: agentData.y };
+                        setAgentVisualPositions(prev => ({ ...prev, [agentId]: startPos }));
+                    }
+
+                    // Set up expression state
+                    agentExpressionsRef.current[agentId] = {
+                        xExpr,
+                        yExpr,
+                        vars,
+                        startTime: Date.now(),
+                        startPos: { ...startPos },
+                        duration,
+                    };
+
+                    // Initialize velocity
+                    agentVelocitiesRef.current[agentId] = { x: 0, y: 0 };
+
+                    // Start animation (triggers the useEffect)
+                    agentMovingRef.current = { ...agentMovingRef.current, [agentId]: true };
+                    setAgentMoving(prev => ({ ...prev, [agentId]: true }));
+
+                    moved.push(agentId);
+                } catch (e: any) {
+                    errors.push(`Error setting expression for ${agentId}: ${e.message}`);
+                }
+            }
+
+            return { moved, errors };
+        },
+        stopAgentsExpr: (agentIds) => {
+            // Stop expression-based movement for specified agents
+            const stopped: string[] = [];
+
+            for (const agentId of agentIds) {
+                if (agentExpressionsRef.current[agentId]) {
+                    delete agentExpressionsRef.current[agentId];
+                    delete agentVelocitiesRef.current[agentId];
+                    stopped.push(agentId);
+                }
+            }
+
+            return { stopped };
+        },
+        getViewport: () => {
+            // Calculate visible bounds based on canvas size and zoom
+            const canvas = canvasRef.current;
+            const charWidth = 10 * engine.zoomLevel;
+            const charHeight = 20 * engine.zoomLevel;
+            const visibleWidth = canvas ? Math.ceil(canvas.width / charWidth) : 100;
+            const visibleHeight = canvas ? Math.ceil(canvas.height / charHeight) : 50;
+            return {
+                offset: engine.viewOffset,
+                zoomLevel: engine.zoomLevel,
+                visibleBounds: {
+                    minX: Math.floor(engine.viewOffset.x),
+                    minY: Math.floor(engine.viewOffset.y),
+                    maxX: Math.floor(engine.viewOffset.x) + visibleWidth,
+                    maxY: Math.floor(engine.viewOffset.y) + visibleHeight,
+                },
+            };
+        },
+        setViewport: (offset, zoomLevel) => {
+            engine.setViewOffset(offset);
+            if (zoomLevel !== undefined) {
+                engine.setZoomLevel(zoomLevel);
+            }
+        },
+        getSelection: () => {
+            return {
+                start: engine.selectionStart,
+                end: engine.selectionEnd,
+            };
+        },
+        setSelection: (start, end) => {
+            engine.setSelectionStart(start);
+            engine.setSelectionEnd(end);
+        },
+        clearSelection: () => {
+            engine.setSelectionStart(null);
+            engine.setSelectionEnd(null);
+        },
+        getNotes: () => {
+            const notes: Array<{ id: string; x: number; y: number; width: number; height: number; contentPreview?: string; contentType?: string }> = [];
+            for (const key in engine.worldData) {
+                if (key.startsWith('note_')) {
+                    try {
+                        const noteDataStr = engine.worldData[key];
+                        const noteData = typeof noteDataStr === 'string' ? JSON.parse(noteDataStr) : noteDataStr;
+                        if (noteData && typeof noteData.startX === 'number') {
+                            notes.push({
+                                id: key,
+                                x: noteData.startX,
+                                y: noteData.startY,
+                                width: noteData.endX - noteData.startX,
+                                height: noteData.endY - noteData.startY,
+                                contentType: noteData.contentType,
+                            });
+                        }
+                    } catch (e) {
+                        // Skip invalid note data
+                    }
+                }
+            }
+            return notes;
+        },
+        getChips: () => {
+            const chips: Array<{ id: string; x: number; y: number; text: string; color?: string }> = [];
+            for (const key in engine.worldData) {
+                if (key.startsWith('chip_')) {
+                    try {
+                        const chipDataStr = engine.worldData[key];
+                        const chipData = typeof chipDataStr === 'string' ? JSON.parse(chipDataStr) : chipDataStr;
+                        if (chipData && typeof chipData.x === 'number') {
+                            chips.push({
+                                id: key,
+                                x: chipData.x,
+                                y: chipData.y,
+                                text: chipData.text || '',
+                                color: chipData.color,
+                            });
+                        }
+                    } catch (e) {
+                        // Skip invalid chip data
+                    }
+                }
+            }
+            return chips;
+        },
+        createNote: (x, y, width, height, content) => {
+            // Create a note directly without requiring selection state
+            const noteId = `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+            const noteData = {
+                startX: x,
+                startY: y,
+                endX: x + width,
+                endY: y + height,
+                contentType: 'text',
+                createdAt: new Date().toISOString(),
+            };
+
+            engine.setWorldData(prev => ({
+                ...prev,
+                [noteId]: JSON.stringify(noteData),
+            }));
+
+            console.log(`[MCP] Created note ${noteId} at (${x}, ${y}) with size ${width}x${height}`);
+            return { success: true, noteId };
+        },
+        createChip: (x, y, text, color) => {
+            // Create a chip directly at the specified position
+            // Key format must be chip_X,Y_timestamp to match existing parsing
+            const chipId = `chip_${x},${y}_${Date.now()}`;
+
+            const chipData = {
+                x,
+                y,
+                text,
+                color: color || '#ffcc00',
+                timestamp: Date.now(),
+            };
+
+            engine.setWorldData(prev => ({
+                ...prev,
+                [chipId]: JSON.stringify(chipData),
+            }));
+
+            console.log(`[MCP] Created chip ${chipId} "${text}" at (${x}, ${y})`);
+            return { success: true, chipId };
+        },
+        getTextAt: (region) => {
+            const lines: string[] = [];
+            for (let y = region.y; y < region.y + region.height; y++) {
+                let line = '';
+                for (let x = region.x; x < region.x + region.width; x++) {
+                    const cellKey = `${x},${y}`;
+                    const cellData = engine.worldData[cellKey];
+                    const char = cellData && !engine.isImageData(cellData) ? engine.getCharacter(cellData) : ' ';
+                    line += char;
+                }
+                lines.push(line.trimEnd());
+            }
+            return lines;
+        },
+        writeText: (pos, text) => {
+            // Write text character by character starting at pos
+            const lines = text.split('\n');
+            const newData: Record<string, string> = {};
+            let y = pos.y;
+            for (const line of lines) {
+                let x = pos.x;
+                for (const char of line) {
+                    newData[`${x},${y}`] = char;
+                    x++;
+                }
+                y++;
+            }
+            engine.setWorldData(prev => ({ ...prev, ...newData }));
+        },
+        runCommand: (command) => {
+            // Execute command via commands system
+            console.log('[MCP] runCommand called:', command, 'commandSystem:', !!engine.commandSystem, 'executeCommandString:', !!engine.commandSystem?.executeCommandString);
+            if (engine.commandSystem?.executeCommandString) {
+                engine.commandSystem.executeCommandString(command);
+                console.log('[MCP] executeCommandString called successfully');
+            } else {
+                console.error('[MCP] commandSystem or executeCommandString not available');
+            }
+        },
+        agentCommand: (agentId, command, restoreCursor = true) => {
+            // Execute command at an agent's position
+            const agentDataStr = engine.worldData[agentId];
+            if (!agentDataStr) {
+                return { success: false, error: `Agent ${agentId} not found` };
+            }
+
+            try {
+                const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+
+                // Get agent's current visual position (or stored position if not animating)
+                const agentPos = agentVisualPositions[agentId] || { x: agentData.x, y: agentData.y };
+
+                // Save current cursor position if we need to restore it
+                const originalPos = restoreCursor ? { ...engine.cursorPos } : null;
+
+                // Move cursor to agent position
+                engine.setCursorPos({ x: Math.round(agentPos.x), y: Math.round(agentPos.y) });
+
+                // Execute the command at the agent's position
+                if (engine.commandSystem?.executeCommandString) {
+                    engine.commandSystem.executeCommandString(command);
+                }
+
+                // Restore cursor position if requested
+                if (originalPos && restoreCursor) {
+                    // Small delay to let command execute, then restore
+                    setTimeout(() => {
+                        engine.setCursorPos(originalPos);
+                    }, 50);
+                }
+
+                console.log(`[MCP] Agent ${agentId} executed: ${command} at (${agentPos.x}, ${agentPos.y})`);
+                return { success: true, agentPos };
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        },
+        agentAction: (agentId, command, selection) => {
+            // Atomic agent action: save state → move cursor → optional selection → execute → restore
+            const agentDataStr = engine.worldData[agentId];
+            if (!agentDataStr) {
+                return { success: false, error: `Agent ${agentId} not found` };
+            }
+
+            try {
+                const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+
+                // Get agent's current visual position
+                const agentPos = agentVisualPositions[agentId] || { x: agentData.x, y: agentData.y };
+                const roundedPos = { x: Math.round(agentPos.x), y: Math.round(agentPos.y) };
+
+                // Save original state
+                const originalCursorPos = { ...engine.cursorPos };
+                const originalSelection = engine.selectionStart && engine.selectionEnd
+                    ? { start: { ...engine.selectionStart }, end: { ...engine.selectionEnd } }
+                    : null;
+
+                // Move cursor to agent position
+                engine.setCursorPos(roundedPos);
+
+                // Create selection if specified
+                if (selection) {
+                    engine.setSelectionStart(roundedPos);
+                    engine.setSelectionEnd({
+                        x: roundedPos.x + selection.width,
+                        y: roundedPos.y + selection.height
+                    });
+                }
+
+                // Execute the command
+                if (engine.commandSystem?.executeCommandString) {
+                    engine.commandSystem.executeCommandString(command);
+                }
+
+                // Restore state after a short delay
+                setTimeout(() => {
+                    // Clear the agent's selection
+                    if (selection) {
+                        engine.setSelectionStart(null);
+                        engine.setSelectionEnd(null);
+                    }
+
+                    // Restore original cursor position
+                    engine.setCursorPos(originalCursorPos);
+
+                    // Restore original selection if there was one
+                    if (originalSelection) {
+                        engine.setSelectionStart(originalSelection.start);
+                        engine.setSelectionEnd(originalSelection.end);
+                    }
+                }, 100);
+
+                console.log(`[MCP] Agent ${agentId} action: ${command}${selection ? ` (selection ${selection.width}x${selection.height})` : ''} at (${agentPos.x}, ${agentPos.y})`);
+                return { success: true, agentPos: roundedPos };
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
         },
     });
 
@@ -2038,11 +2407,13 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         };
     }, [isCharacterMoving, engine.isCharacterEnabled]);
 
-    // Agent movement animation - follows path like cursor does
+    // Agent movement animation - follows path like cursor does, OR evaluates expressions
     useEffect(() => {
-        // Check if any agents need animation
+        // Check if any agents need animation (path-based OR expression-based)
         const hasMovingAgents = Object.values(agentMoving).some(m => m);
-        if (!hasMovingAgents) {
+        const hasExpressionAgents = Object.keys(agentExpressionsRef.current).length > 0;
+
+        if (!hasMovingAgents && !hasExpressionAgents) {
             // Cancel any running animation
             if (agentAnimationRef.current) {
                 cancelAnimationFrame(agentAnimationRef.current);
@@ -2141,6 +2512,73 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 } else {
                     stillMoving = true;
                 }
+            }
+
+            // Process expression-based movement
+            const currentExpressions = agentExpressionsRef.current;
+            const expiredExpressions: string[] = [];
+
+            // Compute swarm context for expression evaluation (avg position of all agents)
+            const allPositions = Object.values(newPositions);
+            const avgX = allPositions.length > 0 ? allPositions.reduce((sum, p) => sum + p.x, 0) / allPositions.length : 0;
+            const avgY = allPositions.length > 0 ? allPositions.reduce((sum, p) => sum + p.y, 0) / allPositions.length : 0;
+
+            for (const agentId in currentExpressions) {
+                const expr = currentExpressions[agentId];
+                const currentPos = newPositions[agentId] || agentVisualPositionsRef.current[agentId];
+
+                if (!currentPos) continue;
+
+                const now = Date.now();
+                const t = (now - expr.startTime) / 1000; // Time in seconds
+
+                // Check if duration exceeded
+                if (expr.duration && t > expr.duration) {
+                    expiredExpressions.push(agentId);
+                    continue;
+                }
+
+                // Get velocity (approximate from last position)
+                const lastVel = agentVelocitiesRef.current[agentId] || { x: 0, y: 0 };
+
+                // Build context for expression evaluation
+                const context: ExpressionContext = {
+                    x: currentPos.x,
+                    y: currentPos.y,
+                    t,
+                    vx: lastVel.x,
+                    vy: lastVel.y,
+                    startX: expr.startPos.x,
+                    startY: expr.startPos.y,
+                    avgX,
+                    avgY,
+                    ...expr.vars,
+                };
+
+                // Evaluate expressions
+                const newX = evaluateExpression(expr.xExpr, context);
+                const newY = evaluateExpression(expr.yExpr, context);
+
+                // Calculate velocity for next frame
+                const vx = newX - currentPos.x;
+                const vy = newY - currentPos.y;
+                agentVelocitiesRef.current[agentId] = { x: vx, y: vy };
+
+                // Update direction based on velocity
+                if (Math.abs(vx) > 0.01 || Math.abs(vy) > 0.01) {
+                    const angle = Math.atan2(vy, vx);
+                    const dir = Math.round(((angle + Math.PI) / (2 * Math.PI)) * 8 + 2) % 8;
+                    newDirections[agentId] = dir;
+                }
+
+                newPositions[agentId] = { x: newX, y: newY };
+                stillMoving = true;
+            }
+
+            // Clean up expired expressions
+            for (const id of expiredExpressions) {
+                delete agentExpressionsRef.current[id];
+                delete agentVelocitiesRef.current[id];
             }
 
             // Update refs immediately for smooth animation

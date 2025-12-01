@@ -16,16 +16,65 @@ interface AgentInfo {
   visualY?: number;
 }
 
+interface NoteInfo {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  contentPreview?: string;
+  contentType?: string;
+}
+
+interface ChipInfo {
+  id: string;
+  x: number;
+  y: number;
+  text: string;
+  color?: string;
+}
+
+interface ViewportInfo {
+  offset: { x: number; y: number };
+  zoomLevel: number;
+  visibleBounds: { minX: number; minY: number; maxX: number; maxY: number };
+}
+
 interface McpBridgeOptions {
   enabled: boolean;
+  // Paint tools
   mcpPaintCells: (cells: Array<{ x: number; y: number; color: string }>) => void;
   mcpEraseCells: (cells: Array<{ x: number; y: number }>) => void;
+  // Cursor
   getCursorPosition: () => { x: number; y: number };
   setCursorPosition: (pos: { x: number; y: number }) => void;
+  // Canvas info
   getCanvasInfo: (region?: { x: number; y: number; width: number; height: number }) => any;
+  getViewport: () => ViewportInfo;
+  setViewport: (offset: { x: number; y: number }, zoomLevel?: number) => void;
+  // Selection
+  getSelection: () => { start: { x: number; y: number } | null; end: { x: number; y: number } | null };
+  setSelection: (start: { x: number; y: number }, end: { x: number; y: number }) => void;
+  clearSelection: () => void;
+  // Agents
   getAgents: () => AgentInfo[];
   moveAgents: (agentIds: string[], destination: { x: number; y: number }) => { moved: string[]; errors: string[] };
+  moveAgentsPath: (agentIds: string[], path: { x: number; y: number }[]) => { moved: string[]; errors: string[] };
+  moveAgentsExpr: (agentIds: string[], xExpr: string, yExpr: string, vars?: Record<string, number>, duration?: number) => { moved: string[]; errors: string[] };
+  stopAgentsExpr: (agentIds: string[]) => { stopped: string[] };
   createAgent: (pos: { x: number; y: number }, spriteName?: string) => { agentId: string } | { error: string };
+  // Notes & Chips
+  getNotes: () => NoteInfo[];
+  getChips: () => ChipInfo[];
+  createNote: (x: number, y: number, width: number, height: number, content?: string) => { success: boolean; noteId?: string; error?: string };
+  createChip: (x: number, y: number, text: string, color?: string) => { success: boolean; chipId?: string; error?: string };
+  // Text
+  getTextAt: (region: { x: number; y: number; width: number; height: number }) => string[];
+  writeText: (pos: { x: number; y: number }, text: string) => void;
+  // Commands
+  runCommand: (command: string) => void;
+  agentCommand: (agentId: string, command: string, restoreCursor?: boolean) => { success: boolean; agentPos?: { x: number; y: number }; error?: string };
+  agentAction: (agentId: string, command: string, selection?: { width: number; height: number }) => { success: boolean; agentPos?: { x: number; y: number }; error?: string };
 }
 
 export function useMcpBridge(options: McpBridgeOptions) {
@@ -46,7 +95,16 @@ export function useMcpBridge(options: McpBridgeOptions) {
     const wsUrl = `${bridgeHost}/nara`;
 
     const handleCommand = (command: McpCommand) => {
-      const { mcpPaintCells, mcpEraseCells, getCursorPosition, setCursorPosition, getCanvasInfo, getAgents, moveAgents, createAgent } = optionsRef.current;
+      const {
+        mcpPaintCells, mcpEraseCells,
+        getCursorPosition, setCursorPosition,
+        getCanvasInfo, getViewport, setViewport,
+        getSelection, setSelection, clearSelection,
+        getAgents, moveAgents, moveAgentsPath, moveAgentsExpr, stopAgentsExpr, createAgent,
+        getNotes, getChips, createNote, createChip,
+        getTextAt, writeText,
+        runCommand, agentCommand, agentAction
+      } = optionsRef.current;
 
       const respond = (data: any) => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -96,6 +154,27 @@ export function useMcpBridge(options: McpBridgeOptions) {
             break;
           }
 
+          case 'move_agents_path': {
+            const { agentIds, path } = command as { agentIds: string[]; path: { x: number; y: number }[] } & McpCommand;
+            const result = moveAgentsPath(agentIds, path);
+            respond({ success: true, ...result });
+            break;
+          }
+
+          case 'move_agents_expr': {
+            const { agentIds, xExpr, yExpr, vars, duration } = command as { agentIds: string[]; xExpr: string; yExpr: string; vars?: Record<string, number>; duration?: number } & McpCommand;
+            const result = moveAgentsExpr(agentIds, xExpr, yExpr, vars, duration);
+            respond({ success: true, ...result });
+            break;
+          }
+
+          case 'stop_agents_expr': {
+            const { agentIds } = command as { agentIds: string[] } & McpCommand;
+            const result = stopAgentsExpr(agentIds);
+            respond({ success: true, ...result });
+            break;
+          }
+
           case 'set_cursor_position': {
             const { position } = command as { position: { x: number; y: number } } & McpCommand;
             setCursorPosition(position);
@@ -107,6 +186,99 @@ export function useMcpBridge(options: McpBridgeOptions) {
             const { position, spriteName } = command as { position: { x: number; y: number }; spriteName?: string } & McpCommand;
             const result = createAgent(position, spriteName);
             respond({ success: true, ...result });
+            break;
+          }
+
+          case 'get_viewport': {
+            const viewport = getViewport();
+            respond({ success: true, viewport });
+            break;
+          }
+
+          case 'set_viewport': {
+            const { offset, zoomLevel } = command as { offset: { x: number; y: number }; zoomLevel?: number } & McpCommand;
+            setViewport(offset, zoomLevel);
+            respond({ success: true, offset, zoomLevel });
+            break;
+          }
+
+          case 'get_selection': {
+            const selection = getSelection();
+            respond({ success: true, selection });
+            break;
+          }
+
+          case 'set_selection': {
+            const { start, end } = command as { start: { x: number; y: number }; end: { x: number; y: number } } & McpCommand;
+            setSelection(start, end);
+            respond({ success: true, start, end });
+            break;
+          }
+
+          case 'clear_selection': {
+            clearSelection();
+            respond({ success: true });
+            break;
+          }
+
+          case 'get_notes': {
+            const notes = getNotes();
+            respond({ success: true, notes });
+            break;
+          }
+
+          case 'get_chips': {
+            const chips = getChips();
+            respond({ success: true, chips });
+            break;
+          }
+
+          case 'create_note': {
+            const { x, y, width, height, content } = command as { x: number; y: number; width: number; height: number; content?: string } & McpCommand;
+            const result = createNote(x, y, width, height, content);
+            respond(result);
+            break;
+          }
+
+          case 'create_chip': {
+            const { x, y, text, color } = command as { x: number; y: number; text: string; color?: string } & McpCommand;
+            const result = createChip(x, y, text, color);
+            respond(result);
+            break;
+          }
+
+          case 'get_text_at': {
+            const { region } = command as { region: { x: number; y: number; width: number; height: number } } & McpCommand;
+            const lines = getTextAt(region);
+            respond({ success: true, lines });
+            break;
+          }
+
+          case 'write_text': {
+            const { position, text } = command as { position: { x: number; y: number }; text: string } & McpCommand;
+            writeText(position, text);
+            respond({ success: true, position, length: text.length });
+            break;
+          }
+
+          case 'run_command': {
+            const { command: cmdString } = command as { command: string } & McpCommand;
+            runCommand(cmdString);
+            respond({ success: true, command: cmdString });
+            break;
+          }
+
+          case 'agent_command': {
+            const { agentId, command: cmdString, restoreCursor = true } = command as { agentId: string; command: string; restoreCursor?: boolean } & McpCommand;
+            const result = agentCommand(agentId, cmdString, restoreCursor);
+            respond(result);
+            break;
+          }
+
+          case 'agent_action': {
+            const { agentId, command: cmdString, selection } = command as { agentId: string; command: string; selection?: { width: number; height: number } } & McpCommand;
+            const result = agentAction(agentId, cmdString, selection);
+            respond(result);
             break;
           }
 

@@ -143,6 +143,7 @@ export default function UserHome() {
         initialHostFlow={shouldShowTutorial ? 'tutorial' : undefined}
         onTutorialComplete={handleTutorialComplete}
         monogram={monogram}
+        mcpEnabled={true}
       />
     </div>
   );
