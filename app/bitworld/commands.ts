@@ -8,6 +8,7 @@ import type { WorldSettings } from './settings';
 import { useFaceDetection, useSmoothFaceOrientation, faceOrientationToRotation } from './face';
 import { DataRecorder } from './recorder';
 import { saveSprite, getUserSprites, deleteSprite, renameSprite, type SavedSprite, getUserTilesets, deleteTileset, type SavedTileset } from '../firebase';
+import { applySkin, getAvailableEffects } from './skins';
 
 // Grid cell span constant (characters occupy 2 vertically-stacked cells)
 const GRID_CELL_SPAN = 2;
@@ -370,20 +371,13 @@ export interface ModeState {
     paintColor: string; // Current paint brush color
     paintBrushSize: number; // Paint brush radius in cells
     paintType: 'color' | 'obstacle'; // Type of paint: color (default) or obstacle (blocks pathfinding)
+    isAgentMode: boolean; // Whether agent spawning mode is active
+    agentSpriteName?: string; // Name of sprite to use for agents (uses ghost effect)
     viewOverlay?: { // View overlay state for fullscreen note viewing
         noteKey: string; // Key of the note being viewed
-        // Original note bounds (for restoration on exit)
-        originalStartX: number;
-        originalStartY: number;
-        originalEndX: number;
-        originalEndY: number;
-        // Expanded bounds for the overlay view
-        expandedStartX: number;
-        expandedStartY: number;
-        expandedEndX: number;
-        expandedEndY: number;
-        // Original note data for restoration
-        originalData: Record<string, any>;
+        content: string; // Wrapped text content for the overlay
+        scrollOffset: number; // Current scroll position
+        maxScroll: number; // Maximum scroll value
     };
 }
 
@@ -441,9 +435,9 @@ const AVAILABLE_COMMANDS = [
     // Navigation & View
     'nav', 'search', 'cam', 'indent', 'zoom', 'map', 'view', 'focus',
     // Content Creation
-    'chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint', 'pattern', 'connect', 'export',
+    'chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint', 'agent', 'pattern', 'connect', 'export',
     // Special
-    'mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help',
+    'mode', 'note', 'mail', 'shell', 'chat', 'talk', 'tutorial', 'help',
     // Styling & Display
     'bg', 'text', 'font', 'style', 'display', 'scale', 'be',
     // State Management
@@ -461,8 +455,8 @@ const AVAILABLE_COMMANDS = [
 // Category mapping for visual organization
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map', 'view', 'focus'],
-    'create': ['chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint', 'export'],
-    'special': ['mode', 'note', 'mail', 'chat', 'talk', 'tutorial', 'help'],
+    'create': ['chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint', 'agent', 'export'],
+    'special': ['mode', 'note', 'mail', 'shell', 'chat', 'talk', 'tutorial', 'help'],
     'style': ['bg', 'text', 'font', 'style', 'display', 'be'],
     'state': ['state', 'random', 'clear', 'replay', 'record'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
@@ -494,10 +488,12 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'export': 'Export selected area as a PNG image. Make a selection, then type /export to download it as an image. Use /export --grid to include grid lines in the export.',
     'upload': 'Upload an image to your canvas. Type /upload, then select an image file. The image will be placed at your current cursor position and saved to your canvas.',
     'paint': 'Enter paint mode to draw filled regions on the canvas. Drag to draw a continuous stroke, double-click/double-tap to fill the enclosed area. Press ESC to exit.',
+    'agent': 'Enter agent spawn mode. Click on the canvas to place ghost agent cursors. Use /agent [spriteName] to use a specific sprite, or /agent to use a default. Press ESC to exit while keeping agents on the canvas.',
     'mode': 'Switch canvas modes. /mode default for standard writing, /mode air for ephemeral text that doesn\'t save, /mode chat to talk with AI, /mode note for focused note-taking.',
     'note': 'Quick shortcut to enter note mode. This creates a focused writing space perfect for drafting ideas before placing them on your main canvas.',
     'display': 'Toggle note display mode. Use inside a note: /display to toggle, /display expand to grow note as you type, /display scroll for terminal-style auto-scrolling. Controls how notes behave when text wraps beyond bounds.',
     'mail': '[SUPER ONLY] Create an email region. Select a rectangular area, type /mail. Row 1 = recipient email, Row 2 = subject line, Row 3+ = message body. Click the send button to deliver the email.',
+    'shell': 'Convert a note into a terminal shell. Position cursor inside a note and type /shell to connect to the terminal server. Interact with the shell through the canvas. Supports keyboard input, arrow keys, and command history.',
     'chat': 'Quick shortcut to enter chat mode. Talk with AI to transform, expand, or generate text. The AI can help you develop ideas or create content based on your prompts.',
     'talk': 'Enable face-piloted geometry with different face styles. Type /talk to use default Macintosh face, or /talk [facename] to select a specific face (macintosh, robot, kawaii). Activates your front webcam and tracks your face to control the face in real-time.',
     'tutorial': 'Start the interactive tutorial. Learn the basics of spatial writing through hands-on exercises that teach you core commands and concepts.',
@@ -522,8 +518,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'account': 'Manage your account settings. Use /account reset to reset your password.',
     'upgrade': 'Upgrade to Nara Pro for unlimited AI operations. Starts a guided conversation to learn about Pro benefits and pricing before upgrading.',
     'debug': 'Toggle debug mode. Shows technical information about canvas state, performance, and rendering. Useful for troubleshooting or understanding the system.',
-    'be': 'Toggle character sprite cursor. When enabled, your cursor becomes an animated character that walks when you move and idles when stationary.',
-    'shell': 'Convert a note region into an interactive terminal. Position cursor inside a note and type /shell to open a shell session. Connects to the local terminal server for command-line access.'
+    'be': 'Toggle character sprite cursor. When enabled, your cursor becomes an animated character that walks when you move and idles when stationary. Use /be --post [effect] <sprite> [color] to apply effects (monochrome, sepia, invert, ghost). For ghost effect, specify a hex color like #ff0000 for red ghosts.'
 };
 
 // Standardized color mapping used throughout the application
@@ -610,6 +605,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         paintColor: '#000000', // Default black paint
         paintBrushSize: 1, // Default brush size (1 cell radius)
         paintType: 'color', // Default to color paint (not obstacle)
+        isAgentMode: false, // Agent spawning mode not active initially
     });
 
     // User's saved sprites
@@ -3357,27 +3353,38 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             if (beArgs.startsWith('--post ')) {
                 const postArgs = beArgs.slice(7).trim().split(' ');
 
-                // Parse arguments: /be --post [effectName] [spriteName]
+                // Parse arguments: /be --post [effectName] [spriteName] [color]
+                // Examples:
+                //   /be --post ghost mysprite #ff0000
+                //   /be --post ghost mysprite
+                //   /be --post mysprite (defaults to monochrome)
                 let effectName = 'monochrome'; // default
                 let spriteName: string;
+                let color: string | undefined;
 
                 if (postArgs.length === 1) {
                     // Just sprite name, use default monochrome
                     spriteName = postArgs[0];
-                } else if (postArgs.length >= 2) {
+                } else if (postArgs.length === 2) {
                     // Effect name and sprite name
                     effectName = postArgs[0].toLowerCase();
                     spriteName = postArgs[1];
+                } else if (postArgs.length >= 3) {
+                    // Effect name, sprite name, and color
+                    effectName = postArgs[0].toLowerCase();
+                    spriteName = postArgs[1];
+                    color = postArgs[2];
                 } else {
-                    setDialogueWithRevert("Usage: /be --post [effect] <sprite> (effects: monochrome, sepia, invert, ghost)", setDialogueText);
+                    const availableEffects = getAvailableEffects();
+                    setDialogueWithRevert(`Usage: /be --post [effect] <sprite> [color] (effects: ${availableEffects.join(', ')})`, setDialogueText);
                     clearCommandState();
                     return null;
                 }
 
                 // Validate effect name
-                const validEffects = ['monochrome', 'sepia', 'invert', 'ghost'];
-                if (!validEffects.includes(effectName)) {
-                    setDialogueWithRevert(`Unknown effect: ${effectName}. Valid: ${validEffects.join(', ')}`, setDialogueText);
+                const availableEffects = getAvailableEffects();
+                if (!availableEffects.includes(effectName)) {
+                    setDialogueWithRevert(`Unknown effect: ${effectName}. Valid: ${availableEffects.join(', ')}`, setDialogueText);
                     clearCommandState();
                     return null;
                 }
@@ -3431,94 +3438,15 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                         console.log(`[/be --post] Found ${sheets.length} sheet(s) to process`);
 
-                        // Process each sheet
+                        // Build options for the effect
+                        const effectOptions = color ? { color } : undefined;
+
+                        // Process each sheet using the skins module
                         for (const sheet of sheets) {
-                            console.log(`[/be --post] Processing ${sheet.name}.png...`);
+                            console.log(`[/be --post] Processing ${sheet.name}.png with ${effectName}${color ? ` (color: ${color})` : ''}...`);
 
-                            // Fetch the image
-                            const response = await fetch(sheet.url);
-                            const blob = await response.blob();
-
-                            // Apply effect using canvas (client-side)
-                            const img = new Image();
-                            img.crossOrigin = 'anonymous';
-
-                            const processedDataUrl = await new Promise<string>((resolve, reject) => {
-                                img.onload = () => {
-                                    // Create canvas
-                                    const canvas = document.createElement('canvas');
-                                    canvas.width = img.width;
-                                    canvas.height = img.height;
-                                    const ctx = canvas.getContext('2d');
-
-                                    if (!ctx) {
-                                        reject(new Error('Failed to get canvas context'));
-                                        return;
-                                    }
-
-                                    // Draw image
-                                    ctx.drawImage(img, 0, 0);
-
-                                    // Get image data
-                                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                                    const data = imageData.data;
-
-                                    // Apply effect based on effectName
-                                    if (effectName === 'monochrome') {
-                                        // Convert to grayscale
-                                        for (let i = 0; i < data.length; i += 4) {
-                                            const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-                                            data[i] = gray;     // R
-                                            data[i + 1] = gray; // G
-                                            data[i + 2] = gray; // B
-                                            // data[i + 3] is alpha, leave unchanged
-                                        }
-                                    } else if (effectName === 'sepia') {
-                                        // Apply sepia tone
-                                        for (let i = 0; i < data.length; i += 4) {
-                                            const r = data[i];
-                                            const g = data[i + 1];
-                                            const b = data[i + 2];
-
-                                            data[i] = Math.min(255, (r * 0.393) + (g * 0.769) + (b * 0.189));     // R
-                                            data[i + 1] = Math.min(255, (r * 0.349) + (g * 0.686) + (b * 0.168)); // G
-                                            data[i + 2] = Math.min(255, (r * 0.272) + (g * 0.534) + (b * 0.131)); // B
-                                        }
-                                    } else if (effectName === 'invert') {
-                                        // Invert colors
-                                        for (let i = 0; i < data.length; i += 4) {
-                                            data[i] = 255 - data[i];         // R
-                                            data[i + 1] = 255 - data[i + 1]; // G
-                                            data[i + 2] = 255 - data[i + 2]; // B
-                                            // data[i + 3] is alpha, leave unchanged
-                                        }
-                                    } else if (effectName === 'ghost') {
-                                        // Ghost effect: flatten to single color silhouette (semi-transparent white)
-                                        const ghostColor = { r: 255, g: 255, b: 255 }; // White ghost
-                                        const ghostOpacity = 0.7; // 70% opacity for ghostly effect
-
-                                        for (let i = 0; i < data.length; i += 4) {
-                                            const alpha = data[i + 3];
-
-                                            if (alpha > 0) {
-                                                // Preserve silhouette but flatten to ghost color
-                                                data[i] = ghostColor.r;         // R
-                                                data[i + 1] = ghostColor.g;     // G
-                                                data[i + 2] = ghostColor.b;     // B
-                                                data[i + 3] = alpha * ghostOpacity; // Reduce opacity for ghostly effect
-                                            }
-                                        }
-                                    }
-
-                                    // Put processed data back
-                                    ctx.putImageData(imageData, 0, 0);
-
-                                    // Convert to data URL
-                                    resolve(canvas.toDataURL('image/png'));
-                                };
-                                img.onerror = () => reject(new Error('Failed to load image'));
-                                img.src = sheet.url;
-                            });
+                            // Apply effect using skins module
+                            const processedDataUrl = await applySkin(sheet.url, effectName, effectOptions);
 
                             // Upload processed image back to storage
                             const uploadRef = storageRef(storage, `sprites/${userUid}/${spriteId}/${sheet.name}.png`);
@@ -5018,137 +4946,16 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('view')) {
-            // /view command - show note as fullscreen overlay with expanded width
+            // /view command - show note as fullscreen overlay
             const cursorPos = commandState.commandStartPos;
 
-            // If already viewing, exit and restore original note bounds (preserving edits)
+            // If already viewing, exit
             if (modeState.viewOverlay) {
-                const overlay = modeState.viewOverlay;
-
-                // Restore original note bounds but keep edited data
-                if (setWorldData && worldData[overlay.noteKey]) {
-                    try {
-                        const currentNote = JSON.parse(worldData[overlay.noteKey] as string);
-                        // Keep the current data (with edits), just restore the bounds
-                        const restoredNote = {
-                            ...currentNote,
-                            startX: overlay.originalStartX,
-                            startY: overlay.originalStartY,
-                            endX: overlay.originalEndX,
-                            endY: overlay.originalEndY,
-                            // Keep currentNote.data (the edited version) instead of overlay.originalData
-                        };
-                        // Rewrap back to original width
-                        const rewrappedNote = rewrapNoteText(restoredNote, worldData);
-                        setWorldData((prev: Record<string, any>) => ({
-                            ...prev,
-                            [overlay.noteKey]: JSON.stringify(rewrappedNote)
-                        }));
-                    } catch (e) {
-                        console.error('Failed to restore note on view exit:', e);
-                    }
-                }
-
                 setModeState(prev => ({ ...prev, viewOverlay: undefined }));
                 setDialogueText?.("Exited view mode");
                 clearCommandState();
                 return null;
             }
-
-            // Find note at cursor position
-            for (const key in worldData) {
-                if (key.startsWith('note_')) {
-                    try {
-                        const noteData = JSON.parse(worldData[key] as string);
-                        const { startX, endX, startY, endY, data } = noteData;
-
-                        // Check if cursor is within note bounds
-                        if (cursorPos.x >= startX && cursorPos.x <= endX &&
-                            cursorPos.y >= startY && cursorPos.y <= endY) {
-
-                            // Calculate expanded bounds based on viewport
-                            const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
-                            const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
-                            const { width: charWidth, height: charHeight } = getEffectiveCharDims(zoomLevel);
-
-                            // Calculate margin in cells (equal on all sides)
-                            const minDimension = Math.min(viewportWidth, viewportHeight);
-                            const marginPixels = Math.max(48, minDimension * 0.08);
-                            const marginCells = Math.ceil(marginPixels / charWidth);
-
-                            // Calculate expanded width in cells
-                            const availableWidthCells = Math.floor((viewportWidth - marginPixels * 2) / charWidth);
-                            const availableHeightCells = Math.floor((viewportHeight - marginPixels * 2) / charHeight);
-
-                            // Center the expanded note in the viewport
-                            // The expanded note starts at a position that centers it
-                            const expandedStartX = Math.floor(-availableWidthCells / 2);
-                            const expandedEndX = expandedStartX + availableWidthCells;
-                            const expandedStartY = Math.floor(-availableHeightCells / 2);
-                            const expandedEndY = expandedStartY + availableHeightCells;
-
-                            // Store original data before modification
-                            const originalData = data ? JSON.parse(JSON.stringify(data)) : {};
-
-                            // Create expanded note and rewrap
-                            const expandedNote = {
-                                ...noteData,
-                                startX: expandedStartX,
-                                startY: expandedStartY,
-                                endX: expandedEndX,
-                                endY: expandedEndY
-                            };
-                            const rewrappedNote = rewrapNoteText(expandedNote, worldData);
-
-                            // Save expanded note to worldData
-                            if (setWorldData) {
-                                setWorldData((prev: Record<string, any>) => ({
-                                    ...prev,
-                                    [key]: JSON.stringify(rewrappedNote)
-                                }));
-                            }
-
-                            // Set view overlay state
-                            setModeState(prev => ({
-                                ...prev,
-                                viewOverlay: {
-                                    noteKey: key,
-                                    originalStartX: startX,
-                                    originalStartY: startY,
-                                    originalEndX: endX,
-                                    originalEndY: endY,
-                                    expandedStartX,
-                                    expandedStartY,
-                                    expandedEndX,
-                                    expandedEndY,
-                                    originalData
-                                }
-                            }));
-
-                            setDialogueText?.("View mode - press Esc to exit, edit normally");
-                            clearCommandState();
-                            return null;
-                        }
-                    } catch (e) {
-                        // Skip invalid note data
-                    }
-                }
-            }
-
-            setDialogueText?.("Position cursor inside a note first");
-            clearCommandState();
-            return null;
-        }
-
-        if (commandToExecute.startsWith('shell')) {
-            // /shell command - convert note to interactive terminal
-            if (!worldData || !setWorldData) {
-                setDialogueText?.("Cannot modify world data");
-                clearCommandState();
-                return null;
-            }
-
-            const cursorPos = commandState.commandStartPos;
 
             // Find note at cursor position
             for (const key in worldData) {
@@ -5161,27 +4968,60 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         if (cursorPos.x >= startX && cursorPos.x <= endX &&
                             cursorPos.y >= startY && cursorPos.y <= endY) {
 
-                            // Convert note to terminal type
-                            const updatedNote = {
-                                ...noteData,
-                                contentType: 'terminal',
-                                content: {
-                                    ...noteData.content,
-                                    terminalData: {
-                                        sessionId: `term_${Date.now()}`,
-                                        wsUrl: `ws://${window.location.hostname}:8767`
-                                    }
-                                },
-                                // Clear text data - terminal takes over
-                                data: {}
-                            };
+                            // Extract text content from note
+                            const noteContent = noteData.data || {};
+                            const lines: string[] = [];
 
-                            setWorldData((prev: any) => ({
+                            // Find all text in the note region
+                            let minY = Infinity, maxY = -Infinity;
+                            for (const cellKey in noteContent) {
+                                const [, yStr] = cellKey.split(',');
+                                const y = parseInt(yStr, 10);
+                                if (!isNaN(y)) {
+                                    minY = Math.min(minY, y);
+                                    maxY = Math.max(maxY, y);
+                                }
+                            }
+
+                            // Extract lines
+                            for (let y = minY; y <= maxY; y++) {
+                                let line = '';
+                                for (let x = startX; x <= endX; x++) {
+                                    const cellKey = `${x},${y}`;
+                                    const cellData = noteContent[cellKey];
+                                    if (cellData) {
+                                        const char = typeof cellData === 'string' ? cellData : cellData.char || ' ';
+                                        line += char;
+                                    } else {
+                                        line += ' ';
+                                    }
+                                }
+                                lines.push(line.trimEnd());
+                            }
+
+                            // Join lines and calculate wrapped content
+                            const rawContent = lines.join('\n').trim();
+
+                            // Debug logging
+                            console.log('[/view] Found note:', key);
+                            console.log('[/view] Note bounds:', { startX, endX, startY, endY });
+                            console.log('[/view] Note content data keys:', Object.keys(noteContent).slice(0, 10));
+                            console.log('[/view] Extracted lines:', lines.slice(0, 5));
+                            console.log('[/view] Raw content length:', rawContent.length);
+                            console.log('[/view] Raw content preview:', rawContent.slice(0, 100));
+
+                            // Set view overlay state
+                            setModeState(prev => ({
                                 ...prev,
-                                [key]: JSON.stringify(updatedNote)
+                                viewOverlay: {
+                                    noteKey: key,
+                                    content: rawContent,
+                                    scrollOffset: 0,
+                                    maxScroll: 0 // Will be calculated during render
+                                }
                             }));
 
-                            setDialogueText?.("Terminal activated");
+                            setDialogueText?.("View mode - press Esc to exit");
                             clearCommandState();
                             return null;
                         }
@@ -5385,6 +5225,44 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 isPaintMode: true
             }));
             setDialogueWithRevert(`Paint ${toolNames[tool]} enabled. Press ESC to exit.`, setDialogueText);
+            clearCommandState();
+            return null;
+        }
+
+        if (commandToExecute.startsWith('agent')) {
+            const agentArgs = commandToExecute.slice(5).trim();
+
+            // If already in agent mode and no arguments, toggle it off
+            if (modeState.isAgentMode && !agentArgs) {
+                setModeState(prev => ({
+                    ...prev,
+                    isAgentMode: false
+                }));
+                setDialogueWithRevert("Agent mode disabled", setDialogueText);
+                clearCommandState();
+                return null;
+            }
+
+            // Parse sprite name if provided
+            let spriteName: string | undefined;
+            if (agentArgs) {
+                spriteName = agentArgs.toLowerCase();
+                // Validate sprite exists
+                const sprite = userSprites.find(s => s.name.toLowerCase() === spriteName);
+                if (!sprite) {
+                    setDialogueWithRevert(`Sprite "${agentArgs}" not found`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+            }
+
+            // Enable agent mode
+            setModeState(prev => ({
+                ...prev,
+                isAgentMode: true,
+                agentSpriteName: spriteName
+            }));
+            setDialogueWithRevert(`Agent spawn mode enabled. Click on canvas to place agents. Press ESC to exit.`, setDialogueText);
             clearCommandState();
             return null;
         }
@@ -6787,12 +6665,77 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             } else {
                 setDialogueWithRevert("Make a selection first", setDialogueText);
             }
+        } else if (commandName === 'shell') {
+            // Convert note to terminal shell - find note at cursor position or use selected note
+            if (worldData && setWorldData) {
+                let targetNoteKey: string | null = selectedNoteKey || null;
+                let targetNoteData: any = null;
+
+                // If no selected note, search for note at cursor position
+                if (!targetNoteKey) {
+                    const cursorPos = commandState.commandStartPos;
+                    const noteKeys = Object.keys(worldData).filter(k => k.startsWith('note_'));
+
+                    for (const key of noteKeys) {
+                        try {
+                            const noteData = JSON.parse(worldData[key] as string);
+                            if (cursorPos.x >= noteData.startX && cursorPos.x <= noteData.endX &&
+                                cursorPos.y >= noteData.startY && cursorPos.y <= noteData.endY) {
+                                targetNoteKey = key;
+                                targetNoteData = noteData;
+                                break;
+                            }
+                        } catch (e) {
+                            continue;
+                        }
+                    }
+                }
+
+                if (targetNoteKey) {
+                    try {
+                        // Parse note data if not already parsed
+                        const noteData = targetNoteData || JSON.parse(worldData[targetNoteKey] as string);
+
+                        // Calculate dimensions
+                        const cols = noteData.endX - noteData.startX + 1;
+                        const rows = Math.floor((noteData.endY - noteData.startY + 1) / GRID_CELL_SPAN);
+
+                        // Get WebSocket URL - use window.location.hostname for proper host resolution
+                        const wsUrl = `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:8767`;
+
+                        // Update note with terminal configuration
+                        const updatedNote = {
+                            ...noteData,
+                            contentType: 'terminal',
+                            content: {
+                                terminalData: {
+                                    wsUrl
+                                }
+                            }
+                        };
+
+                        // Save updated note
+                        const newWorldData = { ...worldData };
+                        newWorldData[targetNoteKey] = JSON.stringify(updatedNote);
+                        setWorldData(newWorldData);
+
+                        setDialogueWithRevert(`Terminal shell activated (${cols}×${rows})`, setDialogueText);
+                    } catch (error) {
+                        console.error('[shell command] Failed to convert note:', error);
+                        setDialogueWithRevert("Failed to create terminal shell", setDialogueText);
+                    }
+                } else {
+                    setDialogueWithRevert("Position cursor inside a note first", setDialogueText);
+                }
+            } else {
+                setDialogueWithRevert("Position cursor inside a note first", setDialogueText);
+            }
         } else if (commandName === 'publish') {
             // Execute publish command
             // TODO: Implement publish logic or call existing publish function
             setDialogueWithRevert("Publishing canvas...", setDialogueText);
         }
-    }, [getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, setDialogueText]);
+    }, [getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, setDialogueText, selectedNoteKey, commandState.commandStartPos]);
 
     // Helper method to activate command with pre-filled input (for Cmd+F search)
     const startCommandWithInput = useCallback((cursorPos: Point, input: string) => {
@@ -6978,35 +6921,14 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         setPaintTool: (tool: 'brush' | 'fill' | 'lasso') => setModeState(prev => ({ ...prev, paintTool: tool })),
         // View overlay
         viewOverlay: modeState.viewOverlay,
-        exitViewOverlay: () => {
-            // Restore original note before exiting
-            const overlay = modeState.viewOverlay;
-            if (overlay && setWorldData && worldData?.[overlay.noteKey]) {
-                try {
-                    const currentNote = JSON.parse(worldData[overlay.noteKey] as string);
-                    const restoredNote = {
-                        ...currentNote,
-                        startX: overlay.originalStartX,
-                        startY: overlay.originalStartY,
-                        endX: overlay.originalEndX,
-                        endY: overlay.originalEndY,
-                        data: overlay.originalData
-                    };
-                    // Rewrap back to original width
-                    const rewrappedNote = rewrapNoteText(restoredNote, worldData);
-                    setWorldData((prev: Record<string, any>) => ({
-                        ...prev,
-                        [overlay.noteKey]: JSON.stringify(rewrappedNote)
-                    }));
-                } catch (e) {
-                    console.error('Failed to restore note on view exit:', e);
-                }
-            }
-            setModeState(prev => ({ ...prev, viewOverlay: undefined }));
-        },
+        exitViewOverlay: () => setModeState(prev => ({ ...prev, viewOverlay: undefined })),
         setViewOverlayScroll: (scrollOffset: number) => setModeState(prev => ({
             ...prev,
-            viewOverlay: prev.viewOverlay ? { ...prev.viewOverlay } : undefined
+            viewOverlay: prev.viewOverlay ? { ...prev.viewOverlay, scrollOffset } : undefined
         })),
+        // Agent mode
+        isAgentMode: modeState.isAgentMode,
+        agentSpriteName: modeState.agentSpriteName,
+        exitAgentMode: () => setModeState(prev => ({ ...prev, isAgentMode: false, agentSpriteName: undefined })),
     };
 }

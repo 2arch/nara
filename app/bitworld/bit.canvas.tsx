@@ -14,6 +14,9 @@ import { renderStyledRect, getRectStyle, type CellBounds, type BaseRenderContext
 import { useMonogram } from './monogram';
 import { faceOrientationToRotation } from './face';
 import { renderBubble } from './bubble';
+import { terminalManager, type TerminalBuffer } from './terminal.manager';
+import { findSmoothPath } from './paths';
+import { ghostEffect } from './skins';
 
 // --- Constants --- (Copied and relevant ones kept)
 const GRID_COLOR = '#F2F2F233';
@@ -84,9 +87,10 @@ interface Note {
     startY: number;
     endY: number;
     timestamp: number;
+    key?: string;  // Reference key in worldData (e.g., 'note_123,456_1234567890')
 
     // Content type determines function (defaults to 'text' if omitted)
-    contentType?: 'text' | 'image' | 'mail' | 'list';
+    contentType?: 'text' | 'image' | 'mail' | 'list' | 'terminal';
 
     // Visual styling
     style?: string;           // Style name (e.g., "glow", "solid", "glowing")
@@ -106,6 +110,10 @@ interface Note {
             scrollOffset: number;
             color: string;
             title?: string;
+        };
+        // Terminal content
+        terminalData?: {
+            wsUrl?: string;
         };
     };
 
@@ -144,7 +152,8 @@ function parseNoteFromWorldData(key: string, value: any): Note | null {
             endY: data.endY,
             timestamp: data.timestamp || Date.now(),
             ...(data.style && { style: data.style }),
-            ...(data.patternKey && { patternKey: data.patternKey })
+            ...(data.patternKey && { patternKey: data.patternKey }),
+            key: key  // Store the key for reference (e.g., terminal identification)
         };
 
         // Detect content type from key prefix or explicit contentType field
@@ -191,6 +200,14 @@ function parseNoteFromWorldData(key: string, value: any): Note | null {
                         scrollOffset: data.scrollOffset || 0,
                         color: data.color || '#FFFFFF',
                         title: data.title
+                    }
+                };
+                break;
+
+            case 'terminal':
+                baseNote.content = {
+                    terminalData: {
+                        wsUrl: data.wsUrl || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:8767`
                     }
                 };
                 break;
@@ -434,7 +451,7 @@ function renderEntitySelection(
 /**
  * Get note type based on contentType (with legacy fallback)
  */
-function getNoteType(note: Note): 'text' | 'image' | 'mail' | 'list' {
+function getNoteType(note: Note): 'text' | 'image' | 'mail' | 'list' | 'terminal' {
     // Use explicit contentType if available
     if (note.contentType) return note.contentType;
 
@@ -460,6 +477,7 @@ interface NoteRenderContext {
     imageCache: Map<string, HTMLImageElement>;
     gifFrameCache: Map<string, { frames: HTMLImageElement[]; delays: number[] }>;
     hexToRgb: (hex: string) => string;
+    activeTerminalKey?: string | null;
 }
 
 /**
@@ -596,6 +614,52 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
                 if (bottomScreenPos.x >= -effectiveCharWidth && bottomScreenPos.x <= cssWidth &&
                     topScreenPos.y >= -effectiveCharHeight && bottomScreenPos.y <= cssHeight) {
                     ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                }
+            }
+        }
+
+    } else if (contentType === 'terminal') {
+        // TERMINAL NOTE: Render terminal buffer content
+        if (!note.key) return;
+        const buffer = terminalManager.getBuffer(note.key);
+        if (buffer && buffer.rows.length > 0) {
+            ctx.font = `${engine.getEffectiveCharDims(currentZoom).fontSize}px ${engine.settings?.fontFamily || 'monospace'}`;
+            ctx.textBaseline = 'top';
+            const verticalTextOffset = 2;
+            const scale = { w: 1, h: GRID_CELL_SPAN }; // Terminal characters span GRID_CELL_SPAN cells vertically
+
+            for (let y = 0; y < Math.min(buffer.rows.length, endY - startY + 1); y++) {
+                const worldY = startY + y;
+                const row = buffer.rows[y];
+
+                if (!row) continue;
+
+                for (let x = 0; x < Math.min(row.length, endX - startX + 1); x++) {
+                    const worldX = startX + x;
+                    const cell = row[x];
+
+                    if (!cell) continue;
+
+                    // Get screen position (adjust for scale height)
+                    const topScreenPos = engine.worldToScreen(worldX, worldY - (scale.h - 1), currentZoom, currentOffset);
+                    const charPixelWidth = effectiveCharWidth * scale.w;
+                    const charPixelHeight = effectiveCharHeight * scale.h;
+
+                    // Draw background
+                    ctx.fillStyle = cell.bg;
+                    ctx.fillRect(topScreenPos.x, topScreenPos.y, charPixelWidth, charPixelHeight);
+
+                    // Draw cursor if this is the active terminal and cursor position
+                    if (context.activeTerminalKey === note.key && buffer.cursorX === x && buffer.cursorY === y) {
+                        ctx.fillStyle = '#00FF00';
+                        ctx.fillRect(topScreenPos.x, topScreenPos.y, charPixelWidth, charPixelHeight);
+                    }
+
+                    // Draw character
+                    if (cell.char && cell.char.trim()) {
+                        ctx.fillStyle = cell.fg;
+                        ctx.fillText(cell.char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
+                    }
                 }
             }
         }
@@ -1216,6 +1280,10 @@ function renderViewOverlay(
 
     const { content, scrollOffset } = engine.viewOverlay;
 
+    // Debug logging
+    console.log('[renderViewOverlay] Rendering overlay, content length:', content.length);
+    console.log('[renderViewOverlay] Content preview:', content.slice(0, 100));
+
     // Calculate margins (responsive)
     const viewportWidth = cssWidth;
     const viewportHeight = cssHeight;
@@ -1595,6 +1663,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     });
 
     const [selectedChipKey, setSelectedChipKey] = useState<string | null>(null);
+    const [activeTerminalKey, setActiveTerminalKey] = useState<string | null>(null);
+    const [terminalUpdateCounter, setTerminalUpdateCounter] = useState<number>(0);
 
     const [clipboardFlashBounds, setClipboardFlashBounds] = useState<Map<string, number>>(new Map()); // boundKey -> timestamp
     const lastCursorPosRef = useRef<Point | null>(null);
@@ -1611,6 +1681,72 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const previousCharacterPosRef = useRef<Point | null>(null);
     const characterAnimationIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const idleTransitionPendingRef = useRef<boolean>(false);
+
+    // Agent selection and movement state (supports multiple selection)
+    const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
+    const selectedAgentIdsRef = useRef<Set<string>>(new Set());
+    const [agentVisualPositions, setAgentVisualPositions] = useState<Record<string, Point>>({});
+    const [agentDirections, setAgentDirections] = useState<Record<string, number>>({});
+    const [agentMoving, setAgentMoving] = useState<Record<string, boolean>>({});
+    const [agentFrames, setAgentFrames] = useState<Record<string, number>>({});
+    const agentAnimationRef = useRef<number | null>(null);
+    const agentFrameIntervalRef = useRef<NodeJS.Timeout | null>(null); // Separate interval for frame animation (like cursor)
+    // Refs to avoid stale closure issues in animation loop and draw callback
+    const agentMovingRef = useRef<Record<string, boolean>>({});
+    const agentVisualPositionsRef = useRef<Record<string, Point>>({});
+    const agentTargetsRef = useRef<Record<string, Point>>({});
+    const agentFramesRef = useRef<Record<string, number>>({});
+    const agentDirectionsRef = useRef<Record<string, number>>({});
+    // Pathfinding state for agents (like cursor's currentPathRef/pathIndexRef)
+    const agentPathsRef = useRef<Record<string, Point[]>>({});
+    const agentPathIndicesRef = useRef<Record<string, number>>({});
+    const agentLastAnimTimeRef = useRef<number>(0);
+    // Pending agent move (to allow double-tap to cancel)
+    const pendingAgentMoveRef = useRef<NodeJS.Timeout | null>(null);
+    // Keep refs in sync with state (for draw callback which may have stale closure)
+    useEffect(() => { agentMovingRef.current = agentMoving; }, [agentMoving]);
+    useEffect(() => { agentVisualPositionsRef.current = agentVisualPositions; }, [agentVisualPositions]);
+    useEffect(() => { agentFramesRef.current = agentFrames; }, [agentFrames]);
+    useEffect(() => { agentDirectionsRef.current = agentDirections; }, [agentDirections]);
+    useEffect(() => { selectedAgentIdsRef.current = selectedAgentIds; }, [selectedAgentIds]);
+
+    // Select agents within selection bounds when selection is made
+    useEffect(() => {
+        if (!engine.selectionStart || !engine.selectionEnd) return;
+
+        const minX = Math.min(engine.selectionStart.x, engine.selectionEnd.x);
+        const maxX = Math.max(engine.selectionStart.x, engine.selectionEnd.x);
+        const minY = Math.min(engine.selectionStart.y, engine.selectionEnd.y);
+        const maxY = Math.max(engine.selectionStart.y, engine.selectionEnd.y);
+
+        // Find agents within selection bounds
+        const agentsInSelection = new Set<string>();
+        for (const key in engine.worldData) {
+            if (key.startsWith('agent_')) {
+                try {
+                    const agentDataStr = engine.worldData[key];
+                    const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+                    if (agentData && typeof agentData.x === 'number' && typeof agentData.y === 'number') {
+                        // Use visual position if available
+                        const visualPos = agentVisualPositions[key] || { x: agentData.x, y: agentData.y };
+                        if (visualPos.x >= minX && visualPos.x <= maxX &&
+                            visualPos.y >= minY && visualPos.y <= maxY) {
+                            agentsInSelection.add(key);
+                        }
+                    }
+                } catch (e) {
+                    // Ignore malformed agent data
+                }
+            }
+        }
+
+        // Only update if we found agents in selection
+        if (agentsInSelection.size > 0) {
+            selectedAgentIdsRef.current = agentsInSelection;
+            setSelectedAgentIds(agentsInSelection);
+            console.log(`[Agent] Selected ${agentsInSelection.size} agents via selection box`);
+        }
+    }, [engine.selectionStart, engine.selectionEnd, engine.worldData, agentVisualPositions]);
 
     // Spinner for sprite generation
     const SPINNER_CHARS = ['/', '|', '\\', '—'];
@@ -1765,6 +1901,194 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             }
         };
     }, [isCharacterMoving, engine.isCharacterEnabled]);
+
+    // Agent movement animation - follows path like cursor does
+    useEffect(() => {
+        // Check if any agents need animation
+        const hasMovingAgents = Object.values(agentMoving).some(m => m);
+        if (!hasMovingAgents) {
+            // Cancel any running animation
+            if (agentAnimationRef.current) {
+                cancelAnimationFrame(agentAnimationRef.current);
+                agentAnimationRef.current = null;
+            }
+            return;
+        }
+
+        const AGENT_MOVE_SPEED = 15; // cells per second (same as cursor)
+
+        const animate = (currentTime: number) => {
+            // Initialize time on first frame
+            if (agentLastAnimTimeRef.current === 0) {
+                agentLastAnimTimeRef.current = currentTime;
+                agentAnimationRef.current = requestAnimationFrame(animate);
+                return;
+            }
+
+            // Calculate time delta
+            const deltaTime = (currentTime - agentLastAnimTimeRef.current) / 1000;
+            agentLastAnimTimeRef.current = currentTime;
+
+            // Use refs to get current state
+            const currentMoving = agentMovingRef.current;
+            const currentPositions = agentVisualPositionsRef.current;
+            const currentPaths = agentPathsRef.current;
+            const currentIndices = agentPathIndicesRef.current;
+
+            let stillMoving = false;
+            const newPositions: Record<string, Point> = { ...currentPositions };
+            const stoppedAgents: string[] = [];
+            const newDirections: Record<string, number> = {};
+
+            for (const agentId in currentMoving) {
+                if (!currentMoving[agentId]) continue;
+
+                const path = currentPaths[agentId];
+                if (!path || path.length === 0) {
+                    stoppedAgents.push(agentId);
+                    continue;
+                }
+
+                let pathIndex = currentIndices[agentId] || 0;
+
+                // Already at end of path
+                if (pathIndex >= path.length - 1) {
+                    const finalPos = path[path.length - 1];
+                    newPositions[agentId] = { x: finalPos.x, y: finalPos.y };
+                    stoppedAgents.push(agentId);
+                    continue;
+                }
+
+                // Move along path at constant speed
+                let remainingDistance = AGENT_MOVE_SPEED * deltaTime;
+                let currentPos = currentPositions[agentId] || path[0];
+
+                while (remainingDistance > 0 && pathIndex < path.length - 1) {
+                    const nextWaypoint = path[pathIndex + 1];
+
+                    const dx = nextWaypoint.x - currentPos.x;
+                    const dy = nextWaypoint.y - currentPos.y;
+                    const distanceToNext = Math.sqrt(dx * dx + dy * dy);
+
+                    // Update direction based on movement direction
+                    if (distanceToNext > 0.01) {
+                        const angle = Math.atan2(dy, dx);
+                        const dir = Math.round(((angle + Math.PI) / (2 * Math.PI)) * 8 + 2) % 8;
+                        newDirections[agentId] = dir;
+                    }
+
+                    if (distanceToNext <= remainingDistance) {
+                        // Move to next waypoint
+                        currentPos = { x: nextWaypoint.x, y: nextWaypoint.y };
+                        remainingDistance -= distanceToNext;
+                        pathIndex++;
+                    } else {
+                        // Move partway to next waypoint
+                        const ratio = remainingDistance / distanceToNext;
+                        currentPos = {
+                            x: currentPos.x + dx * ratio,
+                            y: currentPos.y + dy * ratio
+                        };
+                        remainingDistance = 0;
+                    }
+                }
+
+                // Update path index
+                agentPathIndicesRef.current[agentId] = pathIndex;
+                newPositions[agentId] = currentPos;
+
+                // Check if reached end
+                if (pathIndex >= path.length - 1) {
+                    const finalPos = path[path.length - 1];
+                    newPositions[agentId] = { x: finalPos.x, y: finalPos.y };
+                    stoppedAgents.push(agentId);
+                } else {
+                    stillMoving = true;
+                }
+            }
+
+            // Update refs immediately for smooth animation
+            agentVisualPositionsRef.current = newPositions;
+
+            // Update state for re-render
+            setAgentVisualPositions(newPositions);
+
+            if (Object.keys(newDirections).length > 0) {
+                setAgentDirections(prev => ({ ...prev, ...newDirections }));
+            }
+
+            if (stoppedAgents.length > 0) {
+                setAgentMoving(prev => {
+                    const updated = { ...prev };
+                    stoppedAgents.forEach(id => {
+                        updated[id] = false;
+                        // Clean up path data
+                        delete agentPathsRef.current[id];
+                        delete agentPathIndicesRef.current[id];
+                    });
+                    agentMovingRef.current = updated;
+                    return updated;
+                });
+            }
+
+            if (stillMoving) {
+                agentAnimationRef.current = requestAnimationFrame(animate);
+            } else {
+                agentAnimationRef.current = null;
+                agentLastAnimTimeRef.current = 0;
+            }
+        };
+
+        // Start animation if not already running
+        if (!agentAnimationRef.current) {
+            agentLastAnimTimeRef.current = 0;
+            agentAnimationRef.current = requestAnimationFrame(animate);
+        }
+
+        return () => {
+            if (agentAnimationRef.current) {
+                cancelAnimationFrame(agentAnimationRef.current);
+                agentAnimationRef.current = null;
+            }
+        };
+    }, [agentMoving]);
+
+    // Agent frame animation - uses setInterval like cursor (separate from position animation)
+    useEffect(() => {
+        // Start frame animation interval ONCE on mount (same speed as cursor: CHARACTER_ANIMATION_SPEED = 100ms)
+        // This interval runs continuously and checks refs to see which agents are moving.
+        // Previously, this depended on agentMoving state, which caused the interval to restart
+        // every time any agent started/stopped moving, resetting all agents' frame timing.
+        if (agentFrameIntervalRef.current) {
+            // Already running, don't restart
+            return;
+        }
+
+        agentFrameIntervalRef.current = setInterval(() => {
+            const currentMoving = agentMovingRef.current;
+            const movingAgentIds = Object.keys(currentMoving).filter(id => currentMoving[id]);
+
+            if (movingAgentIds.length === 0) {
+                return;
+            }
+
+            // Update ref directly for immediate effect in draw callback (no state update needed)
+            // Just increment the frame counter - the render code will apply the correct modulo
+            // based on whether the agent is using walk (6 frames) or idle (7 frames) sprite
+            const newFrames = { ...agentFramesRef.current };
+            for (const agentId of movingAgentIds) {
+                newFrames[agentId] = (agentFramesRef.current[agentId] || 0) + 1;
+            }
+            agentFramesRef.current = newFrames;
+        }, 100); // Same as CHARACTER_ANIMATION_SPEED
+
+        return () => {
+            if (agentFrameIntervalRef.current) {
+                clearInterval(agentFrameIntervalRef.current);
+                agentFrameIntervalRef.current = null;
+            }
+        };
+    }, []); // Empty dependency array - only run once on mount
 
     // Track host mode dim fade-in (should only happen once when host mode activates)
     const hostDimFadeStartRef = useRef<number | null>(null);
@@ -2602,6 +2926,63 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         prevClipboardLengthRef.current = currentLength;
     }, [engine.clipboardItems]);
 
+    // Terminal initialization effect
+    useEffect(() => {
+        // Collect all terminal notes
+        const terminalNotes: Array<{ key: string; wsUrl: string; cols: number; rows: number }> = [];
+
+        for (const key in engine.worldData) {
+            if (key.startsWith('note_')) {
+                try {
+                    const noteData = JSON.parse(engine.worldData[key] as string);
+                    if (noteData.contentType === 'terminal') {
+                        const cols = noteData.endX - noteData.startX + 1;
+                        const rows = Math.floor((noteData.endY - noteData.startY + 1) / 2); // GRID_CELL_SPAN = 2
+                        const wsUrl = noteData.content?.terminalData?.wsUrl || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:8767`;
+                        terminalNotes.push({
+                            key,
+                            wsUrl,
+                            cols,
+                            rows
+                        });
+                    }
+                } catch (e) {
+                    // Skip invalid note data
+                }
+            }
+        }
+
+        // Initialize new terminals
+        terminalNotes.forEach(({ key, wsUrl, cols, rows }) => {
+            if (!terminalManager.hasTerminal(key)) {
+                terminalManager.createTerminal(key, wsUrl, cols, rows, () => {
+                    // Force re-render when terminal updates
+                    setTerminalUpdateCounter(c => c + 1);
+                });
+            }
+        });
+
+        // Cleanup terminals that no longer exist
+        const currentKeys = new Set(terminalNotes.map(t => t.key));
+        terminalManager.getAllTerminalKeys().forEach(key => {
+            if (!currentKeys.has(key)) {
+                terminalManager.destroyTerminal(key);
+            }
+        });
+
+        // Set colors for terminal rendering
+        terminalManager.setColors(
+            engine.textColor || '#ffffff',
+            engine.backgroundColor || '#000000'
+        );
+
+        // Poll for terminal updates to ensure re-renders happen
+        const pollInterval = setInterval(() => {
+            setTerminalUpdateCounter(c => c + 1);
+        }, 100); // Poll every 100ms for terminal updates
+
+        return () => clearInterval(pollInterval);
+    }, [engine.worldData, engine.textColor, engine.backgroundColor]);
 
     // Controller system for handling keyboard inputs
     const { registerGroup, handleKeyDown: handleKeyDownFromController, getHelpText } = useControllerSystem();
@@ -4375,7 +4756,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             cssHeight,
             imageCache: imageCache.current,
             gifFrameCache: gifFrameCache.current,
-            hexToRgb
+            hexToRgb,
+            activeTerminalKey
         };
 
         // Render paint blobs first (underneath text) - using efficient blob storage
@@ -6107,10 +6489,216 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 }
             }
 
+            // === Collect agents and cursor for packing/spreading ===
+            // When multiple entities (agents + cursor) are at the same position, spread them out
+            const agentCursorScale = engine.currentScale || { w: 1, h: 2 };
+            const agentCursorPixelWidth = effectiveCharWidth * agentCursorScale.w;
+            const agentCursorPixelHeight = effectiveCharHeight * agentCursorScale.h;
+
+            // Collect all agents with their positions
+            type EntityInfo = {
+                type: 'agent' | 'cursor';
+                key: string;
+                worldX: number;
+                worldY: number;
+                isMoving: boolean;
+                isSelected: boolean;
+                direction: number;
+                frame: number;
+            };
+            const allEntities: EntityInfo[] = [];
+
+            // Add main cursor as an entity (if sprite is enabled)
+            const mainCursorHasSprite = engine.isCharacterEnabled && (walkSpriteSheet || idleSpriteSheet);
+            if (mainCursorHasSprite) {
+                allEntities.push({
+                    type: 'cursor',
+                    key: 'main_cursor',
+                    worldX: engine.visualCursorPos.x,
+                    worldY: engine.visualCursorPos.y,
+                    isMoving: isCharacterMoving,
+                    isSelected: false,
+                    direction: characterDirection,
+                    frame: characterFrame,
+                });
+            }
+
+            // Add all agents
+            for (const key in engine.worldData) {
+                if (key.startsWith('agent_')) {
+                    try {
+                        const agentDataStr = engine.worldData[key];
+                        const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+
+                        if (agentData && typeof agentData.x === 'number' && typeof agentData.y === 'number') {
+                            const visualPos = agentVisualPositionsRef.current[key] || { x: agentData.x, y: agentData.y };
+                            allEntities.push({
+                                type: 'agent',
+                                key,
+                                worldX: visualPos.x,
+                                worldY: visualPos.y,
+                                isMoving: agentMovingRef.current[key] || false,
+                                isSelected: selectedAgentIds.has(key),
+                                direction: agentDirectionsRef.current[key] ?? 4,
+                                frame: agentFramesRef.current[key] || 0,
+                            });
+                        }
+                    } catch (err) {
+                        // Skip malformed agent data
+                    }
+                }
+            }
+
+            // Group entities by position (rounded to nearest cell)
+            const positionGroups: Record<string, EntityInfo[]> = {};
+            for (const entity of allEntities) {
+                const posKey = `${Math.round(entity.worldX)},${Math.round(entity.worldY)}`;
+                if (!positionGroups[posKey]) {
+                    positionGroups[posKey] = [];
+                }
+                positionGroups[posKey].push(entity);
+            }
+
+            // Helper to calculate spread offset for entities at same position
+            const getSpreadOffsetForRender = (index: number, total: number): { x: number; y: number } => {
+                if (total === 1) return { x: 0, y: 0 };
+
+                // Spread horizontally with slight y stagger
+                const spreadX = effectiveCharWidth * 0.6; // Tighter horizontal spread
+                const spreadY = effectiveCharHeight * 0.15; // Slight vertical stagger
+
+                // Center the group
+                const centerOffset = (total - 1) / 2;
+                return {
+                    x: (index - centerOffset) * spreadX,
+                    y: index * spreadY * 0.5 // Slight stagger for depth
+                };
+            };
+
+            // Render all agents (not cursor yet - that comes after)
+            for (const key in engine.worldData) {
+                if (key.startsWith('agent_')) {
+                    try {
+                        const agentDataStr = engine.worldData[key];
+                        const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+
+                        if (agentData && typeof agentData.x === 'number' && typeof agentData.y === 'number') {
+                            const visualPos = agentVisualPositionsRef.current[key] || { x: agentData.x, y: agentData.y };
+                            const agentWorldX = visualPos.x;
+                            const agentWorldY = visualPos.y;
+                            const isThisAgentMoving = agentMovingRef.current[key] || false;
+                            const isSelected = selectedAgentIds.has(key);
+
+                            // Check if agent is within viewport
+                            if (agentWorldX >= startWorldX - 5 && agentWorldX <= endWorldX + 5 &&
+                                agentWorldY >= startWorldY - 5 && agentWorldY <= endWorldY + 5) {
+
+                                // Find spread offset based on position group
+                                const posKey = `${Math.round(agentWorldX)},${Math.round(agentWorldY)}`;
+                                const group = positionGroups[posKey] || [];
+                                const entityIndex = group.findIndex(e => e.key === key);
+                                const spreadOffset = getSpreadOffsetForRender(entityIndex >= 0 ? entityIndex : 0, group.length);
+
+                                const agentBottomScreenPos = engine.worldToScreen(agentWorldX, agentWorldY, currentZoom, currentOffset);
+                                const agentTopScreenPos = engine.worldToScreen(agentWorldX, agentWorldY - (agentCursorScale.h - 1), currentZoom, currentOffset);
+
+                                // Apply spread offset to screen position
+                                agentBottomScreenPos.x += spreadOffset.x;
+                                agentBottomScreenPos.y += spreadOffset.y;
+                                agentTopScreenPos.x += spreadOffset.x;
+                                agentTopScreenPos.y += spreadOffset.y;
+
+                                const agentPixelWidth = agentCursorPixelWidth;
+                                const agentPixelHeight = agentCursorPixelHeight;
+
+                                if (agentBottomScreenPos.x >= -agentPixelWidth * 2 &&
+                                    agentBottomScreenPos.x <= cssWidth + agentPixelWidth &&
+                                    agentBottomScreenPos.y >= -agentPixelHeight * 2 &&
+                                    agentBottomScreenPos.y <= cssHeight + agentPixelHeight) {
+
+                                    const hasAvailableSpriteSheet = walkSpriteSheet || idleSpriteSheet;
+
+                                    if (hasAvailableSpriteSheet) {
+                                        const sheetToDraw = isThisAgentMoving && walkSpriteSheet ? walkSpriteSheet : (idleSpriteSheet || walkSpriteSheet)!;
+                                        const frameWidth = (isThisAgentMoving && walkSpriteSheet) ? CHARACTER_FRAME_WIDTH : CHARACTER_IDLE_FRAME_WIDTH;
+                                        const frameHeight = CHARACTER_FRAME_HEIGHT;
+                                        const maxFrames = (isThisAgentMoving && walkSpriteSheet) ? CHARACTER_FRAMES_PER_DIRECTION : CHARACTER_IDLE_FRAMES_PER_DIRECTION;
+                                        const direction = agentDirectionsRef.current[key] ?? 4;
+                                        const rawFrame = agentFramesRef.current[key] || 0;
+                                        const frameNum = isThisAgentMoving ? (rawFrame % maxFrames) : 0;
+
+                                        const sourceX = frameNum * frameWidth;
+                                        const sourceY = direction * frameHeight;
+
+                                        const spriteAspect = frameWidth / frameHeight;
+                                        const destHeight = effectiveCharHeight * CHARACTER_SPRITE_SCALE;
+                                        const destWidth = destHeight * spriteAspect;
+
+                                        const agentCursorBottomY = agentBottomScreenPos.y + agentPixelHeight;
+                                        const destX = agentTopScreenPos.x + (agentPixelWidth - destWidth) / 2;
+                                        const destY = agentCursorBottomY - destHeight;
+
+                                        const savedAlpha = ctx.globalAlpha;
+
+                                        if (isSelected) {
+                                            const offscreen = document.createElement('canvas');
+                                            offscreen.width = destWidth;
+                                            offscreen.height = destHeight;
+                                            const offCtx = offscreen.getContext('2d');
+                                            if (offCtx) {
+                                                offCtx.drawImage(
+                                                    sheetToDraw,
+                                                    sourceX, sourceY, frameWidth, frameHeight,
+                                                    0, 0, destWidth, destHeight
+                                                );
+                                                ghostEffect(offscreen, offCtx, { color: '#00ff00' });
+                                                ctx.drawImage(offscreen, destX, destY);
+                                            }
+                                        } else {
+                                            ctx.globalAlpha = 1.0;
+                                            ctx.drawImage(
+                                                sheetToDraw,
+                                                sourceX, sourceY, frameWidth, frameHeight,
+                                                destX, destY, destWidth, destHeight
+                                            );
+                                        }
+
+                                        ctx.globalAlpha = savedAlpha;
+                                    } else {
+                                        ctx.fillStyle = isSelected ? 'rgba(0, 255, 0, 0.5)' : 'rgba(255, 255, 255, 0.7)';
+                                        ctx.fillRect(agentTopScreenPos.x, agentTopScreenPos.y, agentPixelWidth, agentPixelHeight);
+
+                                        ctx.strokeStyle = isSelected ? 'rgba(0, 255, 0, 0.8)' : 'rgba(255, 255, 255, 0.5)';
+                                        ctx.lineWidth = isSelected ? 2 : 1;
+                                        ctx.strokeRect(agentTopScreenPos.x, agentTopScreenPos.y, agentPixelWidth, agentPixelHeight);
+                                    }
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        console.log(`[Agent] Failed to parse agent ${key}:`, err);
+                    }
+                }
+            }
+
+            // Calculate cursor spread offset (if cursor shares position with agents)
+            const cursorPosKey = `${Math.round(engine.visualCursorPos.x)},${Math.round(engine.visualCursorPos.y)}`;
+            const cursorGroup = positionGroups[cursorPosKey] || [];
+            const cursorEntityIndex = cursorGroup.findIndex(e => e.key === 'main_cursor');
+            const cursorSpreadOffset = mainCursorHasSprite && cursorGroup.length > 1
+                ? getSpreadOffsetForRender(cursorEntityIndex >= 0 ? cursorEntityIndex : cursorGroup.length, cursorGroup.length)
+                : { x: 0, y: 0 };
+
             // Cursor spans cursorScale.h cells: bottom cell at cursorPos.y and top cell at cursorPos.y - (h-1)
             // Use visualCursorPos for smooth animated rendering
             const cursorBottomScreenPos = engine.worldToScreen(engine.visualCursorPos.x, engine.visualCursorPos.y, currentZoom, currentOffset);
             const cursorTopScreenPos = engine.worldToScreen(engine.visualCursorPos.x, engine.visualCursorPos.y - (cursorScale.h - 1), currentZoom, currentOffset);
+
+            // Apply spread offset to cursor
+            cursorBottomScreenPos.x += cursorSpreadOffset.x;
+            cursorBottomScreenPos.y += cursorSpreadOffset.y;
+            cursorTopScreenPos.x += cursorSpreadOffset.x;
+            cursorTopScreenPos.y += cursorSpreadOffset.y;
 
             if (cursorBottomScreenPos.x >= -effectiveCharWidth && cursorBottomScreenPos.x <= cssWidth &&
                 cursorTopScreenPos.y >= -effectiveCharHeight && cursorBottomScreenPos.y <= cssHeight) {
@@ -6944,7 +7532,9 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
         ctx.restore();
         // --- End Drawing ---
-    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, engine.faceOrientation, engine.isFaceDetectionEnabled, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, selectedNoteKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, enhancedDebugText, showCursor, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateTasksIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition]);
+    // Note: Agent state (agentVisualPositions, agentFrames, etc.) is NOT in dependencies.
+    // Instead, we read from refs inside the draw callback for smooth 60fps animation without re-creating the callback.
+    }, [engine, engine.backgroundMode, engine.backgroundImage, engine.commandData, engine.commandState, engine.lightModeData, engine.chatData, engine.searchData, engine.isSearchActive, engine.searchPattern, engine.faceOrientation, engine.isFaceDetectionEnabled, canvasSize, cursorColorAlternate, isMiddleMouseDownRef.current, intermediatePanOffsetRef.current, cursorTrail, mouseWorldPos, isShiftPressed, shiftDragStartPos, selectedImageKey, selectedNoteKey, clipboardFlashBounds, renderDialogue, renderDebugDialogue, enhancedDebugText, showCursor, dialogueEnabled, drawArrow, getViewportEdgeIntersection, isBlockInViewport, updateTasksIndex, drawHoverPreview, drawModeSpecificPreview, drawPositionInfo, findTextBlock, findImageAtPosition, terminalUpdateCounter, selectedAgentIds]);
 
 
     // --- Drawing Loop Effect ---
@@ -7079,13 +7669,19 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         if (!canvas) return;
         
         const wheelHandler = (e: WheelEvent) => {
+            // Block wheel scrolling when view overlay is active
+            if (engine.viewOverlay) {
+                e.preventDefault();
+                return;
+            }
+
             const rect = canvas.getBoundingClientRect();
             engine.handleCanvasWheel(
                 e.deltaX, e.deltaY,
                 e.clientX - rect.left, e.clientY - rect.top,
                 e.ctrlKey || e.metaKey
             );
-            
+
             // Prevent default if we're handling this ourselves
             if (e.ctrlKey || e.metaKey) {
                 e.preventDefault();
@@ -7104,6 +7700,11 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
     // --- Event Handlers (Attached to Canvas) ---
     const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         if (e.button !== 0) return; // Only left clicks
+
+        // Block all canvas interactions when view overlay is active
+        if (engine.viewOverlay) {
+            return; // View overlay handles its own interactions
+        }
 
         // Don't process click if it was the end of a pan
         if (panStartInfoRef.current) {
@@ -7180,6 +7781,234 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
         // Set flag to prevent trail creation from click movement
         isClickMovementRef.current = true;
+
+        // Handle agent spawning if in agent mode
+        if (engine.isAgentMode) {
+            const worldPos = engine.screenToWorld(clickX, clickY, engine.zoomLevel, engine.viewOffset);
+            const clickWorldX = Math.round(worldPos.x);
+            const clickWorldY = Math.round(worldPos.y);
+
+            // Check if clicking on an existing agent
+            const cursorScale = engine.currentScale || { w: 1, h: 2 };
+            let clickedAgentId: string | null = null;
+
+            for (const key in engine.worldData) {
+                if (key.startsWith('agent_')) {
+                    try {
+                        const agentDataStr = engine.worldData[key];
+                        const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+
+                        if (agentData && typeof agentData.x === 'number' && typeof agentData.y === 'number') {
+                            // Use visual position if available, otherwise use target position
+                            const visualPos = agentVisualPositions[key] || { x: agentData.x, y: agentData.y };
+                            const agentX = Math.round(visualPos.x);
+                            const agentBottomY = Math.round(visualPos.y);
+                            const agentTopY = agentBottomY - (cursorScale.h - 1);
+
+                            // Check if click is within agent bounds
+                            if (clickWorldX === agentX && clickWorldY >= agentTopY && clickWorldY <= agentBottomY) {
+                                clickedAgentId = key;
+                                break;
+                            }
+                        }
+                    } catch (e) {
+                        // Ignore malformed agent data
+                    }
+                }
+            }
+
+            if (clickedAgentId) {
+                if (selectedAgentIds.has(clickedAgentId)) {
+                    // Clicking on already-selected agent → delete it
+                    engine.setWorldData(prev => {
+                        const newData = { ...prev };
+                        delete newData[clickedAgentId];
+                        return newData;
+                    });
+                    // Clean up visual state
+                    setAgentVisualPositions(prev => {
+                        const newPos = { ...prev };
+                        delete newPos[clickedAgentId!];
+                        return newPos;
+                    });
+                    setAgentMoving(prev => {
+                        const newM = { ...prev };
+                        delete newM[clickedAgentId!];
+                        return newM;
+                    });
+                    // Remove from selection set
+                    const newSet = new Set(selectedAgentIdsRef.current);
+                    newSet.delete(clickedAgentId!);
+                    selectedAgentIdsRef.current = newSet;
+                    setSelectedAgentIds(newSet);
+                    console.log(`[Agent] Deleted agent ${clickedAgentId}`);
+                } else {
+                    // Select the clicked agent (add to selection)
+                    const newSelection = new Set([clickedAgentId]);
+                    selectedAgentIdsRef.current = newSelection;
+                    setSelectedAgentIds(newSelection);
+                    // Initialize visual position if not set (both state and ref)
+                    if (!agentVisualPositionsRef.current[clickedAgentId]) {
+                        const agentDataStr = engine.worldData[clickedAgentId];
+                        if (agentDataStr) {
+                            const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+                            const selectPos = { x: agentData.x, y: agentData.y };
+                            agentVisualPositionsRef.current = {
+                                ...agentVisualPositionsRef.current,
+                                [clickedAgentId!]: selectPos
+                            };
+                            setAgentVisualPositions(prev => ({
+                                ...prev,
+                                [clickedAgentId!]: selectPos
+                            }));
+                        }
+                    }
+                    console.log(`[Agent] Selected agent ${clickedAgentId}`);
+                }
+            } else if (selectedAgentIds.size > 0) {
+                // Cancel any pending move (allows double-tap to prevent move)
+                if (pendingAgentMoveRef.current) {
+                    clearTimeout(pendingAgentMoveRef.current);
+                    pendingAgentMoveRef.current = null;
+                }
+
+                // Delay move to allow double-tap to cancel selection instead
+                // This prevents first tap of double-tap from triggering a move
+                const MOVE_DELAY = 250; // ms - slightly less than double-tap threshold
+                const selectedArray = Array.from(selectedAgentIds);
+                const agentCount = selectedArray.length;
+
+                pendingAgentMoveRef.current = setTimeout(() => {
+                    pendingAgentMoveRef.current = null;
+
+                    // Check if agents are still selected (double-tap might have cleared them)
+                    if (selectedAgentIds.size === 0) {
+                        console.log('[Agent] Move cancelled - agents deselected');
+                        return;
+                    }
+
+                    // Calculate spread positions to avoid stacking
+                    // Use a grid/spiral pattern based on cursor scale
+                    const cursorScale = engine.currentScale || { w: 1, h: 2 };
+                    const spreadX = cursorScale.w * 1.2; // Slightly more than cursor width
+                    const spreadY = cursorScale.h * 1.2;
+
+                    // For single agent, no offset needed
+                    // For multiple agents, arrange in a grid pattern around click point
+                    const getSpreadOffset = (index: number, total: number): { x: number; y: number } => {
+                        if (total === 1) return { x: 0, y: 0 };
+
+                        // Grid layout: calculate row/col positions
+                        const cols = Math.ceil(Math.sqrt(total));
+                        const row = Math.floor(index / cols);
+                        const col = index % cols;
+
+                        // Center the grid around the click point
+                        const totalRows = Math.ceil(total / cols);
+                        const centerCol = (cols - 1) / 2;
+                        const centerRow = (totalRows - 1) / 2;
+
+                        return {
+                            x: (col - centerCol) * spreadX,
+                            y: (row - centerRow) * spreadY
+                        };
+                    };
+
+                    selectedArray.forEach((agentId, index) => {
+                    const agentDataStr = engine.worldData[agentId];
+                    if (agentDataStr) {
+                        const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+
+                        // Get spread offset for this agent
+                        const offset = getSpreadOffset(index, agentCount);
+                        const newX = clickWorldX + offset.x;
+                        const newY = clickWorldY + offset.y;
+
+                        // Update target position in worldData
+                        engine.setWorldData(prev => ({
+                            ...prev,
+                            [agentId]: JSON.stringify({
+                                ...agentData,
+                                x: newX,
+                                y: newY,
+                            }),
+                        }));
+
+                        // Set target position in ref for animation loop
+                        agentTargetsRef.current = {
+                            ...agentTargetsRef.current,
+                            [agentId]: { x: newX, y: newY }
+                        };
+
+                        // Initialize visual position if not set
+                        let startPos = agentVisualPositionsRef.current[agentId];
+                        if (!startPos) {
+                            startPos = { x: agentData.x, y: agentData.y };
+                            agentVisualPositionsRef.current = {
+                                ...agentVisualPositionsRef.current,
+                                [agentId]: startPos
+                            };
+                            setAgentVisualPositions(prev => ({ ...prev, [agentId]: startPos }));
+                        }
+
+                        // Calculate path using A* pathfinding (same as cursor)
+                        const targetPos = { x: newX, y: newY };
+                        const path = findSmoothPath(startPos, targetPos, engine.worldData);
+                        agentPathsRef.current[agentId] = path;
+                        agentPathIndicesRef.current[agentId] = 0;
+
+                        // Start animation - update ref immediately, then state
+                        agentMovingRef.current = { ...agentMovingRef.current, [agentId]: true };
+                        setAgentMoving(prev => ({ ...prev, [agentId]: true }));
+                    }
+                    });
+                    console.log(`[Agent] Moving ${agentCount} agents to (${clickWorldX}, ${clickWorldY}) with grid spread`);
+                }, MOVE_DELAY);
+            } else {
+                // Check agent cap (max 5 agents)
+                const MAX_AGENTS = 5;
+                const currentAgentCount = Object.keys(engine.worldData).filter(k => k.startsWith('agent_')).length;
+
+                if (currentAgentCount >= MAX_AGENTS) {
+                    console.log(`[Agent] Max agents (${MAX_AGENTS}) reached, cannot spawn more`);
+                    return;
+                }
+
+                // Spawn new agent
+                const agentId = `agent_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+                const agentData = {
+                    x: clickWorldX,
+                    y: clickWorldY,
+                    spriteName: engine.agentSpriteName || 'default',
+                    createdAt: new Date().toISOString(),
+                };
+
+                engine.setWorldData(prev => ({
+                    ...prev,
+                    [agentId]: JSON.stringify(agentData),
+                }));
+
+                // Initialize visual position (both state and ref)
+                const spawnPos = { x: clickWorldX, y: clickWorldY };
+                agentVisualPositionsRef.current = {
+                    ...agentVisualPositionsRef.current,
+                    [agentId]: spawnPos
+                };
+                setAgentVisualPositions(prev => ({
+                    ...prev,
+                    [agentId]: spawnPos
+                }));
+
+                console.log(`[Agent] Spawned agent ${agentId} at (${agentData.x}, ${agentData.y})`);
+            }
+
+            // Focus hidden input even in agent mode to keep virtual keyboard accessible
+            if (hiddenInputRef.current && !hostDialogue.isHostActive) {
+                hiddenInputRef.current.focus();
+            }
+            return; // Don't process as regular click
+        }
 
         // Pass to engine's regular click handler
         engine.handleCanvasClick(clickX, clickY, false, e.shiftKey, e.metaKey, e.ctrlKey);
@@ -7313,6 +8142,11 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
     }, [engine, findTextBlock, findImageAtPosition, findPlanAtPosition]);
     
     const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+        // Block all canvas interactions when view overlay is active
+        if (engine.viewOverlay) {
+            return; // View overlay handles its own interactions
+        }
+
         const rect = canvasRef.current?.getBoundingClientRect();
         if (!rect) return;
 
@@ -7671,8 +8505,9 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 // Check for scrollable note/list first (for drag-to-scroll)
                 const listAtPos = findListAt(snappedWorldPos);
                 let noteAtPos: { key: string; data: any } | null = null;
+                let terminalAtPos: { key: string; data: any } | null = null;
 
-                // Only check for text notes if no list found
+                // Only check for text notes and terminals if no list found
                 if (!listAtPos) {
                     for (const key in engine.worldData) {
                         if (key.startsWith('note_')) {
@@ -7681,13 +8516,22 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                                     ? JSON.parse(engine.worldData[key] as string)
                                     : engine.worldData[key];
 
+                                const isInBounds = snappedWorldPos.x >= noteData.startX && snappedWorldPos.x <= noteData.endX &&
+                                                   snappedWorldPos.y >= noteData.startY && snappedWorldPos.y <= noteData.endY;
+
+                                if (!isInBounds) continue;
+
+                                // Check if it's a terminal note
+                                if (noteData.contentType === 'terminal') {
+                                    terminalAtPos = { key, data: noteData };
+                                    break;
+                                }
+
                                 // Check if it's a text note in scroll/paint display mode
                                 const isTextNote = !noteData.contentType || noteData.contentType === 'text';
                                 const isScrollableMode = noteData.displayMode === 'scroll' || noteData.displayMode === 'paint';
 
-                                if (isTextNote && isScrollableMode &&
-                                    snappedWorldPos.x >= noteData.startX && snappedWorldPos.x <= noteData.endX &&
-                                    snappedWorldPos.y >= noteData.startY && snappedWorldPos.y <= noteData.endY) {
+                                if (isTextNote && isScrollableMode) {
                                     noteAtPos = { key, data: noteData };
                                     break;
                                 }
@@ -7720,6 +8564,12 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     isSelectingMouseDownRef.current = false;
                     if (canvasRef.current) canvasRef.current.style.cursor = 'grabbing';
                     return; // Don't process other mouse events
+                } else if (terminalAtPos) {
+                    // Activate terminal when clicked
+                    setActiveTerminalKey(terminalAtPos.key);
+                    isSelectingMouseDownRef.current = false;
+                    if (canvasRef.current) canvasRef.current.style.cursor = 'text';
+                    return; // Don't process other mouse events
                 }
 
                 // Check for pattern
@@ -7745,7 +8595,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
             canvasRef.current?.focus();
         }
-    }, [engine, selectedImageKey, selectedNoteKey, findListAt, findPatternAtPosition]);
+    }, [engine, selectedImageKey, selectedNoteKey, findListAt, findPatternAtPosition, setActiveTerminalKey]);
 
     const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -8462,6 +9312,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
     const TRIPLE_TAP_THRESHOLD = 400; // ms - time window for triple-tap
     const DOUBLE_TAP_DISTANCE = 30; // px - max distance between taps
     const isDoubleTapModeRef = useRef<boolean>(false);
+    const doubleTapPendingEscRef = useRef<boolean>(false); // Track if double-tap should trigger ESC on release
 
     // Long press detection for command menu and move operations
     const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -8545,19 +9396,21 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
                 return;
             } else if (isDoubleTap) {
-                // Double-tap detected
+                // Double-tap detected - acts as universal ESC for touch (if no drag follows)
                 e.preventDefault(); // Prevent iOS Safari double-tap-to-zoom
 
-                // If command menu is active, dismiss it (mobile alternative to ESC key)
-                if (engine.commandState.isActive) {
-                    // Dismiss command menu by simulating ESC key press through engine
-                    engine.handleKeyDown('Escape', false, false, false, false);
-                    // Don't enter selection mode, just dismiss the menu
-                } else {
-                    // Normal double-tap behavior - enter selection/click mode
-                    isDoubleTapModeRef.current = true;
-                    isTouchSelectingRef.current = true;
-                }
+                // Check if there's something that could be escaped
+                const hasEscapableState =
+                    engine.commandState.isActive ||
+                    selectedAgentIds.size > 0 ||
+                    engine.isAgentMode;
+
+                // Mark pending ESC - will trigger on touchEnd if no drag occurred
+                doubleTapPendingEscRef.current = hasEscapableState;
+
+                // Always enter double-tap/selection mode (drag will use this)
+                isDoubleTapModeRef.current = true;
+                isTouchSelectingRef.current = true;
             }
 
             // Check for resize thumb touches (highest priority - before pan setup)
@@ -8971,7 +9824,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         }
 
         canvasRef.current?.focus();
-    }, [engine, findImageAtPosition, findListAt]);
+    }, [engine, findImageAtPosition, findListAt, selectedAgentIds.size]);
 
     const handleTouchMove = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
         const rect = canvasRef.current?.getBoundingClientRect();
@@ -9263,6 +10116,60 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             clearTimeout(longPressTimerRef.current);
             longPressTimerRef.current = null;
         }
+
+        // Handle pending ESC from double-tap (only if no drag occurred)
+        if (doubleTapPendingEscRef.current && !touchHasMovedRef.current) {
+            doubleTapPendingEscRef.current = false;
+
+            // Priority 1: If command menu is active, dismiss it
+            if (engine.commandState.isActive) {
+                engine.handleKeyDown('Escape', false, false, false, false);
+                isDoubleTapModeRef.current = false;
+                isTouchSelectingRef.current = false;
+                touchStartRef.current = null;
+                // Maintain keyboard focus for virtual keyboard accessibility
+                if (hiddenInputRef.current && !hostDialogue.isHostActive) {
+                    hiddenInputRef.current.focus();
+                }
+                return;
+            }
+
+            // Priority 2: If agents are selected, clear selection
+            if (selectedAgentIdsRef.current.size > 0) {
+                // Cancel any pending move
+                if (pendingAgentMoveRef.current) {
+                    clearTimeout(pendingAgentMoveRef.current);
+                    pendingAgentMoveRef.current = null;
+                }
+                // Update both ref (immediately) and state (for re-render)
+                selectedAgentIdsRef.current = new Set();
+                setSelectedAgentIds(new Set());
+                console.log('[Agent] Cleared agent selection via double-tap');
+                isDoubleTapModeRef.current = false;
+                isTouchSelectingRef.current = false;
+                touchStartRef.current = null;
+                // Maintain keyboard focus for virtual keyboard accessibility
+                if (hiddenInputRef.current && !hostDialogue.isHostActive) {
+                    hiddenInputRef.current.focus();
+                }
+                return;
+            }
+
+            // Priority 3: If agent mode is active, exit it
+            if (engine.isAgentMode) {
+                engine.handleKeyDown('Escape', false, false, false, false);
+                isDoubleTapModeRef.current = false;
+                isTouchSelectingRef.current = false;
+                touchStartRef.current = null;
+                // Maintain keyboard focus for virtual keyboard accessibility
+                if (hiddenInputRef.current && !hostDialogue.isHostActive) {
+                    hiddenInputRef.current.focus();
+                }
+                return;
+            }
+        }
+        // Clear the pending flag if drag occurred
+        doubleTapPendingEscRef.current = false;
 
         // Reset resize state if active - commit preview bounds to worldData
         if (resizeState.active && resizePreviewRef.current) {
@@ -9766,6 +10673,31 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             panStartPosRef.current = null;
             lastPinchDistanceRef.current = null;
 
+            // If this was a tap (no movement), handle agent interactions
+            // - Agent mode: tap creates new agent
+            // - Agents selected: tap moves them
+            // Use ref for immediate value (not stale from closure)
+            if (!touchHasMovedRef.current && (engine.isAgentMode || selectedAgentIdsRef.current.size > 0)) {
+                const endTouches = Array.from(e.changedTouches).map(touch => ({
+                    x: touch.clientX - rect.left,
+                    y: touch.clientY - rect.top
+                }));
+
+                if (endTouches.length > 0) {
+                    const syntheticEvent = {
+                        button: 0,
+                        clientX: endTouches[0].x + rect.left,
+                        clientY: endTouches[0].y + rect.top,
+                        shiftKey: false,
+                        metaKey: false,
+                        ctrlKey: false,
+                        preventDefault: () => {},
+                        stopPropagation: () => {}
+                    } as React.MouseEvent<HTMLCanvasElement>;
+                    handleCanvasClick(syntheticEvent);
+                }
+            }
+
             // Clear pan distance after a delay
             setTimeout(() => {
                 setIsPanning(false);
@@ -9786,7 +10718,33 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     // Don't treat as click to avoid clearing the selection
                     const hasActiveSelection = engine.selectionStart !== null && engine.selectionEnd !== null;
 
-                    if (hasActiveSelection) {
+                    // If agents are selected, route through handleCanvasClick for tap-to-move
+                    if (selectedAgentIdsRef.current.size > 0) {
+                        // Don't handle touch end if command menu was just opened
+                        if (commandMenuJustOpenedRef.current) {
+                            return;
+                        }
+
+                        const endTouches = Array.from(e.changedTouches).map(touch => ({
+                            x: touch.clientX - rect.left,
+                            y: touch.clientY - rect.top
+                        }));
+
+                        if (endTouches.length > 0) {
+                            // Create synthetic event for handleCanvasClick (agent move)
+                            const syntheticEvent = {
+                                button: 0,
+                                clientX: endTouches[0].x + rect.left,
+                                clientY: endTouches[0].y + rect.top,
+                                shiftKey: false,
+                                metaKey: false,
+                                ctrlKey: false,
+                                preventDefault: () => {},
+                                stopPropagation: () => {}
+                            } as React.MouseEvent<HTMLCanvasElement>;
+                            handleCanvasClick(syntheticEvent);
+                        }
+                    } else if (hasActiveSelection) {
                         // Don't handle touch end if command menu was just opened
                         // This prevents accidental command selection when releasing after long press
                         if (commandMenuJustOpenedRef.current) {
@@ -9870,9 +10828,21 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             }
         }
 
+        // UNIFIED KEYBOARD FOCUS: Focus hidden input for virtual keyboard on tap
+        // Only if: not dragging, no agents selected, not in agent mode, not in host dialogue
+        // Use ref instead of state to get immediate value (not stale from closure)
+        const wasTap = !touchHasMovedRef.current;
+        const shouldFocusKeyboard = wasTap &&
+                                    selectedAgentIdsRef.current.size === 0 &&
+                                    !engine.isAgentMode &&
+                                    !hostDialogue.isHostActive;
+        if (shouldFocusKeyboard && hiddenInputRef.current) {
+            hiddenInputRef.current.focus();
+        }
+
         touchStartRef.current = null;
         touchHasMovedRef.current = false;
-    }, [engine, handleCanvasClick, findImageAtPosition, selectedNoteKey, setSelectedNoteKey]);
+    }, [engine, handleCanvasClick, findImageAtPosition, selectedNoteKey, setSelectedNoteKey, selectedAgentIds.size, hostDialogue.isHostActive]);
 
     // === IME Composition Handlers ===
     const handleCompositionStart = useCallback((e: React.CompositionEvent<HTMLCanvasElement>) => {
@@ -9888,6 +10858,52 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
     }, [engine]);
 
     const handleCanvasKeyDown = useCallback(async (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+        // Terminal mode: forward keyboard input to active terminal
+        if (activeTerminalKey) {
+            const char = e.key.length === 1 ? e.key : '';
+            if (char) {
+                terminalManager.sendInput(activeTerminalKey, char);
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            } else if (e.key === 'Enter') {
+                terminalManager.sendInput(activeTerminalKey, '\r');
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            } else if (e.key === 'Backspace') {
+                terminalManager.sendInput(activeTerminalKey, '\x7F');  // DEL character for backspace
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            } else if (e.key === 'Tab') {
+                terminalManager.sendInput(activeTerminalKey, '\t');
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            } else if (e.key === 'ArrowUp') {
+                terminalManager.sendInput(activeTerminalKey, '\x1b[A');  // ESC sequence for up arrow
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            } else if (e.key === 'ArrowDown') {
+                terminalManager.sendInput(activeTerminalKey, '\x1b[B');  // ESC sequence for down arrow
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            } else if (e.key === 'ArrowRight') {
+                terminalManager.sendInput(activeTerminalKey, '\x1b[C');  // ESC sequence for right arrow
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            } else if (e.key === 'ArrowLeft') {
+                terminalManager.sendInput(activeTerminalKey, '\x1b[D');  // ESC sequence for left arrow
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+        }
+
         // Host mode: check if we're on a non-input message that needs manual advancement
         if (hostDialogue.isHostActive) {
             const currentMessage = hostDialogue.getCurrentMessage();
@@ -10074,7 +11090,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             e.preventDefault();
             e.stopPropagation();
         }
-    }, [engine, handleKeyDownFromController, selectedImageKey, selectedNoteKey, selectedPatternKey, hostDialogue]);
+    }, [engine, handleKeyDownFromController, selectedImageKey, selectedNoteKey, selectedPatternKey, hostDialogue, activeTerminalKey]);
 
     // Continuous render loop for processing effects
     useEffect(() => {

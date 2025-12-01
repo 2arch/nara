@@ -1,0 +1,13 @@
+{
+  "name": "nara-terminal-server",
+  "version": "1.0.0",
+  "description": "WebSocket terminal server for Nara",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.14.2",
+    "node-pty": "^1.0.0"
+  }
+}

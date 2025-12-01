@@ -21,6 +21,8 @@
     "@sanity/diff-match-patch": "^3.2.0",
     "@types/katex": "^0.16.7",
     "@types/three": "^0.175.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "canvas": "^3.2.0",
     "firebase": "^11.5.0",
     "firebase-admin": "^13.6.0",

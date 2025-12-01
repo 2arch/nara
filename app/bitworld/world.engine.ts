@@ -1002,6 +1002,7 @@ export interface WorldEngine {
     clipboardItems: ClipboardItem[]; // Clipboard items from Cmd+click on bounds
     searchData: WorldData;
     viewOffset: Point;
+    effectiveViewOffset: Point;
     cursorPos: Point;
     visualCursorPos: Point;
     zoomLevel: number;
@@ -1258,6 +1259,9 @@ export interface WorldEngine {
     };
     exitViewOverlay: () => void;
     setViewOverlayScroll: (scrollOffset: number) => void;
+    // Agent spawning mode
+    isAgentMode: boolean;
+    agentSpriteName?: string;
 }
 
 // --- Hook Input ---
@@ -2387,6 +2391,8 @@ export function useWorldEngine({
         viewOverlay,
         exitViewOverlay,
         setViewOverlayScroll,
+        isAgentMode,
+        agentSpriteName,
     } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid: authenticatedUserUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, currentScale, setCurrentScale, recorder, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
@@ -2407,6 +2413,12 @@ export function useWorldEngine({
             commandValidationHandlerRef.current(command, args, worldState);
         }
     } });
+
+    // Compute effective view offset - currently just returns viewOffset
+    // View overlay centering is handled in bit.canvas.tsx
+    const effectiveViewOffset = useMemo(() => {
+        return viewOffset;
+    }, [viewOffset]);
 
     // Calculate path when cursor target changes (placed after isCharacterEnabled is available)
     useEffect(() => {
@@ -10572,6 +10584,9 @@ export function useWorldEngine({
                 nextCursorPos.y = Math.max(focusRegion.startY, Math.min(focusRegion.endY, nextCursorPos.y));
             }
 
+            // View overlay cursor constraining handled by the overlay itself
+            // (viewOverlay no longer has bounds, just noteKey and content)
+
             setCursorPos(nextCursorPos);
             // Update ref synchronously so IME composition handlers see the latest position
             cursorPosRef.current = nextCursorPos;
@@ -10616,7 +10631,10 @@ export function useWorldEngine({
         // Clear autocomplete on canvas click
         clearAutocompleteSuggestions();
 
-        const newCursorPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
+        let newCursorPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, effectiveViewOffset);
+
+        // View overlay cursor constraining handled by the overlay itself
+        // (viewOverlay no longer has bounds, just noteKey and content)
 
         // === Cmd+Click to Add Text Block to Clipboard ===
         if ((metaKey || ctrlKey) && !shiftKey) {
@@ -11059,55 +11077,17 @@ export function useWorldEngine({
             setCursorPos(newCursorPos);
             setLastEnterX(null); // Reset Enter X tracking when clicking
         }
-    }, [zoomLevel, viewOffset, screenToWorld, selectionStart, selectionEnd, chatMode, worldData, setDialogueText, clipboardItems, getCharacter, isImageData]);
+    }, [zoomLevel, effectiveViewOffset, screenToWorld, selectionStart, selectionEnd, chatMode, worldData, setDialogueText, clipboardItems, getCharacter, isImageData, viewOverlay]);
 
     const handleCanvasWheel = useCallback((deltaX: number, deltaY: number, canvasRelativeX: number, canvasRelativeY: number, ctrlOrMetaKey: boolean): void => {
-        // Handle view overlay scrolling first
+        // In view overlay mode, disable scrolling (view is a zoomed viewport)
         if (viewOverlay) {
-            const scrollSpeed = 30; // Pixels per scroll tick
-            const scrollDelta = Math.sign(deltaY) * scrollSpeed;
-
-            // Calculate max scroll based on content
-            // We need to calculate this dynamically since content wraps
-            const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
-            const isPortrait = viewportHeight > (typeof window !== 'undefined' ? window.innerWidth : 800);
-            const verticalMargin = isPortrait ? 48 : Math.max(60, viewportHeight * 0.1);
-            const contentAreaHeight = viewportHeight - (verticalMargin * 2);
-
-            // Estimate content height (wrapped lines * line height)
-            const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
-            const horizontalMargin = isPortrait ? 24 : Math.max(60, (typeof window !== 'undefined' ? window.innerWidth : 800) * 0.1);
-            const contentAreaWidth = (typeof window !== 'undefined' ? window.innerWidth : 800) - (horizontalMargin * 2);
-            const charsPerLine = Math.floor(contentAreaWidth / effectiveCharWidth);
-
-            // Count wrapped lines
-            const content = viewOverlay.content;
-            const paragraphs = content.split('\n');
-            let totalLines = 0;
-            for (const paragraph of paragraphs) {
-                if (paragraph === '') {
-                    totalLines++;
-                } else {
-                    totalLines += Math.ceil(paragraph.length / charsPerLine) || 1;
-                }
-            }
-
-            const totalContentHeight = totalLines * effectiveCharHeight;
-            const maxScroll = Math.max(0, totalContentHeight - contentAreaHeight);
-
-            const currentScroll = viewOverlay.scrollOffset || 0;
-            const newScroll = Math.max(0, Math.min(maxScroll, currentScroll + scrollDelta));
-
-            if (newScroll !== currentScroll) {
-                setViewOverlayScroll(newScroll);
-            }
-
-            return; // Don't process other scroll actions
+            return; // Don't process scroll actions in view mode
         }
 
         // First, check if mouse is over a list (unless zooming with ctrl/meta)
         if (!ctrlOrMetaKey) {
-            const worldPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
+            const worldPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, effectiveViewOffset);
             const listAtPos = findListAt(worldPos.x, worldPos.y);
 
             if (listAtPos) {
@@ -11195,7 +11175,7 @@ export function useWorldEngine({
             // Zooming
             if (isFullscreenMode && fullscreenRegion) {
                 // In fullscreen mode, allow zoom but constrain to keep region visible
-                const worldPointBeforeZoom = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
+                const worldPointBeforeZoom = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, effectiveViewOffset);
                 const delta = deltaY * ZOOM_SENSITIVITY;
                 let newZoom = zoomLevel * (1 - delta);
 
@@ -11224,7 +11204,7 @@ export function useWorldEngine({
             }
             // Focus mode zoom
             if (isFocusMode && focusRegion) {
-                const worldPointBeforeZoom = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
+                const worldPointBeforeZoom = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, effectiveViewOffset);
                 const delta = deltaY * ZOOM_SENSITIVITY;
                 let newZoom = zoomLevel * (1 - delta);
 
@@ -11257,7 +11237,7 @@ export function useWorldEngine({
                 return;
             }
 
-            const worldPointBeforeZoom = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
+            const worldPointBeforeZoom = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, effectiveViewOffset);
             const delta = deltaY * ZOOM_SENSITIVITY;
             let newZoom = zoomLevel * (1 - delta);
             newZoom = Math.min(Math.max(newZoom, MIN_ZOOM), MAX_ZOOM);
@@ -11343,7 +11323,7 @@ export function useWorldEngine({
                 setViewOffset(prev => ({ x: prev.x + deltaWorldX, y: prev.y + deltaWorldY }));
             }
         }
-    }, [zoomLevel, viewOffset, screenToWorld, getEffectiveCharDims, findListAt, worldData, isFullscreenMode, fullscreenRegion, isFocusMode, focusRegion, viewOverlay, setViewOverlayScroll]);
+    }, [zoomLevel, effectiveViewOffset, screenToWorld, getEffectiveCharDims, findListAt, worldData, isFullscreenMode, fullscreenRegion, isFocusMode, focusRegion, viewOverlay, setViewOverlayScroll]);
 
     const handlePanStart = useCallback((clientX: number, clientY: number): PanStartInfo | null => {
         isPanningRef.current = true;
@@ -11448,24 +11428,24 @@ export function useWorldEngine({
     }, []);
 
     const handleSelectionStart = useCallback((canvasRelativeX: number, canvasRelativeY: number): void => {
-        const worldPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
+        const worldPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, effectiveViewOffset);
         setSelectionStart(worldPos);
         setSelectionEnd(worldPos);
         setCursorPos(worldPos); // Move cursor to selection start
 
         // Record action for playback
         recorder.recordAction('selection_start', { pos: worldPos });
-    }, [zoomLevel, viewOffset, screenToWorld, recorder]);
+    }, [zoomLevel, effectiveViewOffset, screenToWorld, recorder]);
 
     const handleSelectionMove = useCallback((canvasRelativeX: number, canvasRelativeY: number): void => {
         if (selectionStart) { // This is correct - we want to update only if a selection has started
-            const worldPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, viewOffset);
+            const worldPos = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, effectiveViewOffset);
             setSelectionEnd(worldPos);
 
             // Record action for playback
             recorder.recordAction('selection_update', { pos: worldPos });
         }
-    }, [selectionStart, zoomLevel, viewOffset, screenToWorld, recorder]);
+    }, [selectionStart, zoomLevel, effectiveViewOffset, screenToWorld, recorder]);
 
     const handleSelectionEnd = useCallback((): void => {
         // Simply mark selection process as ended
@@ -12004,6 +11984,7 @@ export function useWorldEngine({
         lightModeData,
         searchData,
         viewOffset,
+        effectiveViewOffset,
         cursorPos,
         visualCursorPos,
         zoomLevel,
@@ -12462,5 +12443,8 @@ export function useWorldEngine({
         viewOverlay,
         exitViewOverlay,
         setViewOverlayScroll,
+        // Agent mode
+        isAgentMode,
+        agentSpriteName,
     };
 }
