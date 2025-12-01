@@ -1832,9 +1832,12 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                     agentPathsRef.current[agentId] = path;
                     agentPathIndicesRef.current[agentId] = 0;
 
-                    // Start animation
-                    agentMovingRef.current = { ...agentMovingRef.current, [agentId]: true };
-                    setAgentMoving(prev => ({ ...prev, [agentId]: true }));
+                    // Start animation - update ref inside setter to ensure sync
+                    setAgentMoving(prev => {
+                        const updated = { ...prev, [agentId]: true };
+                        agentMovingRef.current = updated;
+                        return updated;
+                    });
 
                     moved.push(agentId);
                 } catch (e: any) {
@@ -1872,9 +1875,12 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                     agentPathsRef.current[agentId] = path;
                     agentPathIndicesRef.current[agentId] = 0;
 
-                    // Start animation
-                    agentMovingRef.current = { ...agentMovingRef.current, [agentId]: true };
-                    setAgentMoving(prev => ({ ...prev, [agentId]: true }));
+                    // Start animation - update ref inside setter to ensure sync
+                    setAgentMoving(prev => {
+                        const updated = { ...prev, [agentId]: true };
+                        agentMovingRef.current = updated;
+                        return updated;
+                    });
 
                     moved.push(agentId);
                 } catch (e: any) {
@@ -1960,9 +1966,12 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                     // Initialize velocity
                     agentVelocitiesRef.current[agentId] = { x: 0, y: 0 };
 
-                    // Start animation (triggers the useEffect)
-                    agentMovingRef.current = { ...agentMovingRef.current, [agentId]: true };
-                    setAgentMoving(prev => ({ ...prev, [agentId]: true }));
+                    // Start animation (triggers the useEffect) - update ref inside setter to ensure sync
+                    setAgentMoving(prev => {
+                        const updated = { ...prev, [agentId]: true };
+                        agentMovingRef.current = updated;
+                        return updated;
+                    });
 
                     moved.push(agentId);
                 } catch (e: any) {
@@ -8337,8 +8346,12 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                         agentPathsRef.current[agentId] = path;
                         agentPathIndicesRef.current[agentId] = 0;
 
-                        agentMovingRef.current = { ...agentMovingRef.current, [agentId]: true };
-                        setAgentMoving(prev => ({ ...prev, [agentId]: true }));
+                        // Start animation - update ref inside setter to ensure sync
+                        setAgentMoving(prev => {
+                            const updated = { ...prev, [agentId]: true };
+                            agentMovingRef.current = updated;
+                            return updated;
+                        });
                     }
                 });
                 console.log(`[Agent] Moving ${agentCount} agents to (${clickWorldX}, ${clickWorldY}) with grid spread`);
@@ -8526,9 +8539,12 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                         agentPathsRef.current[agentId] = path;
                         agentPathIndicesRef.current[agentId] = 0;
 
-                        // Start animation - update ref immediately, then state
-                        agentMovingRef.current = { ...agentMovingRef.current, [agentId]: true };
-                        setAgentMoving(prev => ({ ...prev, [agentId]: true }));
+                        // Start animation - update ref inside setter to ensure sync
+                        setAgentMoving(prev => {
+                            const updated = { ...prev, [agentId]: true };
+                            agentMovingRef.current = updated;
+                            return updated;
+                        });
                     }
                     });
                     console.log(`[Agent] Moving ${agentCount} agents to (${clickWorldX}, ${clickWorldY}) with grid spread`);
