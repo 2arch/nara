@@ -125,6 +125,7 @@ interface Note {
             frozenCols?: number;   // Index columns that don't scroll
             activeCell?: { row: number; col: number };  // Currently active cell
             cellScrollOffsets?: Record<string, number>;  // "row,col" → horizontal scroll offset
+            tableScrollOffset?: number;  // Vertical scroll offset for table rows
         };
         // Script content
         scriptData?: {
@@ -144,6 +145,7 @@ interface Note {
         frozenCols?: number;
         activeCell?: { row: number; col: number };  // Currently active cell
         cellScrollOffsets?: Record<string, number>;  // "row,col" → horizontal scroll offset
+        tableScrollOffset?: number;  // Vertical scroll offset for table rows
     };
     scriptData?: {
         language: string;
