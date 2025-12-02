@@ -728,18 +728,11 @@ class MonogramSystem {
     // Track last viewport for auto-reload on invalidation
     private lastViewport: { startX: number, startY: number, endX: number, endY: number } | null = null;
 
-    // Fade in/out effect for all transitions
-    private fadeFactor = 0;        // Current fade factor (0 to 1)
-    private targetFade = 0;        // Target fade factor (0 or 1)
-    private readonly FADE_DURATION = 0.8; // seconds
-
-    // Cross-fade state for monogram-to-monogram transitions
-    private pendingMode: MonogramMode | null = null;
-    
     // Interactive Voronoi state
     private activeSeed: { x: number, y: number } | null = null;
     private toggledCells: Set<string> = new Set();
     private readonly MAX_ACTIVE_CELLS = 64;
+
 
     constructor(options: MonogramOptions) {
         this.options = options;
@@ -779,8 +772,11 @@ class MonogramSystem {
     }
 
     async initialize(): Promise<boolean> {
-        if (this.isInitialized || !navigator.gpu) {
+        if (this.isInitialized) {
             return this.isInitialized;
+        }
+        if (!navigator.gpu) {
+            return false;
         }
 
         try {
@@ -895,7 +891,6 @@ class MonogramSystem {
                 // Debug: Check texture data
                 const nonZeroPixels = textureData.filter(v => v > 128).length;
                 const totalPixels = textureData.length;
-                console.log(`[Monogram] NARA texture data: ${nonZeroPixels}/${totalPixels} white pixels`);
 
                 this.device.queue.writeTexture(
                     { texture: this.naraTexture },
@@ -904,7 +899,6 @@ class MonogramSystem {
                     [textBitmap.width, textBitmap.height, 1]
                 );
 
-                console.log(`[Monogram] NARA texture created: ${textBitmap.width}x${textBitmap.height}`);
             }
 
             // Create trail buffer (4 floats per position: x, y, age, intensity)
@@ -920,7 +914,6 @@ class MonogramSystem {
             });
 
             this.isInitialized = true;
-            console.log('[Monogram] WebGPU initialized (Perlin + NARA + Voronoi + Face3D)');
             return true;
         } catch (error) {
             console.error('[Monogram] WebGPU init failed:', error);
@@ -1038,7 +1031,6 @@ class MonogramSystem {
         }
 
         if (!this.options.interactiveTrails) {
-            console.log('[Monogram Trail] Interactive trails disabled');
             return;
         }
 
@@ -1073,8 +1065,6 @@ class MonogramSystem {
 
             this.lastMousePos = currentPos;
 
-            console.log(`[Monogram Trail] Mouse at (${worldX.toFixed(1)}, ${worldY.toFixed(1)}), trail length: ${this.mouseTrail.length} (filtered ${beforeFilter - afterFilter}), intensity: ${intensity}`);
-
             // Upload trail data to GPU
             this.uploadTrailData();
         }
@@ -1083,7 +1073,6 @@ class MonogramSystem {
     clearTrail() {
         this.mouseTrail = [];
         this.lastMousePos = null;
-        console.log('[Monogram Trail] Trail cleared');
 
         // Upload empty trail to GPU
         if (this.device && this.trailBuffer) {
@@ -1093,7 +1082,6 @@ class MonogramSystem {
 
     private uploadTrailData() {
         if (!this.device || !this.trailBuffer) {
-            console.log('[Monogram Trail] Cannot upload - device or buffer not initialized');
             return;
         }
 
@@ -1111,11 +1099,6 @@ class MonogramSystem {
         }
 
         this.device.queue.writeBuffer(this.trailBuffer, 0, trailData);
-
-        if (this.mouseTrail.length > 0) {
-            const sample = this.mouseTrail[this.mouseTrail.length - 1];
-            console.log(`[Monogram Trail] Uploaded ${this.mouseTrail.length} positions. Latest: (${sample.x.toFixed(1)}, ${sample.y.toFixed(1)}), age: ${now - sample.timestamp}ms`);
-        }
     }
 
     private async computeChunk(chunkWorldX: number, chunkWorldY: number): Promise<Float32Array> {
@@ -1291,7 +1274,6 @@ class MonogramSystem {
                 x: (this.lastViewport.startX + this.lastViewport.endX) / 2,
                 y: (this.lastViewport.startY + this.lastViewport.endY) / 2
             };
-            console.log(`[Monogram NARA] Anchor set to (${this.naraAnchor.x}, ${this.naraAnchor.y})`);
         }
 
         const centerX = this.naraAnchor?.x ?? 0;
@@ -1561,35 +1543,11 @@ class MonogramSystem {
         }
 
         const index = localY * this.CHUNK_SIZE + localX;
-        // Apply fade in/out effect for smooth transitions
-        return chunk[index] * this.fadeFactor;
+        return chunk[index];
     }
 
     updateTime(deltaTime: number) {
         this.time += deltaTime * this.options.speed;
-        // Smooth animation: time flows continuously
-        // Chunks recompute on-demand with current time (no invalidation needed)
-
-        // Smoothly interpolate fade factor towards target (handles both fade-in and fade-out)
-        if (Math.abs(this.fadeFactor - this.targetFade) > 0.001) {
-            // Exponential smoothing for buttery smooth fade in/out
-            const smoothing = 1 - Math.pow(0.001, deltaTime / this.FADE_DURATION);
-            this.fadeFactor += (this.targetFade - this.fadeFactor) * smoothing;
-
-            // Snap to target when very close
-            if (Math.abs(this.fadeFactor - this.targetFade) < 0.001) {
-                this.fadeFactor = this.targetFade;
-
-                // Cross-fade: if we just finished fading out and have a pending mode, switch and fade in
-                if (this.fadeFactor === 0 && this.pendingMode !== null) {
-                    this.options.mode = this.pendingMode;
-                    this.pendingMode = null;
-                    this.chunks.clear();
-                    this.chunkAccessTime.clear();
-                    this.targetFade = 1; // Fade in the new mode
-                }
-            }
-        }
     }
     
     updateFaceData(faceData: MonogramOptions['faceOrientation']) {
@@ -1613,49 +1571,12 @@ class MonogramSystem {
     setOptions(options: Partial<MonogramOptions>) {
         const complexityChanged = options.complexity !== undefined && options.complexity !== this.options.complexity;
         const modeChanged = options.mode !== undefined && options.mode !== this.options.mode;
-        const wasEnabled = this.options.enabled;
-        const enabledChanged = options.enabled !== undefined && options.enabled !== wasEnabled;
 
-        if (modeChanged && options.mode !== undefined) {
-            const oldMode = this.options.mode;
-            const newMode = options.mode;
-            const oldIsVisible = oldMode !== 'clear';
-            const newIsVisible = newMode !== 'clear';
+        this.options = { ...this.options, ...options };
 
-            // Cross-fade between visible modes (perlin ↔ nara ↔ voronoi ↔ face3d)
-            if (oldIsVisible && newIsVisible) {
-                this.pendingMode = newMode;
-                this.targetFade = 0; // Fade out current mode first
-                // Don't update options.mode yet - will be set in updateTime after fade-out
-            } else {
-                // Direct transition for clear ↔ visible
-                this.options.mode = newMode;
-                this.targetFade = newIsVisible ? 1 : 0;
-                this.chunks.clear();
-                this.chunkAccessTime.clear();
-            }
-        }
-
-        // Apply other options (skip mode if we're cross-fading)
-        const { mode, ...otherOptions } = options;
-        if (!this.pendingMode) {
-            this.options = { ...this.options, ...options };
-        } else {
-            this.options = { ...this.options, ...otherOptions };
-        }
-
-        if (complexityChanged) {
+        if (complexityChanged || modeChanged) {
             this.chunks.clear();
             this.chunkAccessTime.clear();
-        }
-
-        // Handle enable/disable transitions
-        // Only process enable/disable if:
-        // 1. No mode change in this same call (modeChanged = false), AND
-        // 2. No pending cross-fade from a previous call (pendingMode = null)
-        // This prevents enable/disable logic from interfering with mode transitions
-        if (enabledChanged && !modeChanged && !this.pendingMode) {
-            this.targetFade = this.options.enabled && this.options.mode !== 'clear' ? 1 : 0;
         }
 
         // Update face data if provided in options
@@ -1666,14 +1587,6 @@ class MonogramSystem {
 
     toggleEnabled() {
         this.options.enabled = !this.options.enabled;
-
-        // Cancel any pending cross-fade when toggling
-        if (this.pendingMode) {
-            this.pendingMode = null;
-        }
-
-        // Fade in when enabling, fade out when disabling
-        this.targetFade = this.options.enabled && this.options.mode !== 'clear' ? 1 : 0;
     }
 
     getOptions(): MonogramOptions {
@@ -1726,6 +1639,7 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         };
     }, []);
 
+    // Propagate options changes to the MonogramSystem
     useEffect(() => {
         systemRef.current?.setOptions(options);
     }, [options]);
@@ -1791,7 +1705,6 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         setMouseTrail([]);
         lastMousePosRef.current = null;
         systemRef.current?.clearTrail();
-        console.log('[Monogram Hook] Trail cleared');
     }, []);
 
     const toggleCell = useCallback((worldX: number, worldY: number) => {

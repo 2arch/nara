@@ -91,7 +91,7 @@ interface Note {
     key?: string;  // Reference key in worldData (e.g., 'note_123,456_1234567890')
 
     // Content type determines function (defaults to 'text' if omitted)
-    contentType?: 'text' | 'image' | 'mail' | 'list' | 'terminal';
+    contentType?: 'text' | 'image' | 'mail' | 'list' | 'terminal' | 'data' | 'script';
 
     // Visual styling
     style?: string;           // Style name (e.g., "glow", "solid", "glowing")
@@ -116,11 +116,39 @@ interface Note {
         terminalData?: {
             wsUrl?: string;
         };
+        // Table/data content
+        tableData?: {
+            columns: Array<{ width: number; header?: string }>;
+            rows: Array<{ height: number }>;
+            cells: Record<string, string>;  // "row,col" → full cell text
+            frozenRows?: number;   // Header rows that don't scroll
+            frozenCols?: number;   // Index columns that don't scroll
+            activeCell?: { row: number; col: number };  // Currently active cell
+            cellScrollOffsets?: Record<string, number>;  // "row,col" → horizontal scroll offset
+        };
+        // Script content
+        scriptData?: {
+            language: string;
+            status: string;
+        };
     };
 
     // Legacy support: top-level properties for backward compatibility
     imageData?: ImageAttachment;
     mailData?: {};
+    tableData?: {
+        columns: Array<{ width: number; header?: string }>;
+        rows: Array<{ height: number }>;
+        cells: Record<string, string>;  // "row,col" → full cell text
+        frozenRows?: number;
+        frozenCols?: number;
+        activeCell?: { row: number; col: number };  // Currently active cell
+        cellScrollOffsets?: Record<string, number>;  // "row,col" → horizontal scroll offset
+    };
+    scriptData?: {
+        language: string;
+        status: string;
+    };
 
     // Text content data (for notes that own their text)
     data?: Record<string, string | { char: string; style?: { color?: string; background?: string } }>;
@@ -211,6 +239,43 @@ function parseNoteFromWorldData(key: string, value: any): Note | null {
                         wsUrl: data.wsUrl || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:8767`
                     }
                 };
+                break;
+
+            case 'data':
+                const tableData = data.tableData || {
+                    columns: [],
+                    rows: [],
+                    cells: {}
+                };
+                baseNote.content = { tableData };
+                baseNote.tableData = tableData;
+                // Table notes use note.data for text storage (like text notes)
+                if (data.data) {
+                    baseNote.data = data.data;
+                }
+                // Table notes also support scrolling
+                if (data.scrollOffset !== undefined) {
+                    baseNote.scrollOffset = data.scrollOffset;
+                }
+                if (data.scrollOffsetX !== undefined) {
+                    baseNote.scrollOffsetX = data.scrollOffsetX;
+                }
+                break;
+
+            case 'script':
+                const scriptData = data.scriptData || {
+                    language: 'javascript',
+                    status: 'idle' // 'idle' | 'running' | 'error' | 'success'
+                };
+                baseNote.content = { scriptData };
+                baseNote.scriptData = scriptData;
+                // Script notes use note.data for code storage (like text notes)
+                if (data.data) {
+                    baseNote.data = data.data;
+                }
+                if (data.scrollOffset !== undefined) {
+                    baseNote.scrollOffset = data.scrollOffset;
+                }
                 break;
 
             case 'text':
@@ -452,13 +517,15 @@ function renderEntitySelection(
 /**
  * Get note type based on contentType (with legacy fallback)
  */
-function getNoteType(note: Note): 'text' | 'image' | 'mail' | 'list' | 'terminal' {
+function getNoteType(note: Note): 'text' | 'image' | 'mail' | 'list' | 'terminal' | 'data' | 'script' {
     // Use explicit contentType if available
     if (note.contentType) return note.contentType;
 
     // Legacy fallback: infer from top-level properties
     if (note.imageData) return 'image';
     if (note.mailData) return 'mail';
+    if (note.tableData) return 'data';
+    if (note.scriptData) return 'script';
     return 'text';
 }
 
@@ -619,6 +686,241 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
             }
         }
 
+    } else if (contentType === 'data') {
+        // DATA/TABLE NOTE: Cell-based rendering with per-cell horizontal scrolling
+        const tableData = note.tableData || note.content?.tableData;
+        if (!tableData || !tableData.columns || !tableData.rows) return;
+
+        const { columns: originalColumns, rows: originalRows, cells = {}, frozenRows = 0, activeCell, cellScrollOffsets = {}, tableScrollOffset = 0 } = tableData;
+
+        // Calculate note dimensions
+        const noteWidth = endX - startX + 1;
+        const noteHeight = endY - startY + 1;
+
+        // Calculate total data dimensions
+        const totalDataWidth = originalColumns.reduce((sum: number, col: { width: number }) => sum + col.width, 0);
+        const totalDataHeight = originalRows.length * GRID_CELL_SPAN;
+
+        // Scale columns proportionally if data is smaller than note region
+        let columns = originalColumns;
+        if (totalDataWidth < noteWidth && originalColumns.length > 0) {
+            const scale = noteWidth / totalDataWidth;
+            columns = originalColumns.map((col: { width: number }) => ({
+                ...col,
+                width: Math.floor(col.width * scale)
+            }));
+            // Distribute any remaining width to last column due to rounding
+            const scaledWidth = columns.reduce((sum: number, col: { width: number }) => sum + col.width, 0);
+            if (scaledWidth < noteWidth && columns.length > 0) {
+                columns[columns.length - 1].width += noteWidth - scaledWidth;
+            }
+        }
+
+        // Scale rows proportionally if data is smaller than note region
+        let rows = originalRows;
+        const visibleRowCount = Math.floor(noteHeight / GRID_CELL_SPAN);
+        if (originalRows.length < visibleRowCount && originalRows.length > 0) {
+            // Distribute extra height among rows - but keep integer heights
+            const extraHeight = visibleRowCount - originalRows.length;
+            const extraPerRow = Math.floor(extraHeight / originalRows.length);
+            rows = originalRows.map((row: { height: number }, idx: number) => ({
+                ...row,
+                height: row.height + extraPerRow + (idx < extraHeight % originalRows.length ? 1 : 0)
+            }));
+        }
+
+        // Table styling
+        const borderColor = getTextColor(engine, 0.4);
+        const headerBgColor = getTextColor(engine, 0.15);
+        const dividerColor = getTextColor(engine, 0.3);
+        const activeCellColor = getTextColor(engine, 0.25);
+
+        // Text renders at Y-1 due to GRID_CELL_SPAN, so shift grid up by 1 to align
+        const gridStartY = startY - 1;
+        const gridEndY = endY;
+
+        // Calculate screen bounds
+        const tableStartScreen = engine.worldToScreen(startX, gridStartY, currentZoom, currentOffset);
+        const tableEndScreen = engine.worldToScreen(endX + 1, gridEndY + 1, currentZoom, currentOffset);
+
+        // Draw table background
+        ctx.fillStyle = getTextColor(engine, 0.08);
+        ctx.fillRect(tableStartScreen.x, tableStartScreen.y,
+            tableEndScreen.x - tableStartScreen.x, tableEndScreen.y - tableStartScreen.y);
+
+        // Draw header row background (frozen rows)
+        if (frozenRows > 0) {
+            let headerHeight = 0;
+            for (let r = 0; r < frozenRows && r < rows.length; r++) {
+                headerHeight += rows[r].height * GRID_CELL_SPAN;
+            }
+            const headerEndScreen = engine.worldToScreen(startX, gridStartY + headerHeight, currentZoom, currentOffset);
+            ctx.fillStyle = headerBgColor;
+            ctx.fillRect(tableStartScreen.x, tableStartScreen.y,
+                tableEndScreen.x - tableStartScreen.x, headerEndScreen.y - tableStartScreen.y);
+        }
+
+        // Calculate cell positions for rendering (with scroll offset)
+        // Only include cells within note bounds (viewport culling like regular notes)
+        const cellPositions: Array<{ row: number; col: number; worldX: number; worldY: number; width: number; height: number }> = [];
+
+        // Calculate visible height and rows
+        const visibleHeight = endY - startY + 1;
+        const maxVisibleRows = Math.ceil(visibleHeight / GRID_CELL_SPAN);
+
+        // Start from scroll offset, render only visible rows
+        let cellY = gridStartY;
+        const startRowIndex = tableScrollOffset;
+        const endRowIndex = Math.min(rows.length, tableScrollOffset + maxVisibleRows);
+
+        for (let rowIndex = startRowIndex; rowIndex < endRowIndex; rowIndex++) {
+            const rowHeight = rows[rowIndex].height * GRID_CELL_SPAN;
+
+            // Only render if row Y is within bounds
+            if (cellY > endY) break;
+
+            let cellX = startX;
+            for (let colIndex = 0; colIndex < columns.length; colIndex++) {
+                const colWidth = columns[colIndex].width;
+
+                // Only include cell if it starts within note bounds
+                if (cellX <= endX) {
+                    // Clamp cell width to note bounds
+                    const clampedWidth = Math.min(colWidth, endX - cellX + 1);
+                    cellPositions.push({
+                        row: rowIndex,
+                        col: colIndex,
+                        worldX: cellX,
+                        worldY: cellY,
+                        width: clampedWidth,
+                        height: rowHeight
+                    });
+                }
+
+                cellX += colWidth;
+                // Stop if we've passed the note bounds
+                if (cellX > endX + 1) break;
+            }
+            cellY += rowHeight;
+        }
+
+        // Draw active cell highlight
+        if (activeCell) {
+            const activeCellPos = cellPositions.find(c => c.row === activeCell.row && c.col === activeCell.col);
+            if (activeCellPos) {
+                const cellStartScreen = engine.worldToScreen(activeCellPos.worldX, activeCellPos.worldY, currentZoom, currentOffset);
+                const cellEndScreen = engine.worldToScreen(
+                    activeCellPos.worldX + activeCellPos.width,
+                    activeCellPos.worldY + activeCellPos.height,
+                    currentZoom, currentOffset
+                );
+                ctx.fillStyle = activeCellColor;
+                ctx.fillRect(cellStartScreen.x, cellStartScreen.y,
+                    cellEndScreen.x - cellStartScreen.x, cellEndScreen.y - cellStartScreen.y);
+            }
+        }
+
+        // Draw horizontal row dividers (only for visible rows)
+        let currentY = gridStartY;
+        for (let rowIndex = startRowIndex; rowIndex < endRowIndex; rowIndex++) {
+            const rowHeight = rows[rowIndex].height * GRID_CELL_SPAN;
+            currentY += rowHeight;
+
+            // Only draw divider if within note bounds
+            if (currentY <= endY + 1) {
+                const rowEndScreen = engine.worldToScreen(startX, currentY, currentZoom, currentOffset);
+                ctx.strokeStyle = dividerColor;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(tableStartScreen.x, rowEndScreen.y);
+                ctx.lineTo(tableEndScreen.x, rowEndScreen.y);
+                ctx.stroke();
+            }
+        }
+
+        // Draw vertical column dividers (only within note bounds)
+        let dividerX = startX;
+        for (let colIndex = 0; colIndex < columns.length; colIndex++) {
+            dividerX += columns[colIndex].width;
+
+            // Only draw divider if within note bounds
+            if (dividerX > endX + 1) break;
+
+            const dividerScreen = engine.worldToScreen(dividerX, gridStartY, currentZoom, currentOffset);
+
+            ctx.strokeStyle = dividerColor;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(dividerScreen.x, tableStartScreen.y);
+            ctx.lineTo(dividerScreen.x, tableEndScreen.y);
+            ctx.stroke();
+        }
+
+        // Draw outer border
+        ctx.strokeStyle = borderColor;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(tableStartScreen.x, tableStartScreen.y,
+            tableEndScreen.x - tableStartScreen.x, tableEndScreen.y - tableStartScreen.y);
+
+        // Render cell text with per-cell horizontal scrolling
+        ctx.font = `${engine.getEffectiveCharDims(currentZoom).fontSize}px ${engine.settings?.fontFamily || 'monospace'}`;
+        ctx.textBaseline = 'top';
+        const verticalTextOffset = 2;
+
+        for (const cellPos of cellPositions) {
+            const cellKey = `${cellPos.row},${cellPos.col}`;
+            const cellText = cells[cellKey] || '';
+            if (!cellText) continue;
+
+            const scrollOffset = cellScrollOffsets[cellKey] || 0;
+            const cellWidth = cellPos.width;
+
+            // Calculate visible portion of text
+            const visibleStart = scrollOffset;
+            const visibleEnd = scrollOffset + cellWidth;
+            const visibleText = cellText.substring(visibleStart, visibleEnd);
+
+            // Render each character
+            const textStartX = cellPos.worldX;
+            // Text renders at worldY position (cell grid already accounts for GRID_CELL_SPAN offset)
+            const textY = cellPos.worldY;
+
+            ctx.save();
+            // Clip to cell bounds
+            const clipStart = engine.worldToScreen(cellPos.worldX, cellPos.worldY, currentZoom, currentOffset);
+            const clipEnd = engine.worldToScreen(cellPos.worldX + cellWidth, cellPos.worldY + cellPos.height, currentZoom, currentOffset);
+            ctx.beginPath();
+            ctx.rect(clipStart.x, clipStart.y, clipEnd.x - clipStart.x, clipEnd.y - clipStart.y);
+            ctx.clip();
+
+            // Render visible characters
+            for (let charIdx = 0; charIdx < visibleText.length; charIdx++) {
+                const worldX = textStartX + charIdx;
+                const screenPos = engine.worldToScreen(worldX, textY, currentZoom, currentOffset);
+                ctx.fillStyle = engine.textColor;
+                ctx.fillText(visibleText[charIdx], screenPos.x, screenPos.y + verticalTextOffset);
+            }
+
+            // Show scroll indicator if text is longer than cell
+            if (cellText.length > cellWidth) {
+                const indicatorColor = getTextColor(engine, 0.5);
+                if (scrollOffset > 0) {
+                    // Left scroll indicator
+                    const leftIndicatorScreen = engine.worldToScreen(cellPos.worldX, textY, currentZoom, currentOffset);
+                    ctx.fillStyle = indicatorColor;
+                    ctx.fillText('◀', leftIndicatorScreen.x - effectiveCharWidth * 0.3, leftIndicatorScreen.y + verticalTextOffset);
+                }
+                if (scrollOffset + cellWidth < cellText.length) {
+                    // Right scroll indicator
+                    const rightIndicatorScreen = engine.worldToScreen(cellPos.worldX + cellWidth - 1, textY, currentZoom, currentOffset);
+                    ctx.fillStyle = indicatorColor;
+                    ctx.fillText('▶', rightIndicatorScreen.x + effectiveCharWidth * 0.7, rightIndicatorScreen.y + verticalTextOffset);
+                }
+            }
+
+            ctx.restore();
+        }
+
     } else if (contentType === 'terminal') {
         // TERMINAL NOTE: Render terminal buffer content
         if (!note.key) return;
@@ -729,88 +1031,91 @@ function renderNote(note: Note, context: NoteRenderContext, renderContext?: Base
                 }
             }
         }
+    }
 
-        // Render text content from note.data if it exists (with scrolling support)
-        if (note.data && contentType === 'text') {
-            const verticalTextOffset = 2; // Same offset used in main rendering
+    // Render text content from note.data if it exists (with scrolling support)
+    // This applies to 'text' notes only - 'data' notes use tableData.cells and are rendered above
+    const noteContentType = note.contentType || 'text';
 
-            // Viewport size is derived from note bounds (what's visible on screen)
-            const visibleWidth = endX - startX + 1;
-            const visibleHeight = endY - startY + 1;
+    if (note.data && (noteContentType === 'text' || noteContentType === 'script')) {
+        const verticalTextOffset = 2; // Same offset used in main rendering
 
-            // Scroll offsets control which part of the content is visible
-            const scrollOffsetY = note.scrollOffset || 0;
-            const scrollOffsetX = note.scrollOffsetX || 0;
+        // Viewport size is derived from note bounds (what's visible on screen)
+        const visibleWidth = endX - startX + 1;
+        const visibleHeight = endY - startY + 1;
 
-            ctx.font = `${context.engine.getEffectiveCharDims(currentZoom).fontSize}px ${context.engine.settings?.fontFamily || 'monospace'}`;
-            ctx.textBaseline = 'top';
+        // Scroll offsets control which part of the content is visible
+        const scrollOffsetY = note.scrollOffset || 0;
+        const scrollOffsetX = note.scrollOffsetX || 0;
 
-            // Calculate visible world coordinate range (viewport culling)
-            const topLeft = engine.screenToWorld(-effectiveCharWidth, -effectiveCharHeight, currentZoom, currentOffset);
-            const bottomRight = engine.screenToWorld(cssWidth + effectiveCharWidth, cssHeight + effectiveCharHeight, currentZoom, currentOffset);
+        ctx.font = `${context.engine.getEffectiveCharDims(currentZoom).fontSize}px ${context.engine.settings?.fontFamily || 'monospace'}`;
+        ctx.textBaseline = 'top';
 
-            // Calculate visible Y range within note content (accounting for vertical scroll)
-            const noteContentStartY = scrollOffsetY;
-            const noteContentEndY = scrollOffsetY + visibleHeight - 1;
+        // Calculate visible world coordinate range (viewport culling)
+        const topLeft = engine.screenToWorld(-effectiveCharWidth, -effectiveCharHeight, currentZoom, currentOffset);
+        const bottomRight = engine.screenToWorld(cssWidth + effectiveCharWidth, cssHeight + effectiveCharHeight, currentZoom, currentOffset);
 
-            // Map viewport visible Y range to note content coordinates
-            const minVisibleWorldY = Math.max(startY, topLeft.y);
-            const maxVisibleWorldY = Math.min(startY + visibleHeight - 1, bottomRight.y);
+        // Calculate visible Y range within note content (accounting for vertical scroll)
+        const noteContentStartY = scrollOffsetY;
+        const noteContentEndY = scrollOffsetY + visibleHeight - 1;
 
-            // Convert to relative Y range within note content
-            const minContentY = Math.max(noteContentStartY, minVisibleWorldY - startY + scrollOffsetY);
-            const maxContentY = Math.min(noteContentEndY, maxVisibleWorldY - startY + scrollOffsetY);
+        // Map viewport visible Y range to note content coordinates
+        const minVisibleWorldY = Math.max(startY, topLeft.y);
+        const maxVisibleWorldY = Math.min(startY + visibleHeight - 1, bottomRight.y);
 
-            // Calculate visible X range within note content (accounting for horizontal scroll)
-            const noteContentStartX = scrollOffsetX;
-            const noteContentEndX = scrollOffsetX + visibleWidth - 1;
+        // Convert to relative Y range within note content
+        const minContentY = Math.max(noteContentStartY, minVisibleWorldY - startY + scrollOffsetY);
+        const maxContentY = Math.min(noteContentEndY, maxVisibleWorldY - startY + scrollOffsetY);
 
-            // Map viewport visible X range to note content coordinates
-            const minVisibleWorldX = Math.max(startX, topLeft.x);
-            const maxVisibleWorldX = Math.min(startX + visibleWidth - 1, bottomRight.x);
+        // Calculate visible X range within note content (accounting for horizontal scroll)
+        const noteContentStartX = scrollOffsetX;
+        const noteContentEndX = scrollOffsetX + visibleWidth - 1;
 
-            // Convert to relative X range within note content
-            const minContentX = Math.max(noteContentStartX, minVisibleWorldX - startX + scrollOffsetX);
-            const maxContentX = Math.min(noteContentEndX, maxVisibleWorldX - startX + scrollOffsetX);
+        // Map viewport visible X range to note content coordinates
+        const minVisibleWorldX = Math.max(startX, topLeft.x);
+        const maxVisibleWorldX = Math.min(startX + visibleWidth - 1, bottomRight.x);
 
-            // Check paint mode once outside loop for performance
-            const isPaintMode = note.displayMode === 'paint';
+        // Convert to relative X range within note content
+        const minContentX = Math.max(noteContentStartX, minVisibleWorldX - startX + scrollOffsetX);
+        const maxContentX = Math.min(noteContentEndX, maxVisibleWorldX - startX + scrollOffsetX);
 
-            // Only iterate through visible region (viewport culling on both axes with 2D scrolling)
-            for (let relativeY = Math.floor(minContentY); relativeY <= Math.ceil(maxContentY); relativeY++) {
-                const viewportLine = relativeY - scrollOffsetY;
-                const renderY = startY + viewportLine;
+        // Check paint mode once outside loop for performance
+        const isPaintMode = note.displayMode === 'paint';
 
-                for (let relativeX = Math.floor(minContentX); relativeX <= Math.ceil(maxContentX); relativeX++) {
-                    const coordKey = `${relativeX},${relativeY}`;
-                    const charData = note.data[coordKey];
+        // Only iterate through visible region (viewport culling on both axes with 2D scrolling)
+        for (let relativeY = Math.floor(minContentY); relativeY <= Math.ceil(maxContentY); relativeY++) {
+            const viewportLine = relativeY - scrollOffsetY;
+            const renderY = startY + viewportLine;
 
-                    if (!charData) continue;
+            for (let relativeX = Math.floor(minContentX); relativeX <= Math.ceil(maxContentX); relativeX++) {
+                const coordKey = `${relativeX},${relativeY}`;
+                const charData = note.data[coordKey];
 
-                    const viewportColumn = relativeX - scrollOffsetX;
-                    const worldX = startX + viewportColumn;
+                if (!charData) continue;
 
-                    // Paint mode: only render where paint cells exist (using blob storage)
-                    if (isPaintMode && !isPaintedCell(engine.worldData, worldX, renderY)) {
-                        continue;
-                    }
+                const viewportColumn = relativeX - scrollOffsetX;
+                const worldX = startX + viewportColumn;
 
-                    // Single worldToScreen calculation using renderY directly
-                    const topScreenPos = engine.worldToScreen(worldX, renderY - 1, currentZoom, currentOffset);
-
-                    // Screen bounds check (should rarely filter now due to culling)
-                    if (topScreenPos.x < -effectiveCharWidth || topScreenPos.x > cssWidth ||
-                        topScreenPos.y < -effectiveCharHeight || topScreenPos.y > cssHeight) {
-                        continue;
-                    }
-
-                    // Render character
-                    const char = typeof charData === 'string' ? charData : charData.char;
-                    const style = typeof charData === 'object' && charData.style ? charData.style : undefined;
-
-                    ctx.fillStyle = style?.color || engine.textColor;
-                    ctx.fillText(char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
+                // Paint mode: only render where paint cells exist (using blob storage)
+                if (isPaintMode && !isPaintedCell(engine.worldData, worldX, renderY)) {
+                    continue;
                 }
+
+                // Single worldToScreen calculation using renderY directly
+                const topScreenPos = engine.worldToScreen(worldX, renderY - 1, currentZoom, currentOffset);
+
+                // Screen bounds check (should rarely filter now due to culling)
+                if (topScreenPos.x < -effectiveCharWidth || topScreenPos.x > cssWidth ||
+                    topScreenPos.y < -effectiveCharHeight || topScreenPos.y > cssHeight) {
+                    continue;
+                }
+
+                // Render character
+                const char = typeof charData === 'string' ? charData : charData.char;
+                const style = typeof charData === 'object' && charData.style ? charData.style : undefined;
+
+                ctx.fillStyle = style?.color || engine.textColor;
+                ctx.fillText(char, topScreenPos.x, topScreenPos.y + verticalTextOffset);
             }
         }
     }
@@ -1745,7 +2050,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         if (agentsInSelection.size > 0) {
             selectedAgentIdsRef.current = agentsInSelection;
             setSelectedAgentIds(agentsInSelection);
-            console.log(`[Agent] Selected ${agentsInSelection.size} agents via selection box`);
         }
     }, [engine.selectionStart, engine.selectionEnd, engine.worldData, agentVisualPositions]);
 
@@ -1928,7 +2232,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 [agentId]: spawnPos
             }));
 
-            console.log(`[MCP] Spawned agent ${agentId} at (${pos.x}, ${pos.y})`);
             return { agentId };
         },
         moveAgentsExpr: (agentIds, xExpr, yExpr, vars = {}, duration) => {
@@ -2098,7 +2401,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 [noteId]: JSON.stringify(noteData),
             }));
 
-            console.log(`[MCP] Created note ${noteId} at (${x}, ${y}) with size ${width}x${height}`);
             return { success: true, noteId };
         },
         createChip: (x, y, text, color) => {
@@ -2119,7 +2421,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 [chipId]: JSON.stringify(chipData),
             }));
 
-            console.log(`[MCP] Created chip ${chipId} "${text}" at (${x}, ${y})`);
             return { success: true, chipId };
         },
         getTextAt: (region) => {
@@ -2153,12 +2454,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         },
         runCommand: (command) => {
             // Execute command via commands system
-            console.log('[MCP] runCommand called:', command, 'commandSystem:', !!engine.commandSystem, 'executeCommandString:', !!engine.commandSystem?.executeCommandString);
             if (engine.commandSystem?.executeCommandString) {
                 engine.commandSystem.executeCommandString(command);
-                console.log('[MCP] executeCommandString called successfully');
-            } else {
-                console.error('[MCP] commandSystem or executeCommandString not available');
             }
         },
         agentCommand: (agentId, command, restoreCursor = true) => {
@@ -2193,7 +2490,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                     }, 50);
                 }
 
-                console.log(`[MCP] Agent ${agentId} executed: ${command} at (${agentPos.x}, ${agentPos.y})`);
                 return { success: true, agentPos };
             } catch (e: any) {
                 return { success: false, error: e.message };
@@ -2254,7 +2550,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                     }
                 }, 100);
 
-                console.log(`[MCP] Agent ${agentId} action: ${command}${selection ? ` (selection ${selection.width}x${selection.height})` : ''} at (${agentPos.x}, ${agentPos.y})`);
                 return { success: true, agentPos: roundedPos };
             } catch (e: any) {
                 return { success: false, error: e.message };
@@ -2932,7 +3227,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             },
             setMonogramMode: (mode) => {
                 // TODO: Wire up to monogram system once setMonogramMode is implemented on engine
-                console.log('[BitCanvas] setMonogramMode called with:', mode);
             },
             setWorldData: engine.setWorldData,
             addEphemeralText: engine.addInstantAIResponse ?
@@ -3799,6 +4093,29 @@ Camera & Viewport Controls:
         startY: number;
         endX: number;
         endY: number;
+    } | null>(null);
+
+    // Table column/row resize state
+    const [tableResizeState, setTableResizeState] = useState<{
+        active: boolean;
+        noteKey: string | null;
+        type: 'column' | 'row' | null;
+        index: number;           // Which column/row divider (right edge of column[index])
+        startMousePos: number;   // Starting mouse X (column) or Y (row) in world coords
+        originalSize: number;    // Original width/height before drag
+    }>({
+        active: false,
+        noteKey: null,
+        type: null,
+        index: 0,
+        startMousePos: 0,
+        originalSize: 0
+    });
+
+    // Preview ref for table column/row resize (smooth dragging)
+    const tableResizePreviewRef = useRef<{
+        index: number;
+        newSize: number;
     } | null>(null);
 
     // --- Resize Handler (Canvas specific) ---
@@ -7377,7 +7694,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     }
                 } catch (err) {
                     // Silently ignore malformed agent data
-                    console.log(`[Agent] Failed to parse agent ${key}:`, err);
                 }
             }
         }
@@ -8115,7 +8431,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     if (engine.recorder.isPlaying) {
                         const actions = engine.recorder.getPlaybackActions();
                         if (actions.length > 0) {
-                            console.log(`[Playback] Processing ${actions.length} actions:`, actions);
                             for (const action of actions) {
                                 engine.agentController.processAction(action);
                             }
@@ -8129,18 +8444,15 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             // Set agent to typing state during content changes
                             engine.agentController.setTyping();
 
-                            console.log(`[Playback] Applying ${contentChanges.length} content changes:`, contentChanges);
                             engine.setWorldData((prev) => {
                                 const next = { ...prev };
                                 for (const change of contentChanges) {
                                     if (change.value === null) {
                                         // Deletion
                                         delete next[change.key];
-                                        console.log(`[Playback] Deleted at ${change.key}`);
                                     } else {
                                         // Addition or update
                                         next[change.key] = change.value;
-                                        console.log(`[Playback] Added/Updated at ${change.key}:`, change.value);
                                     }
                                 }
                                 return next;
@@ -8287,7 +8599,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
                 // Check if agents are still selected (double-tap might have cleared them)
                 if (selectedAgentIds.size === 0) {
-                    console.log('[Agent] Move cancelled - agents deselected');
                     return;
                 }
 
@@ -8354,7 +8665,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                         });
                     }
                 });
-                console.log(`[Agent] Moving ${agentCount} agents to (${clickWorldX}, ${clickWorldY}) with grid spread`);
             }, MOVE_DELAY);
 
             // Focus hidden input to keep virtual keyboard accessible
@@ -8423,7 +8733,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     newSet.delete(clickedAgentId!);
                     selectedAgentIdsRef.current = newSet;
                     setSelectedAgentIds(newSet);
-                    console.log(`[Agent] Deleted agent ${clickedAgentId}`);
                 } else {
                     // Select the clicked agent (add to selection)
                     const newSelection = new Set([clickedAgentId]);
@@ -8445,7 +8754,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             }));
                         }
                     }
-                    console.log(`[Agent] Selected agent ${clickedAgentId}`);
                 }
             } else if (selectedAgentIds.size > 0) {
                 // Cancel any pending move (allows double-tap to prevent move)
@@ -8465,7 +8773,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
                     // Check if agents are still selected (double-tap might have cleared them)
                     if (selectedAgentIds.size === 0) {
-                        console.log('[Agent] Move cancelled - agents deselected');
                         return;
                     }
 
@@ -8547,7 +8854,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                         });
                     }
                     });
-                    console.log(`[Agent] Moving ${agentCount} agents to (${clickWorldX}, ${clickWorldY}) with grid spread`);
                 }, MOVE_DELAY);
             } else {
                 // Check agent cap (max 5 agents)
@@ -8555,7 +8861,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 const currentAgentCount = Object.keys(engine.worldData).filter(k => k.startsWith('agent_')).length;
 
                 if (currentAgentCount >= MAX_AGENTS) {
-                    console.log(`[Agent] Max agents (${MAX_AGENTS}) reached, cannot spawn more`);
                     return;
                 }
 
@@ -8584,8 +8889,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     ...prev,
                     [agentId]: spawnPos
                 }));
-
-                console.log(`[Agent] Spawned agent ${agentId} at (${agentData.x}, ${agentData.y})`);
             }
 
             // Focus hidden input even in agent mode to keep virtual keyboard accessible
@@ -8867,6 +9170,68 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 }
             }
 
+            // Check table column/row divider resize (for data notes)
+            // This checks all data tables, not just selected ones
+            const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
+            for (const key in engine.worldData) {
+                if (key.startsWith('note_')) {
+                    try {
+                        const noteData = JSON.parse(engine.worldData[key] as string);
+                        if (noteData.contentType === 'data' && noteData.tableData) {
+                            const { startX, startY, endX, endY } = noteData;
+                            const { columns, rows } = noteData.tableData;
+
+                            // Table renders with tableTopY = startY - 1 due to GRID_CELL_SPAN text alignment
+                            const tableTopY = startY - 1;
+                            const tableBottomY = endY;
+
+                            // Check if click is within table bounds (visual bounds, not data bounds)
+                            if (worldPos.x >= startX && worldPos.x <= endX + 1 &&
+                                worldPos.y >= tableTopY && worldPos.y <= tableBottomY) {
+
+                                // Check column dividers - hit area is the thumb at top
+                                let dividerX = startX;
+                                for (let colIndex = 0; colIndex < columns.length - 1; colIndex++) {
+                                    dividerX += columns[colIndex].width;
+                                    // Check if near this column divider (within 1 world unit horizontally, and near top)
+                                    if (Math.abs(worldPos.x - dividerX) < 1.5 && worldPos.y < tableTopY + 3) {
+                                        setTableResizeState({
+                                            active: true,
+                                            noteKey: key,
+                                            type: 'column',
+                                            index: colIndex,
+                                            startMousePos: worldPos.x,
+                                            originalSize: columns[colIndex].width
+                                        });
+                                        return; // Early return
+                                    }
+                                }
+
+                                // Check row dividers - hit area is the thumb on left edge
+                                let dividerY = tableTopY;
+                                for (let rowIndex = 0; rowIndex < rows.length - 1; rowIndex++) {
+                                    dividerY += rows[rowIndex].height * 2; // GRID_CELL_SPAN
+                                    // Check if near this row divider (within 1.5 world units vertically, and near left edge)
+                                    if (Math.abs(worldPos.y - dividerY) < 1.5 && worldPos.x < startX + 3) {
+                                        setTableResizeState({
+                                            active: true,
+                                            noteKey: key,
+                                            type: 'row',
+                                            index: rowIndex,
+                                            startMousePos: worldPos.y,
+                                            originalSize: rows[rowIndex].height
+                                        });
+                                        return; // Early return
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Skip invalid note data
+                    }
+                }
+            }
+
             // Check paint blob resize handles
             if (selectedPaintRegion) {
                 const topLeftScreen = engine.worldToScreen(selectedPaintRegion.minX, selectedPaintRegion.minY, engine.zoomLevel, engine.viewOffset);
@@ -9107,8 +9472,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                                     break;
                                 }
 
-                                // Check if it's a text note in scroll/paint display mode
-                                const isTextNote = !noteData.contentType || noteData.contentType === 'text';
+                                // Check if it's a text/script note in scroll/paint display mode
+                                const isTextNote = !noteData.contentType || noteData.contentType === 'text' || noteData.contentType === 'script';
                                 const isScrollableMode = noteData.displayMode === 'scroll' || noteData.displayMode === 'paint';
 
                                 if (isTextNote && isScrollableMode) {
@@ -9247,9 +9612,61 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 }
             }
 
+            // Check for table column/row border hover (for resize cursor)
+            let isOverTableBorder = false;
+            let tableBorderType: 'column' | 'row' | null = null;
+            const tableBorderWorldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
+            for (const key in engine.worldData) {
+                if (key.startsWith('note_')) {
+                    try {
+                        const noteData = JSON.parse(engine.worldData[key] as string);
+                        if (noteData.contentType === 'data' && noteData.tableData) {
+                            const { startX, startY, endX, endY } = noteData;
+                            const { columns, rows } = noteData.tableData;
+                            const tableTopY = startY - 1;
+                            const tableBottomY = endY;
+
+                            // Check if within table bounds
+                            if (tableBorderWorldPos.x >= startX && tableBorderWorldPos.x <= endX + 1 &&
+                                tableBorderWorldPos.y >= tableTopY && tableBorderWorldPos.y <= tableBottomY) {
+
+                                // Check column dividers
+                                let dividerX = startX;
+                                for (let colIndex = 0; colIndex < columns.length - 1; colIndex++) {
+                                    dividerX += columns[colIndex].width;
+                                    if (Math.abs(tableBorderWorldPos.x - dividerX) < 1.5) {
+                                        isOverTableBorder = true;
+                                        tableBorderType = 'column';
+                                        break;
+                                    }
+                                }
+
+                                // Check row dividers
+                                if (!isOverTableBorder) {
+                                    let dividerY = tableTopY;
+                                    for (let rowIndex = 0; rowIndex < rows.length - 1; rowIndex++) {
+                                        dividerY += rows[rowIndex].height * 2; // GRID_CELL_SPAN
+                                        if (Math.abs(tableBorderWorldPos.y - dividerY) < 1.5) {
+                                            isOverTableBorder = true;
+                                            tableBorderType = 'row';
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) { /* Skip invalid */ }
+                }
+                if (isOverTableBorder) break;
+            }
+
             // Update cursor style
             if (canvasRef.current) {
-                canvasRef.current.style.cursor = (isOverLink || isOverTask) ? 'pointer' : 'text';
+                if (isOverTableBorder) {
+                    canvasRef.current.style.cursor = tableBorderType === 'column' ? 'col-resize' : 'row-resize';
+                } else {
+                    canvasRef.current.style.cursor = (isOverLink || isOverTask) ? 'pointer' : 'text';
+                }
             }
         }
 
@@ -9287,6 +9704,30 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             // Final commit happens on mouseUp
             resizePreviewRef.current = newBounds;
             return; // Early return - don't process other mouse move events during resize
+        }
+
+        // Handle table column/row resize drag
+        if (tableResizeState.active && tableResizeState.noteKey) {
+            const worldPos = engine.screenToWorld(x, y, engine.zoomLevel, engine.viewOffset);
+            const delta = tableResizeState.type === 'column'
+                ? worldPos.x - tableResizeState.startMousePos
+                : worldPos.y - tableResizeState.startMousePos;
+
+            // Calculate new size (min 2 for columns, min 1 for rows)
+            const minSize = tableResizeState.type === 'column' ? 2 : 1;
+            const newSize = Math.max(minSize, Math.round(tableResizeState.originalSize + delta));
+
+            // Update preview ref
+            tableResizePreviewRef.current = {
+                index: tableResizeState.index,
+                newSize
+            };
+
+            // Set resize cursor
+            if (canvasRef.current) {
+                canvasRef.current.style.cursor = tableResizeState.type === 'column' ? 'col-resize' : 'row-resize';
+            }
+            return; // Early return
         }
 
         if (isMiddleMouseDownRef.current && panStartInfoRef.current) {
@@ -9612,7 +10053,90 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     roomIndex: null
                 });
                 return; // Early return after resize complete
-            } else if (resizeState.active) {
+            }
+
+            // Handle table column/row resize commit
+            if (tableResizeState.active && tableResizeState.noteKey && tableResizePreviewRef.current) {
+                try {
+                    const noteData = JSON.parse(engine.worldData[tableResizeState.noteKey] as string);
+                    if (noteData.tableData) {
+                        const { index, newSize } = tableResizePreviewRef.current;
+
+                        if (tableResizeState.type === 'column') {
+                            // Update column width
+                            const updatedColumns = [...noteData.tableData.columns];
+                            const oldWidth = updatedColumns[index].width;
+                            updatedColumns[index] = { ...updatedColumns[index], width: newSize };
+
+                            // Recalculate table endX based on new column widths
+                            const totalWidth = updatedColumns.reduce((sum: number, col: { width: number }) => sum + col.width, 0);
+
+                            engine.setWorldData(prev => ({
+                                ...prev,
+                                [tableResizeState.noteKey!]: JSON.stringify({
+                                    ...noteData,
+                                    endX: noteData.startX + totalWidth - 1,
+                                    tableData: {
+                                        ...noteData.tableData,
+                                        columns: updatedColumns
+                                    }
+                                })
+                            }));
+                        } else {
+                            // Update row height
+                            const updatedRows = [...noteData.tableData.rows];
+                            updatedRows[index] = { ...updatedRows[index], height: newSize };
+
+                            // Recalculate table endY based on new row heights
+                            const totalHeight = updatedRows.reduce((sum: number, row: { height: number }) => sum + row.height * 2, 0);
+
+                            engine.setWorldData(prev => ({
+                                ...prev,
+                                [tableResizeState.noteKey!]: JSON.stringify({
+                                    ...noteData,
+                                    endY: noteData.startY + totalHeight - 1,
+                                    tableData: {
+                                        ...noteData.tableData,
+                                        rows: updatedRows
+                                    }
+                                })
+                            }));
+                        }
+                    }
+                } catch (e) {
+                    // Ignore errors
+                }
+
+                // Clear preview and reset state
+                tableResizePreviewRef.current = null;
+                setTableResizeState({
+                    active: false,
+                    noteKey: null,
+                    type: null,
+                    index: 0,
+                    startMousePos: 0,
+                    originalSize: 0
+                });
+
+                // Reset cursor
+                if (canvasRef.current) {
+                    canvasRef.current.style.cursor = 'text';
+                }
+                return; // Early return after table resize complete
+            } else if (tableResizeState.active) {
+                // Table resize was active but no preview - just reset
+                tableResizePreviewRef.current = null;
+                setTableResizeState({
+                    active: false,
+                    noteKey: null,
+                    type: null,
+                    index: 0,
+                    startMousePos: 0,
+                    originalSize: 0
+                });
+            }
+
+            if (resizeState.active) {
                 // Resize was active but no preview (user didn't move) - just reset
                 resizePreviewRef.current = null;
                 setResizeState({
@@ -10261,8 +10785,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                                     ? JSON.parse(engine.worldData[key] as string)
                                     : engine.worldData[key];
 
-                                // Check if it's a text note in scroll/paint display mode
-                                const isTextNote = !noteData.contentType || noteData.contentType === 'text';
+                                // Check if it's a text/script note in scroll/paint display mode
+                                const isTextNote = !noteData.contentType || noteData.contentType === 'text' || noteData.contentType === 'script';
                                 const isScrollableMode = noteData.displayMode === 'scroll' || noteData.displayMode === 'paint';
 
                                 if (isTextNote && isScrollableMode &&
@@ -10724,7 +11248,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 // Update both ref (immediately) and state (for re-render)
                 selectedAgentIdsRef.current = new Set();
                 setSelectedAgentIds(new Set());
-                console.log('[Agent] Cleared agent selection via double-tap');
                 isDoubleTapModeRef.current = false;
                 isTouchSelectingRef.current = false;
                 touchStartRef.current = null;
@@ -11673,7 +12196,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             }
             selectedAgentIdsRef.current = new Set();
             setSelectedAgentIds(new Set());
-            console.log('[Agent] Cleared agent selection via ESC');
             e.preventDefault();
             e.stopPropagation();
             return;

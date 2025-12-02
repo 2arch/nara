@@ -687,7 +687,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "get_cursor_position": {
         const response = await sendToNara({ type: "get_cursor_position" });
         return {
-          content: [{ type: "text", text: JSON.stringify(response.position) }],
+          content: [{ type: "text", text: JSON.stringify(response.position || { x: 0, y: 0 }) }],
         };
       }
 
@@ -695,14 +695,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { region } = args as any;
         const response = await sendToNara({ type: "get_canvas_info", region });
         return {
-          content: [{ type: "text", text: JSON.stringify(response.info) }],
+          content: [{ type: "text", text: JSON.stringify(response.info || {}) }],
         };
       }
 
       case "get_agents": {
         const response = await sendToNara({ type: "get_agents" });
         return {
-          content: [{ type: "text", text: JSON.stringify(response.agents) }],
+          content: [{ type: "text", text: JSON.stringify(response.agents || []) }],
         };
       }
 
@@ -779,7 +779,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "get_viewport": {
         const response = await sendToNara({ type: "get_viewport" });
         return {
-          content: [{ type: "text", text: JSON.stringify(response.viewport) }],
+          content: [{ type: "text", text: JSON.stringify(response.viewport || { offset: { x: 0, y: 0 }, zoomLevel: 1, visibleBounds: {} }) }],
         };
       }
 
@@ -795,7 +795,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "get_selection": {
         const response = await sendToNara({ type: "get_selection" });
         return {
-          content: [{ type: "text", text: JSON.stringify(response.selection) }],
+          content: [{ type: "text", text: JSON.stringify(response.selection || { start: null, end: null }) }],
         };
       }
 
@@ -818,14 +818,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "get_notes": {
         const response = await sendToNara({ type: "get_notes" });
         return {
-          content: [{ type: "text", text: JSON.stringify(response.notes) }],
+          content: [{ type: "text", text: JSON.stringify(response.notes || []) }],
         };
       }
 
       case "get_chips": {
         const response = await sendToNara({ type: "get_chips" });
         return {
-          content: [{ type: "text", text: JSON.stringify(response.chips) }],
+          content: [{ type: "text", text: JSON.stringify(response.chips || []) }],
         };
       }
 
@@ -834,7 +834,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { x, y, width, height } = args as { x: number; y: number; width: number; height: number };
         const response = await sendToNara({ type: "get_text_at", region: { x, y, width, height } });
         return {
-          content: [{ type: "text", text: JSON.stringify(response.lines) }],
+          content: [{ type: "text", text: JSON.stringify(response.lines || []) }],
         };
       }
 

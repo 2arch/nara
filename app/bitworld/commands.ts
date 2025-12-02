@@ -89,8 +89,6 @@ async function compositeSpriteSheetFromRefs(
     const sheetWidth = frameSize.width * framesPerDirection;
     const sheetHeight = frameSize.height * SPRITE_DIRECTIONS.length;
 
-    console.log('[compositeSpriteSheetFromRefs] Creating sheet with', storageRefs.length, 'refs');
-
     // Create canvas
     const canvas = document.createElement('canvas');
     canvas.width = sheetWidth;
@@ -105,11 +103,8 @@ async function compositeSpriteSheetFromRefs(
         const direction = SPRITE_DIRECTIONS[row];
         const refInfo = storageRefs.find(r => r.direction === direction);
         if (!refInfo) {
-            console.log(`[compositeSpriteSheetFromRefs] No ref for direction: ${direction}`);
             continue;
         }
-
-        console.log(`[compositeSpriteSheetFromRefs] Loading ${direction}`);
 
         // Get download URL and load with CORS
         const url = await getDownloadURL(refInfo.ref);
@@ -159,8 +154,6 @@ async function compositeSpriteSheetFromUrls(
     const sheetWidth = frameSize.width * framesPerDirection;
     const sheetHeight = frameSize.height * SPRITE_DIRECTIONS.length;
 
-    console.log('[compositeSpriteSheetFromUrls] Creating sheet from URLs');
-
     // Create canvas
     const canvas = document.createElement('canvas');
     canvas.width = sheetWidth;
@@ -173,11 +166,8 @@ async function compositeSpriteSheetFromUrls(
         const direction = SPRITE_DIRECTIONS[row];
         const url = storagePaths[direction];
         if (!url) {
-            console.log(`[compositeSpriteSheetFromUrls] No URL for direction: ${direction}`);
             continue;
         }
-
-        console.log(`[compositeSpriteSheetFromUrls] Loading ${direction}`);
 
         const img = await new Promise<HTMLImageElement>((resolve, reject) => {
             const image = new Image();
@@ -435,9 +425,9 @@ const AVAILABLE_COMMANDS = [
     // Navigation & View
     'nav', 'search', 'cam', 'indent', 'zoom', 'map', 'view', 'focus',
     // Content Creation
-    'chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint', 'agent', 'pattern', 'connect', 'export',
+    'chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint', 'agent', 'pattern', 'connect', 'export', 'data', 'list', 'grow', 'duplicate', 'name',
     // Special
-    'mode', 'note', 'mail', 'shell', 'chat', 'talk', 'tutorial', 'help',
+    'mode', 'note', 'mail', 'shell', 'chat', 'talk', 'tutorial', 'help', 'script', 'run',
     // Styling & Display
     'bg', 'text', 'font', 'style', 'display', 'scale', 'be',
     // State Management
@@ -455,8 +445,8 @@ const AVAILABLE_COMMANDS = [
 // Category mapping for visual organization
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map', 'view', 'focus'],
-    'create': ['chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint', 'agent', 'export'],
-    'special': ['mode', 'note', 'mail', 'shell', 'chat', 'talk', 'tutorial', 'help'],
+    'create': ['chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint', 'agent', 'export', 'data', 'list', 'grow', 'duplicate', 'name'],
+    'special': ['mode', 'note', 'mail', 'shell', 'chat', 'talk', 'tutorial', 'help', 'script', 'run'],
     'style': ['bg', 'text', 'font', 'style', 'display', 'be'],
     'state': ['state', 'random', 'clear', 'replay', 'record'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
@@ -486,9 +476,16 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'pack': 'Pack selected world data into a collapsible chip. Select a region (including notes, text, etc), then type /pack [color]. Click the pack chip to toggle between collapsed (hidden) and expanded (visible) states.',
     'clip': 'Save selected text to your clipboard. Select text, then type /clip to capture it. Access your clips later to paste them anywhere on the canvas.',
     'export': 'Export selected area as a PNG image. Make a selection, then type /export to download it as an image. Use /export --grid to include grid lines in the export.',
-    'upload': 'Upload an image to your canvas. Type /upload, then select an image file. The image will be placed at your current cursor position and saved to your canvas.',
+    'upload': 'Upload files to your canvas. Images are rasterized to fit. Scripts (.js, .py) become executable script notes - use /run to execute. Also supports .json, .txt, .md, .csv as text notes.',
     'paint': 'Enter paint mode to draw filled regions on the canvas. Drag to draw a continuous stroke, double-click/double-tap to fill the enclosed area. Press ESC to exit.',
     'agent': 'Enter agent spawn mode. Click on the canvas to place ghost agent cursors. Use /agent [spriteName] to use a specific sprite, or /agent to use a default. Press ESC to exit while keeping agents on the canvas.',
+    'data': 'Create a data table from selected text. Select CSV-formatted text (comma-separated values), then type /data to convert it into an interactive table with resizable columns and rows. First row becomes the header.',
+    'script': 'Convert a note into an executable script. Usage: /script [lang]. Languages: js/javascript (default), py/python. Auto-detects Python from import, def, print(), etc. Use /run to execute.',
+    'run': 'Execute the script note at cursor position. JavaScript uses print() or console.log(). Python uses Pyodide (~10MB, lazy loaded on first use). Use #!py at start of script for Python.',
+    'grow': 'Run cellular automata from cursor position. Animates step by step. /grow [steps] [rule] [color]. Rules: life, grow, maze, seeds, coral. Example: /grow 20 coral green. Uses existing paint as seed if present.',
+    'duplicate': 'Duplicate the note at cursor. Creates an identical copy 3 cells to the right. Also available via Cmd+D (Mac) or Ctrl+D (Windows).',
+    'name': 'Name a note for script references. Usage: /name mydata. Named data notes can be read by scripts using nara.read_table("mydata"). Names must be unique and contain only letters, numbers, underscores.',
+    'list': 'Create a scrollable list from selected text. Select text, then type /list [color]. The selection becomes a scrollable region. Drag to scroll through content that extends beyond the visible area.',
     'mode': 'Switch canvas modes. /mode default for standard writing, /mode air for ephemeral text that doesn\'t save, /mode chat to talk with AI, /mode note for focused note-taking.',
     'note': 'Quick shortcut to enter note mode. This creates a focused writing space perfect for drafting ideas before placing them on your main canvas.',
     'display': 'Toggle note display mode. Use inside a note: /display to toggle, /display expand to grow note as you type, /display scroll for terminal-style auto-scrolling. Controls how notes behave when text wraps beyond bounds.',
@@ -1381,6 +1378,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             return ['text --g', ...Object.keys(COLOR_MAP).map(color => `text ${color}`)];
         }
 
+        if (lowerInput === 'data') {
+            // No arguments for data command
+            return ['data'];
+        }
+
         if (lowerInput === 'list') {
             const parts = input.split(' ');
 
@@ -2209,11 +2211,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (!commandToExecute) return null; // Safety check for undefined command
 
-        // DEBUG: Log command execution
-        console.log('[executeCommand] commandToExecute:', JSON.stringify(commandToExecute));
-        console.log('[executeCommand] hasNavigated:', commandState.hasNavigated);
-        console.log('[executeCommand] matchedCommands:', commandState.matchedCommands.slice(0, 5));
-
         const inputParts = commandToExecute.split(/\s+/);
         const commandName = inputParts[0];
         
@@ -2283,11 +2280,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     },
                     audio: false
                 });
-
-                // Log which camera was actually selected
-                const videoTrack = stream.getVideoTracks()[0];
-                const trackSettings = videoTrack.getSettings();
-                console.log('[Camera] Facetalk active | Actual:', trackSettings.facingMode, '| Label:', videoTrack.label, '| Mask:', maskName);
 
                 // Stop any existing stream
                 if (backgroundStreamRef.current) {
@@ -3249,9 +3241,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (commandToExecute.startsWith('be')) {
             const beArgs = commandToExecute.slice(2).trim();
-            console.log('[/be] Command received, beArgs:', JSON.stringify(beArgs));
-            console.log('[/be] userUid:', userUid);
-            console.log('[/be] userSprites count:', userSprites.length);
 
             // Handle --rm flag (delete sprite)
             if (beArgs.startsWith('--rm ')) {
@@ -3405,7 +3394,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 const spriteId = sprite.id;
 
                 setDialogueText(`Applying ${effectName} effect to ${spriteName}...`);
-                console.log(`[/be --post] Post-processing sprite: ${spriteName} (id: ${spriteId}) with effect: ${effectName}`);
 
                 (async () => {
                     try {
@@ -3420,7 +3408,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             const idleUrl = await getDownloadURL(idleRef);
                             sheets.push({ name: 'idle', url: idleUrl });
                         } catch (err) {
-                            console.log(`[/be --post] No idle.png found`);
+                            // No idle.png found
                         }
 
                         try {
@@ -3428,7 +3416,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             const walkUrl = await getDownloadURL(walkRef);
                             sheets.push({ name: 'walk', url: walkUrl });
                         } catch (err) {
-                            console.log(`[/be --post] No walk.png found`);
+                            // No walk.png found
                         }
 
                         if (sheets.length === 0) {
@@ -3436,23 +3424,17 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             return;
                         }
 
-                        console.log(`[/be --post] Found ${sheets.length} sheet(s) to process`);
-
                         // Build options for the effect
                         const effectOptions = color ? { color } : undefined;
 
                         // Process each sheet using the skins module
                         for (const sheet of sheets) {
-                            console.log(`[/be --post] Processing ${sheet.name}.png with ${effectName}${color ? ` (color: ${color})` : ''}...`);
-
                             // Apply effect using skins module
                             const processedDataUrl = await applySkin(sheet.url, effectName, effectOptions);
 
                             // Upload processed image back to storage
                             const uploadRef = storageRef(storage, `sprites/${userUid}/${spriteId}/${sheet.name}.png`);
                             await uploadString(uploadRef, processedDataUrl, 'data_url');
-
-                            console.log(`[/be --post] Processed and uploaded ${sheet.name}.png`);
                         }
 
                         // Reload the sprite
@@ -3464,7 +3446,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             const walkRef = storageRef(storage, `sprites/${userUid}/${spriteId}/walk.png`);
                             walkUrl = await getDownloadURL(walkRef);
                         } catch (err) {
-                            console.log(`[/be --post] Using idle for walk`);
+                            // Using idle for walk
                         }
 
                         // Set as current cursor
@@ -3510,7 +3492,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 const spriteId = sprite.id;
 
                 setDialogueText(`Creating idle sheet for ${spriteName}...`);
-                console.log(`[/be --sheet] Creating sheet for sprite: ${spriteName} (id: ${spriteId})`);
 
                 (async () => {
                     try {
@@ -3520,8 +3501,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         // List rotations in the sprite folder
                         const rotationsRef = storageRef(storage, `sprites/${userUid}/${spriteId}/rotations`);
                         const rotationsList = await listAll(rotationsRef);
-
-                        console.log(`[/be --sheet] Found ${rotationsList.items.length} rotation files`);
 
                         if (rotationsList.items.length === 0) {
                             setDialogueText(`No rotations found for ${spriteId}`);
@@ -3533,10 +3512,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             direction: item.name.replace('.png', ''),
                             ref: item,
                         }));
-                        console.log(`[/be --sheet] Built ${storageRefs.length} refs`);
 
                         // Create the spritesheet using Firebase SDK (no CORS issues)
-                        console.log(`[/be --sheet] Compositing spritesheet...`);
                         const staticSheet = await compositeSpriteSheetFromRefs(
                             storageRefs,
                             IDLE_FRAME_SIZE,
@@ -3547,8 +3524,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         const { uploadString } = await import('firebase/storage');
                         const idleRef = storageRef(storage, `sprites/${userUid}/${spriteId}/idle.png`);
                         await uploadString(idleRef, staticSheet, 'data_url');
-
-                        console.log(`[/be --sheet] Uploaded idle.png`);
 
                         // Set as current cursor (use idle for walk until animated)
                         setModeState(prev => ({
@@ -3599,7 +3574,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         ...prev,
                         spriteDebugLog: [...(prev.spriteDebugLog || []), `[${timestamp}] ${msg}`]
                     }));
-                    console.log(`[AnimateSprite] ${msg}`);
                 };
 
                 // Set cursor to idle sprite immediately (it will pulse during animation)
@@ -3618,7 +3592,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 setDialogueText(`Generating walk animation for ${spriteName}...`);
                 addLog(`Starting animation for: ${spriteName}`);
                 addLog(`Cursor set to idle sprite (pulsing)`);
-                console.log(`[/be --animate] Starting animation for sprite: ${spriteName} (id: ${spriteId})`);
 
                 (async () => {
                     try {
@@ -3640,7 +3613,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         }
 
                         addLog(`Found characterId: ${metadata.characterId.slice(0, 8)}...`);
-                        console.log(`[/be --animate] Found characterId: ${metadata.characterId}`);
                         setDialogueText(`Requesting animation from Pixellab...`);
                         addLog(`Requesting animation from Pixellab...`);
 
@@ -3666,7 +3638,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                         const { jobId } = await response.json();
                         addLog(`Job started: ${jobId.slice(0, 8)}...`);
-                        console.log(`[/be --animate] Animation job started: ${jobId}`);
 
                         // Poll for completion
                         const pollInterval = 3000;
@@ -3682,7 +3653,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                             const phase = status.currentPhase || 'processing';
                             addLog(`[${pollCount}] ${status.status} - ${phase}`);
-                            console.log(`[/be --animate] Poll ${pollCount}: ${status.status} - ${phase}`);
 
                             if (status.status === 'complete') {
                                 return status;
@@ -3712,7 +3682,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                         const result = await poll();
                         addLog(`Animation complete!`);
-                        console.log(`[/be --animate] Animation complete! framePaths:`, result.framePaths);
 
                         setDialogueText(`Compositing walk sheet...`);
                         addLog(`Compositing walk sheet...`);
@@ -3733,7 +3702,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             const direction = SPRITE_DIRECTIONS[row];
                             const frames = framePaths[direction];
                             if (!frames) {
-                                console.log(`[/be --animate] No frames for ${direction}`);
                                 continue;
                             }
 
@@ -3772,13 +3740,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         }
 
                         const walkSheet = walkCanvas.toDataURL('image/png');
-                        console.log(`[/be --animate] Walk sheet composited`);
 
                         // Upload walk sheet to Storage
                         const { uploadString: upStr } = await import('firebase/storage');
                         const walkRef = storageRef(storage, `sprites/${userUid}/${spriteId}/walk.png`);
                         await upStr(walkRef, walkSheet, 'data_url');
-                        console.log(`[/be --animate] Walk sheet uploaded`);
 
                         // Load idle sheet
                         const idleRef = storageRef(storage, `sprites/${userUid}/${spriteId}/idle.png`);
@@ -3848,7 +3814,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 const spriteId = sprite.id;
 
                 setDialogueText(`Checking ${spriteName} animation status...`);
-                console.log(`[/be --animate-continue] Checking sprite: ${spriteName} (id: ${spriteId})`);
 
                 (async () => {
                     try {
@@ -3865,7 +3830,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             return;
                         } catch {
                             // walk.png doesn't exist, check for partial frames
-                            console.log(`[/be --animate-continue] Walk sheet missing, checking for partial frames...`);
                         }
 
                         // Check walk_frames/ folder for existing frames
@@ -3876,7 +3840,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                         try {
                             const framesList = await listAll(walkFramesRef);
-                            console.log(`[/be --animate-continue] Found ${framesList.items.length} existing frames`);
 
                             // Group frames by direction
                             for (const item of framesList.items) {
@@ -3901,13 +3864,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             const existingDirs = Object.keys(existingFrames);
                             if (existingDirs.length > 0) {
                                 missingDirs = SPRITE_DIRECTIONS.filter(d => !existingFrames[d]);
-                                console.log(`[/be --animate-continue] Found: ${existingDirs.join(', ')}`);
-                                console.log(`[/be --animate-continue] Missing: ${missingDirs.join(', ')}`);
 
                                 if (missingDirs.length === 0) {
                                     // All directions already exist, skip animation request
                                     setDialogueText(`All directions complete, creating walk sheet...`);
-                                    console.log(`[/be --animate-continue] All frames exist, skipping animation request`);
                                     shouldRequestAnimation = false;
                                 } else {
                                     // Some missing, will request animation ONLY for missing directions
@@ -3915,7 +3875,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                                 }
                             }
                         } catch (err) {
-                            console.log(`[/be --animate-continue] No existing frames, will request new animation`);
+                            // No existing frames, will request new animation
                         }
 
                         // Prepare framePaths for compositing
@@ -3956,7 +3916,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             }
 
                             const { jobId } = await response.json();
-                            console.log(`[/be --animate-continue] Animation job started: ${jobId}`);
 
                             // Poll for completion
                             const pollInterval = 3000;
@@ -3973,7 +3932,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                                 if (status.status === 'complete') return status;
                                 if (status.status === 'partial') {
                                     // Partial success - some directions completed
-                                    console.log(`[/be --animate-continue] Partial: ${status.completedDirections?.length}/${status.totalDirections}`);
                                     return status;
                                 }
                                 if (status.status === 'error') throw new Error(status.error || 'Animation failed');
@@ -4146,7 +4104,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     // First try to match by name, then by ID
                     const savedSprite = userSprites.find(s => s.name.toLowerCase() === prompt.toLowerCase())
                         || userSprites.find(s => s.id.toLowerCase() === prompt.toLowerCase());
-                    console.log('[/be] Checking savedSprite for prompt:', prompt, 'found:', !!savedSprite);
 
                     if (savedSprite) {
                         // Load saved sprite (use idleUrl as fallback if no walkUrl)
@@ -4196,9 +4153,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             } // End of !--re block
 
             // Generate sprite if we have a prompt
-            console.log('[/be] About to check prompt, prompt:', JSON.stringify(prompt));
             if (prompt) {
-                console.log('[/be] Entering generation block');
                 // Helper to add log entry
                 const addLog = (msg: string) => {
                     const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
@@ -4206,21 +4161,17 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         ...prev,
                         spriteDebugLog: [...(prev.spriteDebugLog || []), `[${timestamp}] ${msg}`]
                     }));
-                    console.log(`[SpriteGen] ${msg}`);
                 };
 
                 // Require user to be logged in
                 if (!userUid) {
-                    console.log('[/be] User not signed in, showing sign-in message');
                     setDialogueWithRevert("Sign in required to generate sprites. Use /signin", setDialogueText);
                     clearCommandState();
                     return null;
                 }
 
                 // Generate new sprite from prompt using polling
-                console.log('[/be] Starting generation, setting isGeneratingSprite: true');
                 setModeState(prev => {
-                    console.log('[/be] setModeState called, prev.isGeneratingSprite:', prev.isGeneratingSprite);
                     return { ...prev, isGeneratingSprite: true, spriteDebugLog: [], spriteProgress: 0 };
                 });
                 setDialogueText(`Generating "${prompt}"...`);
@@ -5106,6 +5057,18 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
             clearCommandState();
             return null;
+        }
+
+        if (commandToExecute.startsWith('data')) {
+            // Clear command mode
+            clearCommandState();
+
+            // Return command execution for immediate processing
+            return {
+                command: 'data',
+                args: inputParts.slice(1),
+                commandStartPos: commandState.commandStartPos
+            };
         }
 
         if (commandToExecute.startsWith('list')) {

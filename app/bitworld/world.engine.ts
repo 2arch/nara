@@ -19,6 +19,8 @@ import { parseGIFFromArrayBuffer, getCurrentFrame, isGIFUrl } from './gif.parser
 import type { AgentState } from './agent';
 import { AgentController } from './agent';
 import { findSmoothPath, type Point as PathPoint } from './paths';
+import { runCA, type CARule } from './ca';
+import { runPython, isPyodideLoaded } from './pyodide';
 import { BubbleState, createInitialBubbleState, showBubble, hideBubble, isBubbleExpired } from './bubble';
 
 // API route helper functions for AI operations
@@ -1768,7 +1770,6 @@ export function useWorldEngine({
                     ...noteObjects  // Add all note objects
                 }));
 
-                console.log(`Pattern ${initialPatternId} generated from URL with ${Object.keys(noteObjects).length} notes`);
             }
         }
     }, [initialPatternId]); // Only run once on mount when initialPatternId exists
@@ -3761,6 +3762,7 @@ export function useWorldEngine({
     };
 
     // Helper to find specifically text-type notes (not image/mail/list)
+    // Includes 'data' (table) and 'script' notes which use note.data for text storage
     const findTextNoteContainingPoint = (x: number, y: number, currentWorldData: WorldData): { key: string; data: any } | null => {
         for (const key in currentWorldData) {
             if (key.startsWith('note_')) {
@@ -3769,11 +3771,14 @@ export function useWorldEngine({
                         ? JSON.parse(currentWorldData[key] as string)
                         : currentWorldData[key];
 
-                    // Only return text-type notes (or notes without contentType which default to text)
-                    const isTextNote = !noteData.contentType || noteData.contentType === 'text';
+                    // Return text-type, data (table), and script notes which all use note.data
+                    const isEditableNote = !noteData.contentType ||
+                        noteData.contentType === 'text' ||
+                        noteData.contentType === 'data' ||
+                        noteData.contentType === 'script';
 
                     // Check if point is inside this note
-                    if (isTextNote && x >= noteData.startX && x <= noteData.endX &&
+                    if (isEditableNote && x >= noteData.startX && x <= noteData.endX &&
                         y >= noteData.startY && y <= noteData.endY) {
                         return { key, data: noteData };
                     }
@@ -3783,6 +3788,69 @@ export function useWorldEngine({
             }
         }
         return null;
+    };
+
+    // Helper to get the cell (row, col) at a cursor position in a data note
+    // Returns null if not in a data note or cursor is outside table bounds
+    const getCellAtPosition = (cursorX: number, cursorY: number, noteData: any): { row: number; col: number; cellStartX: number; cellEndX: number; cellStartY: number; cellEndY: number } | null => {
+        if (noteData.contentType !== 'data' || !noteData.tableData) return null;
+
+        const { columns, rows } = noteData.tableData;
+        if (!columns || !rows) return null;
+
+        const { startX, startY } = noteData;
+
+        // Find which row the cursor is in
+        let rowStartY = startY - 1; // Grid starts at startY - 1 due to GRID_CELL_SPAN offset
+        let foundRow = -1;
+        for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+            const rowHeight = rows[rowIndex].height * GRID_CELL_SPAN;
+            const rowEndY = rowStartY + rowHeight;
+            if (cursorY >= rowStartY && cursorY < rowEndY) {
+                foundRow = rowIndex;
+                break;
+            }
+            rowStartY = rowEndY;
+        }
+
+        if (foundRow === -1) return null;
+
+        // Find which column the cursor is in
+        let colStartX = startX;
+        let foundCol = -1;
+        for (let colIndex = 0; colIndex < columns.length; colIndex++) {
+            const colWidth = columns[colIndex].width;
+            const colEndX = colStartX + colWidth;
+            if (cursorX >= colStartX && cursorX < colEndX) {
+                foundCol = colIndex;
+                break;
+            }
+            colStartX = colEndX;
+        }
+
+        if (foundCol === -1) return null;
+
+        // Calculate cell bounds
+        let cellStartX = startX;
+        for (let c = 0; c < foundCol; c++) {
+            cellStartX += columns[c].width;
+        }
+        const cellEndX = cellStartX + columns[foundCol].width;
+
+        let cellStartY = startY - 1;
+        for (let r = 0; r < foundRow; r++) {
+            cellStartY += rows[r].height * GRID_CELL_SPAN;
+        }
+        const cellEndY = cellStartY + rows[foundRow].height * GRID_CELL_SPAN;
+
+        return {
+            row: foundRow,
+            col: foundCol,
+            cellStartX,
+            cellEndX,
+            cellStartY,
+            cellEndY
+        };
     };
 
     // Helper to rewrap text in a note when switching to wrap mode or resizing
@@ -5983,24 +6051,17 @@ export function useWorldEngine({
                     setSelectionEnd(null);
                 } else if (exec.command === 'margin') {
                     // /margin command - create a margin note for selected text
-                    console.log('[/margin] Command triggered in world engine');
-
                     if (selectionStart && selectionEnd) {
                         const hasSelection = selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y;
-                        console.log('[/margin] Selection exists:', { selectionStart, selectionEnd, hasSelection });
 
                         if (hasSelection) {
-                            console.log('[/margin] Loading bit.blocks functions...');
                             // Use dynamic import to load margin calculation functions
                             import('./bit.blocks').then(({ findTextBlockForSelection, calculateMarginPlacement }) => {
-                                console.log('[/margin] Functions loaded');
                                 const normalized = getNormalizedSelection();
-                                console.log('[/margin] Normalized selection:', normalized);
 
                                 if (normalized) {
                                     // Find the text block containing this selection
                                     const textBlock = findTextBlockForSelection(normalized, worldData);
-                                    console.log('[/margin] Text block found:', textBlock);
 
                                     if (textBlock) {
                                         // Calculate margin placement (right, left, or bottom)
@@ -6009,7 +6070,6 @@ export function useWorldEngine({
                                             normalized.startY,
                                             worldData
                                         );
-                                        console.log('[/margin] Margin placement calculated:', marginPlacement);
 
                                         if (marginPlacement) {
                                             // Create note region using helper
@@ -6027,7 +6087,6 @@ export function useWorldEngine({
                                                 ...prev,
                                                 [noteKey]: JSON.stringify(noteData)
                                             }));
-                                            console.log('[/margin] Note region created with key:', noteKey, noteData);
 
                                             const width = marginPlacement.endX - marginPlacement.startX + 1;
                                             const height = marginPlacement.endY - marginPlacement.startY + 1;
@@ -6040,11 +6099,9 @@ export function useWorldEngine({
                                             setSelectionStart(null);
                                             setSelectionEnd(null);
                                         } else {
-                                            console.log('[/margin] No available margin space found');
                                             setDialogueWithRevert("Could not find available margin space", setDialogueText);
                                         }
                                     } else {
-                                        console.log('[/margin] No text block found for selection');
                                         setDialogueWithRevert("Could not find text block for selection", setDialogueText);
                                     }
                                 }
@@ -6053,11 +6110,9 @@ export function useWorldEngine({
                                 setDialogueWithRevert("Error creating margin note", setDialogueText);
                             });
                         } else {
-                            console.log('[/margin] Selection must span more than one cell');
                             setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
                         }
                     } else {
-                        console.log('[/margin] No selection exists');
                         setDialogueWithRevert("Make a selection first", setDialogueText);
                     }
                 } else if (exec.command === 'signin') {
@@ -6683,6 +6738,856 @@ export function useWorldEngine({
                     } else {
                         setDialogueWithRevert(`No list found at cursor position`, setDialogueText);
                     }
+                } else if (exec.command === 'data') {
+                    // Create a data table from selection
+                    // Parses selected content as CSV or creates empty grid
+                    const selection = getNormalizedSelection();
+
+                    if (selection) {
+                        const selectionWidth = selection.endX - selection.startX + 1;
+                        const selectionHeight = selection.endY - selection.startY + 1;
+
+                        // Capture existing content from selection
+                        const lines: string[] = [];
+                        for (let y = selection.startY; y <= selection.endY; y++) {
+                            let lineText = '';
+                            for (let x = selection.startX; x <= selection.endX; x++) {
+                                const key = `${x},${y}`;
+                                const charData = worldData[key];
+                                if (charData && !isImageData(charData)) {
+                                    lineText += getCharacter(charData);
+                                } else {
+                                    lineText += ' ';
+                                }
+                            }
+                            lines.push(lineText.trimEnd());
+                        }
+
+                        // Parse as CSV (simple comma-separated, handles quoted fields)
+                        const parseCSVLine = (line: string): string[] => {
+                            const result: string[] = [];
+                            let current = '';
+                            let inQuotes = false;
+                            for (let i = 0; i < line.length; i++) {
+                                const char = line[i];
+                                if (char === '"') {
+                                    inQuotes = !inQuotes;
+                                } else if (char === ',' && !inQuotes) {
+                                    result.push(current.trim());
+                                    current = '';
+                                } else {
+                                    current += char;
+                                }
+                            }
+                            result.push(current.trim());
+                            return result;
+                        };
+
+                        // Parse all lines
+                        const parsedRows = lines.filter(l => l.length > 0).map(parseCSVLine);
+
+                        // Determine column count (max columns across all rows)
+                        const numCols = parsedRows.reduce((max, row) => Math.max(max, row.length), 0) || 3;
+                        const numRows = parsedRows.length || 3;
+
+                        // Calculate column widths (max content width + padding, min 4)
+                        const columnWidths: number[] = [];
+                        for (let col = 0; col < numCols; col++) {
+                            let maxWidth = 4;
+                            for (let row = 0; row < parsedRows.length; row++) {
+                                const cellValue = parsedRows[row]?.[col] || '';
+                                maxWidth = Math.max(maxWidth, cellValue.length + 2);
+                            }
+                            columnWidths.push(Math.min(maxWidth, 20)); // Cap at 20
+                        }
+
+                        // Build table data
+                        const columns = columnWidths.map(width => ({ width }));
+                        const rows = Array(numRows).fill(null).map(() => ({ height: 1 }));
+
+                        // Calculate table bounds based on column widths
+                        const totalWidth = columnWidths.reduce((sum, w) => sum + w, 0);
+                        const totalHeight = numRows * 2; // Each row is 2 world units (GRID_CELL_SPAN)
+
+                        // Build tableData.cells with "row,col" → full cell text
+                        const cells: Record<string, string> = {};
+                        for (let rowIdx = 0; rowIdx < parsedRows.length; rowIdx++) {
+                            const row = parsedRows[rowIdx];
+                            for (let colIdx = 0; colIdx < row.length; colIdx++) {
+                                const cellValue = row[colIdx] || '';
+                                if (cellValue) {
+                                    cells[`${rowIdx},${colIdx}`] = cellValue;
+                                }
+                            }
+                        }
+
+                        // Create table note
+                        const noteData = {
+                            startX: selection.startX,
+                            startY: selection.startY,
+                            endX: selection.startX + totalWidth - 1,
+                            endY: selection.startY + totalHeight - 1,
+                            timestamp: Date.now(),
+                            contentType: 'data',
+                            tableData: {
+                                columns,
+                                rows,
+                                cells, // "row,col" → full cell text
+                                frozenRows: parsedRows.length > 0 ? 1 : 0,
+                                frozenCols: 0,
+                                activeCell: { row: 0, col: 0 }, // Start with first cell active
+                                cellScrollOffsets: {} // "row,col" → horizontal scroll offset
+                            },
+                            scrollOffset: 0,
+                            scrollOffsetX: 0
+                        };
+                        const noteKey = `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+                        // Store table
+                        let newWorldData = { ...worldData };
+                        newWorldData[noteKey] = JSON.stringify(noteData);
+
+                        // Clear the selection area
+                        for (let y = selection.startY; y <= selection.endY; y++) {
+                            for (let x = selection.startX; x <= selection.endX; x++) {
+                                delete newWorldData[`${x},${y}`];
+                            }
+                        }
+
+                        setWorldData(newWorldData);
+                        setDialogueWithRevert(`Data table created: ${numCols} columns × ${numRows} rows`, setDialogueText);
+
+                        // Clear selection
+                        setSelectionStart(null);
+                        setSelectionEnd(null);
+                    } else {
+                        setDialogueWithRevert(`No region selected. Select text (CSV format) then use /data`, setDialogueText);
+                    }
+                } else if (exec.command === 'script') {
+                    // Convert existing note at cursor into a script note
+                    // Usage: /script [lang] where lang is js/javascript/py/python (optional)
+                    // Use commandStartPos (where / was typed) not current cursor position
+                    const cmdPos = exec.commandStartPos;
+                    const noteAtCursor = findNoteContainingPoint(cmdPos.x, cmdPos.y, worldData);
+
+                    if (!noteAtCursor) {
+                        setDialogueWithRevert(`No note at cursor. Move cursor into a note first.`, setDialogueText);
+                        return true;
+                    }
+
+                    // Check for explicit language argument
+                    const langArg = exec.args[0]?.toLowerCase();
+
+                    // If already a script, allow changing language with explicit arg
+                    if (noteAtCursor.data.contentType === 'script') {
+                        if (langArg === 'py' || langArg === 'python' || langArg === 'js' || langArg === 'javascript') {
+                            const newLang = (langArg === 'py' || langArg === 'python') ? 'python' : 'javascript';
+                            const currentLang = noteAtCursor.data.scriptData?.language || 'javascript';
+
+                            if (newLang === currentLang) {
+                                setDialogueWithRevert(`Already a ${currentLang} script.`, setDialogueText);
+                                return true;
+                            }
+
+                            // Update language
+                            const updatedNoteData = {
+                                ...noteAtCursor.data,
+                                scriptData: {
+                                    ...noteAtCursor.data.scriptData,
+                                    language: newLang,
+                                    status: 'idle'
+                                }
+                            };
+                            const newWorldData = { ...worldData };
+                            newWorldData[noteAtCursor.key] = JSON.stringify(updatedNoteData);
+                            setWorldData(newWorldData);
+                            setDialogueWithRevert(`Changed to ${newLang}. Use /run to execute.`, setDialogueText);
+                            return true;
+                        } else {
+                            const currentLang = noteAtCursor.data.scriptData?.language || 'javascript';
+                            setDialogueWithRevert(`Already a ${currentLang} script. Use /script py or /script js to change language.`, setDialogueText);
+                            return true;
+                        }
+                    }
+                    let language: 'javascript' | 'python' = 'javascript';
+                    let languageSource = 'default';
+
+                    if (langArg === 'py' || langArg === 'python') {
+                        language = 'python';
+                        languageSource = 'argument';
+                    } else if (langArg === 'js' || langArg === 'javascript') {
+                        language = 'javascript';
+                        languageSource = 'argument';
+                    } else {
+                        // Auto-detect language from content
+                        const noteDataContent = noteAtCursor.data.data || {};
+                        const dataKeys = Object.keys(noteDataContent);
+
+                        // Helper to get first few lines of content
+                        const getContentPreview = (): string => {
+                            if (dataKeys.length === 0) return '';
+
+                            const isLineBased = dataKeys.some(k => /^\d+$/.test(k));
+                            if (isLineBased) {
+                                const lineNumbers = dataKeys.filter(k => /^\d+$/.test(k)).map(Number).sort((a, b) => a - b);
+                                return lineNumbers.slice(0, 5).map(n => noteDataContent[n.toString()] || '').join('\n');
+                            } else {
+                                // Coordinate-based: reconstruct first few lines
+                                const lines: string[] = [];
+                                for (let y = 0; y < 5; y++) {
+                                    let line = '';
+                                    for (let x = 0; x < 100; x++) {
+                                        const char = noteDataContent[`${x},${y}`];
+                                        if (char) {
+                                            line += typeof char === 'string' ? char : (char.char || '');
+                                        }
+                                    }
+                                    if (line.trim()) lines.push(line.trimEnd());
+                                }
+                                return lines.join('\n');
+                            }
+                        };
+
+                        const preview = getContentPreview();
+
+                        // Python detection patterns
+                        const pythonPatterns = [
+                            /^#!.*py/m,           // Shebang
+                            /^import\s+\w/m,      // import statement
+                            /^from\s+\w+\s+import/m, // from x import
+                            /^def\s+\w+\s*\(/m,   // def function():
+                            /^class\s+\w+/m,      // class definition
+                            /print\s*\(/,         // print() function
+                            /:\s*$/m,             // Lines ending with :
+                        ];
+
+                        if (pythonPatterns.some(pattern => pattern.test(preview))) {
+                            language = 'python';
+                            languageSource = 'auto-detected';
+                        } else {
+                            languageSource = 'default';
+                        }
+                    }
+
+                    // Update note to script type (keep all existing data intact)
+                    const updatedNoteData = {
+                        ...noteAtCursor.data,
+                        contentType: 'script',
+                        scriptData: {
+                            language,
+                            status: 'idle'
+                        }
+                    };
+
+                    const newWorldData = { ...worldData };
+                    newWorldData[noteAtCursor.key] = JSON.stringify(updatedNoteData);
+                    setWorldData(newWorldData);
+
+                    setDialogueWithRevert(`Script (${language}, ${languageSource}). Use /run to execute.`, setDialogueText);
+                } else if (exec.command === 'run') {
+                    // Execute script note at cursor position
+                    // Use commandStartPos (where / was typed) not current cursor position
+                    const cmdPos = exec.commandStartPos;
+                    const noteAtCursor = findNoteContainingPoint(cmdPos.x, cmdPos.y, worldData);
+
+                    if (!noteAtCursor) {
+                        setDialogueWithRevert(`No note at cursor position. Move cursor into a script note.`, setDialogueText);
+                        return true;
+                    }
+
+                    if (noteAtCursor.data.contentType !== 'script') {
+                        setDialogueWithRevert(`Not a script note. Use /script to create one.`, setDialogueText);
+                        return true;
+                    }
+
+                    const scriptData = noteAtCursor.data.scriptData || { language: 'javascript', status: 'idle' };
+                    const { startX, startY, endX, endY } = noteAtCursor.data;
+
+                    // Get note content - handle multiple formats
+                    // It could be: object, string (JSON), or undefined
+                    let noteDataObj: Record<string, any> = {};
+                    const rawData = noteAtCursor.data.data;
+
+                    if (typeof rawData === 'string') {
+                        // Data stored as JSON string - parse it
+                        try {
+                            noteDataObj = JSON.parse(rawData);
+                        } catch {
+                            noteDataObj = {};
+                        }
+                    } else if (rawData && typeof rawData === 'object') {
+                        noteDataObj = rawData;
+                    }
+
+                    // Reconstruct script content - handle both formats:
+                    // 1. Line-based: {"0": "line1", "1": "line2"} (from /upload)
+                    // 2. Coordinate-based: {"x,y": "char"} (from manual typing)
+                    let scriptContent = '';
+                    const keys = Object.keys(noteDataObj);
+
+                    if (keys.length === 0) {
+                        setDialogueWithRevert(`Script is empty. (rawData type: ${typeof rawData})`, setDialogueText);
+                        return true;
+                    }
+
+                    // Check if first key looks like line-based (just a number) or coordinate-based (x,y)
+                    const isLineBased = keys.some(k => /^\d+$/.test(k));
+
+                    if (isLineBased) {
+                        // Line-based format from /upload
+                        const lineNumbers = keys.filter(k => /^\d+$/.test(k)).map(Number).sort((a, b) => a - b);
+                        scriptContent = lineNumbers.map(n => noteDataObj[n.toString()] || '').join('\n');
+                    } else {
+                        // Coordinate-based format from manual typing
+                        const noteWidth = endX - startX + 1;
+                        const lines: string[] = [];
+
+                        // Determine max Y coordinate in the data
+                        let maxY = 0;
+                        for (const key of keys) {
+                            const parts = key.split(',');
+                            if (parts.length === 2) {
+                                const y = parseInt(parts[1]);
+                                if (!isNaN(y) && y > maxY) maxY = y;
+                            }
+                        }
+
+                        // Build lines from coordinate data
+                        // Y coordinates are spaced by GRID_CELL_SPAN (2)
+                        const GRID_CELL_SPAN = 2;
+                        for (let y = 0; y <= maxY; y += GRID_CELL_SPAN) {
+                            let line = '';
+                            for (let x = 0; x < noteWidth; x++) {
+                                const coordKey = `${x},${y}`;
+                                const charData = noteDataObj[coordKey];
+                                if (charData) {
+                                    line += typeof charData === 'string' ? charData : (charData.char || ' ');
+                                } else {
+                                    line += ' ';
+                                }
+                            }
+                            lines.push(line.trimEnd());
+                        }
+                        scriptContent = lines.join('\n');
+                    }
+
+                    scriptContent = scriptContent.trim();
+
+                    if (!scriptContent) {
+                        setDialogueWithRevert(`Script is empty.`, setDialogueText);
+                        return true;
+                    }
+
+                    // Update status to running
+                    const updatedNoteData = {
+                        ...noteAtCursor.data,
+                        scriptData: { ...scriptData, status: 'running' }
+                    };
+                    const newWorldData = { ...worldData };
+                    newWorldData[noteAtCursor.key] = JSON.stringify(updatedNoteData);
+                    setWorldData(newWorldData);
+
+                    // Execute based on language
+                    if (scriptData.language === 'javascript') {
+                        try {
+                            // Collect output from print() calls
+                            const outputs: string[] = [];
+
+                            // Create helper functions available to scripts
+                            const print = (...args: any[]) => {
+                                const message = args.map(a =>
+                                    typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)
+                                ).join(' ');
+                                outputs.push(message);
+                            };
+
+                            const log = print; // Alias
+
+                            // Execute script with helpers in scope
+                            // Using Function constructor to provide clean scope with helpers
+                            const scriptFunction = new Function('print', 'log', 'console', `
+                                ${scriptContent}
+                            `);
+
+                            const result = scriptFunction(print, log, console);
+
+                            if (result !== undefined) {
+                                outputs.push(`→ ${typeof result === 'object' ? JSON.stringify(result) : result}`);
+                            }
+
+                            // Update status to success
+                            const successNoteData = {
+                                ...noteAtCursor.data,
+                                scriptData: { ...scriptData, status: 'success' }
+                            };
+                            const successWorldData = { ...worldData };
+                            successWorldData[noteAtCursor.key] = JSON.stringify(successNoteData);
+                            setWorldData(successWorldData);
+
+                            // Show output in dialogue if there is any
+                            if (outputs.length > 0) {
+                                const outputPreview = outputs.slice(0, 3).join(' | ');
+                                const more = outputs.length > 3 ? ` (+${outputs.length - 3} more)` : '';
+                                setDialogueWithRevert(`Output: ${outputPreview}${more}`, setDialogueText);
+                            } else {
+                                setDialogueWithRevert(`Script executed. Check console (F12) for output.`, setDialogueText);
+                            }
+                        } catch (error: any) {
+                            console.error('Script Error:', error);
+
+                            // Update status to error
+                            const errorNoteData = {
+                                ...noteAtCursor.data,
+                                scriptData: { ...scriptData, status: 'error' }
+                            };
+                            const errorWorldData = { ...worldData };
+                            errorWorldData[noteAtCursor.key] = JSON.stringify(errorNoteData);
+                            setWorldData(errorWorldData);
+                            setDialogueWithRevert(`Script error: ${error.message}`, setDialogueText);
+                        }
+                    } else if (scriptData.language === 'python') {
+                        // Python execution via Pyodide
+                        const executePython = async () => {
+                            try {
+                                // Show loading message if Pyodide isn't loaded yet
+                                if (!isPyodideLoaded()) {
+                                    setDialogueWithRevert(`Loading Python runtime (~10MB)...`, setDialogueText);
+                                }
+
+                                // Gather all named data tables from worldData
+                                const namedTables: Record<string, string[][]> = {};
+                                for (const key in worldData) {
+                                    if (key.startsWith('note_')) {
+                                        try {
+                                            const noteData = JSON.parse(worldData[key] as string);
+                                            if (noteData.contentType === 'data' && noteData.name && noteData.tableData) {
+                                                const { columns, rows, cells } = noteData.tableData;
+                                                // Convert tableData.cells to list-of-lists
+                                                const tableRows: string[][] = [];
+                                                for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+                                                    const rowData: string[] = [];
+                                                    for (let colIdx = 0; colIdx < columns.length; colIdx++) {
+                                                        const cellKey = `${rowIdx},${colIdx}`;
+                                                        rowData.push(cells?.[cellKey] || '');
+                                                    }
+                                                    tableRows.push(rowData);
+                                                }
+                                                namedTables[noteData.name] = tableRows;
+                                            }
+                                        } catch (e) { /* ignore parse errors */ }
+                                    }
+                                }
+
+                                const { result, stdout, stderr, error, tableOutput, tableUpdates } = await runPython(scriptContent, namedTables);
+
+                                if (error) {
+                                    console.error('Python Error:', error);
+
+                                    // Update status to error
+                                    const errorNoteData = {
+                                        ...noteAtCursor.data,
+                                        scriptData: { ...scriptData, status: 'error' }
+                                    };
+                                    setWorldData(prev => ({
+                                        ...prev,
+                                        [noteAtCursor.key]: JSON.stringify(errorNoteData)
+                                    }));
+                                    setDialogueWithRevert(`Python error: ${error}`, setDialogueText);
+                                    return;
+                                }
+
+                                // If tableOutput exists, create a data note to the right of the script
+                                let newWorldDataUpdates: Record<string, string> = {};
+                                let dataTableCreated = false;
+
+                                if (tableOutput) {
+                                    // Parse CSV to create table data
+                                    const parseCSVLine = (line: string): string[] => {
+                                        const result: string[] = [];
+                                        let current = '';
+                                        let inQuotes = false;
+                                        for (let i = 0; i < line.length; i++) {
+                                            const char = line[i];
+                                            if (char === '"') {
+                                                inQuotes = !inQuotes;
+                                            } else if (char === ',' && !inQuotes) {
+                                                result.push(current.trim());
+                                                current = '';
+                                            } else {
+                                                current += char;
+                                            }
+                                        }
+                                        result.push(current.trim());
+                                        return result;
+                                    };
+
+                                    const lines = tableOutput.split('\n').filter(l => l.trim().length > 0);
+                                    const parsedRows = lines.map(parseCSVLine);
+
+                                    const numCols = parsedRows.reduce((max, row) => Math.max(max, row.length), 0) || 3;
+                                    const numRows = parsedRows.length || 3;
+
+                                    // Calculate column widths
+                                    const columnWidths: number[] = [];
+                                    for (let col = 0; col < numCols; col++) {
+                                        let maxWidth = 4;
+                                        for (let row = 0; row < parsedRows.length; row++) {
+                                            const cellValue = parsedRows[row]?.[col] || '';
+                                            maxWidth = Math.max(maxWidth, cellValue.length + 2);
+                                        }
+                                        columnWidths.push(Math.min(maxWidth, 16)); // Cap at 16
+                                    }
+
+                                    // Build table data
+                                    const columns = columnWidths.map(width => ({ width }));
+                                    const rows = Array(numRows).fill(null).map(() => ({ height: 1 }));
+                                    const totalWidth = columnWidths.reduce((sum, w) => sum + w, 0);
+                                    const totalHeight = numRows * 2; // GRID_CELL_SPAN = 2
+
+                                    // Build cells
+                                    const cells: Record<string, string> = {};
+                                    for (let rowIdx = 0; rowIdx < parsedRows.length; rowIdx++) {
+                                        const row = parsedRows[rowIdx];
+                                        for (let colIdx = 0; colIdx < row.length; colIdx++) {
+                                            const cellValue = row[colIdx] || '';
+                                            if (cellValue) {
+                                                cells[`${rowIdx},${colIdx}`] = cellValue;
+                                            }
+                                        }
+                                    }
+
+                                    // Position: 3 cells to the right of script note's right edge
+                                    const scriptRight = noteAtCursor.data.endX;
+                                    const outputStartX = scriptRight + 4;
+                                    const outputStartY = noteAtCursor.data.startY;
+
+                                    const dataNote = {
+                                        startX: outputStartX,
+                                        startY: outputStartY,
+                                        endX: outputStartX + totalWidth - 1,
+                                        endY: outputStartY + totalHeight - 1,
+                                        timestamp: Date.now(),
+                                        contentType: 'data',
+                                        tableData: {
+                                            columns,
+                                            rows,
+                                            cells,
+                                            frozenRows: parsedRows.length > 0 ? 1 : 0,
+                                            frozenCols: 0,
+                                            activeCell: { row: 0, col: 0 },
+                                            cellScrollOffsets: {}
+                                        },
+                                        scrollOffset: 0,
+                                        scrollOffsetX: 0
+                                    };
+
+                                    const dataKey = `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                                    newWorldDataUpdates[dataKey] = JSON.stringify(dataNote);
+                                    dataTableCreated = true;
+                                }
+
+                                // Handle in-place table updates from write_table()
+                                let tablesUpdated = 0;
+                                if (tableUpdates && Object.keys(tableUpdates).length > 0) {
+                                    // Find and update each named table
+                                    for (const [tableName, tableRows] of Object.entries(tableUpdates)) {
+                                        // Find the note with this name
+                                        for (const key in worldData) {
+                                            if (key.startsWith('note_')) {
+                                                try {
+                                                    const noteData = JSON.parse(worldData[key] as string);
+                                                    if (noteData.contentType === 'data' && noteData.name === tableName && noteData.tableData) {
+                                                        // Update the table data
+                                                        const numCols = tableRows.reduce((max: number, row: string[]) => Math.max(max, row.length), 0);
+                                                        const numRows = tableRows.length;
+
+                                                        // Rebuild cells
+                                                        const cells: Record<string, string> = {};
+                                                        for (let rowIdx = 0; rowIdx < tableRows.length; rowIdx++) {
+                                                            const row = tableRows[rowIdx];
+                                                            for (let colIdx = 0; colIdx < row.length; colIdx++) {
+                                                                const cellValue = row[colIdx] || '';
+                                                                if (cellValue) {
+                                                                    cells[`${rowIdx},${colIdx}`] = cellValue;
+                                                                }
+                                                            }
+                                                        }
+
+                                                        // Calculate column widths
+                                                        const columnWidths: number[] = [];
+                                                        for (let col = 0; col < numCols; col++) {
+                                                            let maxWidth = 4;
+                                                            for (let row = 0; row < tableRows.length; row++) {
+                                                                const cellValue = tableRows[row]?.[col] || '';
+                                                                maxWidth = Math.max(maxWidth, cellValue.length + 2);
+                                                            }
+                                                            columnWidths.push(Math.min(maxWidth, 16));
+                                                        }
+
+                                                        const columns = columnWidths.map(width => ({ width }));
+                                                        const rows = Array(numRows).fill(null).map(() => ({ height: 1 }));
+                                                        const totalWidth = columnWidths.reduce((sum, w) => sum + w, 0);
+                                                        const totalHeight = numRows * 2;
+
+                                                        // Update note data
+                                                        const updatedNoteData = {
+                                                            ...noteData,
+                                                            endX: noteData.startX + totalWidth - 1,
+                                                            endY: noteData.startY + totalHeight - 1,
+                                                            tableData: {
+                                                                ...noteData.tableData,
+                                                                columns,
+                                                                rows,
+                                                                cells,
+                                                            }
+                                                        };
+
+                                                        newWorldDataUpdates[key] = JSON.stringify(updatedNoteData);
+                                                        tablesUpdated++;
+                                                        break;
+                                                    }
+                                                } catch (e) { /* ignore parse errors */ }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Update status to success and add any new notes
+                                const successNoteData = {
+                                    ...noteAtCursor.data,
+                                    scriptData: { ...scriptData, status: 'success' }
+                                };
+                                setWorldData(prev => ({
+                                    ...prev,
+                                    [noteAtCursor.key]: JSON.stringify(successNoteData),
+                                    ...newWorldDataUpdates
+                                }));
+
+                                // Collect outputs
+                                const outputs: string[] = [...stdout];
+                                if (stderr.length > 0) {
+                                    outputs.push(...stderr.map(s => `⚠ ${s}`));
+                                }
+                                if (result !== undefined && result !== null) {
+                                    outputs.push(`→ ${typeof result === 'object' ? JSON.stringify(result) : result}`);
+                                }
+
+                                // Show output in dialogue
+                                const statusParts: string[] = [];
+                                if (dataTableCreated) statusParts.push('data table created');
+                                if (tablesUpdated > 0) statusParts.push(`${tablesUpdated} table${tablesUpdated > 1 ? 's' : ''} updated`);
+
+                                if (statusParts.length > 0) {
+                                    setDialogueWithRevert(`Script executed → ${statusParts.join(', ')}`, setDialogueText);
+                                } else if (outputs.length > 0) {
+                                    const outputPreview = outputs.slice(0, 3).join(' | ');
+                                    const more = outputs.length > 3 ? ` (+${outputs.length - 3} more)` : '';
+                                    setDialogueWithRevert(`Output: ${outputPreview}${more}`, setDialogueText);
+                                } else {
+                                    setDialogueWithRevert(`Python script executed. Check console (F12) for output.`, setDialogueText);
+                                }
+                            } catch (err: any) {
+                                console.error('Pyodide Error:', err);
+
+                                // Update status to error
+                                const errorNoteData = {
+                                    ...noteAtCursor.data,
+                                    scriptData: { ...scriptData, status: 'error' }
+                                };
+                                setWorldData(prev => ({
+                                    ...prev,
+                                    [noteAtCursor.key]: JSON.stringify(errorNoteData)
+                                }));
+                                setDialogueWithRevert(`Pyodide error: ${err.message}`, setDialogueText);
+                            }
+                        };
+
+                        // Execute async
+                        executePython();
+                    }
+                } else if (exec.command === 'duplicate') {
+                    // Duplicate the note at cursor position
+                    // Creates an identical copy 3 cells to the right
+                    const cmdPos = exec.commandStartPos;
+                    const noteAtCursor = findNoteContainingPoint(cmdPos.x, cmdPos.y, worldData);
+
+                    if (!noteAtCursor) {
+                        setDialogueWithRevert(`No note at cursor. Move cursor into a note to duplicate.`, setDialogueText);
+                        return true;
+                    }
+
+                    const originalData = noteAtCursor.data;
+                    const noteWidth = originalData.endX - originalData.startX;
+                    const noteHeight = originalData.endY - originalData.startY;
+
+                    // Offset: 3 cells to the right of the original note's right edge
+                    const offsetX = noteWidth + 4; // +1 for the width itself, +3 for gap
+
+                    // Create new note data with offset positions
+                    const newNoteData = {
+                        ...originalData,
+                        startX: originalData.startX + offsetX,
+                        endX: originalData.endX + offsetX,
+                        timestamp: Date.now(),
+                    };
+
+                    // Generate new key
+                    const newKey = `note_${newNoteData.startX},${newNoteData.startY}_${newNoteData.timestamp}`;
+
+                    // Add to world data
+                    const newWorldData = { ...worldData };
+                    newWorldData[newKey] = JSON.stringify(newNoteData);
+                    setWorldData(newWorldData);
+
+                    // Move cursor to the new note
+                    setCursorPos({ x: newNoteData.startX, y: newNoteData.startY });
+
+                    const noteType = originalData.contentType || 'text';
+                    setDialogueWithRevert(`Duplicated ${noteType} note`, setDialogueText);
+                } else if (exec.command === 'name') {
+                    // Name a note for script references
+                    // Usage: /name mydata
+                    const cmdPos = exec.commandStartPos;
+                    const noteAtCursor = findNoteContainingPoint(cmdPos.x, cmdPos.y, worldData);
+
+                    if (!noteAtCursor) {
+                        setDialogueWithRevert(`No note at cursor. Move cursor into a note to name it.`, setDialogueText);
+                        return true;
+                    }
+
+                    const newName = exec.args[0];
+                    if (!newName) {
+                        // Show current name if no arg provided
+                        const currentName = noteAtCursor.data.name;
+                        if (currentName) {
+                            setDialogueWithRevert(`This note is named: "${currentName}"`, setDialogueText);
+                        } else {
+                            setDialogueWithRevert(`Usage: /name <identifier>. Names can be letters, numbers, underscores.`, setDialogueText);
+                        }
+                        return true;
+                    }
+
+                    // Validate name: only alphanumeric and underscores
+                    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(newName)) {
+                        setDialogueWithRevert(`Invalid name. Use letters, numbers, underscores. Must start with letter or underscore.`, setDialogueText);
+                        return true;
+                    }
+
+                    // Check for duplicate names
+                    for (const key in worldData) {
+                        if (key.startsWith('note_') && key !== noteAtCursor.key) {
+                            try {
+                                const otherNote = JSON.parse(worldData[key] as string);
+                                if (otherNote.name === newName) {
+                                    setDialogueWithRevert(`Name "${newName}" is already used by another note.`, setDialogueText);
+                                    return true;
+                                }
+                            } catch (e) { /* ignore parse errors */ }
+                        }
+                    }
+
+                    // Update note with name
+                    const updatedNoteData = {
+                        ...noteAtCursor.data,
+                        name: newName
+                    };
+                    const newWorldData = { ...worldData };
+                    newWorldData[noteAtCursor.key] = JSON.stringify(updatedNoteData);
+                    setWorldData(newWorldData);
+
+                    const noteType = noteAtCursor.data.contentType || 'text';
+                    setDialogueWithRevert(`Named ${noteType} note: "${newName}"`, setDialogueText);
+                } else if (exec.command === 'grow') {
+                    // Run cellular automata - generative, animates step by step
+                    // Parse args: /grow [steps] [rule] [color]
+                    let steps = 5;
+                    let rule: CARule = 'life';
+                    let color = '#22c55e'; // Default green
+
+                    for (const arg of exec.args) {
+                        const numArg = parseInt(arg);
+                        if (!isNaN(numArg) && numArg > 0 && numArg <= 100) {
+                            steps = numArg;
+                        } else if (['life', 'grow', 'maze', 'seeds', 'coral'].includes(arg)) {
+                            rule = arg as CARule;
+                        } else if (arg.startsWith('#') || COLOR_MAP[arg.toLowerCase()]) {
+                            color = COLOR_MAP[arg.toLowerCase()] || arg;
+                        }
+                    }
+
+                    // Get starting cells: use existing paint at cursor, or cursor position as seed
+                    const blobAtCursor = findBlobAt(worldData, cursorPos.x, cursorPos.y);
+                    let currentCells: Array<{x: number, y: number}>;
+                    let existingBlobId: string | null = null;
+
+                    if (blobAtCursor) {
+                        // Use existing paint as seed
+                        currentCells = blobAtCursor.cells.map((cellKey: string) => {
+                            const [x, y] = cellKey.split(',').map(Number);
+                            return { x, y };
+                        });
+                        existingBlobId = blobAtCursor.id;
+                        color = blobAtCursor.color; // Inherit color
+                    } else {
+                        // Use cursor position as seed (small cross pattern for better CA dynamics)
+                        const cx = cursorPos.x;
+                        const cy = cursorPos.y;
+                        currentCells = [
+                            { x: cx, y: cy },
+                            { x: cx - 1, y: cy },
+                            { x: cx + 1, y: cy },
+                            { x: cx, y: cy - 1 },
+                            { x: cx, y: cy + 1 },
+                        ];
+                    }
+
+                    // Animate CA step by step
+                    let currentStep = 0;
+                    const blobId = `blob_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+                    const runStep = () => {
+                        if (currentStep >= steps || currentCells.length === 0 || currentCells.length > 10000) {
+                            setDialogueWithRevert(`CA (${rule}) complete: ${currentCells.length} cells after ${currentStep} steps`, setDialogueText);
+                            return;
+                        }
+
+                        // Run one CA step
+                        currentCells = runCA(currentCells, 1, rule);
+                        currentStep++;
+
+                        if (currentCells.length === 0) {
+                            // CA died - remove blob
+                            setWorldData(prev => {
+                                const updated = { ...prev };
+                                delete updated[`paintblob_${blobId}`];
+                                if (existingBlobId) delete updated[`paintblob_${existingBlobId}`];
+                                return updated;
+                            });
+                            setDialogueWithRevert(`CA died out after ${currentStep} steps`, setDialogueText);
+                            return;
+                        }
+
+                        // Create/update blob with current state
+                        const blob = createPaintBlob(color, currentCells);
+
+                        setWorldData(prev => {
+                            const updated = { ...prev };
+                            // Remove old blob if transforming existing paint
+                            if (existingBlobId && currentStep === 1) {
+                                delete updated[`paintblob_${existingBlobId}`];
+                            }
+                            updated[`paintblob_${blobId}`] = JSON.stringify({ ...blob, id: blobId });
+                            return updated;
+                        });
+
+                        setDialogueText(`CA (${rule}) step ${currentStep}/${steps}: ${currentCells.length} cells`);
+
+                        // Schedule next step
+                        setTimeout(runStep, 150); // 150ms between steps
+                    };
+
+                    // Start animation
+                    runStep();
                 } else if (exec.command === 'upload') {
                     // Determine target note and bounds for upload
                     // Priority: 1) cursor inside note region, 2) exact selection match, 3) use selection
@@ -6724,12 +7629,236 @@ export function useWorldEngine({
                     // Create and trigger file input
                     const fileInput = document.createElement('input');
                     fileInput.type = 'file';
-                    fileInput.accept = 'image/*';
+                    fileInput.accept = 'image/*,.js,.ts,.py,.json,.txt,.md,.csv';
                     fileInput.style.display = 'none';
 
                     fileInput.onchange = async (e) => {
                         const file = (e.target as HTMLInputElement).files?.[0];
                         if (!file) return;
+
+                        // Check if file is a script (.js, .ts, .py)
+                        const fileName = file.name.toLowerCase();
+                        const isScript = fileName.endsWith('.js') || fileName.endsWith('.ts') || fileName.endsWith('.py');
+                        const isCsv = fileName.endsWith('.csv');
+                        const isTextFile = isScript || fileName.endsWith('.json') || fileName.endsWith('.txt') || fileName.endsWith('.md') || isCsv;
+
+                        // Handle CSV files specially - convert to /data note
+                        if (isCsv && uploadBounds) {
+                            try {
+                                const text = await file.text();
+
+                                // Parse CSV (handle quoted fields with commas)
+                                const parseCSVLine = (line: string): string[] => {
+                                    const result: string[] = [];
+                                    let current = '';
+                                    let inQuotes = false;
+
+                                    for (let i = 0; i < line.length; i++) {
+                                        const char = line[i];
+                                        if (char === '"') {
+                                            if (inQuotes && line[i + 1] === '"') {
+                                                // Escaped quote
+                                                current += '"';
+                                                i++;
+                                            } else {
+                                                inQuotes = !inQuotes;
+                                            }
+                                        } else if (char === ',' && !inQuotes) {
+                                            result.push(current.trim());
+                                            current = '';
+                                        } else {
+                                            current += char;
+                                        }
+                                    }
+                                    result.push(current.trim());
+                                    return result;
+                                };
+
+                                const lines = text.split('\n').filter(line => line.trim().length > 0);
+                                const parsedRows = lines.map(parseCSVLine);
+
+                                if (parsedRows.length === 0) {
+                                    setDialogueWithRevert('CSV file is empty', setDialogueText);
+                                    return;
+                                }
+
+                                // Determine number of columns (max across all rows)
+                                const numCols = Math.max(...parsedRows.map(row => row.length));
+                                const numRows = parsedRows.length;
+
+                                // Calculate column widths based on content (min 4, max 20)
+                                const columnWidths: number[] = [];
+                                for (let col = 0; col < numCols; col++) {
+                                    let maxLen = 4; // minimum width
+                                    for (let row = 0; row < parsedRows.length; row++) {
+                                        const cellLen = (parsedRows[row][col] || '').length;
+                                        maxLen = Math.max(maxLen, cellLen);
+                                    }
+                                    columnWidths.push(Math.min(maxLen + 1, 20)); // +1 padding, max 20
+                                }
+
+                                // Build tableData structure
+                                const columns = columnWidths.map(width => ({ width }));
+                                const rows = Array(numRows).fill(null).map(() => ({ height: 1 }));
+
+                                // Build cells Record<"row,col", string>
+                                const cells: Record<string, string> = {};
+                                for (let rowIdx = 0; rowIdx < parsedRows.length; rowIdx++) {
+                                    const row = parsedRows[rowIdx];
+                                    for (let colIdx = 0; colIdx < row.length; colIdx++) {
+                                        const cellValue = row[colIdx] || '';
+                                        if (cellValue) {
+                                            cells[`${rowIdx},${colIdx}`] = cellValue;
+                                        }
+                                    }
+                                }
+
+                                // Calculate note dimensions
+                                const totalWidth = columnWidths.reduce((sum, w) => sum + w, 0);
+                                const totalHeight = numRows * 2; // GRID_CELL_SPAN = 2
+
+                                const tableData = {
+                                    columns,
+                                    rows,
+                                    cells,
+                                    frozenRows: numRows > 0 ? 1 : 0,
+                                    frozenCols: 0,
+                                    activeCell: { row: 0, col: 0 },
+                                    cellScrollOffsets: {}
+                                };
+
+                                if (targetNote) {
+                                    // Update existing note to data type
+                                    // Keep original note bounds - data outside will be viewport culled
+                                    const updatedNoteData = {
+                                        ...targetNote.data,
+                                        contentType: 'data',
+                                        tableData,
+                                        // Keep original bounds, don't resize to fit all data
+                                        scrollOffset: 0
+                                    };
+                                    // Remove old data field if present (text note character storage)
+                                    delete updatedNoteData.data;
+
+                                    setWorldData(prev => ({
+                                        ...prev,
+                                        [targetNote.key]: JSON.stringify(updatedNoteData)
+                                    }));
+                                } else {
+                                    // Create new note from selection
+                                    // Keep selection bounds - data outside will be viewport culled
+                                    const noteData = {
+                                        startX: uploadBounds.startX,
+                                        startY: uploadBounds.startY,
+                                        endX: uploadBounds.endX,
+                                        endY: uploadBounds.endY,
+                                        timestamp: Date.now(),
+                                        contentType: 'data',
+                                        tableData,
+                                        scrollOffset: 0
+                                    };
+                                    const noteKey = `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+                                    setWorldData(prev => {
+                                        const updated = { ...prev };
+                                        // Clear any existing content in the region
+                                        for (let y = uploadBounds.startY; y <= uploadBounds.endY; y++) {
+                                            for (let x = uploadBounds.startX; x <= uploadBounds.endX; x++) {
+                                                delete updated[`${x},${y}`];
+                                            }
+                                        }
+                                        updated[noteKey] = JSON.stringify(noteData);
+                                        return updated;
+                                    });
+                                }
+
+                                setSelectionStart(null);
+                                setSelectionEnd(null);
+                                setDialogueWithRevert(
+                                    `CSV loaded: ${file.name} (${numRows} rows × ${numCols} columns)`,
+                                    setDialogueText
+                                );
+                                return;
+                            } catch (err) {
+                                console.error('Error parsing CSV:', err);
+                                setDialogueWithRevert(`Error parsing CSV: ${file.name}`, setDialogueText);
+                                return;
+                            }
+                        }
+
+                        if (isTextFile && uploadBounds) {
+                            // Handle script/text file upload
+                            try {
+                                const text = await file.text();
+                                const lines = text.split('\n');
+
+                                // Detect language for scripts
+                                const language = fileName.endsWith('.py') ? 'python' : 'javascript';
+
+                                // Build note data storage (line by line)
+                                const data: Record<string, string> = {};
+                                lines.forEach((line, idx) => {
+                                    if (line.length > 0 || idx < lines.length - 1) {
+                                        data[idx.toString()] = line;
+                                    }
+                                });
+
+                                if (targetNote) {
+                                    // Update existing note to script type
+                                    const updatedNoteData = {
+                                        ...targetNote.data,
+                                        contentType: isScript ? 'script' : 'text',
+                                        data,
+                                        scrollOffset: 0,
+                                        ...(isScript ? { scriptData: { language, status: 'idle' } } : {})
+                                    };
+
+                                    setWorldData(prev => ({
+                                        ...prev,
+                                        [targetNote.key]: JSON.stringify(updatedNoteData)
+                                    }));
+                                } else {
+                                    // Create new note from selection
+                                    const noteData = {
+                                        startX: uploadBounds.startX,
+                                        startY: uploadBounds.startY,
+                                        endX: uploadBounds.endX,
+                                        endY: uploadBounds.endY,
+                                        timestamp: Date.now(),
+                                        contentType: isScript ? 'script' : 'text',
+                                        data,
+                                        scrollOffset: 0,
+                                        ...(isScript ? { scriptData: { language, status: 'idle' } } : {})
+                                    };
+                                    const noteKey = `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+                                    setWorldData(prev => {
+                                        const updated = { ...prev };
+                                        for (let y = uploadBounds.startY; y <= uploadBounds.endY; y++) {
+                                            for (let x = uploadBounds.startX; x <= uploadBounds.endX; x++) {
+                                                delete updated[`${x},${y}`];
+                                            }
+                                        }
+                                        updated[noteKey] = JSON.stringify(noteData);
+                                        return updated;
+                                    });
+                                }
+
+                                setSelectionStart(null);
+                                setSelectionEnd(null);
+                                setDialogueWithRevert(
+                                    isScript
+                                        ? `Script loaded: ${file.name} (${language}, ${lines.length} lines). Use /run to execute.`
+                                        : `File loaded: ${file.name} (${lines.length} lines)`,
+                                    setDialogueText
+                                );
+                                return;
+                            } catch (err) {
+                                console.error('Error reading text file:', err);
+                                setDialogueWithRevert(`Error reading file: ${file.name}`, setDialogueText);
+                                return;
+                            }
+                        }
 
                         // Show pending visual effect on the target region
                         if (uploadBounds) {
@@ -7584,6 +8713,39 @@ export function useWorldEngine({
         } else if (isMod && key.toLowerCase() === 'v') {
             pasteText(); // Call async paste, state updates happen inside it
             // Don't set worldDataChanged = true here, paste handles its own state updates
+        } else if (isMod && key.toLowerCase() === 'd') {
+            // Duplicate note at cursor (Cmd+D / Ctrl+D)
+            const noteAtCursor = findNoteContainingPoint(cursorPos.x, cursorPos.y, worldData);
+
+            if (noteAtCursor) {
+                const originalData = noteAtCursor.data;
+                const noteWidth = originalData.endX - originalData.startX;
+
+                // Offset: 3 cells to the right of the original note's right edge
+                const offsetX = noteWidth + 4;
+
+                // Create new note data with offset positions
+                const newNoteData = {
+                    ...originalData,
+                    startX: originalData.startX + offsetX,
+                    endX: originalData.endX + offsetX,
+                    timestamp: Date.now(),
+                };
+
+                // Generate new key
+                const newKey = `note_${newNoteData.startX},${newNoteData.startY}_${newNoteData.timestamp}`;
+
+                // Add to world data
+                nextWorldData[newKey] = JSON.stringify(newNoteData);
+                worldDataChanged = true;
+
+                // Move cursor to the new note
+                nextCursorPos = { x: newNoteData.startX, y: newNoteData.startY };
+                moved = true;
+
+                const noteType = originalData.contentType || 'text';
+                setDialogueWithRevert(`Duplicated ${noteType} note`, setDialogueText);
+            }
         }
         // === Pending Command Handling ===
         else if (key === 'Enter' && pendingCommand && pendingCommand.isWaitingForSelection) {
@@ -9027,9 +10189,48 @@ export function useWorldEngine({
             }
             moved = true;
         } else if (key === 'ArrowLeft') {
-            // Check if cursor is inside a scrollable note - if so, scroll horizontally instead of moving cursor
+            // Check if cursor is inside a data note - move to previous cell
             const noteAtCursor = findTextNoteContainingPoint(cursorPos.x, cursorPos.y, worldData);
-            if (noteAtCursor && noteAtCursor.data.data && !isMod && !altKey) {
+            if (noteAtCursor && noteAtCursor.data.contentType === 'data' && noteAtCursor.data.tableData && !isMod && !altKey) {
+                const noteData = noteAtCursor.data;
+                const { columns, rows, activeCell } = noteData.tableData;
+
+                if (activeCell) {
+                    let newCol = activeCell.col - 1;
+                    let newRow = activeCell.row;
+
+                    // Wrap to previous row if at first column
+                    if (newCol < 0) {
+                        newCol = columns.length - 1;
+                        newRow = activeCell.row - 1;
+                    }
+
+                    if (newRow >= 0) {
+                        noteData.tableData.activeCell = { row: newRow, col: newCol };
+                        // Reset scroll offset for new cell
+                        const newCellKey = `${newRow},${newCol}`;
+                        if (!noteData.tableData.cellScrollOffsets) noteData.tableData.cellScrollOffsets = {};
+                        noteData.tableData.cellScrollOffsets[newCellKey] = 0;
+
+                        // Move cursor to new cell position
+                        let cellStartX = noteData.startX;
+                        for (let c = 0; c < newCol; c++) {
+                            cellStartX += columns[c].width;
+                        }
+                        let cellStartY = noteData.startY;
+                        for (let r = 0; r < newRow; r++) {
+                            cellStartY += rows[r].height * GRID_CELL_SPAN;
+                        }
+
+                        setWorldData(prev => ({
+                            ...prev,
+                            [noteAtCursor.key]: JSON.stringify(noteData)
+                        }));
+                        setCursorPos({ x: cellStartX, y: cellStartY });
+                        return true;
+                    }
+                }
+            } else if (noteAtCursor && noteAtCursor.data.data && !isMod && !altKey) {
                 const noteData = noteAtCursor.data;
                 const currentScrollOffsetX = noteData.scrollOffsetX || 0;
 
@@ -9125,9 +10326,48 @@ export function useWorldEngine({
             setLastEnterX(null); // Reset Enter X tracking on horizontal movement
             moved = true;
         } else if (key === 'ArrowRight') {
-            // Check if cursor is inside a scrollable note - if so, scroll horizontally instead of moving cursor
+            // Check if cursor is inside a data note - move to next cell
             const noteAtCursor = findTextNoteContainingPoint(cursorPos.x, cursorPos.y, worldData);
-            if (noteAtCursor && noteAtCursor.data.data && !isMod && !altKey) {
+            if (noteAtCursor && noteAtCursor.data.contentType === 'data' && noteAtCursor.data.tableData && !isMod && !altKey) {
+                const noteData = noteAtCursor.data;
+                const { columns, rows, activeCell } = noteData.tableData;
+
+                if (activeCell) {
+                    let newCol = activeCell.col + 1;
+                    let newRow = activeCell.row;
+
+                    // Wrap to next row if past last column
+                    if (newCol >= columns.length) {
+                        newCol = 0;
+                        newRow = activeCell.row + 1;
+                    }
+
+                    if (newRow < rows.length) {
+                        noteData.tableData.activeCell = { row: newRow, col: newCol };
+                        // Reset scroll offset for new cell
+                        const newCellKey = `${newRow},${newCol}`;
+                        if (!noteData.tableData.cellScrollOffsets) noteData.tableData.cellScrollOffsets = {};
+                        noteData.tableData.cellScrollOffsets[newCellKey] = 0;
+
+                        // Move cursor to new cell position
+                        let cellStartX = noteData.startX;
+                        for (let c = 0; c < newCol; c++) {
+                            cellStartX += columns[c].width;
+                        }
+                        let cellStartY = noteData.startY;
+                        for (let r = 0; r < newRow; r++) {
+                            cellStartY += rows[r].height * GRID_CELL_SPAN;
+                        }
+
+                        setWorldData(prev => ({
+                            ...prev,
+                            [noteAtCursor.key]: JSON.stringify(noteData)
+                        }));
+                        setCursorPos({ x: cellStartX, y: cellStartY });
+                        return true;
+                    }
+                }
+            } else if (noteAtCursor && noteAtCursor.data.data && !isMod && !altKey) {
                 const noteData = noteAtCursor.data;
                 const currentScrollOffsetX = noteData.scrollOffsetX || 0;
 
@@ -9647,17 +10887,74 @@ export function useWorldEngine({
                             // Check if this is a text note with embedded data
                             const containingNote = findTextNoteContainingPoint(cursorPos.x - 1, cursorPos.y, worldData);
 
-                            if (containingNote && containingNote.data.data) {
-                                // Delete from note's data field using relative coordinates
-                                nextWorldData = { ...worldData };
+                            if (containingNote) {
                                 const noteData = containingNote.data;
-                                // Convert absolute world coordinates to relative content coordinates
-                                const scrollOffset = noteData.scrollOffset || 0;
-                                const relativeDeleteKey = `${(cursorPos.x - 1) - noteData.startX},${(cursorPos.y - noteData.startY) + scrollOffset}`;
-                                if (noteData.data && noteData.data[relativeDeleteKey]) {
-                                    delete noteData.data[relativeDeleteKey];
-                                    nextWorldData[containingNote.key] = JSON.stringify(noteData);
-                                    worldDataChanged = true;
+                                nextWorldData = { ...worldData };
+
+                                // Check if this is a data note (table) - use cell-based storage
+                                if (noteData.contentType === 'data' && noteData.tableData) {
+                                    // Use active cell for backspace
+                                    const activeCell = noteData.tableData.activeCell;
+                                    if (activeCell) {
+                                        const { row, col } = activeCell;
+                                        const cellKey = `${row},${col}`;
+                                        const { columns } = noteData.tableData;
+                                        const cellWidth = columns[col]?.width || 4;
+
+                                        const currentText = noteData.tableData.cells?.[cellKey] || '';
+
+                                        if (currentText.length > 0) {
+                                            // Delete last character from cell text
+                                            const newText = currentText.slice(0, -1);
+                                            if (!noteData.tableData.cells) noteData.tableData.cells = {};
+                                            noteData.tableData.cells[cellKey] = newText;
+
+                                            // Adjust scroll - scroll back if we can show all text now
+                                            if (!noteData.tableData.cellScrollOffsets) noteData.tableData.cellScrollOffsets = {};
+                                            const wasScrolling = noteData.tableData.cellScrollOffsets[cellKey] > 0;
+                                            if (newText.length <= cellWidth) {
+                                                noteData.tableData.cellScrollOffsets[cellKey] = 0;
+                                            } else if (noteData.tableData.cellScrollOffsets[cellKey] > 0) {
+                                                noteData.tableData.cellScrollOffsets[cellKey] = Math.max(0, newText.length - cellWidth);
+                                            }
+                                            const stillScrolling = noteData.tableData.cellScrollOffsets[cellKey] > 0;
+
+                                            // Handle cursor position for data cells
+                                            // Calculate cell start X position
+                                            let cellStartX = noteData.startX;
+                                            for (let c = 0; c < col; c++) {
+                                                cellStartX += columns[c]?.width || 4;
+                                            }
+
+                                            if (stillScrolling) {
+                                                // Still scrolling: cursor stays at right edge of cell
+                                                nextCursorPos.x = cellStartX + cellWidth - 1;
+                                            } else {
+                                                // No longer scrolling: cursor moves with visible text
+                                                nextCursorPos.x = cellStartX + newText.length;
+                                            }
+
+                                            // Update state directly and return (skip default cursor movement)
+                                            setWorldData(prev => ({
+                                                ...prev,
+                                                [containingNote.key]: JSON.stringify(noteData)
+                                            }));
+                                            setCursorPos(nextCursorPos);
+                                            cursorPosRef.current = nextCursorPos;
+                                            return true;
+                                        }
+                                    }
+                                    // No text to delete, but still skip default cursor movement for data cells
+                                    return true;
+                                } else if (noteData.data) {
+                                    // Regular text note - delete from note's data field using relative coordinates
+                                    const scrollOffset = noteData.scrollOffset || 0;
+                                    const relativeDeleteKey = `${(cursorPos.x - 1) - noteData.startX},${(cursorPos.y - noteData.startY) + scrollOffset}`;
+                                    if (noteData.data[relativeDeleteKey]) {
+                                        delete noteData.data[relativeDeleteKey];
+                                        nextWorldData[containingNote.key] = JSON.stringify(noteData);
+                                        worldDataChanged = true;
+                                    }
                                 }
                             } else if (worldData[deleteKey]) {
                                 // Delete from global worldData (legacy/backward compat)
@@ -9745,10 +11042,56 @@ export function useWorldEngine({
             }
             moved = true; // Cursor position changed or selection was deleted
         } else if (key === 'Tab') {
-            // Tab key is ONLY for accepting autocomplete suggestions
             // Always prevent default browser behavior (focusing address bar)
             preventDefault = true;
 
+            // Check if cursor is inside a data note - Tab moves to next cell
+            const noteAtCursor = findTextNoteContainingPoint(cursorPos.x, cursorPos.y, worldData);
+            if (noteAtCursor && noteAtCursor.data.contentType === 'data' && noteAtCursor.data.tableData) {
+                const noteData = noteAtCursor.data;
+                const { columns, rows, activeCell } = noteData.tableData;
+
+                if (activeCell) {
+                    let newCol = shiftKey ? activeCell.col - 1 : activeCell.col + 1;
+                    let newRow = activeCell.row;
+
+                    // Wrap to next/previous row
+                    if (newCol >= columns.length) {
+                        newCol = 0;
+                        newRow = activeCell.row + 1;
+                    } else if (newCol < 0) {
+                        newCol = columns.length - 1;
+                        newRow = activeCell.row - 1;
+                    }
+
+                    if (newRow >= 0 && newRow < rows.length) {
+                        noteData.tableData.activeCell = { row: newRow, col: newCol };
+                        // Reset scroll offset for new cell
+                        const newCellKey = `${newRow},${newCol}`;
+                        if (!noteData.tableData.cellScrollOffsets) noteData.tableData.cellScrollOffsets = {};
+                        noteData.tableData.cellScrollOffsets[newCellKey] = 0;
+
+                        // Move cursor to new cell position
+                        let cellStartX = noteData.startX;
+                        for (let c = 0; c < newCol; c++) {
+                            cellStartX += columns[c].width;
+                        }
+                        let cellStartY = noteData.startY;
+                        for (let r = 0; r < newRow; r++) {
+                            cellStartY += rows[r].height * GRID_CELL_SPAN;
+                        }
+
+                        setWorldData(prev => ({
+                            ...prev,
+                            [noteAtCursor.key]: JSON.stringify(noteData)
+                        }));
+                        setCursorPos({ x: cellStartX, y: cellStartY });
+                        return true;
+                    }
+                }
+            }
+
+            // Tab key for accepting autocomplete suggestions (when not in data note)
             // Use ref for immediate access to suggestion (state may not have updated yet)
             const suggestionToAccept = currentSuggestionRef.current;
 
@@ -10169,6 +11512,10 @@ export function useWorldEngine({
 
                     const noteData = noteAtCursor.data;
 
+                    // Skip word wrapping for data notes - they handle text in cells with horizontal scrolling
+                    if (noteData.contentType === 'data') {
+                        // Don't do word wrapping, fall through to data cell handling below
+                    } else {
                     // We would type past the right edge - wrap to next line
                     // (All display modes support wrapping, but behavior differs)
                     const nextLineY = cursorAfterDelete.y + GRID_CELL_SPAN;
@@ -10277,6 +11624,7 @@ export function useWorldEngine({
                         worldDataChanged = true;
                         return true;
                     }
+                    } // end else (non-data note word wrapping)
                 }
             }
 
@@ -10476,23 +11824,107 @@ export function useWorldEngine({
 
                 // Write to note.data if inside a note, otherwise to global worldData
                 if (containingNote) {
-                    // Write to note's data field using relative coordinates
                     const noteData = containingNote.data;
-                    if (!noteData.data) {
-                        noteData.data = {};
-                    }
-                    // Convert absolute world coordinates to relative content coordinates
-                    const scrollOffset = noteData.scrollOffset || 0;
-                    const relativeX = cursorAfterDelete.x - noteData.startX;
-                    const relativeY = (cursorAfterDelete.y - noteData.startY) + scrollOffset;
-                    const relativeKey = `${relativeX},${relativeY}`;
-                    noteData.data[relativeKey] = charData;
-                    nextWorldData[containingNote.key] = JSON.stringify(noteData);
 
-                    // Record character placement for playback
-                    if (recorder.isRecording) {
-                        console.log(`[Recording] Placing character '${key}' in note at ${containingNote.key}`, noteData);
-                        recorder.recordContentChange(containingNote.key, JSON.stringify(noteData));
+                    // Check if this is a data note (table) - use cell-based storage
+                    if (noteData.contentType === 'data' && noteData.tableData) {
+                        // Initialize cells if needed
+                        if (!noteData.tableData.cells) {
+                            noteData.tableData.cells = {};
+                        }
+                        if (!noteData.tableData.cellScrollOffsets) {
+                            noteData.tableData.cellScrollOffsets = {};
+                        }
+
+                        // Determine which cell to type into:
+                        // - If we have an active cell and cursor is near it, keep typing there
+                        // - Otherwise, find cell at cursor position and make it active
+                        let targetCell = noteData.tableData.activeCell;
+                        const cursorCellInfo = getCellAtPosition(cursorAfterDelete.x, cursorAfterDelete.y, noteData);
+
+                        if (!targetCell && cursorCellInfo) {
+                            // No active cell, use cursor position
+                            targetCell = { row: cursorCellInfo.row, col: cursorCellInfo.col };
+                        } else if (targetCell && cursorCellInfo) {
+                            // Check if cursor moved to a different row - that means user wants different cell
+                            if (cursorCellInfo.row !== targetCell.row) {
+                                targetCell = { row: cursorCellInfo.row, col: cursorCellInfo.col };
+                            }
+                            // If same row but different column, keep typing in active cell (horizontal scroll)
+                            // unless user explicitly clicked a different cell (handled by click events)
+                        }
+                        // If cursor is outside cell bounds but we have an activeCell, keep using it
+                        // (this handles typing in rightmost column with horizontal scroll)
+
+                        // For data notes, if we can't determine a target cell, skip writing
+                        // (don't fall through to regular text note handling)
+                        if (!targetCell) {
+                            // No valid cell to type into - skip writing for data notes
+                            return true;
+                        }
+
+                        if (targetCell) {
+                            const { row, col } = targetCell;
+                            const cellKey = `${row},${col}`;
+
+                            // Get cell width from tableData
+                            const { columns } = noteData.tableData;
+                            const cellWidth = columns[col]?.width || 4;
+
+                            // Get current cell text
+                            const currentText = noteData.tableData.cells[cellKey] || '';
+
+                            // Always append to end of cell text
+                            const newText = currentText + key;
+                            noteData.tableData.cells[cellKey] = newText;
+
+                            // Update active cell
+                            noteData.tableData.activeCell = targetCell;
+
+                            // Calculate cell start X position
+                            let cellStartX = noteData.startX;
+                            for (let c = 0; c < col; c++) {
+                                cellStartX += columns[c]?.width || 4;
+                            }
+
+                            // Auto-scroll to show the new character
+                            if (newText.length > cellWidth) {
+                                noteData.tableData.cellScrollOffsets[cellKey] = newText.length - cellWidth;
+                                // Keep cursor at the right edge of the cell (like scroll display mode)
+                                nextCursorPos.x = cellStartX + cellWidth - 1;
+                            } else {
+                                // No scrolling yet - cursor stays within cell at end of visible text
+                                nextCursorPos.x = cellStartX + newText.length;
+                                // But don't exceed cell bounds (important for rightmost column)
+                                if (nextCursorPos.x >= cellStartX + cellWidth) {
+                                    nextCursorPos.x = cellStartX + cellWidth - 1;
+                                }
+                            }
+
+                            nextWorldData[containingNote.key] = JSON.stringify(noteData);
+
+                            // Record for playback
+                            if (recorder.isRecording) {
+                                recorder.recordContentChange(containingNote.key, JSON.stringify(noteData));
+                            }
+                        }
+                    } else {
+                        // Regular text note - write to note.data field using relative coordinates
+                        if (!noteData.data) {
+                            noteData.data = {};
+                        }
+                        // Convert absolute world coordinates to relative content coordinates
+                        const scrollOffset = noteData.scrollOffset || 0;
+                        const relativeX = cursorAfterDelete.x - noteData.startX;
+                        const relativeY = (cursorAfterDelete.y - noteData.startY) + scrollOffset;
+                        const relativeKey = `${relativeX},${relativeY}`;
+                        noteData.data[relativeKey] = charData;
+                        nextWorldData[containingNote.key] = JSON.stringify(noteData);
+
+                        // Record character placement for playback
+                        if (recorder.isRecording) {
+                            recorder.recordContentChange(containingNote.key, JSON.stringify(noteData));
+                        }
                     }
                 } else {
                     // Write to global worldData
@@ -10500,7 +11932,6 @@ export function useWorldEngine({
 
                     // Record character placement for playback
                     if (recorder.isRecording) {
-                        console.log(`[Recording] Placing character '${key}' at ${currentKey}`, charData);
                         recorder.recordContentChange(currentKey, charData);
                     }
                 }
@@ -11065,6 +12496,34 @@ export function useWorldEngine({
                 newCursorPos.y >= minY && newCursorPos.y <= maxY;
         }
 
+        // Check if clicking inside a data note - set active cell
+        const clickedNote = findTextNoteContainingPoint(newCursorPos.x, newCursorPos.y, worldData);
+        if (clickedNote && clickedNote.data.contentType === 'data' && clickedNote.data.tableData) {
+            const noteData = clickedNote.data;
+            const cellInfo = getCellAtPosition(newCursorPos.x, newCursorPos.y, noteData);
+
+            if (cellInfo) {
+                const { row, col, cellStartX, cellStartY } = cellInfo;
+
+                // Set active cell
+                noteData.tableData.activeCell = { row, col };
+
+                // Reset scroll offset for newly selected cell
+                if (!noteData.tableData.cellScrollOffsets) noteData.tableData.cellScrollOffsets = {};
+                const cellKey = `${row},${col}`;
+                noteData.tableData.cellScrollOffsets[cellKey] = 0;
+
+                // Update note and move cursor to cell start
+                setWorldData(prev => ({
+                    ...prev,
+                    [clickedNote.key]: JSON.stringify(noteData)
+                }));
+
+                // Snap cursor to cell start position
+                newCursorPos = { x: cellStartX, y: cellStartY + 1 }; // +1 for text baseline
+            }
+        }
+
         if (shiftKey && selectionStart) {
             // Extend selection if shift is held and selection exists
             setSelectionEnd(newCursorPos);
@@ -11127,6 +12586,47 @@ export function useWorldEngine({
                     ...prev,
                     [key]: JSON.stringify(updatedListData)
                 }));
+
+                return; // Don't pan world
+            }
+
+            // Check if mouse is over a data table note
+            const dataTableAtPos = findTextNoteContainingPoint(worldPos.x, worldPos.y, worldData);
+            if (dataTableAtPos && dataTableAtPos.data.contentType === 'data' && dataTableAtPos.data.tableData) {
+                // Scroll the data table vertically through rows
+                const noteData = dataTableAtPos.data;
+                const { rows } = noteData.tableData;
+                const scrollSpeed = 1; // Rows per scroll tick
+                const scrollDelta = Math.sign(deltaY) * scrollSpeed;
+
+                // Calculate visible rows based on note height
+                const visibleHeight = noteData.endY - noteData.startY + 1;
+                const visibleRows = Math.floor(visibleHeight / GRID_CELL_SPAN);
+
+                // Total rows in the table
+                const totalRows = rows.length;
+
+                // Max scroll = total rows - visible rows (can't scroll past the end)
+                const maxScroll = Math.max(0, totalRows - visibleRows);
+
+                // Get current scroll offset (row index)
+                const currentScrollOffset = noteData.tableData.tableScrollOffset || 0;
+                const newScrollOffset = Math.max(0, Math.min(maxScroll, currentScrollOffset + scrollDelta));
+
+                // Only update if scroll offset actually changed
+                if (newScrollOffset !== currentScrollOffset) {
+                    const updatedNoteData = {
+                        ...noteData,
+                        tableData: {
+                            ...noteData.tableData,
+                            tableScrollOffset: newScrollOffset
+                        }
+                    };
+                    setWorldData(prev => ({
+                        ...prev,
+                        [dataTableAtPos.key]: JSON.stringify(updatedNoteData)
+                    }));
+                }
 
                 return; // Don't pan world
             }
@@ -11674,7 +13174,6 @@ export function useWorldEngine({
 
         // Record deletion immediately for accurate playback
         if (recorder.isRecording) {
-            console.log(`[Recording] Deleting character at ${key}`);
             recorder.recordContentChange(key, null);
         }
     }, [worldData, recorder]);
@@ -11710,7 +13209,6 @@ export function useWorldEngine({
 
         // Record character placement immediately for accurate playback
         if (recorder.isRecording) {
-            console.log(`[Recording] Placing character '${char}' at ${key}`, charData);
             recorder.recordContentChange(key, charData);
         }
     }, [worldData, currentScale, currentTextStyle, textColor, recorder]);
