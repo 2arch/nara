@@ -59,6 +59,13 @@ Based on the user's prompt and context, choose the most appropriate action:
 - For questions, explanations, conversations → use respond_text
 - For image creation requests → use generate_image
 
+IMPORTANT: When you need information to complete a task, use the appropriate "get" tools first:
+- Need to know what agents exist? Call get_agents first, then use the returned IDs
+- Need cursor position? Call get_cursor_position
+- Need to know what's selected? Call get_selection
+- Need to see notes/chips? Call get_notes or get_chips
+Don't ask the user for IDs or positions - discover them yourself using the tools.
+
 Be precise with coordinates and colors. Use hex colors (e.g., #ff0000 for red).
 The canvas uses integer cell coordinates. Positive X is right, positive Y is down.
 If the user provides selected text, consider whether they want you to transform, explain, or work with that text.`;
