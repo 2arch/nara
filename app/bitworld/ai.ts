@@ -1,25 +1,29 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Content, Part, FunctionCall } from '@google/genai';
 import { logger } from './logger';
 import { checkUserQuota, incrementUserUsage } from '../firebase';
 import { createAIAbortController } from './ai.utils';
+import { canvasTools, executeTool, ToolContext, toGeminiFunctionDeclarations } from './ai.tools';
+
+// Get Gemini-formatted function declarations
+const geminiFunctionDeclarations = toGeminiFunctionDeclarations();
 
 // Re-export utilities for backward compatibility
 export { abortCurrentAI, isAIActive, setDialogueWithRevert, createSubtitleCycler } from './ai.utils';
 
 // Lazy initialization of the Google GenAI client
 // This ensures the client is only created when needed, not at module load time
-let ai: GoogleGenAI | null = null;
+let genaiClient: GoogleGenAI | null = null;
 
 function getAIClient(): GoogleGenAI {
-    if (!ai) {
+    if (!genaiClient) {
         // Server-side only - called from API routes
         const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) {
             throw new Error('GEMINI_API_KEY environment variable is not set');
         }
-        ai = new GoogleGenAI({ apiKey });
+        genaiClient = new GoogleGenAI({ apiKey });
     }
-    return ai;
+    return genaiClient;
 }
 
 // Global cache management
@@ -805,3 +809,329 @@ export async function getAutocompleteSuggestions(
         return [];
     }
 }
+
+// Re-export tools for external use
+export { canvasTools, executeTool } from './ai.tools';
+export type { ToolContext } from './ai.tools';
+
+// System instruction for action-only mode
+const ACTION_SYSTEM_INSTRUCTION = `You are an AI that controls a canvas application.
+When the user asks you to do something, use the provided tools to accomplish it.
+Do NOT respond with text - only use function calls to perform actions.
+Be precise with coordinates and colors. Use hex colors (e.g., #ff0000 for red).
+The canvas uses integer cell coordinates. Positive X is right, positive Y is down.
+If the user's request doesn't make sense as a canvas action, return no function calls.`;
+
+export interface AIActionResult {
+    toolCalls: Array<{ name: string; args: Record<string, any> }>;
+    error?: string;
+}
+
+/**
+ * Get AI-determined actions for a prompt (no text response, just tool calls)
+ */
+export async function getAIActions(prompt: string, userId?: string): Promise<AIActionResult> {
+    try {
+        // Check user quota before proceeding
+        if (userId) {
+            const quota = await checkUserQuota(userId);
+            if (!quota.canUseAI) {
+                return {
+                    toolCalls: [],
+                    error: `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today)`,
+                };
+            }
+        }
+
+        const response = await getAIClient().models.generateContent({
+            model: 'gemini-2.0-flash',
+            contents: prompt,
+            config: {
+                systemInstruction: ACTION_SYSTEM_INSTRUCTION,
+                tools: [{ functionDeclarations: geminiFunctionDeclarations }],
+            },
+        });
+
+        // Extract function calls from response
+        const candidate = response.candidates?.[0];
+        if (!candidate?.content?.parts) {
+            return { toolCalls: [] };
+        }
+
+        const toolCalls: Array<{ name: string; args: Record<string, any> }> = [];
+
+        for (const part of candidate.content.parts) {
+            if (part.functionCall) {
+                const name = part.functionCall.name || 'unknown';
+                const args = (part.functionCall.args as Record<string, any>) || {};
+                toolCalls.push({ name, args });
+            }
+        }
+
+        // Increment usage after successful response
+        if (userId && toolCalls.length > 0) {
+            await incrementUserUsage(userId);
+        }
+
+        return { toolCalls };
+    } catch (error: any) {
+        logger.error('Error getting AI actions:', error);
+        return { toolCalls: [], error: error.message };
+    }
+}
+
+// Tool-calling conversation history per session
+const toolConversations = new Map<string, Content[]>();
+
+// System instruction for tool-calling mode
+const TOOL_SYSTEM_INSTRUCTION = `You are a helpful AI assistant integrated into Nara, an infinite canvas application.
+You can interact with the canvas using the provided tools to paint, draw, create notes/chips, move agents, and more.
+
+When the user asks you to do something on the canvas:
+1. Use the appropriate tools to accomplish the task
+2. Be creative but precise with coordinates and colors
+3. Confirm what you did after completing actions
+
+Keep responses concise. Use hex colors (e.g., #ff0000 for red, #00ff00 for green, #0000ff for blue).
+The canvas uses integer cell coordinates. Positive X is right, positive Y is down.`;
+
+// Maximum tool call iterations to prevent infinite loops
+const MAX_TOOL_ITERATIONS = 10;
+
+export interface ToolChatResponse {
+    text: string;
+    toolCalls?: Array<{ name: string; args: any; result: any }>;
+    error?: string;
+}
+
+/**
+ * Core tool-calling engine. Executes a prompt with multi-turn tool calling loop.
+ * @param message - The user's prompt
+ * @param toolContext - Canvas tool implementations
+ * @param history - Optional conversation history (mutated in place)
+ * @param userId - Optional user ID for quota checking
+ */
+export async function callTools(
+    message: string,
+    toolContext: ToolContext,
+    history: Content[] = [],
+    userId?: string
+): Promise<ToolChatResponse> {
+    const abortController = createAIAbortController();
+
+    try {
+        // Check user quota before proceeding
+        if (userId) {
+            const quota = await checkUserQuota(userId);
+            if (!quota.canUseAI) {
+                return {
+                    text: `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`,
+                };
+            }
+        }
+
+        // Add user message to history
+        history.push({
+            role: 'user',
+            parts: [{ text: message }],
+        });
+
+        const toolCallResults: Array<{ name: string; args: any; result: any }> = [];
+        let iterations = 0;
+
+        // Tool calling loop
+        while (iterations < MAX_TOOL_ITERATIONS) {
+            iterations++;
+
+            if (abortController.signal.aborted) {
+                throw new Error('AI operation was interrupted');
+            }
+
+            const response = await getAIClient().models.generateContent({
+                model: 'gemini-2.0-flash',
+                contents: history,
+                config: {
+                    systemInstruction: TOOL_SYSTEM_INSTRUCTION,
+                    tools: [{ functionDeclarations: geminiFunctionDeclarations }],
+                },
+            });
+
+            // Check response
+            const candidate = response.candidates?.[0];
+            if (!candidate?.content?.parts) {
+                return { text: 'No response generated', error: 'Empty response from model' };
+            }
+
+            const parts = candidate.content.parts;
+            const functionCalls: FunctionCall[] = [];
+            let textResponse = '';
+
+            // Extract function calls and text
+            for (const part of parts) {
+                if (part.functionCall) {
+                    functionCalls.push(part.functionCall);
+                }
+                if (part.text) {
+                    textResponse += part.text;
+                }
+            }
+
+            // If no function calls, we're done
+            if (functionCalls.length === 0) {
+                history.push({
+                    role: 'model',
+                    parts: [{ text: textResponse }],
+                });
+
+                // Increment usage after successful response
+                if (userId) {
+                    await incrementUserUsage(userId);
+                }
+
+                return {
+                    text: textResponse,
+                    toolCalls: toolCallResults.length > 0 ? toolCallResults : undefined,
+                };
+            }
+
+            // Execute function calls
+            const functionResponses: Part[] = [];
+
+            for (const functionCall of functionCalls) {
+                const name = functionCall.name || 'unknown';
+                const args = functionCall.args || {};
+                logger.debug(`AI calling tool: ${name}`, args);
+
+                const result = executeTool(name, args as Record<string, any>, toolContext);
+                toolCallResults.push({ name, args, result });
+
+                functionResponses.push({
+                    functionResponse: {
+                        name,
+                        response: result,
+                    },
+                });
+            }
+
+            // Add model's function call to history
+            history.push({
+                role: 'model',
+                parts: parts,
+            });
+
+            // Add function responses to history
+            history.push({
+                role: 'user',
+                parts: functionResponses,
+            });
+        }
+
+        // Hit max iterations
+        if (userId) {
+            await incrementUserUsage(userId);
+        }
+
+        return {
+            text: 'Completed maximum tool iterations',
+            toolCalls: toolCallResults,
+            error: 'Hit maximum tool call limit',
+        };
+    } catch (error: any) {
+        if (error.message === 'AI operation was interrupted') {
+            logger.debug('AI tool chat was interrupted');
+            return { text: '[Interrupted]' };
+        }
+        logger.error('Error in tool chat:', error);
+        return { text: 'Sorry, I encountered an error.', error: error.message };
+    }
+}
+
+/**
+ * Clear tool session history
+ */
+export function clearToolSession(sessionId: string): void {
+    toolConversations.delete(sessionId);
+}
+
+/**
+ * Tool session with persistent history across multiple calls.
+ * Wraps callTools with session-based history management.
+ */
+export async function toolSession(
+    sessionId: string,
+    message: string,
+    toolContext: ToolContext,
+    userId?: string
+): Promise<ToolChatResponse> {
+    // Get or create session history
+    let history = toolConversations.get(sessionId);
+    if (!history) {
+        history = [];
+        toolConversations.set(sessionId, history);
+    }
+
+    return callTools(message, toolContext, history, userId);
+}
+
+// =============================================================================
+// Client-side interface
+// =============================================================================
+
+export interface CanvasState {
+    cursorPosition: { x: number; y: number };
+    viewport: { offset: { x: number; y: number }; zoomLevel: number };
+    selection: { start: { x: number; y: number } | null; end: { x: number; y: number } | null };
+    agents: Array<{ id: string; x: number; y: number; spriteName?: string }>;
+    notes: Array<{ id: string; x: number; y: number; width: number; height: number; content: string }>;
+    chips: Array<{ id: string; x: number; y: number; text: string; color?: string }>;
+}
+
+/** Context for AI - provide whatever is available, AI decides what to do */
+export interface AIContext {
+    userId?: string;
+    selection?: string;           // Selected text content
+    worldContext?: {              // Canvas awareness
+        compiledText: string;
+        labels: Array<{ text: string; x: number; y: number }>;
+        metadata?: string;
+    };
+    referenceImage?: string;      // For image editing
+    aspectRatio?: string;         // For image generation
+    canvasState?: CanvasState;    // For canvas tool execution
+}
+
+/** Result from ai() - model decides response type */
+export interface AIResult {
+    text?: string;                // Text response (if model chose to respond with text)
+    actions?: Array<{             // Tool actions (if model chose to use tools)
+        tool: string;
+        args: Record<string, any>;
+    }>;
+    image?: {                     // Image result (if model chose to generate image)
+        imageData: string | null;
+        text: string;
+    };
+    error?: string;
+}
+
+const callAPI = async (body: Record<string, any>): Promise<any> => {
+    const response = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    return response.json();
+};
+
+/**
+ * Unified AI interface. Gemini decides whether to:
+ * - Execute canvas tools (paint, move, create)
+ * - Respond with text
+ * - Generate/edit an image
+ *
+ * Just call ai(prompt, context) and let the model figure it out.
+ */
+const aiCall = (prompt: string, context?: AIContext): Promise<AIResult> =>
+    callAPI({ prompt, ...context });
+
+export const ai = aiCall;

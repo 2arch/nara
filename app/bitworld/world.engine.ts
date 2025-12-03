@@ -11,6 +11,7 @@ import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 // Import lightweight AI utilities (no GenAI dependency)
 import { createSubtitleCycler, setDialogueWithRevert, abortCurrentAI, isAIActive, detectImageIntent } from './ai.utils';
+import { executeTool, ToolContext } from './ai.tools';
 import { logger } from './logger';
 import { useAutoDialogue } from './dialogue';
 import { get } from 'firebase/database';
@@ -23,61 +24,12 @@ import { runCA, type CARule } from './ca';
 import { runPython, isPyodideLoaded } from './pyodide';
 import { BubbleState, createInitialBubbleState, showBubble, hideBubble, isBubbleExpired } from './bubble';
 
-// API route helper functions for AI operations
-const callTransformAPI = async (text: string, instructions: string, userId?: string): Promise<string> => {
-    const response = await fetch('/api/transform', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, instructions, userId })
-    });
-    const data = await response.json();
-    return data.result;
-};
-
-const callExplainAPI = async (text: string, analysisType?: string, userId?: string): Promise<string> => {
-    const response = await fetch('/api/explain', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, analysisType, userId })
-    });
-    const data = await response.json();
-    return data.result;
-};
-
-const callSummarizeAPI = async (text: string, focus?: string, userId?: string): Promise<string> => {
-    const response = await fetch('/api/summarize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, focus, userId })
-    });
-    const data = await response.json();
-    return data.result;
-};
-
-const callChatAPI = async (prompt: string, addToHistory: boolean, userId?: string, worldContext?: any): Promise<string> => {
-    const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, addToHistory, userId, worldContext })
-    });
-    const data = await response.json();
-    return data.result;
-};
-
-const callGenerateImageAPI = async (prompt: string, referenceImage?: string, userId?: string, aspectRatio?: string): Promise<any> => {
-    const response = await fetch('/api/generate-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, referenceImage, userId, aspectRatio })
-    });
-    const data = await response.json();
-    return data.result;
-};
+import { ai, CanvasState } from './ai';
 
 // Keep clearChatHistory as a local import since it's a simple utility
 const clearChatHistory = async () => {
-    const ai = await import('./ai');
-    return ai.clearChatHistory();
+    const aiModule = await import('./ai');
+    return aiModule.clearChatHistory();
 };
 
 // --- Constants --- (Copied and relevant ones kept)
@@ -4760,23 +4712,24 @@ export function useWorldEngine({
                                     return true;
                                 }
 
-                                callGenerateImageAPI(aiPrompt, base64ImageData, userUid || undefined).then(async (result) => {
+                                ai(aiPrompt, { referenceImage: base64ImageData, userId: userUid || undefined }).then(async (result) => {
+                                const imageResult = result.image || { imageData: null, text: result.text || '' };
                                 // Check if quota exceeded
-                                if (result.text && result.text.startsWith('AI limit reached')) {
+                                if (imageResult.text && imageResult.text.startsWith('AI limit reached')) {
                                     if (upgradeFlowHandlerRef.current) {
                                         upgradeFlowHandlerRef.current();
                                     }
                                     return true;
                                 }
 
-                                if (result.imageData) {
+                                if (imageResult.imageData) {
                                     const newWorldData = { ...worldData };
 
                                     // Upload to storage if available
-                                    let finalImageUrl = result.imageData;
+                                    let finalImageUrl = imageResult.imageData;
                                     if (uploadImageToStorage) {
                                         try {
-                                            finalImageUrl = await uploadImageToStorage(result.imageData);
+                                            finalImageUrl = await uploadImageToStorage(imageResult.imageData);
                                         } catch (error) {
                                             logger.error('Failed to upload generated image:', error);
                                         }
@@ -4840,7 +4793,7 @@ export function useWorldEngine({
                                         setSelectionStart(null);
                                         setSelectionEnd(null);
                                     };
-                                    img.src = result.imageData;
+                                    img.src = imageResult.imageData;
                                 } else {
                                     setProcessingRegion(null); // Clear visual feedback
                                     setDialogueWithRevert("Image generation failed", setDialogueText);
@@ -4872,23 +4825,24 @@ export function useWorldEngine({
                             // Show visual feedback for image generation
                             setProcessingRegion({ startX: minX, endX: maxX, startY: minY, endY: maxY });
 
-                            callGenerateImageAPI(aiPrompt, undefined, userUid || undefined).then(async (result) => {
+                            ai(aiPrompt, { userId: userUid || undefined }).then(async (result) => {
+                                const imageResult = result.image || { imageData: null, text: result.text || '' };
                                 // Check if quota exceeded
-                                if (result.text && result.text.startsWith('AI limit reached')) {
+                                if (imageResult.text && imageResult.text.startsWith('AI limit reached')) {
                                     if (upgradeFlowHandlerRef.current) {
                                         upgradeFlowHandlerRef.current();
                                     }
                                     return true;
                                 }
 
-                                if (result.imageData) {
+                                if (imageResult.imageData) {
                                     const newWorldData = { ...worldData };
 
                                     // Upload to storage if available
-                                    let finalImageUrl = result.imageData;
+                                    let finalImageUrl = imageResult.imageData;
                                     if (uploadImageToStorage) {
                                         try {
-                                            finalImageUrl = await uploadImageToStorage(result.imageData);
+                                            finalImageUrl = await uploadImageToStorage(imageResult.imageData);
                                         } catch (error) {
                                             logger.error('Failed to upload generated image:', error);
                                         }
@@ -4994,7 +4948,8 @@ export function useWorldEngine({
                             : aiPrompt;
 
                         setDialogueWithRevert(selectedText ? "Transforming text..." : "Generating text...", setDialogueText);
-                        callChatAPI(fullPrompt, true, userUid || undefined).then((response) => {
+                        ai(fullPrompt, { userId: userUid || undefined }).then((result) => {
+                            const response = result.text || result.error || '';
                             // Check if quota exceeded
                             if (response.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
@@ -5144,21 +5099,22 @@ export function useWorldEngine({
                             // Show visual feedback for image generation
                             setProcessingRegion(imageRegion);
 
-                            callGenerateImageAPI(aiPrompt, base64ImageData, userUid || undefined, aspectRatio).then(async (result) => {
+                            ai(aiPrompt, { referenceImage: base64ImageData, userId: userUid || undefined, aspectRatio }).then(async (result) => {
+                            const imageResult = result.image || { imageData: null, text: result.text || '' };
                             // Check if quota exceeded
-                            if (result.text && result.text.startsWith('AI limit reached')) {
+                            if (imageResult.text && imageResult.text.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
                                     upgradeFlowHandlerRef.current();
                                 }
                                 return true;
                             }
 
-                            if (result.imageData) {
+                            if (imageResult.imageData) {
                                 // Upload to storage if available
-                                let finalImageUrl = result.imageData;
+                                let finalImageUrl = imageResult.imageData;
                                 if (uploadImageToStorage) {
                                     try {
-                                        finalImageUrl = await uploadImageToStorage(result.imageData);
+                                        finalImageUrl = await uploadImageToStorage(imageResult.imageData);
                                     } catch (error) {
                                         logger.error('Failed to upload generated image:', error);
                                     }
@@ -5212,7 +5168,7 @@ export function useWorldEngine({
                                     setProcessingRegion(null); // Clear visual feedback
                                     setDialogueWithRevert("Image transformed", setDialogueText);
                                 };
-                                img.src = result.imageData;
+                                img.src = imageResult.imageData;
                             } else {
                                 setProcessingRegion(null); // Clear visual feedback
                                 setDialogueWithRevert("Image generation failed", setDialogueText);
@@ -5328,7 +5284,8 @@ export function useWorldEngine({
                         const fullPrompt = `${aiPrompt}\n\nExisting text:\n${existingText}`;
 
                         setDialogueWithRevert("Transforming text...", setDialogueText);
-                        callChatAPI(fullPrompt, true, userUid || undefined).then((response) => {
+                        ai(fullPrompt, { userId: userUid || undefined }).then((result) => {
+                            const response = result.text || result.error || '';
                             // Check if quota exceeded
                             if (response.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
@@ -5399,85 +5356,284 @@ export function useWorldEngine({
                         return true;
                     }
 
-                    // Priority 4: Default text-based AI chat (no selection, no image, no text block)
+                    // Priority 4: Try AI actions first (tool calling), fall back to chat
                     setDialogueWithRevert("Asking AI...", setDialogueText);
-                    callChatAPI(aiPrompt, true, userUid || undefined).then((response) => {
-                        // Check if quota exceeded
-                        if (response.startsWith('AI limit reached')) {
+
+                    // Build tool context for executing AI actions
+                    const toolContext: ToolContext = {
+                        paintCells: (cells) => {
+                            setWorldData(prev => {
+                                const newData = { ...prev };
+                                for (const cell of cells) {
+                                    const key = `${Math.floor(cell.x)},${Math.floor(cell.y)}`;
+                                    newData[key] = { char: ' ', style: { background: cell.color } };
+                                }
+                                return newData;
+                            });
+                        },
+                        eraseCells: (cells) => {
+                            setWorldData(prev => {
+                                const newData = { ...prev };
+                                for (const cell of cells) {
+                                    const key = `${Math.floor(cell.x)},${Math.floor(cell.y)}`;
+                                    delete newData[key];
+                                }
+                                return newData;
+                            });
+                        },
+                        getCursorPosition: () => cursorPos,
+                        setCursorPosition: (x, y) => setCursorPos({ x, y }),
+                        getViewport: () => ({ offset: viewOffset, zoomLevel }),
+                        setViewport: (x, y, zoom) => {
+                            setViewOffset({ x, y });
+                            if (zoom !== undefined) setZoomLevel(zoom);
+                        },
+                        getSelection: () => ({ start: selectionStart, end: selectionEnd }),
+                        setSelection: (startX, startY, endX, endY) => {
+                            setSelectionStart({ x: startX, y: startY });
+                            setSelectionEnd({ x: endX, y: endY });
+                        },
+                        clearSelection: () => {
+                            setSelectionStart(null);
+                            setSelectionEnd(null);
+                        },
+                        getAgents: () => {
+                            // Get agents from worldData (they're stored with agent_ prefix)
+                            const agents: Array<{ id: string; x: number; y: number; spriteName?: string }> = [];
+                            for (const key in worldData) {
+                                if (key.startsWith('agent_')) {
+                                    try {
+                                        const agentDataStr = worldData[key];
+                                        const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+                                        if (agentData && typeof agentData.x === 'number' && typeof agentData.y === 'number') {
+                                            agents.push({
+                                                id: key,
+                                                x: agentData.x,
+                                                y: agentData.y,
+                                                spriteName: agentData.name || agentData.spriteName,
+                                            });
+                                        }
+                                    } catch {}
+                                }
+                            }
+                            return agents;
+                        },
+                        createAgent: (x, y, spriteName) => {
+                            const agentId = `agent_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                            const agentData = {
+                                x, y,
+                                name: spriteName,
+                                timestamp: Date.now(),
+                            };
+                            setWorldData(prev => ({ ...prev, [agentId]: JSON.stringify(agentData) }));
+                            return agentId;
+                        },
+                        moveAgents: (agentIds, destination) => {
+                            // Update agent positions in worldData
+                            setWorldData(prev => {
+                                const newData = { ...prev };
+                                for (const agentId of agentIds) {
+                                    const agentDataStr = prev[agentId];
+                                    if (agentDataStr) {
+                                        try {
+                                            const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+                                            agentData.x = destination.x;
+                                            agentData.y = destination.y;
+                                            newData[agentId] = JSON.stringify(agentData);
+                                        } catch {}
+                                    }
+                                }
+                                return newData;
+                            });
+                        },
+                        getNotes: () => {
+                            const notes: Array<{ id: string; x: number; y: number; width: number; height: number; content: string }> = [];
+                            for (const key in worldData) {
+                                if (key.startsWith('note_')) {
+                                    try {
+                                        const data = typeof worldData[key] === 'string' ? JSON.parse(worldData[key]) : worldData[key];
+                                        if (data.type === 'note') {
+                                            notes.push({
+                                                id: key,
+                                                x: data.x,
+                                                y: data.y,
+                                                width: data.width,
+                                                height: data.height,
+                                                content: data.content || '',
+                                            });
+                                        }
+                                    } catch {}
+                                }
+                            }
+                            return notes;
+                        },
+                        createNote: (x, y, width, height, content) => {
+                            const noteKey = `note_${Date.now()}`;
+                            const noteData = {
+                                type: 'note',
+                                x, y, width, height,
+                                content: content || '',
+                                timestamp: Date.now(),
+                            };
+                            setWorldData(prev => ({ ...prev, [noteKey]: JSON.stringify(noteData) }));
+                        },
+                        getChips: () => {
+                            const chips: Array<{ id: string; x: number; y: number; text: string; color?: string }> = [];
+                            for (const key in worldData) {
+                                if (key.startsWith('chip_')) {
+                                    try {
+                                        const data = typeof worldData[key] === 'string' ? JSON.parse(worldData[key]) : worldData[key];
+                                        if (data.type === 'chip') {
+                                            chips.push({
+                                                id: key,
+                                                x: data.x,
+                                                y: data.y,
+                                                text: data.text || '',
+                                                color: data.color,
+                                            });
+                                        }
+                                    } catch {}
+                                }
+                            }
+                            return chips;
+                        },
+                        createChip: (x, y, text, color) => {
+                            const chipKey = `chip_${Date.now()}`;
+                            const chipData = {
+                                type: 'chip',
+                                x, y, text,
+                                color,
+                                timestamp: Date.now(),
+                            };
+                            setWorldData(prev => ({ ...prev, [chipKey]: JSON.stringify(chipData) }));
+                        },
+                        writeText: (x, y, text) => {
+                            setWorldData(prev => {
+                                const newData = { ...prev };
+                                for (let i = 0; i < text.length; i++) {
+                                    const key = `${x + i},${y}`;
+                                    newData[key] = text[i];
+                                }
+                                return newData;
+                            });
+                        },
+                        runCommand: (command) => {
+                            // Execute command through command system
+                            logger.debug('runCommand called', { command });
+                            // TODO: Could integrate with command system here
+                        },
+                    };
+
+                    // Gather canvas state for multi-turn tool calling
+                    const canvasState: CanvasState = {
+                        cursorPosition: cursorPos,
+                        viewport: { offset: viewOffset, zoomLevel },
+                        selection: { start: selectionStart, end: selectionEnd },
+                        agents: toolContext.getAgents(),
+                        notes: toolContext.getNotes(),
+                        chips: toolContext.getChips(),
+                    };
+
+                    // Try AI chat with tools (multi-turn)
+                    ai(aiPrompt, { canvasState, userId: userUid || undefined }).then((result) => {
+                        // Check for quota error
+                        if (result.error?.includes('AI limit reached')) {
                             if (upgradeFlowHandlerRef.current) {
                                 upgradeFlowHandlerRef.current();
                             }
                             return;
                         }
 
-                        // Start response on next line, same X as where '/' was typed
-                        const responseStartPos = {
-                            x: exec.commandStartPos.x,
-                            y: exec.commandStartPos.y + 1
-                        };
-
-                        if (isPermanent) {
-                            // Cmd+Enter: Write permanently to canvas with wrapping
-                            const wrapWidth = 80; // Default wrap width
-
-                            // Text wrapping function
-                            const wrapText = (text: string, maxWidth: number): string[] => {
-                                const paragraphs = text.split('\n');
-                                const lines: string[] = [];
-
-                                for (const paragraph of paragraphs) {
-                                    if (paragraph.trim() === '') {
-                                        lines.push('');
-                                        continue;
-                                    }
-
-                                    const words = paragraph.split(' ');
-                                    let currentLine = '';
-
-                                    for (const word of words) {
-                                        const testLine = currentLine ? `${currentLine} ${word}` : word;
-                                        if (testLine.length <= maxWidth) {
-                                            currentLine = testLine;
-                                        } else {
-                                            if (currentLine) lines.push(currentLine);
-                                            currentLine = word;
-                                        }
-                                    }
-                                    if (currentLine) lines.push(currentLine);
-                                }
-                                return lines;
-                            };
-
-                            const wrappedLines = wrapText(response, wrapWidth);
-
-                            // Write each character permanently to worldData
-                            const newWorldData = { ...worldData };
-                            for (let lineIndex = 0; lineIndex < wrappedLines.length; lineIndex++) {
-                                const line = wrappedLines[lineIndex];
-                                for (let charIndex = 0; charIndex < line.length; charIndex++) {
-                                    const char = line[charIndex];
-                                    const x = responseStartPos.x + charIndex;
-                                    const y = responseStartPos.y + lineIndex;
-                                    const key = `${x},${y}`;
-                                    newWorldData[key] = char;
+                        // If we got actions, execute them
+                        if (result.actions && result.actions.length > 0) {
+                            let executedCount = 0;
+                            for (const action of result.actions) {
+                                const execResult = executeTool(action.tool, action.args, toolContext);
+                                if (execResult.success) {
+                                    executedCount++;
+                                    logger.debug('Executed AI action:', action.tool, execResult.result);
+                                } else {
+                                    logger.error('AI action failed:', action.tool, execResult.error);
                                 }
                             }
-                            setWorldData(newWorldData);
-
-                            // Move cursor to end of response
-                            setCursorPos({
-                                x: responseStartPos.x + wrappedLines[wrappedLines.length - 1].length,
-                                y: responseStartPos.y + wrappedLines.length - 1
-                            });
-
-                            setDialogueWithRevert("AI response written", setDialogueText);
-                        } else {
-                            // Enter: Show ephemeral response (like chat mode)
-                            createSubtitleCycler(response, setDialogueText);
-
-                            // Also show as ephemeral text at response start position
-                            addInstantAIResponse(responseStartPos, response, { queryText: aiPrompt, centered: false });
+                            const message = result.text || `Executed ${executedCount} action${executedCount !== 1 ? 's' : ''}`;
+                            setDialogueWithRevert(message, setDialogueText);
+                            return;
                         }
+
+                        // If AI responded with text but no actions, show the text
+                        if (result.text) {
+                            setDialogueWithRevert(result.text, setDialogueText);
+                            return;
+                        }
+
+                        // No actions and no text - fall back to regular chat
+                        return ai(aiPrompt, { userId: userUid || undefined }).then((fallbackResult) => {
+                            const response = fallbackResult.text || fallbackResult.error || '';
+                            // Check if quota exceeded
+                            if (response.startsWith('AI limit reached')) {
+                                if (upgradeFlowHandlerRef.current) {
+                                    upgradeFlowHandlerRef.current();
+                                }
+                                return;
+                            }
+
+                            // Start response on next line, same X as where '/' was typed
+                            const responseStartPos = {
+                                x: exec.commandStartPos.x,
+                                y: exec.commandStartPos.y + 1
+                            };
+
+                            if (isPermanent) {
+                                // Cmd+Enter: Write permanently to canvas with wrapping
+                                const wrapWidth = 80;
+                                const wrapText = (text: string, maxWidth: number): string[] => {
+                                    const paragraphs = text.split('\n');
+                                    const lines: string[] = [];
+                                    for (const paragraph of paragraphs) {
+                                        if (paragraph.trim() === '') {
+                                            lines.push('');
+                                            continue;
+                                        }
+                                        const words = paragraph.split(' ');
+                                        let currentLine = '';
+                                        for (const word of words) {
+                                            const testLine = currentLine ? `${currentLine} ${word}` : word;
+                                            if (testLine.length <= maxWidth) {
+                                                currentLine = testLine;
+                                            } else {
+                                                if (currentLine) lines.push(currentLine);
+                                                currentLine = word;
+                                            }
+                                        }
+                                        if (currentLine) lines.push(currentLine);
+                                    }
+                                    return lines;
+                                };
+
+                                const wrappedLines = wrapText(response, wrapWidth);
+                                const newWorldData = { ...worldData };
+                                for (let lineIndex = 0; lineIndex < wrappedLines.length; lineIndex++) {
+                                    const line = wrappedLines[lineIndex];
+                                    for (let charIndex = 0; charIndex < line.length; charIndex++) {
+                                        const char = line[charIndex];
+                                        const x = responseStartPos.x + charIndex;
+                                        const y = responseStartPos.y + lineIndex;
+                                        const key = `${x},${y}`;
+                                        newWorldData[key] = char;
+                                    }
+                                }
+                                setWorldData(newWorldData);
+                                setCursorPos({
+                                    x: responseStartPos.x + wrappedLines[wrappedLines.length - 1].length,
+                                    y: responseStartPos.y + wrappedLines.length - 1
+                                });
+                                setDialogueWithRevert("AI response written", setDialogueText);
+                            } else {
+                                createSubtitleCycler(response, setDialogueText);
+                                addInstantAIResponse(responseStartPos, response, { queryText: aiPrompt, centered: false });
+                            }
+                        });
                     }).catch((error) => {
                         setDialogueWithRevert(`AI error: ${error.message || 'Could not get AI response'}`, setDialogueText);
                     });
@@ -8292,7 +8448,8 @@ export function useWorldEngine({
                             showBubbleMessage(userMessage, 3000); // Show for 3 seconds initially
                         }
 
-                        callChatAPI(userMessage, true, userUid || undefined).then((response) => {
+                        ai(userMessage, { userId: userUid || undefined }).then((result) => {
+                            const response = result.text || result.error || '';
                             // Check if quota exceeded
                             if (response.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
@@ -8310,17 +8467,17 @@ export function useWorldEngine({
                                 x: chatMode.inputPositions[0]?.x || cursorPos.x,
                                 y: (chatMode.inputPositions[chatMode.inputPositions.length - 1]?.y || cursorPos.y) + currentScale.h // Start one character height below last input line
                             };
-                            
+
                             // Calculate dynamic wrap width based on input
                             const inputLines = userMessage.split('\n');
                             const maxInputLineLength = Math.max(...inputLines.map(line => line.length));
                             const wrapWidth = Math.max(30, maxInputLineLength);
-                            
+
                             // Text wrapping that honors paragraph breaks
                             const wrapText = (text: string, maxWidth: number): string[] => {
                                 const paragraphs = text.split('\n');
                                 const lines: string[] = [];
-                                
+
                                 for (let i = 0; i < paragraphs.length; i++) {
                                     const paragraph = paragraphs[i].trim();
                                     
@@ -8405,7 +8562,8 @@ export function useWorldEngine({
                             showBubbleMessage(userMessage, 3000); // Show for 3 seconds initially
                         }
 
-                        callChatAPI(userMessage, true, userUid || undefined).then((response) => {
+                        ai(userMessage, { userId: userUid || undefined }).then((result) => {
+                            const response = result.text || result.error || '';
                             // Check if quota exceeded
                             if (response.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
@@ -8806,53 +8964,56 @@ export function useWorldEngine({
                         
                         if (selectedText && instructions) {
                             setDialogueWithRevert("Processing transformation...", setDialogueText);
-                            callTransformAPI(selectedText, instructions, userUid || undefined).then((result) => {
+                            ai(instructions, { selection: selectedText, userId: userUid || undefined }).then((aiResult) => {
+                                const textResult = aiResult.text || aiResult.error || '';
                                 // Check if quota exceeded
-                                if (result.startsWith('AI limit reached')) {
+                                if (textResult.startsWith('AI limit reached')) {
                                     if (upgradeFlowHandlerRef.current) {
                                         upgradeFlowHandlerRef.current();
                                     }
                                     return true;
                                 }
 
-                                createSubtitleCycler(result, setDialogueText);
+                                createSubtitleCycler(textResult, setDialogueText);
                             }).catch(() => {
                                 setDialogueWithRevert(`Could not transform text`, setDialogueText);
                             });
                         }
                     } else if (exec.command === 'explain') {
                         const selectedText = exec.args[0];
-                        const instructions = exec.args.length > 1 ? exec.args.slice(1).join(' ') : 'analysis';
+                        const instructions = exec.args.length > 1 ? exec.args.slice(1).join(' ') : 'explain this';
 
                         setDialogueWithRevert("Processing explanation...", setDialogueText);
-                        callExplainAPI(selectedText, instructions, userUid || undefined).then((result) => {
+                        ai(instructions, { selection: selectedText, userId: userUid || undefined }).then((aiResult) => {
+                            const textResult = aiResult.text || aiResult.error || '';
                             // Check if quota exceeded
-                            if (result.startsWith('AI limit reached')) {
+                            if (textResult.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
                                     upgradeFlowHandlerRef.current();
                                 }
                                 return true;
                             }
 
-                            createSubtitleCycler(result, setDialogueText);
+                            createSubtitleCycler(textResult, setDialogueText);
                         }).catch(() => {
                             setDialogueWithRevert(`Could not explain text`, setDialogueText);
                         });
                     } else if (exec.command === 'summarize') {
                         const selectedText = exec.args[0];
-                        const focus = exec.args.length > 1 ? exec.args.slice(1).join(' ') : undefined;
+                        const focus = exec.args.length > 1 ? `summarize, focusing on ${exec.args.slice(1).join(' ')}` : 'summarize this';
 
                         setDialogueWithRevert("Processing summary...", setDialogueText);
-                        callSummarizeAPI(selectedText, focus, userUid || undefined).then((result) => {
+                        ai(focus, { selection: selectedText, userId: userUid || undefined }).then((aiResult) => {
+                            const textResult = aiResult.text || aiResult.error || '';
                             // Check if quota exceeded
-                            if (result.startsWith('AI limit reached')) {
+                            if (textResult.startsWith('AI limit reached')) {
                                 if (upgradeFlowHandlerRef.current) {
                                     upgradeFlowHandlerRef.current();
                                 }
                                 return true;
                             }
 
-                            createSubtitleCycler(result, setDialogueText);
+                            createSubtitleCycler(textResult, setDialogueText);
                         }).catch(() => {
                             setDialogueWithRevert(`Could not summarize text`, setDialogueText);
                         });
@@ -9152,9 +9313,10 @@ export function useWorldEngine({
                         setDialogueWithRevert("Generating image...", setDialogueText);
                         setProcessingRegion(targetRegion);
 
-                        callGenerateImageAPI(textToSend.trim(), existingImageData || undefined, userUid || undefined).then(async (result) => {
+                        ai(textToSend.trim(), { referenceImage: existingImageData || undefined, userId: userUid || undefined }).then(async (result) => {
+                            const imageResult = result.image || { imageData: null, text: result.text || '' };
                             // Check if quota exceeded
-                            if (result.text && result.text.startsWith('AI limit reached')) {
+                            if (imageResult.text && imageResult.text.startsWith('AI limit reached')) {
                                 setProcessingRegion(null);
                                 if (upgradeFlowHandlerRef.current) {
                                     upgradeFlowHandlerRef.current();
@@ -9162,7 +9324,7 @@ export function useWorldEngine({
                                 return true;
                             }
 
-                            if (!result.imageData) {
+                            if (!imageResult.imageData) {
                                 setProcessingRegion(null);
                                 setDialogueWithRevert("Image generation failed", setDialogueText);
                                 return true;
@@ -9204,7 +9366,7 @@ export function useWorldEngine({
                                 const cellsHigh = Math.ceil(scaledHeight / charHeight);
 
                                 // Upload to storage
-                                const storageUrl = await uploadImageToStorage(result.imageData!);
+                                const storageUrl = await uploadImageToStorage(imageResult.imageData!);
 
                                 // Create note using helper
                                 const { noteKey, noteData } = createNote({
@@ -9265,7 +9427,7 @@ export function useWorldEngine({
                                 setDialogueWithRevert("Error loading generated image", setDialogueText);
                             };
 
-                            img.src = result.imageData!;
+                            img.src = imageResult.imageData!;
                         }).catch((error) => {
                             setProcessingRegion(null);
                             logger.error('Error in image generation:', error);
@@ -9302,7 +9464,8 @@ export function useWorldEngine({
                             metadata: `Canvas viewport center: ${JSON.stringify(getViewportCenter())}, Current cursor: ${JSON.stringify(cursorPos)}`
                         };
 
-                        callChatAPI(enhancedPrompt, true, userUid || undefined, worldContext).then((response) => {
+                        ai(enhancedPrompt, { userId: userUid || undefined, worldContext }).then((result) => {
+                            const response = result.text || result.error || '';
                             // Check if quota exceeded
                             if (response.startsWith('AI limit reached')) {
                                 setProcessingRegion(null);
@@ -9487,7 +9650,8 @@ export function useWorldEngine({
                 };
 
                 // Use world context for AI chat
-                callChatAPI(textToSend.trim(), true, userUid || undefined, worldContext).then((response) => {
+                ai(textToSend.trim(), { userId: userUid || undefined, worldContext }).then((result) => {
+                    const response = result.text || result.error || '';
                     // Check if quota exceeded
                     if (response.startsWith('AI limit reached')) {
                         if (upgradeFlowHandlerRef.current) {
