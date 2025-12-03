@@ -72,7 +72,6 @@ export async function generateImage(
                 contents,
                 config: {
                     responseModalities: ["IMAGE", "TEXT"],
-                    ...(aspectRatio && { aspectRatio })
                 }
             }),
             new Promise((_, reject) => {
@@ -110,8 +109,154 @@ export async function generateImage(
             logger.debug('AI image generation was interrupted by user');
             return { imageData: null, text: '[Interrupted]' };
         }
-        logger.error('Error generating image:', error);
-        return { imageData: null, text: 'Could not generate image' };
+        // Log the full error details for debugging
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorStack = error instanceof Error ? error.stack : '';
+        logger.error('Error generating image:', { message: errorMessage, stack: errorStack, error });
+        console.error('[AI Image Gen Error]', errorMessage, errorStack);
+        return { imageData: null, text: `Could not generate image: ${errorMessage}` };
+    }
+}
+
+/**
+ * Edit text content using AI
+ */
+export async function editTextContent(
+    prompt: string,
+    currentContent: string,
+    userId?: string
+): Promise<{ textContent: string | null; message: string }> {
+    try {
+        if (userId) {
+            const quota = await checkUserQuota(userId);
+            if (!quota.canUseAI) {
+                return {
+                    textContent: null,
+                    message: `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`
+                };
+            }
+        }
+
+        const response = await getAIClient().models.generateContent({
+            model: 'gemini-2.0-flash',
+            contents: `You are editing text content. Apply the user's instruction to transform the text.
+
+Current text:
+"""
+${currentContent}
+"""
+
+User instruction: ${prompt}
+
+Respond with ONLY the updated text. No explanations, no markdown formatting, just the raw text content.`,
+            config: {
+                temperature: 0.3,
+            }
+        });
+
+        const newContent = response.text?.trim();
+        if (!newContent) {
+            return { textContent: null, message: 'No content generated' };
+        }
+
+        if (userId) {
+            await incrementUserUsage(userId);
+        }
+
+        return { textContent: newContent, message: 'Text updated' };
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error('Error editing text content:', errorMessage);
+        return { textContent: null, message: `Could not edit text: ${errorMessage}` };
+    }
+}
+
+/**
+ * Edit table/data content using AI
+ */
+export async function editTableContent(
+    prompt: string,
+    currentTableData: {
+        columns: Array<{ width: number; header?: string }>;
+        rows: Array<{ height: number }>;
+        cells: Record<string, string>;
+    },
+    userId?: string
+): Promise<{ tableData: typeof currentTableData | null; message: string }> {
+    try {
+        if (userId) {
+            const quota = await checkUserQuota(userId);
+            if (!quota.canUseAI) {
+                return {
+                    tableData: null,
+                    message: `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`
+                };
+            }
+        }
+
+        // Convert table to readable format for AI
+        const { columns, rows, cells } = currentTableData;
+        let tableText = '';
+        for (let r = 0; r < rows.length; r++) {
+            const rowCells: string[] = [];
+            for (let c = 0; c < columns.length; c++) {
+                rowCells.push(cells[`${r},${c}`] || '');
+            }
+            tableText += rowCells.join('\t') + '\n';
+        }
+
+        const response = await getAIClient().models.generateContent({
+            model: 'gemini-2.0-flash',
+            contents: `You are editing a table/spreadsheet. Apply the user's instruction to transform the data.
+
+Current table (${rows.length} rows x ${columns.length} columns, tab-separated):
+${tableText}
+
+User instruction: ${prompt}
+
+Respond with ONLY the updated table data in the same format (tab-separated values, one row per line).
+Keep the same number of columns. You may add or remove rows if the instruction requires it.
+No explanations, no markdown, just the raw data.`,
+            config: {
+                temperature: 0.3,
+            }
+        });
+
+        const newTableText = response.text?.trim();
+        if (!newTableText) {
+            return { tableData: null, message: 'No content generated' };
+        }
+
+        // Parse the response back into table structure
+        const newRows = newTableText.split('\n').filter(line => line.trim());
+        const newCells: Record<string, string> = {};
+        const updatedRows: Array<{ height: number }> = [];
+
+        for (let r = 0; r < newRows.length; r++) {
+            const cellValues = newRows[r].split('\t');
+            for (let c = 0; c < columns.length && c < cellValues.length; c++) {
+                newCells[`${r},${c}`] = cellValues[c];
+            }
+            // Preserve row height or use default
+            updatedRows.push(rows[r] || { height: 1 });
+        }
+
+        if (userId) {
+            await incrementUserUsage(userId);
+        }
+
+        return {
+            tableData: {
+                columns: currentTableData.columns, // Keep column structure
+                rows: updatedRows,
+                cells: newCells
+            },
+            message: 'Table updated'
+        };
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error('Error editing table content:', errorMessage);
+        return { tableData: null, message: `Could not edit table: ${errorMessage}` };
     }
 }
 
@@ -279,6 +424,21 @@ export interface CanvasState {
     chips: Array<{ id: string; x: number; y: number; text: string; color?: string }>;
 }
 
+/** Selected note for in-place editing */
+export interface SelectedNote {
+    key: string;
+    contentType: 'text' | 'image' | 'data' | 'script';
+    bounds: { startX: number; startY: number; endX: number; endY: number };
+    // Content varies by type:
+    textContent?: string; // For text/script notes - extracted text
+    imageData?: string;   // For image notes - base64 data URL
+    tableData?: {         // For data notes - table structure
+        columns: Array<{ width: number; header?: string }>;
+        rows: Array<{ height: number }>;
+        cells: Record<string, string>; // "row,col" → cell text
+    };
+}
+
 /** Context for AI - provide whatever is available, AI decides what to do */
 export interface AIContext {
     userId?: string;
@@ -291,6 +451,21 @@ export interface AIContext {
     referenceImage?: string;
     aspectRatio?: string;
     canvasState?: CanvasState;
+    selectedNote?: SelectedNote; // Note to edit in-place
+}
+
+/** Updated note content returned from AI */
+export interface NoteUpdate {
+    key: string;
+    contentType: 'text' | 'image' | 'data' | 'script';
+    // Updated content (one of these based on contentType):
+    textContent?: string;
+    imageData?: string;
+    tableData?: {
+        columns: Array<{ width: number; header?: string }>;
+        rows: Array<{ height: number }>;
+        cells: Record<string, string>;
+    };
 }
 
 /** Result from ai() - model decides response type */
@@ -304,6 +479,7 @@ export interface AIResult {
         imageData: string | null;
         text: string;
     };
+    noteUpdate?: NoteUpdate; // Updated note content for in-place replacement
     error?: string;
 }
 

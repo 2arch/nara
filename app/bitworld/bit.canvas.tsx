@@ -2385,18 +2385,66 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             }
             return chips;
         },
-        createNote: (x, y, width, height, content) => {
+        createNote: (x, y, width, height, contentType, content, imageData, generateImage, scriptData, tableData) => {
             // Create a note directly without requiring selection state
             const noteId = `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-            const noteData = {
+            const noteData: Record<string, any> = {
                 startX: x,
                 startY: y,
                 endX: x + width,
                 endY: y + height,
-                contentType: 'text',
+                contentType: contentType || 'text',
                 createdAt: new Date().toISOString(),
             };
+
+            // Helper to convert content string to grid format
+            // Format: { "x,y": "char", ... } where coords are relative to note
+            // GRID_CELL_SPAN = 2: each character row is 2 cells tall
+            const GRID_CELL_SPAN = 2;
+            const contentToGrid = (text: string): Record<string, string> => {
+                const data: Record<string, string> = {};
+                const lines = text.split('\n');
+                for (let lineY = 0; lineY < lines.length; lineY++) {
+                    const line = lines[lineY];
+                    for (let charX = 0; charX < line.length; charX++) {
+                        data[`${charX},${lineY * GRID_CELL_SPAN}`] = line[charX];
+                    }
+                }
+                return data;
+            };
+
+            // Handle different content types
+            if (contentType === 'script') {
+                // Script note: code with syntax highlighting
+                noteData.scriptData = {
+                    language: scriptData?.language || 'javascript',
+                    status: 'idle'
+                };
+                if (content) {
+                    noteData.data = contentToGrid(content);
+                }
+            } else if (contentType === 'data' && tableData) {
+                // Data/table note - add required fields
+                noteData.tableData = {
+                    ...tableData,
+                    frozenRows: tableData.frozenRows ?? 1,
+                    frozenCols: tableData.frozenCols ?? 0,
+                    activeCell: tableData.activeCell ?? { row: 0, col: 0 },
+                    cellScrollOffsets: tableData.cellScrollOffsets ?? {}
+                };
+                noteData.scrollOffset = 0;
+                noteData.scrollOffsetX = 0;
+            } else if (contentType === 'image') {
+                // Image note
+                if (imageData) {
+                    noteData.imageData = imageData;
+                }
+                // TODO: Handle generateImage (would need AI integration)
+            } else if ((contentType === 'text' || !contentType) && content) {
+                // Text note (default)
+                noteData.data = contentToGrid(content);
+            }
 
             engine.setWorldData(prev => ({
                 ...prev,
@@ -2557,6 +2605,22 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             } catch (e: any) {
                 return { success: false, error: e.message };
             }
+        },
+        deleteEntity: (type, id) => {
+            // Delete entity by type and id
+            if (type === 'note' || type === 'agent' || type === 'chip') {
+                const key = id;
+                if (engine.worldData[key]) {
+                    engine.setWorldData(prev => {
+                        const newData = { ...prev };
+                        delete newData[key];
+                        return newData;
+                    });
+                    return { success: true };
+                }
+                return { success: false, error: `${type} ${id} not found` };
+            }
+            return { success: false, error: `Unknown entity type: ${type}` };
         },
     });
 

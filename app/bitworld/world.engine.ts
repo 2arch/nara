@@ -5471,22 +5471,42 @@ export function useWorldEngine({
                             return agentId;
                         },
                         moveAgents: (agentIds, destination) => {
-                            // Update agent positions in worldData
-                            setWorldData(prev => {
-                                const newData = { ...prev };
-                                for (const agentId of agentIds) {
-                                    const agentDataStr = prev[agentId];
-                                    if (agentDataStr) {
-                                        try {
-                                            const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
-                                            agentData.x = destination.x;
-                                            agentData.y = destination.y;
-                                            newData[agentId] = JSON.stringify(agentData);
-                                        } catch {}
+                            // Use agentHandlers if available for animated movement
+                            if (agentHandlersRef.current?.moveAgents) {
+                                agentHandlersRef.current.moveAgents(agentIds, destination);
+                            } else {
+                                // Fallback: Update agent positions directly in worldData
+                                setWorldData(prev => {
+                                    const newData = { ...prev };
+                                    for (const agentId of agentIds) {
+                                        const agentDataStr = prev[agentId];
+                                        if (agentDataStr) {
+                                            try {
+                                                const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+                                                agentData.x = destination.x;
+                                                agentData.y = destination.y;
+                                                newData[agentId] = JSON.stringify(agentData);
+                                            } catch {}
+                                        }
                                     }
-                                }
-                                return newData;
-                            });
+                                    return newData;
+                                });
+                            }
+                        },
+                        moveAgentsPath: (agentIds, path) => {
+                            if (agentHandlersRef.current?.moveAgentsPath) {
+                                agentHandlersRef.current.moveAgentsPath(agentIds, path);
+                            }
+                        },
+                        moveAgentsExpr: (agentIds, xExpr, yExpr, vars, duration) => {
+                            if (agentHandlersRef.current?.moveAgentsExpr) {
+                                agentHandlersRef.current.moveAgentsExpr(agentIds, xExpr, yExpr, vars, duration);
+                            }
+                        },
+                        stopAgentsExpr: (agentIds) => {
+                            if (agentHandlersRef.current?.stopAgentsExpr) {
+                                agentHandlersRef.current.stopAgentsExpr(agentIds);
+                            }
                         },
                         getNotes: () => {
                             const notes: Array<{ id: string; x: number; y: number; width: number; height: number; contentType?: string; content?: string }> = [];
@@ -5510,18 +5530,52 @@ export function useWorldEngine({
                             }
                             return notes;
                         },
-                        createNote: (x, y, width, height, contentType?, content?, imageData?) => {
+                        createNote: (x, y, width, height, contentType?, content?, imageData?, generateImage?, scriptData?, tableData?) => {
                             const noteKey = `note_${Date.now()}`;
+                            const GRID_CELL_SPAN = 2;
+
+                            // Convert text content to grid format
+                            const contentToGrid = (text: string): Record<string, string> => {
+                                const data: Record<string, string> = {};
+                                const lines = text.split('\n');
+                                for (let lineY = 0; lineY < lines.length; lineY++) {
+                                    const line = lines[lineY];
+                                    for (let charX = 0; charX < line.length; charX++) {
+                                        data[`${charX},${lineY * GRID_CELL_SPAN}`] = line[charX];
+                                    }
+                                }
+                                return data;
+                            };
+
                             const noteData: Record<string, any> = {
-                                type: 'note',
-                                x, y, width, height,
+                                startX: x,
+                                startY: y,
+                                endX: x + width,
+                                endY: y + height,
                                 contentType: contentType || 'text',
-                                content: content || '',
                                 timestamp: Date.now(),
                             };
-                            if (imageData) {
+
+                            // Handle different content types
+                            if (contentType === 'script') {
+                                noteData.scriptData = { language: scriptData?.language || 'javascript', status: 'idle' };
+                                if (content) noteData.data = contentToGrid(content);
+                            } else if (contentType === 'data' && tableData) {
+                                noteData.tableData = {
+                                    ...tableData,
+                                    frozenRows: tableData.frozenRows ?? 1,
+                                    frozenCols: tableData.frozenCols ?? 0,
+                                    activeCell: tableData.activeCell ?? { row: 0, col: 0 },
+                                    cellScrollOffsets: tableData.cellScrollOffsets ?? {}
+                                };
+                                noteData.scrollOffset = 0;
+                                noteData.scrollOffsetX = 0;
+                            } else if (contentType === 'image' && imageData) {
                                 noteData.imageData = imageData;
+                            } else if (content) {
+                                noteData.data = contentToGrid(content);
                             }
+
                             setWorldData(prev => ({ ...prev, [noteKey]: JSON.stringify(noteData) }));
                         },
                         getChips: () => {
@@ -9272,9 +9326,21 @@ export function useWorldEngine({
             }
 
             if (targetRegion) {
-                // Check for existing image in the region (both old image_ format and new note_ format)
+                // Check for existing note in the region (any type: text, script, data, image)
                 let existingImageData: string | null = null;
                 let existingImageKey: string | null = null;
+                let selectedNoteForAI: {
+                    key: string;
+                    contentType: 'text' | 'image' | 'data' | 'script';
+                    bounds: { startX: number; startY: number; endX: number; endY: number };
+                    textContent?: string;
+                    imageData?: string;
+                    tableData?: {
+                        columns: Array<{ width: number; header?: string }>;
+                        rows: Array<{ height: number }>;
+                        cells: Record<string, string>;
+                    };
+                } | null = null;
 
                 for (const key in worldData) {
                     // Check old image_ format
@@ -9291,16 +9357,61 @@ export function useWorldEngine({
                             }
                         }
                     }
-                    // Check new note_ format with contentType: 'image'
+                    // Check new note_ format - all content types
                     if (key.startsWith('note_')) {
                         try {
                             const noteData = typeof worldData[key] === 'string' ? JSON.parse(worldData[key] as string) : worldData[key];
-                            if (noteData && noteData.contentType === 'image' && noteData.src) {
+                            if (noteData && noteData.startX !== undefined) {
                                 // Check if note overlaps with target region
                                 if (noteData.startX <= targetRegion.endX && noteData.endX >= targetRegion.startX &&
                                     noteData.startY <= targetRegion.endY && noteData.endY >= targetRegion.startY) {
-                                    existingImageData = noteData.src;
-                                    existingImageKey = key;
+
+                                    const contentType = noteData.contentType || 'text';
+
+                                    if (contentType === 'image' && noteData.src) {
+                                        existingImageData = noteData.src;
+                                        existingImageKey = key;
+                                        selectedNoteForAI = {
+                                            key,
+                                            contentType: 'image',
+                                            bounds: { startX: noteData.startX, startY: noteData.startY, endX: noteData.endX, endY: noteData.endY },
+                                            imageData: noteData.src
+                                        };
+                                    } else if (contentType === 'data' && noteData.tableData) {
+                                        selectedNoteForAI = {
+                                            key,
+                                            contentType: 'data',
+                                            bounds: { startX: noteData.startX, startY: noteData.startY, endX: noteData.endX, endY: noteData.endY },
+                                            tableData: noteData.tableData
+                                        };
+                                    } else if ((contentType === 'text' || contentType === 'script') && noteData.data) {
+                                        // Extract text from note.data grid
+                                        const noteHeight = noteData.endY - noteData.startY + 1;
+                                        const noteWidth = noteData.endX - noteData.startX + 1;
+                                        let textContent = '';
+                                        for (let relY = 0; relY < noteHeight; relY++) {
+                                            let lineText = '';
+                                            for (let relX = 0; relX < noteWidth; relX++) {
+                                                const cellKey = `${relX},${relY}`;
+                                                const charData = noteData.data[cellKey];
+                                                if (charData) {
+                                                    const char = typeof charData === 'string' ? charData :
+                                                        (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : ' ';
+                                                    lineText += char;
+                                                } else {
+                                                    lineText += ' ';
+                                                }
+                                            }
+                                            textContent += lineText.trimEnd();
+                                            if (relY < noteHeight - 1) textContent += '\n';
+                                        }
+                                        selectedNoteForAI = {
+                                            key,
+                                            contentType: contentType as 'text' | 'script',
+                                            bounds: { startX: noteData.startX, startY: noteData.startY, endX: noteData.endX, endY: noteData.endY },
+                                            textContent: textContent.trim()
+                                        };
+                                    }
                                     break;
                                 }
                             }
@@ -9356,7 +9467,90 @@ export function useWorldEngine({
                     }
                 }
 
-                if (textToSend.trim() || existingImageData) {
+                if (textToSend.trim() || existingImageData || selectedNoteForAI) {
+                    // Check if we have a non-image note to edit
+                    if (selectedNoteForAI && selectedNoteForAI.contentType !== 'image') {
+                        // Non-image note editing path (text, script, data)
+                        const dialogueMessage = selectedNoteForAI.contentType === 'data'
+                            ? "Updating table..."
+                            : "Updating text...";
+                        setDialogueWithRevert(dialogueMessage, setDialogueText);
+                        setProcessingRegion(targetRegion);
+
+                        ai(textToSend.trim(), { selectedNote: selectedNoteForAI, userId: userUid || undefined }).then(async (result) => {
+                            // Check for quota exceeded
+                            if (result.text && result.text.startsWith('AI limit reached')) {
+                                setProcessingRegion(null);
+                                if (upgradeFlowHandlerRef.current) {
+                                    upgradeFlowHandlerRef.current();
+                                }
+                                return;
+                            }
+
+                            // Handle note update
+                            if (result.noteUpdate) {
+                                const { key, contentType, textContent, tableData, imageData: newImageData } = result.noteUpdate;
+
+                                try {
+                                    const existingNoteData = typeof worldData[key] === 'string'
+                                        ? JSON.parse(worldData[key] as string)
+                                        : worldData[key];
+
+                                    if (contentType === 'text' || contentType === 'script') {
+                                        // Convert textContent back to grid format
+                                        const newData: Record<string, string> = {};
+                                        if (textContent) {
+                                            const lines = textContent.split('\n');
+                                            for (let y = 0; y < lines.length; y++) {
+                                                for (let x = 0; x < lines[y].length; x++) {
+                                                    newData[`${x},${y}`] = lines[y][x];
+                                                }
+                                            }
+                                        }
+
+                                        const updatedNoteData = {
+                                            ...existingNoteData,
+                                            data: newData
+                                        };
+
+                                        setWorldData({
+                                            ...worldData,
+                                            [key]: JSON.stringify(updatedNoteData)
+                                        });
+                                        setDialogueWithRevert("Text updated", setDialogueText);
+                                    } else if (contentType === 'data' && tableData) {
+                                        const updatedNoteData = {
+                                            ...existingNoteData,
+                                            tableData: {
+                                                ...existingNoteData.tableData,
+                                                ...tableData
+                                            }
+                                        };
+
+                                        setWorldData({
+                                            ...worldData,
+                                            [key]: JSON.stringify(updatedNoteData)
+                                        });
+                                        setDialogueWithRevert("Table updated", setDialogueText);
+                                    }
+                                } catch (e) {
+                                    logger.error('Failed to update note:', e);
+                                    setDialogueWithRevert("Failed to update note", setDialogueText);
+                                }
+                            } else {
+                                setDialogueWithRevert(result.text || "Update failed", setDialogueText);
+                            }
+
+                            setProcessingRegion(null);
+                        }).catch((error) => {
+                            logger.error('Note editing failed:', error);
+                            setProcessingRegion(null);
+                            setDialogueWithRevert("Failed to update note", setDialogueText);
+                        });
+
+                        return true;
+                    }
+
                     // Detect intent: image-to-image or text-to-image or text-to-text
                     const hasImageIntent = existingImageData ||
                         detectImageIntent(textToSend).intent === 'image';
@@ -9366,7 +9560,46 @@ export function useWorldEngine({
                         setDialogueWithRevert("Generating image...", setDialogueText);
                         setProcessingRegion(targetRegion);
 
-                        ai(textToSend.trim(), { referenceImage: existingImageData || undefined, userId: userUid || undefined }).then(async (result) => {
+                        // Convert URL to base64 if needed
+                        (async () => {
+                            let base64ImageData: string | undefined = undefined;
+
+                            if (existingImageData) {
+                                if (existingImageData.startsWith('data:')) {
+                                    base64ImageData = existingImageData;
+                                } else if (existingImageData.startsWith('http://') || existingImageData.startsWith('https://')) {
+                                    try {
+                                        const response = await fetch(existingImageData, { mode: 'cors' });
+                                        if (!response.ok) {
+                                            throw new Error(`Failed to fetch: ${response.status}`);
+                                        }
+                                        const blob = await response.blob();
+                                        base64ImageData = await new Promise<string>((resolve, reject) => {
+                                            const reader = new FileReader();
+                                            reader.onloadend = () => resolve(reader.result as string);
+                                            reader.onerror = reject;
+                                            reader.readAsDataURL(blob);
+                                        });
+                                    } catch (error) {
+                                        logger.error('Failed to fetch image for conversion:', error);
+                                        setProcessingRegion(null);
+                                        setDialogueWithRevert("Could not load image for editing", setDialogueText);
+                                        return;
+                                    }
+                                }
+
+                                // Update selectedNoteForAI with base64 image data for in-place update
+                                if (selectedNoteForAI && selectedNoteForAI.contentType === 'image') {
+                                    selectedNoteForAI.imageData = base64ImageData;
+                                }
+                            }
+
+                        // Use selectedNote for image-to-image editing (in-place), otherwise use referenceImage
+                        const aiContext = selectedNoteForAI && selectedNoteForAI.contentType === 'image'
+                            ? { selectedNote: selectedNoteForAI, userId: userUid || undefined }
+                            : { referenceImage: base64ImageData, userId: userUid || undefined };
+
+                        ai(textToSend.trim(), aiContext).then(async (result) => {
                             const imageResult = result.image || { imageData: null, text: result.text || '' };
                             // Check if quota exceeded
                             if (imageResult.text && imageResult.text.startsWith('AI limit reached')) {
@@ -9384,6 +9617,45 @@ export function useWorldEngine({
                             }
 
                             setDialogueWithRevert("Image generated successfully", setDialogueText);
+
+                            // Check if this is an in-place update via noteUpdate
+                            if (result.noteUpdate && result.noteUpdate.imageData && selectedNoteForAI) {
+                                // In-place update: just update the note's src
+                                const img = new Image();
+                                img.onload = async () => {
+                                    const storageUrl = await uploadImageToStorage(result.noteUpdate!.imageData!);
+
+                                    try {
+                                        const existingNoteData = typeof worldData[selectedNoteForAI!.key] === 'string'
+                                            ? JSON.parse(worldData[selectedNoteForAI!.key] as string)
+                                            : worldData[selectedNoteForAI!.key];
+
+                                        const updatedNoteData = {
+                                            ...existingNoteData,
+                                            src: storageUrl,
+                                            originalWidth: img.width,
+                                            originalHeight: img.height
+                                        };
+
+                                        setWorldData({
+                                            ...worldData,
+                                            [selectedNoteForAI!.key]: JSON.stringify(updatedNoteData)
+                                        });
+                                        setDialogueWithRevert("Image updated", setDialogueText);
+                                    } catch (e) {
+                                        logger.error('Failed to update image note:', e);
+                                        setDialogueWithRevert("Failed to update image", setDialogueText);
+                                    }
+
+                                    setProcessingRegion(null);
+                                };
+                                img.onerror = () => {
+                                    setProcessingRegion(null);
+                                    setDialogueWithRevert("Failed to load generated image", setDialogueText);
+                                };
+                                img.src = result.noteUpdate.imageData;
+                                return true;
+                            }
 
                             // Load the generated image to get its dimensions
                             const img = new Image();
@@ -9486,6 +9758,7 @@ export function useWorldEngine({
                             logger.error('Error in image generation:', error);
                             setDialogueWithRevert("Could not generate image", setDialogueText);
                         });
+                        })();
                     } else {
                         // Text generation path (existing logic)
                         setDialogueWithRevert("Processing region...", setDialogueText);

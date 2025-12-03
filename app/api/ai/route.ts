@@ -6,6 +6,65 @@ import { checkUserQuota, incrementUserUsage } from '@/app/firebase';
 // Lazy client initialization
 let genaiClient: GoogleGenAI | null = null;
 
+// =============================================================================
+// CONVERSATION HISTORY MANAGEMENT
+// =============================================================================
+
+interface ConversationEntry {
+    history: Content[];
+    lastAccess: number;
+}
+
+// In-memory conversation history per user (userId -> history)
+const conversationStore = new Map<string, ConversationEntry>();
+
+// Configuration
+const MAX_HISTORY_TURNS = 10; // Keep last N exchanges (user + model pairs)
+const HISTORY_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+// Get or create conversation history for user
+function getConversationHistory(userId: string): Content[] {
+    const entry = conversationStore.get(userId);
+    if (entry) {
+        entry.lastAccess = Date.now();
+        return entry.history;
+    }
+    return [];
+}
+
+// Add messages to conversation history
+function addToHistory(userId: string, userMessage: Content, modelResponse: Content) {
+    let entry = conversationStore.get(userId);
+    if (!entry) {
+        entry = { history: [], lastAccess: Date.now() };
+        conversationStore.set(userId, entry);
+    }
+
+    entry.history.push(userMessage, modelResponse);
+    entry.lastAccess = Date.now();
+
+    // Trim to max turns (each turn = 2 messages: user + model)
+    while (entry.history.length > MAX_HISTORY_TURNS * 2) {
+        entry.history.shift();
+        entry.history.shift();
+    }
+}
+
+// Clear conversation history for user
+function clearHistory(userId: string) {
+    conversationStore.delete(userId);
+}
+
+// Cleanup old conversations periodically
+setInterval(() => {
+    const now = Date.now();
+    for (const [userId, entry] of conversationStore.entries()) {
+        if (now - entry.lastAccess > HISTORY_TTL_MS) {
+            conversationStore.delete(userId);
+        }
+    }
+}, 5 * 60 * 1000); // Check every 5 minutes
+
 function getClient(): GoogleGenAI {
     if (!genaiClient) {
         const apiKey = process.env.GEMINI_API_KEY;
@@ -64,24 +123,35 @@ You have two primary canvas tools:
 
 And two response tools:
 - respond_text({ text }) - For answering questions or explanations
-- generate_image({ prompt, x?, y?, width?, height? }) - For creating visual content
+- generate_image({ prompt }) - For creating visual content with AI image generation
 
-WORKFLOW:
-1. Use sense() first to discover what's on the canvas (agents, notes, positions)
-2. Use make() to create or modify based on what you discovered
-3. Use respond_text() for conversational responses
-4. Use generate_image() when user wants visual content created
+IMPORTANT: When user asks to "generate", "create", "draw", or "make" an image, picture, or visual content, IMMEDIATELY use generate_image() tool. Do NOT ask for clarification - just generate it. The cursor position will be used automatically.
 
 EXAMPLES:
+- "generate an image of a cat" → generate_image({ prompt: "a cat" })
+- "create a picture of a sunset" → generate_image({ prompt: "a beautiful sunset" })
+- "draw a dragon" → generate_image({ prompt: "a dragon" })
 - "move the agent to the right" → sense({ find: 'agents' }) then make({ agent: { target: { all: true }, move: { to: { x: 100, y: 50 } } } })
 - "paint a red circle" → make({ paint: { circle: { x: 50, y: 50, radius: 10, color: '#ff0000' } } })
-- "create a note here" → make({ note: { x: 10, y: 10, width: 20, height: 10, contentType: 'text' } })
 - "what agents are there?" → sense({ find: 'agents' }) then respond_text with the info
 
 Be precise with coordinates and colors. Use hex colors (e.g., #ff0000 for red).
 The canvas uses integer cell coordinates. Positive X is right, positive Y is down.`;
 
 const MAX_ITERATIONS = 10;
+
+interface SelectedNote {
+    key: string;
+    contentType: 'text' | 'image' | 'data' | 'script';
+    bounds: { startX: number; startY: number; endX: number; endY: number };
+    textContent?: string;
+    imageData?: string;
+    tableData?: {
+        columns: Array<{ width: number; header?: string }>;
+        rows: Array<{ height: number }>;
+        cells: Record<string, string>;
+    };
+}
 
 interface AIRequest {
     prompt: string;
@@ -102,6 +172,9 @@ interface AIRequest {
         notes: Array<{ id: string; x: number; y: number; width: number; height: number; contentType?: string; content?: string }>;
         chips: Array<{ id: string; x: number; y: number; text: string; color?: string }>;
     };
+    clearHistory?: boolean; // Clear conversation history before this request
+    forceImage?: boolean; // Skip Gemini tool selection and directly generate image
+    selectedNote?: SelectedNote; // Note to edit in-place
 }
 
 // Handle sense() calls by returning data from canvasState
@@ -177,13 +250,102 @@ function handleSense(args: Record<string, any>, canvasState: AIRequest['canvasSt
     }
 }
 
+// Server-side image intent detection (mirrors ai.utils.ts)
+const IMAGE_PATTERNS = [
+    /^generate\s+(an?\s+)?(image|picture|photo|illustration|drawing|art)/i,
+    /^create\s+(an?\s+)?(image|picture|photo|illustration|drawing|art)/i,
+    /^draw\s+(an?\s+)?/i,
+    /^make\s+(an?\s+)?(image|picture|photo|illustration|drawing|art)/i,
+    /^paint\s+(an?\s+)?(image|picture|photo|illustration|drawing|art)/i,
+    /\b(generate|create|make)\s+(me\s+)?(an?\s+)?(image|picture|photo)/i,
+];
+
+function detectImageIntent(input: string): boolean {
+    const text = input.toLowerCase();
+    return IMAGE_PATTERNS.some(pattern => pattern.test(text));
+}
+
 export async function POST(request: NextRequest) {
     try {
         const body: AIRequest = await request.json();
-        const { prompt, userId, selection, worldContext, referenceImage, canvasState } = body;
+        const { prompt, userId, selection, worldContext, referenceImage, canvasState, clearHistory: shouldClearHistory, selectedNote } = body;
 
         if (!prompt) {
             return NextResponse.json({ error: 'prompt required' }, { status: 400 });
+        }
+
+        // Handle note editing - route based on contentType
+        if (selectedNote) {
+            const { key, contentType, textContent, imageData, tableData } = selectedNote;
+
+            if (contentType === 'image' && imageData) {
+                // Image note editing
+                const { generateImage } = await import('@/app/bitworld/ai');
+                const imageResult = await generateImage(prompt, imageData, userId);
+
+                if (userId) {
+                    await incrementUserUsage(userId);
+                }
+
+                return NextResponse.json({
+                    noteUpdate: {
+                        key,
+                        contentType: 'image',
+                        imageData: imageResult.imageData
+                    },
+                    text: imageResult.text || undefined,
+                    image: imageResult
+                });
+            } else if ((contentType === 'text' || contentType === 'script') && textContent !== undefined) {
+                // Text/script note editing
+                const { editTextContent } = await import('@/app/bitworld/ai');
+                const result = await editTextContent(prompt, textContent, userId);
+
+                return NextResponse.json({
+                    noteUpdate: {
+                        key,
+                        contentType,
+                        textContent: result.textContent
+                    },
+                    text: result.message
+                });
+            } else if (contentType === 'data' && tableData) {
+                // Table/data note editing
+                const { editTableContent } = await import('@/app/bitworld/ai');
+                const result = await editTableContent(prompt, tableData, userId);
+
+                return NextResponse.json({
+                    noteUpdate: {
+                        key,
+                        contentType: 'data',
+                        tableData: result.tableData
+                    },
+                    text: result.message
+                });
+            }
+        }
+
+        // Detect image intent - if detected, bypass Gemini and generate directly
+        const hasImageIntent = referenceImage || detectImageIntent(prompt);
+
+        if (hasImageIntent) {
+            // Direct image generation - skip Gemini tool selection
+            const { generateImage } = await import('@/app/bitworld/ai');
+            const imageResult = await generateImage(prompt, referenceImage, userId);
+
+            if (userId) {
+                await incrementUserUsage(userId);
+            }
+
+            return NextResponse.json({
+                image: imageResult,
+                text: imageResult.text || undefined,
+            });
+        }
+
+        // Clear history if requested
+        if (shouldClearHistory && userId) {
+            clearHistory(userId);
         }
 
         // Check quota
@@ -196,34 +358,37 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // Build the full prompt with context
-        let fullPrompt = prompt;
+        // Build the user message with context (only include dynamic context, not full state)
+        let userMessageText = prompt;
         if (selection) {
-            fullPrompt += `\n\nSelected text:\n"${selection}"`;
+            userMessageText += `\n\nSelected text:\n"${selection}"`;
         }
-        if (worldContext) {
-            fullPrompt += `\n\nCanvas context:\n${worldContext.compiledText}`;
-            if (worldContext.metadata) {
-                fullPrompt += `\n${worldContext.metadata}`;
-            }
-        }
+        // Only include compact canvas context (cursor + counts, not full lists)
         if (canvasState) {
-            fullPrompt += `\n\nCursor position: (${canvasState.cursorPosition.x}, ${canvasState.cursorPosition.y})`;
+            const contextSummary = [
+                `Cursor: (${canvasState.cursorPosition.x}, ${canvasState.cursorPosition.y})`,
+                `Agents: ${canvasState.agents.length}`,
+                `Notes: ${canvasState.notes.length}`,
+                `Chips: ${canvasState.chips.length}`,
+            ];
             if (canvasState.selection.start && canvasState.selection.end) {
-                fullPrompt += `\nSelection: (${canvasState.selection.start.x}, ${canvasState.selection.start.y}) to (${canvasState.selection.end.x}, ${canvasState.selection.end.y})`;
+                contextSummary.push(`Selection: (${canvasState.selection.start.x},${canvasState.selection.start.y}) to (${canvasState.selection.end.x},${canvasState.selection.end.y})`);
             }
+            userMessageText += `\n\n[Canvas: ${contextSummary.join(', ')}]`;
         }
         if (referenceImage) {
-            fullPrompt += `\n\n[Reference image provided for editing]`;
+            userMessageText += `\n\n[Reference image provided for editing]`;
         }
+
+        // Create the user message content
+        const userMessage: Content = { role: 'user', parts: [{ text: userMessageText }] };
 
         // Collect make() actions to return to client
         const collectedActions: Array<{ tool: string; args: Record<string, any> }> = [];
 
-        // Multi-turn tool calling loop
-        const history: Content[] = [
-            { role: 'user', parts: [{ text: fullPrompt }] }
-        ];
+        // Build history: previous conversation + current message
+        const previousHistory = userId ? getConversationHistory(userId) : [];
+        const history: Content[] = [...previousHistory, userMessage];
 
         let textResponse = '';
         let imageRequest: { prompt: string; editExisting?: boolean; x?: number; y?: number; width?: number; height?: number } | null = null;
@@ -297,11 +462,89 @@ export async function POST(request: NextRequest) {
                         functionResponse: { name, response: result }
                     });
                 } else if (name === 'make') {
-                    // Collect make actions to send to client
-                    collectedActions.push({ tool: 'make', args });
-                    functionResponses.push({
-                        functionResponse: { name, response: { success: true, message: 'Action queued for execution' } }
-                    });
+                    // Deep validation of make operations
+                    const validateMake = (makeArgs: Record<string, any>): string | null => {
+                        // Check paint has actual sub-operation
+                        if (makeArgs.paint) {
+                            const p = makeArgs.paint;
+                            if (!p.cells && !p.rect && !p.circle && !p.line && !p.erase) {
+                                return 'paint requires: cells, rect, circle, line, or erase';
+                            }
+                        }
+                        // Check note has required fields
+                        if (makeArgs.note) {
+                            if (makeArgs.note.x === undefined || makeArgs.note.y === undefined) {
+                                return 'note requires x and y position';
+                            }
+                        }
+                        // Check text has required fields
+                        if (makeArgs.text) {
+                            if (!makeArgs.text.content) {
+                                return 'text requires content';
+                            }
+                        }
+                        // Check chip has required fields
+                        if (makeArgs.chip) {
+                            if (!makeArgs.chip.text) {
+                                return 'chip requires text';
+                            }
+                        }
+                        // Check agent has valid operation
+                        if (makeArgs.agent) {
+                            const a = makeArgs.agent;
+                            // Must have either create OR (target + move/action)
+                            if (a.create) {
+                                // Create requires x and y
+                                if (a.create.x === undefined || a.create.y === undefined) {
+                                    return 'agent create requires x and y position';
+                                }
+                            } else if (a.target) {
+                                // Target must be combined with move or action
+                                if (!a.move && !a.action) {
+                                    return 'agent target requires move or action';
+                                }
+                                // Target must have a selector
+                                if (!a.target.id && !a.target.all && !a.target.near && !a.target.name) {
+                                    return 'agent target requires id, all, near, or name';
+                                }
+                            } else if (a.move || a.action) {
+                                // Has move/action but no target
+                                return 'agent move/action requires target (id, all, near, or name)';
+                            } else {
+                                return 'agent requires create or (target + move/action)';
+                            }
+                        }
+                        // Check delete has required fields
+                        if (makeArgs.delete) {
+                            if (!makeArgs.delete.type || !makeArgs.delete.id) {
+                                return 'delete requires type and id';
+                            }
+                        }
+                        // Check at least one operation is specified
+                        if (!makeArgs.paint && !makeArgs.note && !makeArgs.text &&
+                            !makeArgs.chip && !makeArgs.agent && !makeArgs.delete && !makeArgs.command) {
+                            return 'make() requires at least one operation: paint, note, text, chip, agent, delete, or command';
+                        }
+                        return null; // Valid
+                    };
+
+                    // Log make calls for debugging (can be removed in production)
+                    console.log('[AI] make() called with args:', JSON.stringify(args));
+
+                    const validationError = validateMake(args);
+                    if (validationError) {
+                        console.error('[AI] Invalid make call:', validationError);
+                        functionResponses.push({
+                            functionResponse: { name, response: { success: false, error: validationError } }
+                        });
+                    } else {
+                        console.log('[AI] make() validation passed, queuing action');
+                        // Collect make actions to send to client
+                        collectedActions.push({ tool: 'make', args });
+                        functionResponses.push({
+                            functionResponse: { name, response: { success: true, message: 'Action queued for execution' } }
+                        });
+                    }
                 } else {
                     // Unknown tool
                     functionResponses.push({
@@ -372,10 +615,52 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // Build response
+        // Save to conversation history (only save user message + summarized model response)
+        if (userId) {
+            // Build a concise model response for history (not the full tool call chain)
+            const modelSummary: string[] = [];
+            if (textResponse) {
+                modelSummary.push(textResponse);
+            }
+            if (collectedActions.length > 0) {
+                const actionSummary = collectedActions.map(a => {
+                    if (a.args.paint) return 'painted on canvas';
+                    if (a.args.note) return 'created note';
+                    if (a.args.chip) return 'created chip';
+                    if (a.args.agent?.create) return 'created agent';
+                    if (a.args.agent?.move) return 'moved agent(s)';
+                    if (a.args.text) return 'wrote text';
+                    if (a.args.delete) return 'deleted item';
+                    if (a.args.command) return `ran ${a.args.command}`;
+                    return 'performed action';
+                }).join(', ');
+                modelSummary.push(`[Actions: ${actionSummary}]`);
+            }
+            const modelResponse: Content = {
+                role: 'model',
+                parts: [{ text: modelSummary.join(' ') || 'Done.' }]
+            };
+            addToHistory(userId, userMessage, modelResponse);
+        }
+
+        // Build response - include image data if generated
+        let imageResponse: { imageData: string | null; text: string } | undefined;
+
+        // Check if we have an image in the actions
+        for (const action of collectedActions) {
+            if (action.args.note?.contentType === 'image' && action.args.note?.imageData?.src) {
+                imageResponse = {
+                    imageData: action.args.note.imageData.src,
+                    text: textResponse || ''
+                };
+                break;
+            }
+        }
+
         return NextResponse.json({
             text: textResponse || undefined,
             actions: collectedActions.length > 0 ? collectedActions : undefined,
+            image: imageResponse,
             error: undefined,
         });
 

@@ -4,9 +4,9 @@
   "private": true,
   "main": "electron/main.js",
   "scripts": {
-    "dev": "kill-port 3000 && next dev -p 3000 -H 0.0.0.0",
+    "dev": "fuser -k -9 3000/tcp 2>/dev/null; lsof -ti :3000 | xargs -r kill -9 2>/dev/null; sleep 1; next dev -p 3000 -H 0.0.0.0",
     "dev:watch": "nodemon --watch app --watch components --watch lib --ext ts,tsx,js,jsx --exec 'next dev -p 3000 -H 0.0.0.0'",
-    "build": "next build",
+    "build": "fuser -k -9 3000/tcp 2>/dev/null; lsof -ti :3000 | xargs -r kill -9 2>/dev/null; sleep 1; next build",
     "build:only": "next build",
     "start": "next start",
     "lint": "next lint",

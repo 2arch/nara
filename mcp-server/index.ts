@@ -121,6 +121,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === "make") {
       // make() - create or modify things
+      console.error("[MCP DEBUG] args:", JSON.stringify(args, null, 2));
       const { paint, note, text, chip, agent, delete: deleteOp, command } = args as {
         paint?: any;
         note?: any;
@@ -130,6 +131,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         delete?: { type: string; id: string };
         command?: string;
       };
+      console.error("[MCP DEBUG] note:", JSON.stringify(note, null, 2));
 
       const results: string[] = [];
 
@@ -165,14 +167,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // Handle note creation
       if (note) {
-        const { x, y, width, height, contentType, content, imageData, generateImage } = note;
+        const { x, y, width, height, contentType, content, imageData, generateImage, scriptData, tableData } = note;
         await sendToNara({
           type: "create_note",
           x, y, width, height,
           contentType: contentType || 'text',
           content,
           imageData,
-          generateImage
+          generateImage,
+          scriptData,
+          tableData
         });
         results.push(`Created ${contentType || 'text'} note at (${x},${y})`);
       }

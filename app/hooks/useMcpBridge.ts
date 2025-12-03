@@ -66,7 +66,7 @@ interface McpBridgeOptions {
   // Notes & Chips
   getNotes: () => NoteInfo[];
   getChips: () => ChipInfo[];
-  createNote: (x: number, y: number, width: number, height: number, contentType?: string, content?: string, imageData?: { src: string; originalWidth: number; originalHeight: number }, generateImage?: string) => { success: boolean; noteId?: string; error?: string };
+  createNote: (x: number, y: number, width: number, height: number, contentType?: string, content?: string, imageData?: { src: string; originalWidth: number; originalHeight: number }, generateImage?: string, scriptData?: { language: string }, tableData?: { columns: { width: number }[]; rows: { height: number }[]; cells: Record<string, string>; frozenRows?: number; frozenCols?: number; activeCell?: { row: number; col: number }; cellScrollOffsets?: Record<string, number> }) => { success: boolean; noteId?: string; error?: string };
   createChip: (x: number, y: number, text: string, color?: string) => { success: boolean; chipId?: string; error?: string };
   deleteEntity: (type: 'note' | 'agent' | 'chip', id: string) => { success: boolean; error?: string };
   // Text
@@ -235,13 +235,15 @@ export function useMcpBridge(options: McpBridgeOptions) {
           }
 
           case 'create_note': {
-            const { x, y, width, height, contentType, content, imageData, generateImage } = command as {
+            const { x, y, width, height, contentType, content, imageData, generateImage, scriptData, tableData } = command as {
               x: number; y: number; width: number; height: number;
               contentType?: string; content?: string;
               imageData?: { src: string; originalWidth: number; originalHeight: number };
               generateImage?: string;
+              scriptData?: { language: string };
+              tableData?: { columns: { width: number }[]; rows: { height: number }[]; cells: Record<string, string>; frozenRows?: number; frozenCols?: number; activeCell?: { row: number; col: number }; cellScrollOffsets?: Record<string, number> };
             } & McpCommand;
-            const result = createNote(x, y, width, height, contentType, content, imageData, generateImage);
+            const result = createNote(x, y, width, height, contentType, content, imageData, generateImage, scriptData, tableData);
             respond(result);
             break;
           }

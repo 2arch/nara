@@ -1613,7 +1613,7 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         speed: initialOptions?.speed ?? 0.5,  // Single speed controller (lower = slower)
         complexity: initialOptions?.complexity ?? 1.0,
         mode: initialOptions?.mode ?? 'nara',
-        interactiveTrails: initialOptions?.interactiveTrails ?? true,
+        interactiveTrails: initialOptions?.interactiveTrails ?? false,
         trailIntensity: initialOptions?.trailIntensity ?? 1.0,
         trailFadeMs: initialOptions?.trailFadeMs ?? 2000,
         faceOrientation: initialOptions?.faceOrientation

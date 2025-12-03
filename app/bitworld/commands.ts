@@ -343,6 +343,9 @@ export interface ModeState {
         walkSheet: string;
         idleSheet: string;
         name: string;
+        ghostMode?: boolean; // If true, auto-applies ghost effect with textColor
+        baseWalkPath?: string; // Original sprite path (before ghost effect)
+        baseIdlePath?: string;
     };
     isGeneratingSprite?: boolean; // True while generating sprite via API
     spriteProgress?: number; // Current progress (0-8) for sprite generation
@@ -496,7 +499,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'tutorial': 'Start the interactive tutorial. Learn the basics of spatial writing through hands-on exercises that teach you core commands and concepts.',
     'help': 'Show this detailed help menu. The command list stays open with descriptions for every available command, so you can explore what\'s possible.',
     'tab': 'Toggle AI-powered autocomplete suggestions. When enabled, type and see AI suggestions appear as gray text. Press Tab to accept suggestions.',
-    'bg': 'Change background color. Use /bg [color] for solid colors like /bg white, /bg black, /bg sulfur, etc.',
+    'bg': 'Change background. Use /bg [color] for solid colors (white, black, sulfur), /bg webcam for camera, /bg video for video, or /bg [prompt] to generate an AI background image.',
     'text': 'Change text color. Type /text followed by a color name (garden, sky, sunset, etc.). This sets the color for all new text you write on the canvas.',
     'font': 'Change font family. Type /font followed by a font name: "IBM Plex Mono" for a clean monospace font, or "Neureal" for a more stylized aesthetic.',
     'scale': 'Change text scale. Type /scale followed by dimensions like 1x2 (default), 1x6 (tall), or 4x4 (square). Affects new text you write.',
@@ -515,7 +518,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'account': 'Manage your account settings. Use /account reset to reset your password.',
     'upgrade': 'Upgrade to Nara Pro for unlimited AI operations. Starts a guided conversation to learn about Pro benefits and pricing before upgrading.',
     'debug': 'Toggle debug mode. Shows technical information about canvas state, performance, and rendering. Useful for troubleshooting or understanding the system.',
-    'be': 'Toggle character sprite cursor. When enabled, your cursor becomes an animated character that walks when you move and idles when stationary. Use /be --post [effect] <sprite> [color] to apply effects (monochrome, sepia, invert, ghost). For ghost effect, specify a hex color like #ff0000 for red ghosts.'
+    'be': 'Toggle ghost cursor. /be alone enables a ghost sprite that matches your text color. /be [prompt] generates a new character. Use /be --post [effect] <sprite> [color] to apply effects (monochrome, sepia, invert, ghost).'
 };
 
 // Standardized color mapping used throughout the application
@@ -1465,11 +1468,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
             // Public sprites available in /public folder
             const PUBLIC_SPRITES = [
-                { name: 'mudkip', walkPath: '/mudkip_walk.png', idlePath: '/mudkip_idle.png' },
-                { name: 'test', walkPath: '/sprites/test_walk.png', idlePath: '/sprites/test_idle.png' },
-                { name: 'wizard', walkPath: '/sprites/generated/wizard_walk.png', idlePath: '/sprites/generated/wizard_idle.png' },
-                { name: 'wizard_blue', walkPath: '/sprites/generated/wizard_with_blue_robes_walk.png', idlePath: '/sprites/generated/wizard_with_blue_robes_idle.png' },
-                { name: 'dragon_knight', walkPath: '/sprites/Dragon_knight/walk.png', idlePath: '/sprites/Dragon_knight/idle.png' },
+                { name: 'default', walkPath: '/sprites/default_walk.png', idlePath: '/sprites/default_idle.png' },
             ];
 
             if (parts.length > 1) {
@@ -1868,6 +1867,38 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             loadColorPreferences(settings);
         }
     }, [settings, loadColorPreferences]);
+
+    // Reactively update ghost sprite when textColor changes
+    useEffect(() => {
+        const sprite = modeState.characterSprite;
+        if (!sprite?.ghostMode || !sprite.baseWalkPath || !sprite.baseIdlePath) {
+            return;
+        }
+
+        // Debounce to avoid excessive reprocessing
+        const timeoutId = setTimeout(async () => {
+            try {
+                const ghostColor = modeState.textColor || '#FFFFFF';
+                const [walkSheet, idleSheet] = await Promise.all([
+                    applySkin(sprite.baseWalkPath!, 'ghost', { color: ghostColor }),
+                    applySkin(sprite.baseIdlePath!, 'ghost', { color: ghostColor })
+                ]);
+
+                setModeState(prev => ({
+                    ...prev,
+                    characterSprite: prev.characterSprite ? {
+                        ...prev.characterSprite,
+                        walkSheet,
+                        idleSheet,
+                    } : undefined,
+                }));
+            } catch (err) {
+                console.error('Failed to update ghost sprite color:', err);
+            }
+        }, 100);
+
+        return () => clearTimeout(timeoutId);
+    }, [modeState.textColor, modeState.characterSprite?.ghostMode, modeState.characterSprite?.baseWalkPath]);
 
     // Add ephemeral text (disappears after delay)
     const addEphemeralText = useCallback((pos: Point, char: string, options?: {
@@ -2459,9 +2490,50 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     // Switch to video background mode
                     switchBackgroundMode('video', videoUrl, param2, param3);
                 } else {
-                    // Format: /bg {backgroundColor} {textColor} {textBackground}
-                    // All parameters are optional
-                    switchBackgroundMode('color', bgArg, param2, param3);
+                    // Check if bgArg is a valid color
+                    const colorCheck = validateColor(bgArg);
+                    if (colorCheck.valid) {
+                        // Format: /bg {backgroundColor} {textColor} {textBackground}
+                        switchBackgroundMode('color', bgArg, param2, param3);
+                    } else {
+                        // Not a valid color - treat as AI prompt for background generation
+                        // Combine all args as the prompt (e.g., "/bg a serene mountain landscape")
+                        const fullPrompt = [bgArg, param2, param3, restOfInput].filter(Boolean).join(' ').trim();
+
+                        setDialogueWithRevert("Generating background...", setDialogueText);
+
+                        // Generate image using AI
+                        (async () => {
+                            try {
+                                const result = await generateImage(fullPrompt + " (wide landscape background, seamless, no text)", undefined, userUid || undefined, '16:9');
+
+                                if (result.imageData) {
+                                    // Set generated image as background
+                                    switchBackgroundMode('image', result.imageData, '#FFFFFF', undefined, fullPrompt);
+                                    setDialogueWithRevert("Background generated. Press ESC to restore.", setDialogueText);
+
+                                    // Store previous background for ESC restoration
+                                    previousBackgroundStateRef.current = {
+                                        mode: modeState.backgroundMode,
+                                        color: modeState.backgroundColor,
+                                        image: modeState.backgroundImage,
+                                        video: modeState.backgroundVideo,
+                                        textColor: modeState.textColor,
+                                        textBackground: modeState.textBackground
+                                    };
+                                } else {
+                                    setDialogueWithRevert(result.text || "Failed to generate background", setDialogueText);
+                                }
+                            } catch (error) {
+                                console.error('Failed to generate background:', error);
+                                setDialogueWithRevert("Failed to generate background", setDialogueText);
+                            }
+                        })();
+
+                        // Clear command mode immediately
+                        clearCommandState();
+                        return null;
+                    }
                 }
             } else {
                 // No arguments - default to white background
@@ -4125,11 +4197,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                     // Check if this matches a public sprite name
                     const PUBLIC_SPRITES = [
-                        { name: 'mudkip', walkPath: '/mudkip_walk.png', idlePath: '/mudkip_idle.png' },
-                        { name: 'test', walkPath: '/sprites/test_walk.png', idlePath: '/sprites/test_idle.png' },
-                        { name: 'wizard', walkPath: '/sprites/generated/wizard_walk.png', idlePath: '/sprites/generated/wizard_idle.png' },
-                        { name: 'wizard_blue', walkPath: '/sprites/generated/wizard_with_blue_robes_walk.png', idlePath: '/sprites/generated/wizard_with_blue_robes_idle.png' },
-                        { name: 'dragon_knight', walkPath: '/sprites/Dragon_knight/walk.png', idlePath: '/sprites/Dragon_knight/idle.png' },
+                        { name: 'default', walkPath: '/sprites/default_walk.png', idlePath: '/sprites/default_idle.png' },
                     ];
                     const publicSprite = PUBLIC_SPRITES.find(s => s.name.toLowerCase() === prompt.toLowerCase());
 
@@ -4632,8 +4700,66 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 clearCommandState();
                 return null;
             } else {
-                // No prompt - just toggle character mode
-                return executeToggleModeCommand('isCharacterEnabled', "Character cursor enabled", "Character cursor disabled");
+                // No prompt - toggle character mode with default ghost sprite
+                if (modeState.isCharacterEnabled) {
+                    // Turn off character mode
+                    setModeState(prev => ({
+                        ...prev,
+                        isCharacterEnabled: false,
+                        characterSprite: undefined,
+                    }));
+                    setDialogueWithRevert("Character cursor disabled", setDialogueText);
+                } else {
+                    // Turn on with default sprite + ghost effect using textColor
+                    // Uses a clean sprite optimized for ghost silhouette
+                    const DEFAULT_SPRITE = {
+                        walkPath: '/sprites/default_walk.png',
+                        idlePath: '/sprites/default_idle.png',
+                    };
+
+                    setDialogueText("Loading ghost cursor...");
+
+                    // Apply ghost effect to sprite sheets using current textColor
+                    (async () => {
+                        try {
+                            const ghostColor = modeState.textColor || '#FFFFFF';
+                            const [walkSheet, idleSheet] = await Promise.all([
+                                applySkin(DEFAULT_SPRITE.walkPath, 'ghost', { color: ghostColor }),
+                                applySkin(DEFAULT_SPRITE.idlePath, 'ghost', { color: ghostColor })
+                            ]);
+
+                            setModeState(prev => ({
+                                ...prev,
+                                isCharacterEnabled: true,
+                                characterSprite: {
+                                    walkSheet,
+                                    idleSheet,
+                                    name: 'default',
+                                    ghostMode: true, // Reactive to textColor changes
+                                    baseWalkPath: DEFAULT_SPRITE.walkPath,
+                                    baseIdlePath: DEFAULT_SPRITE.idlePath,
+                                },
+                            }));
+                            setDialogueWithRevert("Ghost cursor enabled (matches text color)", setDialogueText);
+                        } catch (err) {
+                            console.error('Failed to load ghost sprite:', err);
+                            // Fallback to raw sprite without ghost effect
+                            setModeState(prev => ({
+                                ...prev,
+                                isCharacterEnabled: true,
+                                characterSprite: {
+                                    walkSheet: DEFAULT_SPRITE.walkPath,
+                                    idleSheet: DEFAULT_SPRITE.idlePath,
+                                    name: 'default',
+                                },
+                            }));
+                            setDialogueWithRevert("Character cursor enabled", setDialogueText);
+                        }
+                    })();
+                }
+
+                clearCommandState();
+                return null;
             }
         }
 

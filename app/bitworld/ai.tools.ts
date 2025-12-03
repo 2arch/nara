@@ -181,6 +181,46 @@ Examples:
                 originalWidth: { type: 'number' },
                 originalHeight: { type: 'number' }
               }
+            },
+            scriptData: {
+              type: 'object',
+              description: 'Script note configuration (for script contentType)',
+              properties: {
+                language: { type: 'string', description: 'Programming language (javascript, python, etc.)' }
+              }
+            },
+            tableData: {
+              type: 'object',
+              description: 'Table/data note configuration (for data contentType)',
+              properties: {
+                columns: {
+                  type: 'array',
+                  description: 'Column definitions',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      width: { type: 'number', description: 'Column width in cells' }
+                    },
+                    required: ['width']
+                  }
+                },
+                rows: {
+                  type: 'array',
+                  description: 'Row definitions',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      height: { type: 'number', description: 'Row height (usually 1)' }
+                    },
+                    required: ['height']
+                  }
+                },
+                cells: {
+                  type: 'object',
+                  description: 'Cell data as "row,col": "value" (e.g., {"0,0": "Name", "0,1": "Age", "1,0": "Alice", "1,1": "25"})'
+                }
+              },
+              required: ['columns', 'rows', 'cells']
             }
           },
           required: ['x', 'y', 'width', 'height']
@@ -333,7 +373,7 @@ export interface ToolContext {
   getCanvasInfo?: (region?: { x: number; y: number; width: number; height: number }) => any;
 
   // Creating
-  createNote: (x: number, y: number, width: number, height: number, contentType?: string, content?: string, imageData?: { src: string; originalWidth: number; originalHeight: number }) => void;
+  createNote: (x: number, y: number, width: number, height: number, contentType?: string, content?: string, imageData?: { src: string; originalWidth: number; originalHeight: number }, generateImage?: string, scriptData?: { language: string }, tableData?: { columns: { width: number }[]; rows: { height: number }[]; cells: Record<string, string>; frozenRows?: number; frozenCols?: number; activeCell?: { row: number; col: number }; cellScrollOffsets?: Record<string, number> }) => void;
   createChip: (x: number, y: number, text: string, color?: string) => void;
   createAgent: (x: number, y: number, spriteName?: string) => string | null;
   writeText: (x: number, y: number, text: string) => void;
@@ -611,8 +651,8 @@ export function executeTool(
 
         // NOTE
         if (args.note) {
-          const { x, y, width, height, contentType = 'text', content, generateImage, imageData } = args.note;
-          ctx.createNote(x, y, width, height, contentType, content, imageData);
+          const { x, y, width, height, contentType = 'text', content, generateImage, imageData, scriptData, tableData } = args.note;
+          ctx.createNote(x, y, width, height, contentType, content, imageData, generateImage, scriptData, tableData);
           if (generateImage) {
             results.push(`Created note with image generation request: "${generateImage}"`);
           } else {

@@ -165,14 +165,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // Handle note creation
       if (note) {
-        const { x, y, width, height, contentType, content, imageData, generateImage } = note;
+        const { x, y, width, height, contentType, content, imageData, generateImage, scriptData, tableData } = note;
         await sendToNara({
           type: "create_note",
           x, y, width, height,
           contentType: contentType || 'text',
           content,
           imageData,
-          generateImage
+          generateImage,
+          scriptData,
+          tableData
         });
         results.push(`Created ${contentType || 'text'} note at (${x},${y})`);
       }
