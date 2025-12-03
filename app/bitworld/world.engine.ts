@@ -5545,9 +5545,8 @@ export function useWorldEngine({
                             return chips;
                         },
                         createChip: (x, y, text, color) => {
-                            const chipKey = `chip_${Date.now()}`;
+                            const chipKey = `chip_${x},${y}_${Date.now()}`;
                             const chipData = {
-                                type: 'chip',
                                 x, y, text,
                                 color,
                                 timestamp: Date.now(),

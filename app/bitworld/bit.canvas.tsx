@@ -2406,17 +2406,18 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             return { success: true, noteId };
         },
         createChip: (x, y, text, color) => {
-            // Create a chip directly at the specified position
-            // Key format must be chip_X,Y_timestamp to match existing parsing
+            // Match exact /chip command behavior (commands.ts line 6715-6729)
             const chipId = `chip_${x},${y}_${Date.now()}`;
-
-            const chipData = {
+            const chipData: Record<string, any> = {
                 x,
                 y,
                 text,
-                color: color || '#ffcc00',
                 timestamp: Date.now(),
             };
+            // Only include color if explicitly provided (matches /chip pattern)
+            if (color) {
+                chipData.color = color;
+            }
 
             engine.setWorldData(prev => ({
                 ...prev,
@@ -5128,13 +5129,17 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
             try {
                 const chipData = JSON.parse(engine.worldData[key] as string);
-                const { type, startX, endX, startY, endY, x, y, color } = chipData;
+                const { type, startX: rawStartX, endX, startY: rawStartY, endY, x, y, color } = chipData;
+
+                // Use x/y as fallback for startX/startY (waypoint chips only have x/y)
+                const startX = rawStartX ?? x;
+                const startY = rawStartY ?? y;
 
                 // Additional bounds check for 2D chips (tasks/links/packs that might span beyond their anchor point)
-                const chipMinX = startX ?? x;
-                const chipMaxX = endX ?? x;
-                const chipMinY = startY ?? y;
-                const chipMaxY = endY ?? y;
+                const chipMinX = startX;
+                const chipMaxX = endX ?? startX;
+                const chipMinY = startY;
+                const chipMaxY = endY ?? startY;
 
                 if (chipMaxX < startWorldX - 5 || chipMinX > endWorldX + 5 ||
                     chipMaxY < startWorldY - 5 || chipMinY > endWorldY + 5) {
