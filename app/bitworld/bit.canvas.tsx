@@ -2757,6 +2757,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             for (const agentId in currentMoving) {
                 if (!currentMoving[agentId]) continue;
 
+                // Skip agents with expression-based movement (they're handled separately below)
+                if (agentExpressionsRef.current[agentId]) continue;
+
                 const path = currentPaths[agentId];
                 if (!path || path.length === 0) {
                     stoppedAgents.push(agentId);
