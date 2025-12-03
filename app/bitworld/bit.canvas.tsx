@@ -5074,20 +5074,21 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
                     if (char) {
                         // Apply text background: use charData.style.background if set, otherwise currentTextStyle.background
-                        // Only skip default text backgrounds when monogram is enabled, but always render explicit painted backgrounds
-                        const explicitBackground = typeof charData === 'object' && charData.style?.background;
-                        const textBackground = explicitBackground || engine.currentTextStyle.background;
-                        const isPaintedCell = char === ' ' && explicitBackground; // Painted cells have space char + explicit background
-
-                        if (textBackground && (isPaintedCell || !monogram.options.enabled)) {
-                            if (opacity < 1.0) {
-                                ctx.globalAlpha = opacity;
-                            }
-                            ctx.fillStyle = textBackground;
-                            // Use scale dimensions
-                            ctx.fillRect(topScreenPos.x, topScreenPos.y, charPixelWidth, charPixelHeight);
-                            if (opacity < 1.0) {
-                                ctx.globalAlpha = 1.0;
+                        // Skip text backgrounds when monogram is enabled (monogram provides the glow layer)
+                        if (!monogram.options.enabled) {
+                            const textBackground = (typeof charData === 'object' && charData.style?.background)
+                                ? charData.style.background
+                                : engine.currentTextStyle.background;
+                            if (textBackground) {
+                                if (opacity < 1.0) {
+                                    ctx.globalAlpha = opacity;
+                                }
+                                ctx.fillStyle = textBackground;
+                                // Use scale dimensions
+                                ctx.fillRect(topScreenPos.x, topScreenPos.y, charPixelWidth, charPixelHeight);
+                                if (opacity < 1.0) {
+                                    ctx.globalAlpha = 1.0;
+                                }
                             }
                         }
 
@@ -5784,15 +5785,16 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
                     topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
                     // Apply text background: use charStyle.background if set
-                    // Only skip default text backgrounds when monogram is enabled, but always render explicit painted backgrounds
-                    const textBackground = (charStyle && charStyle.background)
-                        ? charStyle.background
-                        : undefined;
-                    const isPaintedCell = char === ' ' && textBackground; // Painted cells have space char + background
+                    // Skip text backgrounds when monogram is enabled (monogram provides the glow layer)
+                    if (!monogram.options.enabled) {
+                        const textBackground = (charStyle && charStyle.background)
+                            ? charStyle.background
+                            : undefined;
 
-                    if (textBackground && (isPaintedCell || !monogram.options.enabled)) {
-                        ctx.fillStyle = textBackground;
-                        ctx.fillRect(topScreenPos.x, topScreenPos.y, charPixelWidth, charPixelHeight);
+                        if (textBackground) {
+                            ctx.fillStyle = textBackground;
+                            ctx.fillRect(topScreenPos.x, topScreenPos.y, charPixelWidth, charPixelHeight);
+                        }
                     }
 
                     // Render text only if there's actual content

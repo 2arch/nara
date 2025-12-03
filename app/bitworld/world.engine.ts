@@ -5356,22 +5356,59 @@ export function useWorldEngine({
                     // Build tool context for executing AI actions
                     const toolContext: ToolContext = {
                         paintCells: (cells) => {
-                            setWorldData(prev => {
-                                const newData = { ...prev };
-                                for (const cell of cells) {
-                                    const key = `${Math.floor(cell.x)},${Math.floor(cell.y)}`;
-                                    newData[key] = { char: ' ', style: { background: cell.color } };
+                            if (cells.length === 0) return;
+                            // Group cells by color for efficient blob storage
+                            const cellsByColor = new Map<string, Array<{x: number, y: number}>>();
+                            for (const cell of cells) {
+                                const color = cell.color || '#000000';
+                                if (!cellsByColor.has(color)) {
+                                    cellsByColor.set(color, []);
                                 }
-                                return newData;
+                                cellsByColor.get(color)!.push({ x: Math.floor(cell.x), y: Math.floor(cell.y) });
+                            }
+
+                            setWorldData(prev => {
+                                let updated = { ...prev };
+                                for (const [color, colorCells] of cellsByColor) {
+                                    const { blob } = findOrCreateBlobForCell(updated, colorCells[0].x, colorCells[0].y, color, 'color');
+                                    const updatedBlob = addCellsToBlob(blob, colorCells);
+                                    updated[`paintblob_${updatedBlob.id}`] = JSON.stringify(updatedBlob);
+                                }
+                                return updated;
                             });
                         },
                         eraseCells: (cells) => {
+                            if (cells.length === 0) return;
+                            const cellsToErase = cells.map(c => ({ x: Math.floor(c.x), y: Math.floor(c.y) }));
+
                             setWorldData(prev => {
                                 const newData = { ...prev };
-                                for (const cell of cells) {
-                                    const key = `${Math.floor(cell.x)},${Math.floor(cell.y)}`;
+                                const paintBlobs = getAllPaintBlobs(prev);
+
+                                // Remove cells from any paintblobs they belong to
+                                for (const blob of paintBlobs) {
+                                    const cellsInThisBlob = cellsToErase.filter(cell =>
+                                        blob.cells.includes(`${cell.x},${cell.y}`)
+                                    );
+
+                                    if (cellsInThisBlob.length > 0) {
+                                        const updatedBlob = removeCellsFromBlob(blob, cellsInThisBlob);
+                                        const blobKey = `paintblob_${blob.id}`;
+
+                                        if (updatedBlob === null) {
+                                            delete newData[blobKey];
+                                        } else {
+                                            newData[blobKey] = JSON.stringify(updatedBlob);
+                                        }
+                                    }
+                                }
+
+                                // Also delete any direct cell entries (legacy format)
+                                for (const cell of cellsToErase) {
+                                    const key = `${cell.x},${cell.y}`;
                                     delete newData[key];
                                 }
+
                                 return newData;
                             });
                         },
