@@ -66,8 +66,9 @@ interface McpBridgeOptions {
   // Notes & Chips
   getNotes: () => NoteInfo[];
   getChips: () => ChipInfo[];
-  createNote: (x: number, y: number, width: number, height: number, content?: string) => { success: boolean; noteId?: string; error?: string };
+  createNote: (x: number, y: number, width: number, height: number, contentType?: string, content?: string, imageData?: { src: string; originalWidth: number; originalHeight: number }, generateImage?: string) => { success: boolean; noteId?: string; error?: string };
   createChip: (x: number, y: number, text: string, color?: string) => { success: boolean; chipId?: string; error?: string };
+  deleteEntity: (type: 'note' | 'agent' | 'chip', id: string) => { success: boolean; error?: string };
   // Text
   getTextAt: (region: { x: number; y: number; width: number; height: number }) => string[];
   writeText: (pos: { x: number; y: number }, text: string) => void;
@@ -101,7 +102,7 @@ export function useMcpBridge(options: McpBridgeOptions) {
         getCanvasInfo, getViewport, setViewport,
         getSelection, setSelection, clearSelection,
         getAgents, moveAgents, moveAgentsPath, moveAgentsExpr, stopAgentsExpr, createAgent,
-        getNotes, getChips, createNote, createChip,
+        getNotes, getChips, createNote, createChip, deleteEntity,
         getTextAt, writeText,
         runCommand, agentCommand, agentAction
       } = optionsRef.current;
@@ -234,8 +235,13 @@ export function useMcpBridge(options: McpBridgeOptions) {
           }
 
           case 'create_note': {
-            const { x, y, width, height, content } = command as { x: number; y: number; width: number; height: number; content?: string } & McpCommand;
-            const result = createNote(x, y, width, height, content);
+            const { x, y, width, height, contentType, content, imageData, generateImage } = command as {
+              x: number; y: number; width: number; height: number;
+              contentType?: string; content?: string;
+              imageData?: { src: string; originalWidth: number; originalHeight: number };
+              generateImage?: string;
+            } & McpCommand;
+            const result = createNote(x, y, width, height, contentType, content, imageData, generateImage);
             respond(result);
             break;
           }
@@ -243,6 +249,13 @@ export function useMcpBridge(options: McpBridgeOptions) {
           case 'create_chip': {
             const { x, y, text, color } = command as { x: number; y: number; text: string; color?: string } & McpCommand;
             const result = createChip(x, y, text, color);
+            respond(result);
+            break;
+          }
+
+          case 'delete_entity': {
+            const { entityType, id } = command as { entityType: 'note' | 'agent' | 'chip'; id: string } & McpCommand;
+            const result = deleteEntity(entityType, id);
             respond(result);
             break;
           }
@@ -279,6 +292,66 @@ export function useMcpBridge(options: McpBridgeOptions) {
             const { agentId, command: cmdString, selection } = command as { agentId: string; command: string; selection?: { width: number; height: number } } & McpCommand;
             const result = agentAction(agentId, cmdString, selection);
             respond(result);
+            break;
+          }
+
+          // Consolidated sense/make handlers
+          case 'sense': {
+            const { find, region, near, entityId } = command as { find: string; region?: any; near?: any; entityId?: string } & McpCommand;
+            let result: any;
+
+            switch (find) {
+              case 'viewport':
+                result = getViewport();
+                break;
+              case 'cursor':
+                result = getCursorPosition();
+                break;
+              case 'selection':
+                result = getSelection();
+                break;
+              case 'agents':
+                result = getAgents();
+                if (entityId) result = result.filter((a: any) => a.id === entityId);
+                break;
+              case 'notes':
+                result = getNotes();
+                if (entityId) result = result.filter((n: any) => n.id === entityId);
+                break;
+              case 'chips':
+                result = getChips();
+                if (entityId) result = result.filter((c: any) => c.id === entityId);
+                break;
+              case 'all':
+                result = {
+                  viewport: getViewport(),
+                  cursor: getCursorPosition(),
+                  selection: getSelection(),
+                  agents: getAgents(),
+                  notes: getNotes(),
+                  chips: getChips(),
+                };
+                break;
+              default:
+                result = { error: `Unknown find type: ${find}` };
+            }
+
+            // Apply region/near filters for entities
+            if (result && Array.isArray(result) && (region || near)) {
+              result = result.filter((e: any) => {
+                if (region) {
+                  if (e.x < region.x || e.x >= region.x + region.width) return false;
+                  if (e.y < region.y || e.y >= region.y + region.height) return false;
+                }
+                if (near) {
+                  const dist = Math.sqrt(Math.pow(e.x - near.x, 2) + Math.pow(e.y - near.y, 2));
+                  if (dist > (near.radius || 10)) return false;
+                }
+                return true;
+              });
+            }
+
+            respond({ success: true, result });
             break;
           }
 

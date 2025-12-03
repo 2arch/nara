@@ -275,7 +275,7 @@ export interface CanvasState {
     viewport: { offset: { x: number; y: number }; zoomLevel: number };
     selection: { start: { x: number; y: number } | null; end: { x: number; y: number } | null };
     agents: Array<{ id: string; x: number; y: number; spriteName?: string }>;
-    notes: Array<{ id: string; x: number; y: number; width: number; height: number; content: string }>;
+    notes: Array<{ id: string; x: number; y: number; width: number; height: number; contentType?: string; content?: string }>;
     chips: Array<{ id: string; x: number; y: number; text: string; color?: string }>;
 }
 

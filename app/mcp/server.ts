@@ -106,14 +106,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     if (name === "sense") {
       // sense() - query the canvas
-      const { find, region, near, id } = args as {
+      const { find, region, near, id: entityId } = args as {
         find: string;
         region?: { x: number; y: number; width: number; height: number };
         near?: { x: number; y: number; radius?: number };
         id?: string;
       };
 
-      const response = await sendToNara({ type: "sense", find, region, near, id });
+      const response = await sendToNara({ type: "sense", find, region, near, entityId });
       return {
         content: [{ type: "text", text: JSON.stringify(response.result || response, null, 2) }],
       };

@@ -1216,6 +1216,14 @@ export interface WorldEngine {
     // Agent spawning mode
     isAgentMode: boolean;
     agentSpriteName?: string;
+    // Agent movement handlers (registered by BitCanvas which has animation state)
+    agentHandlers?: {
+        moveAgents: (agentIds: string[], destination: { x: number; y: number }) => { moved: string[]; errors: string[] };
+        moveAgentsPath: (agentIds: string[], path: { x: number; y: number }[]) => { moved: string[]; errors: string[] };
+        moveAgentsExpr: (agentIds: string[], xExpr: string, yExpr: string, vars?: Record<string, number>, duration?: number) => { moved: string[]; errors: string[] };
+        stopAgentsExpr: (agentIds: string[]) => { stopped: string[] };
+    };
+    registerAgentHandlers: (handlers: WorldEngine['agentHandlers']) => void;
 }
 
 // --- Hook Input ---
@@ -1671,6 +1679,9 @@ export function useWorldEngine({
 
     // Command validation handler ref (for tutorial flow)
     const commandValidationHandlerRef = useRef<((command: string, args: string[], worldState?: any) => boolean) | null>(null);
+
+    // Agent movement handlers (registered by BitCanvas which has animation state)
+    const agentHandlersRef = useRef<WorldEngine['agentHandlers']>(undefined);
 
     // Auto-clear temporary dialogue messages
     useAutoDialogue(dialogueText, setDialogueText);
@@ -5478,7 +5489,7 @@ export function useWorldEngine({
                             });
                         },
                         getNotes: () => {
-                            const notes: Array<{ id: string; x: number; y: number; width: number; height: number; content: string }> = [];
+                            const notes: Array<{ id: string; x: number; y: number; width: number; height: number; contentType?: string; content?: string }> = [];
                             for (const key in worldData) {
                                 if (key.startsWith('note_')) {
                                     try {
@@ -5490,6 +5501,7 @@ export function useWorldEngine({
                                                 y: data.y,
                                                 width: data.width,
                                                 height: data.height,
+                                                contentType: data.contentType || 'text',
                                                 content: data.content || '',
                                             });
                                         }
@@ -5498,14 +5510,18 @@ export function useWorldEngine({
                             }
                             return notes;
                         },
-                        createNote: (x, y, width, height, content) => {
+                        createNote: (x, y, width, height, contentType?, content?, imageData?) => {
                             const noteKey = `note_${Date.now()}`;
-                            const noteData = {
+                            const noteData: Record<string, any> = {
                                 type: 'note',
                                 x, y, width, height,
+                                contentType: contentType || 'text',
                                 content: content || '',
                                 timestamp: Date.now(),
                             };
+                            if (imageData) {
+                                noteData.imageData = imageData;
+                            }
                             setWorldData(prev => ({ ...prev, [noteKey]: JSON.stringify(noteData) }));
                         },
                         getChips: () => {
@@ -5552,6 +5568,13 @@ export function useWorldEngine({
                             // Execute command through command system
                             logger.debug('runCommand called', { command });
                             // TODO: Could integrate with command system here
+                        },
+                        deleteEntity: (type, id) => {
+                            setWorldData(prev => {
+                                const newData = { ...prev };
+                                delete newData[id];
+                                return newData;
+                            });
                         },
                     };
 
@@ -14215,5 +14238,10 @@ export function useWorldEngine({
         // Agent mode
         isAgentMode,
         agentSpriteName,
+        // Agent movement handlers (registered by BitCanvas)
+        agentHandlers: agentHandlersRef.current,
+        registerAgentHandlers: (handlers: WorldEngine['agentHandlers']) => {
+            agentHandlersRef.current = handlers;
+        },
     };
 }

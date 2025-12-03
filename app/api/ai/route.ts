@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI, Content, FunctionCall } from '@google/genai';
-import { canvasTools, toGeminiFunctionDeclarations, ToolContext } from '@/app/bitworld/ai.tools';
+import { tools } from '@/app/bitworld/ai.tools';
 import { checkUserQuota, incrementUserUsage } from '@/app/firebase';
 
 // Lazy client initialization
@@ -15,8 +15,12 @@ function getClient(): GoogleGenAI {
     return genaiClient;
 }
 
-// Get tool declarations
-const toolDeclarations = toGeminiFunctionDeclarations();
+// Get tool declarations (sense + make)
+const canvasToolDeclarations = tools.map(t => ({
+    name: t.name,
+    description: t.description,
+    parametersJsonSchema: t.parameters,
+}));
 
 // Add response tools - so AI can explicitly choose response type
 const responseTools = [
@@ -33,42 +37,49 @@ const responseTools = [
     },
     {
         name: 'generate_image',
-        description: 'Generate or edit an image. Use this when the user wants to create visual content.',
+        description: 'Generate or edit an image. Use this when the user wants to create visual content that will be placed in a note.',
         parametersJsonSchema: {
             type: 'object' as const,
             properties: {
                 prompt: { type: 'string', description: 'Description of the image to generate' },
-                editExisting: { type: 'boolean', description: 'Whether to edit the existing reference image' }
+                editExisting: { type: 'boolean', description: 'Whether to edit the existing reference image' },
+                x: { type: 'number', description: 'X position for the image note' },
+                y: { type: 'number', description: 'Y position for the image note' },
+                width: { type: 'number', description: 'Width of the image note in cells' },
+                height: { type: 'number', description: 'Height of the image note in cells' }
             },
             required: ['prompt']
         }
     }
 ];
 
-const allTools = [...toolDeclarations, ...responseTools];
+const allTools = [...canvasToolDeclarations, ...responseTools];
 
-// System instruction
+// System instruction - updated for sense/make paradigm
 const SYSTEM_INSTRUCTION = `You are an AI assistant integrated into Nara, an infinite canvas application.
-You have access to tools for:
-- Canvas manipulation (paint, draw shapes, create notes/chips, move agents)
-- Text responses (for questions, explanations, conversations)
-- Image generation (for creating visual content)
 
-Based on the user's prompt and context, choose the most appropriate action:
-- For canvas actions like "paint", "draw", "create note", "move" → use canvas tools
-- For questions, explanations, conversations → use respond_text
-- For image creation requests → use generate_image
+You have two primary canvas tools:
+- sense({ find, region?, near?, id? }) - Query the canvas to discover what exists
+- make({ paint?, note?, text?, chip?, agent?, delete?, command? }) - Create or modify things
 
-IMPORTANT: When you need information to complete a task, use the appropriate "get" tools first:
-- Need to know what agents exist? Call get_agents first, then use the returned IDs
-- Need cursor position? Call get_cursor_position
-- Need to know what's selected? Call get_selection
-- Need to see notes/chips? Call get_notes or get_chips
-Don't ask the user for IDs or positions - discover them yourself using the tools.
+And two response tools:
+- respond_text({ text }) - For answering questions or explanations
+- generate_image({ prompt, x?, y?, width?, height? }) - For creating visual content
+
+WORKFLOW:
+1. Use sense() first to discover what's on the canvas (agents, notes, positions)
+2. Use make() to create or modify based on what you discovered
+3. Use respond_text() for conversational responses
+4. Use generate_image() when user wants visual content created
+
+EXAMPLES:
+- "move the agent to the right" → sense({ find: 'agents' }) then make({ agent: { target: { all: true }, move: { to: { x: 100, y: 50 } } } })
+- "paint a red circle" → make({ paint: { circle: { x: 50, y: 50, radius: 10, color: '#ff0000' } } })
+- "create a note here" → make({ note: { x: 10, y: 10, width: 20, height: 10, contentType: 'text' } })
+- "what agents are there?" → sense({ find: 'agents' }) then respond_text with the info
 
 Be precise with coordinates and colors. Use hex colors (e.g., #ff0000 for red).
-The canvas uses integer cell coordinates. Positive X is right, positive Y is down.
-If the user provides selected text, consider whether they want you to transform, explain, or work with that text.`;
+The canvas uses integer cell coordinates. Positive X is right, positive Y is down.`;
 
 const MAX_ITERATIONS = 10;
 
@@ -88,9 +99,82 @@ interface AIRequest {
         viewport: { offset: { x: number; y: number }; zoomLevel: number };
         selection: { start: { x: number; y: number } | null; end: { x: number; y: number } | null };
         agents: Array<{ id: string; x: number; y: number; spriteName?: string }>;
-        notes: Array<{ id: string; x: number; y: number; width: number; height: number; content: string }>;
+        notes: Array<{ id: string; x: number; y: number; width: number; height: number; contentType?: string; content?: string }>;
         chips: Array<{ id: string; x: number; y: number; text: string; color?: string }>;
     };
+}
+
+// Handle sense() calls by returning data from canvasState
+function handleSense(args: Record<string, any>, canvasState: AIRequest['canvasState']) {
+    const { find, region, near, id } = args;
+    const state = canvasState || {
+        cursorPosition: { x: 0, y: 0 },
+        viewport: { offset: { x: 0, y: 0 }, zoomLevel: 1 },
+        selection: { start: null, end: null },
+        agents: [],
+        notes: [],
+        chips: [],
+    };
+
+    // Helper to filter by region/near
+    const filterByLocation = <T extends { x: number; y: number }>(entities: T[]): T[] => {
+        let result = entities;
+        if (region) {
+            result = result.filter(e =>
+                e.x >= region.x && e.x < region.x + region.width &&
+                e.y >= region.y && e.y < region.y + region.height
+            );
+        }
+        if (near) {
+            const radius = near.radius || 10;
+            result = result.filter(e => {
+                const dist = Math.sqrt(Math.pow(e.x - near.x, 2) + Math.pow(e.y - near.y, 2));
+                return dist <= radius;
+            });
+        }
+        return result;
+    };
+
+    switch (find) {
+        case 'viewport':
+            return { success: true, result: state.viewport };
+        case 'cursor':
+            return { success: true, result: state.cursorPosition };
+        case 'selection':
+            return { success: true, result: state.selection };
+        case 'agents': {
+            let agents = state.agents;
+            if (id) agents = agents.filter(a => a.id === id);
+            else agents = filterByLocation(agents);
+            return { success: true, result: agents };
+        }
+        case 'notes': {
+            let notes = state.notes;
+            if (id) notes = notes.filter(n => n.id === id);
+            else notes = filterByLocation(notes);
+            return { success: true, result: notes };
+        }
+        case 'chips': {
+            let chips = state.chips;
+            if (id) chips = chips.filter(c => c.id === id);
+            else chips = filterByLocation(chips);
+            return { success: true, result: chips };
+        }
+        case 'all':
+            return {
+                success: true,
+                result: {
+                    agents: filterByLocation(state.agents),
+                    notes: filterByLocation(state.notes),
+                    chips: filterByLocation(state.chips),
+                    viewport: state.viewport,
+                    cursor: state.cursorPosition,
+                    selection: state.selection
+                }
+            };
+        default:
+            return { success: false, error: `Unknown find type: ${find}` };
+    }
 }
 
 export async function POST(request: NextRequest) {
@@ -125,77 +209,16 @@ export async function POST(request: NextRequest) {
         }
         if (canvasState) {
             fullPrompt += `\n\nCursor position: (${canvasState.cursorPosition.x}, ${canvasState.cursorPosition.y})`;
+            if (canvasState.selection.start && canvasState.selection.end) {
+                fullPrompt += `\nSelection: (${canvasState.selection.start.x}, ${canvasState.selection.start.y}) to (${canvasState.selection.end.x}, ${canvasState.selection.end.y})`;
+            }
         }
         if (referenceImage) {
             fullPrompt += `\n\n[Reference image provided for editing]`;
         }
 
-        // Build mock tool context for collecting actions
+        // Collect make() actions to return to client
         const collectedActions: Array<{ tool: string; args: Record<string, any> }> = [];
-        const state = {
-            cursorPosition: canvasState?.cursorPosition || { x: 0, y: 0 },
-            viewport: canvasState?.viewport || { offset: { x: 0, y: 0 }, zoomLevel: 1 },
-            selection: canvasState?.selection || { start: null, end: null },
-            agents: canvasState?.agents || [],
-            notes: canvasState?.notes || [],
-            chips: canvasState?.chips || [],
-        };
-
-        const toolContext: ToolContext = {
-            paintCells: (cells) => collectedActions.push({ tool: 'paint_cells', args: { cells } }),
-            eraseCells: (cells) => collectedActions.push({ tool: 'erase_cells', args: { cells } }),
-            getCursorPosition: () => state.cursorPosition,
-            setCursorPosition: (x, y) => {
-                state.cursorPosition = { x, y };
-                collectedActions.push({ tool: 'set_cursor_position', args: { x, y } });
-            },
-            getViewport: () => state.viewport,
-            setViewport: (x, y, zoomLevel) => {
-                state.viewport = { offset: { x, y }, zoomLevel: zoomLevel || state.viewport.zoomLevel };
-                collectedActions.push({ tool: 'set_viewport', args: { x, y, zoomLevel } });
-            },
-            getSelection: () => state.selection,
-            setSelection: (startX, startY, endX, endY) => {
-                state.selection = { start: { x: startX, y: startY }, end: { x: endX, y: endY } };
-                collectedActions.push({ tool: 'set_selection', args: { startX, startY, endX, endY } });
-            },
-            clearSelection: () => {
-                state.selection = { start: null, end: null };
-                collectedActions.push({ tool: 'clear_selection', args: {} });
-            },
-            getAgents: () => state.agents,
-            createAgent: (x, y, spriteName) => {
-                const agentId = `agent_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                collectedActions.push({ tool: 'create_agent', args: { x, y, spriteName, agentId } });
-                return agentId;
-            },
-            moveAgents: (agentIds, destination) => {
-                collectedActions.push({ tool: 'move_agents', args: { agentIds, destination } });
-            },
-            moveAgentsPath: (agentIds, path) => {
-                collectedActions.push({ tool: 'move_agents_path', args: { agentIds, path } });
-            },
-            moveAgentsExpr: (agentIds, xExpr, yExpr, vars, duration) => {
-                collectedActions.push({ tool: 'move_agents_expr', args: { agentIds, xExpr, yExpr, vars, duration } });
-            },
-            stopAgentsExpr: (agentIds) => {
-                collectedActions.push({ tool: 'stop_agents_expr', args: { agentIds } });
-            },
-            getNotes: () => state.notes,
-            createNote: (x, y, width, height, content) => {
-                collectedActions.push({ tool: 'create_note', args: { x, y, width, height, content } });
-            },
-            getChips: () => state.chips,
-            createChip: (x, y, text, color) => {
-                collectedActions.push({ tool: 'create_chip', args: { x, y, text, color } });
-            },
-            writeText: (x, y, text) => {
-                collectedActions.push({ tool: 'write_text', args: { x, y, text } });
-            },
-            runCommand: (command) => {
-                collectedActions.push({ tool: 'run_command', args: { command } });
-            },
-        };
 
         // Multi-turn tool calling loop
         const history: Content[] = [
@@ -203,7 +226,7 @@ export async function POST(request: NextRequest) {
         ];
 
         let textResponse = '';
-        let imageRequest: { prompt: string; editExisting?: boolean } | null = null;
+        let imageRequest: { prompt: string; editExisting?: boolean; x?: number; y?: number; width?: number; height?: number } | null = null;
         let iterations = 0;
 
         while (iterations < MAX_ITERATIONS) {
@@ -255,17 +278,34 @@ export async function POST(request: NextRequest) {
                         functionResponse: { name, response: { success: true } }
                     });
                 } else if (name === 'generate_image') {
-                    // AI chose to generate image
-                    imageRequest = { prompt: args.prompt, editExisting: args.editExisting };
+                    // AI chose to generate image - will become a make() action with image note
+                    imageRequest = {
+                        prompt: args.prompt,
+                        editExisting: args.editExisting,
+                        x: args.x,
+                        y: args.y,
+                        width: args.width,
+                        height: args.height
+                    };
                     functionResponses.push({
                         functionResponse: { name, response: { success: true, message: 'Image generation queued' } }
                     });
-                } else {
-                    // Canvas tool - execute via toolContext
-                    const { executeTool } = await import('@/app/bitworld/ai.tools');
-                    const result = executeTool(name, args, toolContext);
+                } else if (name === 'sense') {
+                    // Handle sense locally - return data from canvasState
+                    const result = handleSense(args, canvasState);
                     functionResponses.push({
                         functionResponse: { name, response: result }
+                    });
+                } else if (name === 'make') {
+                    // Collect make actions to send to client
+                    collectedActions.push({ tool: 'make', args });
+                    functionResponses.push({
+                        functionResponse: { name, response: { success: true, message: 'Action queued for execution' } }
+                    });
+                } else {
+                    // Unknown tool
+                    functionResponses.push({
+                        functionResponse: { name, response: { success: false, error: `Unknown tool: ${name}` } }
                     });
                 }
             }
@@ -285,23 +325,57 @@ export async function POST(request: NextRequest) {
             await incrementUserUsage(userId);
         }
 
-        // Handle image generation if requested
-        let imageResult = null;
+        // Handle image generation if requested - convert to make() action with image note
         if (imageRequest) {
             const { generateImage } = await import('@/app/bitworld/ai');
-            imageResult = await generateImage(
+            const imageResult = await generateImage(
                 imageRequest.prompt,
                 imageRequest.editExisting ? referenceImage : undefined,
                 userId,
                 body.aspectRatio
             );
+
+            if (imageResult.imageData) {
+                // Get dimensions from the generated image
+                // For now, use provided dimensions or defaults
+                const x = imageRequest.x ?? canvasState?.cursorPosition.x ?? 0;
+                const y = imageRequest.y ?? canvasState?.cursorPosition.y ?? 0;
+                const width = imageRequest.width ?? 30;
+                const height = imageRequest.height ?? 20;
+
+                // Convert to make() action with image note
+                collectedActions.push({
+                    tool: 'make',
+                    args: {
+                        note: {
+                            x,
+                            y,
+                            width,
+                            height,
+                            contentType: 'image',
+                            imageData: {
+                                src: imageResult.imageData,
+                                originalWidth: width * 10, // Approximate, will be replaced by actual dims
+                                originalHeight: height * 10
+                            }
+                        }
+                    }
+                });
+
+                // Add any text response from image generation
+                if (imageResult.text && !textResponse) {
+                    textResponse = imageResult.text;
+                }
+            } else if (imageResult.text) {
+                // Image generation failed, return error text
+                textResponse = imageResult.text;
+            }
         }
 
         // Build response
         return NextResponse.json({
             text: textResponse || undefined,
             actions: collectedActions.length > 0 ? collectedActions : undefined,
-            image: imageResult || undefined,
             error: undefined,
         });
 

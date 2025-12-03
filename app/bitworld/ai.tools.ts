@@ -1,4 +1,5 @@
-// Generic tool definitions for Nara canvas
+// Consolidated tool definitions for Nara canvas
+// Two core tools: sense() and make()
 // No external dependencies - can be used by both Gemini AI and MCP server
 
 // Tool definition interface (framework-agnostic)
@@ -12,482 +13,349 @@ export interface ToolDefinition {
   };
 }
 
-// All canvas tools - single source of truth
+// =============================================================================
+// CONSOLIDATED TOOLS: sense + make
+// =============================================================================
+
 export const canvasTools: ToolDefinition[] = [
   {
-    name: 'paint_cells',
-    description: 'Paint multiple cells on the canvas with specified colors. Use this to draw pixel art, shapes, or any visual elements.',
+    name: 'sense',
+    description: `Query the canvas to find entities and get information. Use this to discover what exists before taking action.
+
+Examples:
+- sense({ find: 'agents' }) - get all agents
+- sense({ find: 'notes', region: { x: 0, y: 0, width: 100, height: 100 } }) - notes in region
+- sense({ find: 'all', near: { x: 50, y: 50 } }) - everything near a point
+- sense({ find: 'viewport' }) - current camera position
+- sense({ find: 'text', region: {...} }) - read text in area`,
     parameters: {
       type: 'object',
       properties: {
-        cells: {
-          type: 'array',
-          description: 'Array of cells to paint',
-          items: {
-            type: 'object',
-            properties: {
-              x: { type: 'number', description: 'X coordinate' },
-              y: { type: 'number', description: 'Y coordinate' },
-              color: { type: 'string', description: 'Hex color (e.g., #ff0000)' },
-            },
-            required: ['x', 'y', 'color'],
-          },
+        find: {
+          type: 'string',
+          enum: ['notes', 'agents', 'chips', 'text', 'paint', 'viewport', 'cursor', 'selection', 'all'],
+          description: 'What to look for'
         },
-      },
-      required: ['cells'],
-    },
-  },
-  {
-    name: 'paint_rect',
-    description: 'Paint a filled or outlined rectangle on the canvas',
-    parameters: {
-      type: 'object',
-      properties: {
-        x: { type: 'number', description: 'Top-left X coordinate' },
-        y: { type: 'number', description: 'Top-left Y coordinate' },
-        width: { type: 'number', description: 'Width in cells' },
-        height: { type: 'number', description: 'Height in cells' },
-        color: { type: 'string', description: 'Hex color (e.g., #ff0000)' },
-        filled: { type: 'boolean', description: 'If true, fill the rectangle. If false, only outline.', default: true },
-      },
-      required: ['x', 'y', 'width', 'height', 'color'],
-    },
-  },
-  {
-    name: 'paint_circle',
-    description: 'Paint a filled or outlined circle on the canvas',
-    parameters: {
-      type: 'object',
-      properties: {
-        centerX: { type: 'number', description: 'Center X coordinate' },
-        centerY: { type: 'number', description: 'Center Y coordinate' },
-        radius: { type: 'number', description: 'Radius in cells' },
-        color: { type: 'string', description: 'Hex color (e.g., #ff0000)' },
-        filled: { type: 'boolean', description: 'If true, fill the circle. If false, only outline.', default: true },
-      },
-      required: ['centerX', 'centerY', 'radius', 'color'],
-    },
-  },
-  {
-    name: 'paint_line',
-    description: 'Paint a line between two points using Bresenham\'s algorithm',
-    parameters: {
-      type: 'object',
-      properties: {
-        x1: { type: 'number', description: 'Start X coordinate' },
-        y1: { type: 'number', description: 'Start Y coordinate' },
-        x2: { type: 'number', description: 'End X coordinate' },
-        y2: { type: 'number', description: 'End Y coordinate' },
-        color: { type: 'string', description: 'Hex color (e.g., #ff0000)' },
-      },
-      required: ['x1', 'y1', 'x2', 'y2', 'color'],
-    },
-  },
-  {
-    name: 'erase_cells',
-    description: 'Erase paint from specific cells',
-    parameters: {
-      type: 'object',
-      properties: {
-        cells: {
-          type: 'array',
-          description: 'Array of cells to erase',
-          items: {
-            type: 'object',
-            properties: {
-              x: { type: 'number', description: 'X coordinate' },
-              y: { type: 'number', description: 'Y coordinate' },
-            },
-            required: ['x', 'y'],
-          },
-        },
-      },
-      required: ['cells'],
-    },
-  },
-  {
-    name: 'erase_region',
-    description: 'Erase all paint in a rectangular region',
-    parameters: {
-      type: 'object',
-      properties: {
-        x: { type: 'number', description: 'Top-left X coordinate' },
-        y: { type: 'number', description: 'Top-left Y coordinate' },
-        width: { type: 'number', description: 'Width in cells' },
-        height: { type: 'number', description: 'Height in cells' },
-      },
-      required: ['x', 'y', 'width', 'height'],
-    },
-  },
-  {
-    name: 'get_cursor_position',
-    description: 'Get the current cursor position on the canvas',
-    parameters: { type: 'object', properties: {} },
-  },
-  {
-    name: 'set_cursor_position',
-    description: 'Move the cursor to a specific position on the canvas',
-    parameters: {
-      type: 'object',
-      properties: {
-        x: { type: 'number', description: 'X coordinate' },
-        y: { type: 'number', description: 'Y coordinate' },
-      },
-      required: ['x', 'y'],
-    },
-  },
-  {
-    name: 'get_canvas_info',
-    description: 'Get information about the canvas state including painted regions',
-    parameters: {
-      type: 'object',
-      properties: {
         region: {
           type: 'object',
-          description: 'Optional region to query. If not provided, returns general canvas info.',
+          description: 'Rectangular region to query',
+          properties: {
+            x: { type: 'number', description: 'Top-left X' },
+            y: { type: 'number', description: 'Top-left Y' },
+            width: { type: 'number', description: 'Width in cells' },
+            height: { type: 'number', description: 'Height in cells' }
+          },
+          required: ['x', 'y', 'width', 'height']
+        },
+        near: {
+          type: 'object',
+          description: 'Find entities near this position',
           properties: {
             x: { type: 'number' },
             y: { type: 'number' },
-            width: { type: 'number' },
-            height: { type: 'number' },
+            radius: { type: 'number', description: 'Search radius (default: 10)' }
           },
+          required: ['x', 'y']
         },
+        id: {
+          type: 'string',
+          description: 'Find specific entity by ID/key'
+        }
       },
-    },
+      required: ['find']
+    }
   },
   {
-    name: 'get_viewport',
-    description: 'Get current viewport information including offset, zoom level, and visible bounds',
-    parameters: { type: 'object', properties: {} },
-  },
-  {
-    name: 'set_viewport',
-    description: 'Set the viewport offset and optionally zoom level to pan/zoom the canvas view',
+    name: 'make',
+    description: `Create or modify things on the canvas. This is the primary action tool.
+
+Examples:
+- make({ paint: { rect: { x: 0, y: 0, width: 10, height: 10, color: '#ff0000' } } })
+- make({ paint: { circle: { x: 50, y: 50, radius: 5, color: '#00ff00' } } })
+- make({ paint: { line: { x1: 0, y1: 0, x2: 100, y2: 100, color: '#0000ff' } } })
+- make({ paint: { cells: [{ x: 1, y: 1, color: '#fff' }, ...] } })
+- make({ paint: { erase: { x: 0, y: 0, width: 10, height: 10 } } })
+- make({ note: { x: 10, y: 10, width: 20, height: 15, contentType: 'text', content: 'Hello' } })
+- make({ note: { x: 10, y: 10, width: 30, height: 20, contentType: 'image', generateImage: 'a sunset' } })
+- make({ text: { x: 5, y: 5, content: 'Hello world' } })
+- make({ chip: { x: 0, y: 0, text: 'Label', color: '#ff0000' } })
+- make({ agent: { create: { x: 50, y: 50, spriteName: 'wizard' } } })
+- make({ agent: { target: { near: { x: 10, y: 10 } }, move: { to: { x: 100, y: 100 } } } })
+- make({ agent: { target: { all: true }, move: { expr: { x: 'startX + t*5', y: 'startY + sin(t)*10' } } } })
+- make({ agent: { target: { name: 'wizard' }, action: { command: '/paint red' } } })
+- make({ agent: { target: { id: 'abc123' }, move: { stop: true } } })
+- make({ delete: { type: 'note', id: 'note_123,456_789' } })
+- make({ command: '/color blue' })`,
     parameters: {
       type: 'object',
       properties: {
-        x: { type: 'number', description: 'X offset for viewport' },
-        y: { type: 'number', description: 'Y offset for viewport' },
-        zoomLevel: { type: 'number', description: 'Optional zoom level' },
-      },
-      required: ['x', 'y'],
-    },
-  },
-  {
-    name: 'get_selection',
-    description: 'Get the current selection rectangle (start and end coordinates)',
-    parameters: { type: 'object', properties: {} },
-  },
-  {
-    name: 'set_selection',
-    description: 'Set the selection rectangle to a specific region',
-    parameters: {
-      type: 'object',
-      properties: {
-        startX: { type: 'number', description: 'Start X coordinate' },
-        startY: { type: 'number', description: 'Start Y coordinate' },
-        endX: { type: 'number', description: 'End X coordinate' },
-        endY: { type: 'number', description: 'End Y coordinate' },
-      },
-      required: ['startX', 'startY', 'endX', 'endY'],
-    },
-  },
-  {
-    name: 'clear_selection',
-    description: 'Clear the current selection',
-    parameters: { type: 'object', properties: {} },
-  },
-  {
-    name: 'get_agents',
-    description: 'Get all agents on the canvas with their positions, names, and sprite info',
-    parameters: { type: 'object', properties: {} },
-  },
-  {
-    name: 'create_agent',
-    description: 'Create a new agent at a specified position on the canvas',
-    parameters: {
-      type: 'object',
-      properties: {
-        x: { type: 'number', description: 'X coordinate to spawn the agent' },
-        y: { type: 'number', description: 'Y coordinate to spawn the agent' },
-        spriteName: { type: 'string', description: 'Optional sprite name for the agent' },
-      },
-      required: ['x', 'y'],
-    },
-  },
-  {
-    name: 'move_agents',
-    description: 'Move one or more agents to a destination with smooth walking animation',
-    parameters: {
-      type: 'object',
-      properties: {
-        agentIds: {
-          type: 'array',
-          description: 'Array of agent IDs to move',
-          items: { type: 'string' },
-        },
-        destination: {
+        // PAINT
+        paint: {
           type: 'object',
-          description: 'Target position to move agents to',
+          description: 'Paint on the canvas',
           properties: {
-            x: { type: 'number', description: 'Target X coordinate' },
-            y: { type: 'number', description: 'Target Y coordinate' },
-          },
-          required: ['x', 'y'],
-        },
-      },
-      required: ['agentIds', 'destination'],
-    },
-  },
-  {
-    name: 'move_agents_path',
-    description: 'Move one or more agents along a custom path (array of points). Use this for custom movement patterns like sine waves, circles, spirals, etc.',
-    parameters: {
-      type: 'object',
-      properties: {
-        agentIds: {
-          type: 'array',
-          description: 'Array of agent IDs to move',
-          items: { type: 'string' },
-        },
-        path: {
-          type: 'array',
-          description: 'Array of points defining the path to follow',
-          items: {
-            type: 'object',
-            properties: {
-              x: { type: 'number', description: 'X coordinate' },
-              y: { type: 'number', description: 'Y coordinate' },
+            cells: {
+              type: 'array',
+              description: 'Array of individual cells to paint',
+              items: {
+                type: 'object',
+                properties: {
+                  x: { type: 'number' },
+                  y: { type: 'number' },
+                  color: { type: 'string', description: 'Hex color (e.g., #ff0000)' }
+                },
+                required: ['x', 'y', 'color']
+              }
             },
-            required: ['x', 'y'],
-          },
+            rect: {
+              type: 'object',
+              description: 'Paint a rectangle',
+              properties: {
+                x: { type: 'number', description: 'Top-left X' },
+                y: { type: 'number', description: 'Top-left Y' },
+                width: { type: 'number' },
+                height: { type: 'number' },
+                color: { type: 'string', description: 'Hex color' },
+                filled: { type: 'boolean', description: 'Fill or outline (default: true)' }
+              },
+              required: ['x', 'y', 'width', 'height', 'color']
+            },
+            circle: {
+              type: 'object',
+              description: 'Paint a circle',
+              properties: {
+                x: { type: 'number', description: 'Center X' },
+                y: { type: 'number', description: 'Center Y' },
+                radius: { type: 'number' },
+                color: { type: 'string', description: 'Hex color' },
+                filled: { type: 'boolean', description: 'Fill or outline (default: true)' }
+              },
+              required: ['x', 'y', 'radius', 'color']
+            },
+            line: {
+              type: 'object',
+              description: 'Paint a line',
+              properties: {
+                x1: { type: 'number', description: 'Start X' },
+                y1: { type: 'number', description: 'Start Y' },
+                x2: { type: 'number', description: 'End X' },
+                y2: { type: 'number', description: 'End Y' },
+                color: { type: 'string', description: 'Hex color' }
+              },
+              required: ['x1', 'y1', 'x2', 'y2', 'color']
+            },
+            erase: {
+              type: 'object',
+              description: 'Erase a region',
+              properties: {
+                x: { type: 'number' },
+                y: { type: 'number' },
+                width: { type: 'number' },
+                height: { type: 'number' }
+              },
+              required: ['x', 'y', 'width', 'height']
+            }
+          }
         },
-      },
-      required: ['agentIds', 'path'],
-    },
-  },
-  {
-    name: 'move_agents_expr',
-    description: 'Move agents using mathematical expressions evaluated each frame. Expressions can use variables: x, y (current position), t (time in seconds), vx, vy (velocity), startX, startY (initial position), avgX, avgY (average position of all agents). Math functions: sin, cos, tan, sqrt, abs, pow, min, max, etc.',
-    parameters: {
-      type: 'object',
-      properties: {
-        agentIds: {
-          type: 'array',
-          description: 'Array of agent IDs to move',
-          items: { type: 'string' },
-        },
-        xExpr: { type: 'string', description: 'Math expression for x position (e.g., "startX + t * 5")' },
-        yExpr: { type: 'string', description: 'Math expression for y position (e.g., "startY + sin(t * 2) * 10")' },
-        vars: {
+        // NOTE
+        note: {
           type: 'object',
-          description: 'Optional custom variables to use in expressions (e.g., {speed: 5, amplitude: 10})',
-          additionalProperties: { type: 'number' },
-        },
-        duration: { type: 'number', description: 'Optional duration in seconds. Movement stops after this time.' },
-      },
-      required: ['agentIds', 'xExpr', 'yExpr'],
-    },
-  },
-  {
-    name: 'stop_agents_expr',
-    description: 'Stop expression-based movement for specified agents',
-    parameters: {
-      type: 'object',
-      properties: {
-        agentIds: {
-          type: 'array',
-          description: 'Array of agent IDs to stop',
-          items: { type: 'string' },
-        },
-      },
-      required: ['agentIds'],
-    },
-  },
-  {
-    name: 'get_notes',
-    description: 'Get all notes on the canvas with their positions, dimensions, and content preview',
-    parameters: { type: 'object', properties: {} },
-  },
-  {
-    name: 'create_note',
-    description: 'Create a note directly at a specified position with given dimensions',
-    parameters: {
-      type: 'object',
-      properties: {
-        x: { type: 'number', description: 'X coordinate (top-left)' },
-        y: { type: 'number', description: 'Y coordinate (top-left)' },
-        width: { type: 'number', description: 'Width in cells' },
-        height: { type: 'number', description: 'Height in cells' },
-        content: { type: 'string', description: 'Optional initial content for the note' },
-      },
-      required: ['x', 'y', 'width', 'height'],
-    },
-  },
-  {
-    name: 'get_chips',
-    description: 'Get all chips (small labels) on the canvas with their positions, text, and color',
-    parameters: { type: 'object', properties: {} },
-  },
-  {
-    name: 'create_chip',
-    description: 'Create a chip (small label) directly at a specified position',
-    parameters: {
-      type: 'object',
-      properties: {
-        x: { type: 'number', description: 'X coordinate' },
-        y: { type: 'number', description: 'Y coordinate' },
-        text: { type: 'string', description: 'Text content for the chip' },
-        color: { type: 'string', description: 'Optional hex color for the chip' },
-      },
-      required: ['x', 'y', 'text'],
-    },
-  },
-  {
-    name: 'get_text_at',
-    description: 'Get text content within a specified rectangular region',
-    parameters: {
-      type: 'object',
-      properties: {
-        x: { type: 'number', description: 'Top-left X coordinate' },
-        y: { type: 'number', description: 'Top-left Y coordinate' },
-        width: { type: 'number', description: 'Width in cells' },
-        height: { type: 'number', description: 'Height in cells' },
-      },
-      required: ['x', 'y', 'width', 'height'],
-    },
-  },
-  {
-    name: 'write_text',
-    description: 'Write text at a specific position on the canvas',
-    parameters: {
-      type: 'object',
-      properties: {
-        x: { type: 'number', description: 'X coordinate to start writing' },
-        y: { type: 'number', description: 'Y coordinate to start writing' },
-        text: { type: 'string', description: 'Text content to write' },
-      },
-      required: ['x', 'y', 'text'],
-    },
-  },
-  {
-    name: 'run_command',
-    description: 'Execute a Nara command string (e.g., "/color red", "/brush 3", "/agent create")',
-    parameters: {
-      type: 'object',
-      properties: {
-        command: { type: 'string', description: 'Command string to execute (starting with /)' },
-      },
-      required: ['command'],
-    },
-  },
-  {
-    name: 'agent_command',
-    description: 'Execute a command at a specific agent\'s position. The cursor is temporarily moved to the agent\'s location, the command is executed, then the cursor is restored.',
-    parameters: {
-      type: 'object',
-      properties: {
-        agentId: { type: 'string', description: 'The ID of the agent' },
-        command: { type: 'string', description: 'Command string to execute (e.g., "/chip Hello", "/note", "/paint")' },
-        restoreCursor: { type: 'boolean', description: 'If true, restore cursor to original position after command. Default: true', default: true },
-      },
-      required: ['agentId', 'command'],
-    },
-  },
-  {
-    name: 'agent_action',
-    description: 'Execute a command at an agent\'s position with optional selection. Atomic operation: saves state, moves cursor to agent, optionally creates selection, executes command, restores state.',
-    parameters: {
-      type: 'object',
-      properties: {
-        agentId: { type: 'string', description: 'The ID of the agent' },
-        command: { type: 'string', description: 'Command string to execute (e.g., "/note", "/paint")' },
-        selection: {
-          type: 'object',
-          description: 'Optional selection region relative to agent position',
+          description: 'Create a note (text, image, or other content)',
           properties: {
-            width: { type: 'number', description: 'Width of selection in cells' },
-            height: { type: 'number', description: 'Height of selection in cells' },
-          },
-          required: ['width', 'height'],
-        },
-      },
-      required: ['agentId', 'command'],
-    },
-  },
-  {
-    name: 'sequence',
-    description: 'Execute multiple operations in sequence with proper timing. Each operation completes before the next begins.',
-    parameters: {
-      type: 'object',
-      properties: {
-        operations: {
-          type: 'array',
-          description: 'Array of operations to execute in order. Each has a "type" matching tool names and relevant parameters.',
-          items: {
-            type: 'object',
-            properties: {
-              type: { type: 'string', description: 'Operation type (e.g., "set_selection", "run_command", "move_agents")' },
+            x: { type: 'number', description: 'Top-left X' },
+            y: { type: 'number', description: 'Top-left Y' },
+            width: { type: 'number', description: 'Width in cells' },
+            height: { type: 'number', description: 'Height in cells' },
+            contentType: {
+              type: 'string',
+              enum: ['text', 'image', 'data', 'terminal'],
+              description: 'Type of note content (default: text)'
             },
-            required: ['type'],
-            additionalProperties: true,
+            content: { type: 'string', description: 'Text content for text notes' },
+            generateImage: { type: 'string', description: 'Prompt to generate image (for image notes)' },
+            imageData: {
+              type: 'object',
+              description: 'Direct image data (if already have it)',
+              properties: {
+                src: { type: 'string' },
+                originalWidth: { type: 'number' },
+                originalHeight: { type: 'number' }
+              }
+            }
           },
+          required: ['x', 'y', 'width', 'height']
         },
-        delayMs: { type: 'number', description: 'Delay in milliseconds between operations (default: 50)', default: 50 },
-      },
-      required: ['operations'],
-    },
-  },
+        // TEXT
+        text: {
+          type: 'object',
+          description: 'Write text directly on the canvas',
+          properties: {
+            x: { type: 'number' },
+            y: { type: 'number' },
+            content: { type: 'string' }
+          },
+          required: ['x', 'y', 'content']
+        },
+        // CHIP
+        chip: {
+          type: 'object',
+          description: 'Create a small label/chip',
+          properties: {
+            x: { type: 'number' },
+            y: { type: 'number' },
+            text: { type: 'string' },
+            color: { type: 'string', description: 'Hex color (optional)' }
+          },
+          required: ['x', 'y', 'text']
+        },
+        // AGENT
+        agent: {
+          type: 'object',
+          description: 'Create, move, or command agents',
+          properties: {
+            target: {
+              type: 'object',
+              description: 'Which agent(s) to act on',
+              properties: {
+                id: { type: 'string', description: 'Specific agent ID' },
+                near: {
+                  type: 'object',
+                  properties: { x: { type: 'number' }, y: { type: 'number' } },
+                  description: 'Agent nearest to position'
+                },
+                name: { type: 'string', description: 'Agent by sprite name' },
+                all: { type: 'boolean', description: 'All agents' }
+              }
+            },
+            create: {
+              type: 'object',
+              description: 'Create a new agent',
+              properties: {
+                x: { type: 'number' },
+                y: { type: 'number' },
+                spriteName: { type: 'string' }
+              },
+              required: ['x', 'y']
+            },
+            move: {
+              type: 'object',
+              description: 'Movement state',
+              properties: {
+                to: {
+                  type: 'object',
+                  properties: { x: { type: 'number' }, y: { type: 'number' } },
+                  description: 'Move to point'
+                },
+                path: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: { x: { type: 'number' }, y: { type: 'number' } }
+                  },
+                  description: 'Follow path of waypoints'
+                },
+                expr: {
+                  type: 'object',
+                  properties: {
+                    x: { type: 'string', description: 'Expression for X (e.g., "startX + t * 5")' },
+                    y: { type: 'string', description: 'Expression for Y (e.g., "startY + sin(t) * 10")' },
+                    duration: { type: 'number', description: 'Duration in seconds' },
+                    vars: { type: 'object', description: 'Custom variables' }
+                  },
+                  description: 'Expression-based movement'
+                },
+                stop: { type: 'boolean', description: 'Stop movement' }
+              }
+            },
+            action: {
+              type: 'object',
+              description: 'Execute command at agent position',
+              properties: {
+                command: { type: 'string', description: 'Command to execute (e.g., "/paint red")' },
+                selection: {
+                  type: 'object',
+                  properties: {
+                    width: { type: 'number' },
+                    height: { type: 'number' }
+                  },
+                  description: 'Optional selection region'
+                }
+              },
+              required: ['command']
+            }
+          }
+        },
+        // DELETE
+        delete: {
+          type: 'object',
+          description: 'Delete an entity',
+          properties: {
+            type: {
+              type: 'string',
+              enum: ['note', 'agent', 'chip'],
+              description: 'Type of entity to delete'
+            },
+            id: { type: 'string', description: 'Entity ID to delete' }
+          },
+          required: ['type', 'id']
+        },
+        // COMMAND
+        command: {
+          type: 'string',
+          description: 'Execute a Nara command (e.g., "/color red", "/brush 3")'
+        }
+      }
+    }
+  }
 ];
 
-// Type for tool execution context - passed from the canvas component
+// =============================================================================
+// TOOL CONTEXT - Interface for executing tools
+// =============================================================================
+
 export interface ToolContext {
   // Paint operations
   paintCells: (cells: Array<{ x: number; y: number; color: string }>) => void;
   eraseCells: (cells: Array<{ x: number; y: number }>) => void;
 
-  // Cursor/viewport
+  // Sensing
   getCursorPosition: () => { x: number; y: number };
-  setCursorPosition: (x: number, y: number) => void;
+  setCursorPosition?: (x: number, y: number) => void;
   getViewport: () => { offset: { x: number; y: number }; zoomLevel: number };
-  setViewport: (x: number, y: number, zoomLevel?: number) => void;
-
-  // Canvas info
+  setViewport?: (x: number, y: number, zoom?: number) => void;
+  getSelection: () => { start: { x: number; y: number } | null; end: { x: number; y: number } | null };
+  setSelection?: (startX: number, startY: number, endX: number, endY: number) => void;
+  clearSelection?: () => void;
+  getAgents: () => Array<{ id: string; x: number; y: number; spriteName?: string }>;
+  getNotes: () => Array<{ id: string; x: number; y: number; width: number; height: number; contentType?: string; content?: string }>;
+  getChips: () => Array<{ id: string; x: number; y: number; text: string; color?: string }>;
+  getTextAt?: (x: number, y: number, width: number, height: number) => string[];
   getCanvasInfo?: (region?: { x: number; y: number; width: number; height: number }) => any;
 
-  // Selection
-  getSelection: () => { start: { x: number; y: number } | null; end: { x: number; y: number } | null };
-  setSelection: (startX: number, startY: number, endX: number, endY: number) => void;
-  clearSelection: () => void;
-
-  // Agents
-  getAgents: () => Array<{ id: string; x: number; y: number; spriteName?: string }>;
+  // Creating
+  createNote: (x: number, y: number, width: number, height: number, contentType?: string, content?: string, imageData?: { src: string; originalWidth: number; originalHeight: number }) => void;
+  createChip: (x: number, y: number, text: string, color?: string) => void;
   createAgent: (x: number, y: number, spriteName?: string) => string | null;
+  writeText: (x: number, y: number, text: string) => void;
+
+  // Agent operations
   moveAgents: (agentIds: string[], destination: { x: number; y: number }) => void;
   moveAgentsPath?: (agentIds: string[], path: Array<{ x: number; y: number }>) => void;
   moveAgentsExpr?: (agentIds: string[], xExpr: string, yExpr: string, vars?: Record<string, number>, duration?: number) => void;
   stopAgentsExpr?: (agentIds: string[]) => void;
+  agentAction?: (agentId: string, command: string, selection?: { width: number; height: number }) => void;
 
-  // Notes and chips
-  getNotes: () => Array<{ id: string; x: number; y: number; width: number; height: number; content: string }>;
-  createNote: (x: number, y: number, width: number, height: number, content?: string) => void;
-  getChips: () => Array<{ id: string; x: number; y: number; text: string; color?: string }>;
-  createChip: (x: number, y: number, text: string, color?: string) => void;
-
-  // Text
-  getTextAt?: (x: number, y: number, width: number, height: number) => string[];
-  writeText: (x: number, y: number, text: string) => void;
+  // Deletion
+  deleteEntity?: (type: 'note' | 'agent' | 'chip', id: string) => void;
 
   // Commands
   runCommand: (command: string) => void;
-  agentCommand?: (agentId: string, command: string, restoreCursor?: boolean) => void;
-  agentAction?: (agentId: string, command: string, selection?: { width: number; height: number }) => void;
-
-  // Sequence
-  executeSequence?: (operations: Array<{ type: string; [key: string]: any }>, delayMs?: number) => Promise<any>;
 }
 
-// Helper functions for generating shapes
+// =============================================================================
+// HELPER FUNCTIONS - Shape generation
+// =============================================================================
+
 export function generateRectCells(x: number, y: number, width: number, height: number, filled: boolean): Array<{ x: number; y: number }> {
   const cells: Array<{ x: number; y: number }> = [];
   for (let dy = 0; dy < height; dy++) {
@@ -539,7 +407,71 @@ export function generateLineCells(x1: number, y1: number, x2: number, y2: number
   return cells;
 }
 
-// Execute a tool call with the given context
+// =============================================================================
+// TOOL EXECUTION
+// =============================================================================
+
+// Helper to find agent by flexible target
+function resolveAgentTarget(
+  target: { id?: string; near?: { x: number; y: number }; name?: string; all?: boolean } | undefined,
+  agents: Array<{ id: string; x: number; y: number; spriteName?: string }>
+): string[] {
+  if (!target) return [];
+
+  if (target.all) {
+    return agents.map(a => a.id);
+  }
+
+  if (target.id) {
+    const agent = agents.find(a => a.id === target.id);
+    return agent ? [agent.id] : [];
+  }
+
+  if (target.name) {
+    return agents.filter(a => a.spriteName === target.name).map(a => a.id);
+  }
+
+  if (target.near) {
+    // Find closest agent to position
+    let closest: { id: string; dist: number } | null = null;
+    for (const agent of agents) {
+      const dist = Math.sqrt(Math.pow(agent.x - target.near.x, 2) + Math.pow(agent.y - target.near.y, 2));
+      if (!closest || dist < closest.dist) {
+        closest = { id: agent.id, dist };
+      }
+    }
+    return closest ? [closest.id] : [];
+  }
+
+  return [];
+}
+
+// Helper to filter entities by region or near
+function filterByLocation<T extends { x: number; y: number }>(
+  entities: T[],
+  region?: { x: number; y: number; width: number; height: number },
+  near?: { x: number; y: number; radius?: number }
+): T[] {
+  let result = entities;
+
+  if (region) {
+    result = result.filter(e =>
+      e.x >= region.x && e.x < region.x + region.width &&
+      e.y >= region.y && e.y < region.y + region.height
+    );
+  }
+
+  if (near) {
+    const radius = near.radius || 10;
+    result = result.filter(e => {
+      const dist = Math.sqrt(Math.pow(e.x - near.x, 2) + Math.pow(e.y - near.y, 2));
+      return dist <= radius;
+    });
+  }
+
+  return result;
+}
+
 export function executeTool(
   toolName: string,
   args: Record<string, any>,
@@ -547,187 +479,225 @@ export function executeTool(
 ): { success: boolean; result?: any; error?: string } {
   try {
     switch (toolName) {
-      case 'paint_cells': {
-        ctx.paintCells(args.cells);
-        return { success: true, result: `Painted ${args.cells.length} cells` };
-      }
+      // ===================
+      // SENSE
+      // ===================
+      case 'sense': {
+        const { find, region, near, id } = args;
 
-      case 'paint_rect': {
-        const { x, y, width, height, color, filled = true } = args;
-        const cells = generateRectCells(x, y, width, height, filled).map(c => ({ ...c, color }));
-        ctx.paintCells(cells);
-        return { success: true, result: `Painted ${filled ? 'filled' : 'outlined'} rectangle` };
-      }
+        switch (find) {
+          case 'viewport':
+            return { success: true, result: ctx.getViewport() };
 
-      case 'paint_circle': {
-        const { centerX, centerY, radius, color, filled = true } = args;
-        const cells = generateCircleCells(centerX, centerY, radius, filled).map(c => ({ ...c, color }));
-        ctx.paintCells(cells);
-        return { success: true, result: `Painted ${filled ? 'filled' : 'outlined'} circle` };
-      }
+          case 'cursor':
+            return { success: true, result: ctx.getCursorPosition() };
 
-      case 'paint_line': {
-        const { x1, y1, x2, y2, color } = args;
-        const cells = generateLineCells(x1, y1, x2, y2).map(c => ({ ...c, color }));
-        ctx.paintCells(cells);
-        return { success: true, result: `Painted line from (${x1},${y1}) to (${x2},${y2})` };
-      }
+          case 'selection':
+            return { success: true, result: ctx.getSelection() };
 
-      case 'erase_cells': {
-        ctx.eraseCells(args.cells);
-        return { success: true, result: `Erased ${args.cells.length} cells` };
-      }
+          case 'agents': {
+            let agents = ctx.getAgents();
+            if (id) {
+              agents = agents.filter(a => a.id === id);
+            } else {
+              agents = filterByLocation(agents, region, near);
+            }
+            return { success: true, result: agents };
+          }
 
-      case 'erase_region': {
-        const { x, y, width, height } = args;
-        const cells = generateRectCells(x, y, width, height, true);
-        ctx.eraseCells(cells);
-        return { success: true, result: `Erased region ${width}x${height}` };
-      }
+          case 'notes': {
+            let notes = ctx.getNotes();
+            if (id) {
+              notes = notes.filter(n => n.id === id);
+            } else {
+              notes = filterByLocation(notes, region, near);
+            }
+            return { success: true, result: notes };
+          }
 
-      case 'get_cursor_position': {
-        const pos = ctx.getCursorPosition();
-        return { success: true, result: pos };
-      }
+          case 'chips': {
+            let chips = ctx.getChips();
+            if (id) {
+              chips = chips.filter(c => c.id === id);
+            } else {
+              chips = filterByLocation(chips, region, near);
+            }
+            return { success: true, result: chips };
+          }
 
-      case 'set_cursor_position': {
-        ctx.setCursorPosition(args.x, args.y);
-        return { success: true, result: `Cursor moved to (${args.x}, ${args.y})` };
-      }
+          case 'text': {
+            if (!region) {
+              return { success: false, error: 'region required for text sensing' };
+            }
+            if (ctx.getTextAt) {
+              const lines = ctx.getTextAt(region.x, region.y, region.width, region.height);
+              return { success: true, result: lines };
+            }
+            return { success: false, error: 'getTextAt not implemented' };
+          }
 
-      case 'get_canvas_info': {
-        if (ctx.getCanvasInfo) {
-          const info = ctx.getCanvasInfo(args.region);
-          return { success: true, result: info };
+          case 'paint':
+          case 'all': {
+            if (ctx.getCanvasInfo) {
+              const info = ctx.getCanvasInfo(region);
+              if (find === 'all') {
+                // Return everything
+                return {
+                  success: true,
+                  result: {
+                    canvas: info,
+                    agents: filterByLocation(ctx.getAgents(), region, near),
+                    notes: filterByLocation(ctx.getNotes(), region, near),
+                    chips: filterByLocation(ctx.getChips(), region, near),
+                    viewport: ctx.getViewport(),
+                    cursor: ctx.getCursorPosition(),
+                    selection: ctx.getSelection()
+                  }
+                };
+              }
+              return { success: true, result: info };
+            }
+            return { success: false, error: 'getCanvasInfo not implemented' };
+          }
+
+          default:
+            return { success: false, error: `Unknown find type: ${find}` };
         }
-        return { success: false, error: 'getCanvasInfo not implemented' };
       }
 
-      case 'get_viewport': {
-        const viewport = ctx.getViewport();
-        return { success: true, result: viewport };
-      }
+      // ===================
+      // MAKE
+      // ===================
+      case 'make': {
+        const results: string[] = [];
 
-      case 'set_viewport': {
-        ctx.setViewport(args.x, args.y, args.zoomLevel);
-        return { success: true, result: `Viewport set to (${args.x}, ${args.y})` };
-      }
+        // PAINT
+        if (args.paint) {
+          const { cells, rect, circle, line, erase } = args.paint;
 
-      case 'get_selection': {
-        const selection = ctx.getSelection();
-        return { success: true, result: selection };
-      }
+          if (cells) {
+            ctx.paintCells(cells);
+            results.push(`Painted ${cells.length} cells`);
+          }
 
-      case 'set_selection': {
-        ctx.setSelection(args.startX, args.startY, args.endX, args.endY);
-        return { success: true, result: 'Selection set' };
-      }
+          if (rect) {
+            const { x, y, width, height, color, filled = true } = rect;
+            const paintCells = generateRectCells(x, y, width, height, filled).map(c => ({ ...c, color }));
+            ctx.paintCells(paintCells);
+            results.push(`Painted ${filled ? 'filled' : 'outlined'} rectangle`);
+          }
 
-      case 'clear_selection': {
-        ctx.clearSelection();
-        return { success: true, result: 'Selection cleared' };
-      }
+          if (circle) {
+            const { x, y, radius, color, filled = true } = circle;
+            const paintCells = generateCircleCells(x, y, radius, filled).map(c => ({ ...c, color }));
+            ctx.paintCells(paintCells);
+            results.push(`Painted ${filled ? 'filled' : 'outlined'} circle`);
+          }
 
-      case 'get_agents': {
-        const agents = ctx.getAgents();
-        return { success: true, result: agents };
-      }
+          if (line) {
+            const { x1, y1, x2, y2, color } = line;
+            const paintCells = generateLineCells(x1, y1, x2, y2).map(c => ({ ...c, color }));
+            ctx.paintCells(paintCells);
+            results.push(`Painted line from (${x1},${y1}) to (${x2},${y2})`);
+          }
 
-      case 'create_agent': {
-        const agentId = ctx.createAgent(args.x, args.y, args.spriteName);
-        return { success: true, result: { agentId, position: { x: args.x, y: args.y } } };
-      }
-
-      case 'move_agents': {
-        ctx.moveAgents(args.agentIds, args.destination);
-        return { success: true, result: `Moving ${args.agentIds.length} agents` };
-      }
-
-      case 'move_agents_path': {
-        if (ctx.moveAgentsPath) {
-          ctx.moveAgentsPath(args.agentIds, args.path);
-          return { success: true, result: `Moving ${args.agentIds.length} agents along path` };
+          if (erase) {
+            const { x, y, width, height } = erase;
+            const eraseCells = generateRectCells(x, y, width, height, true);
+            ctx.eraseCells(eraseCells);
+            results.push(`Erased region ${width}x${height}`);
+          }
         }
-        return { success: false, error: 'moveAgentsPath not implemented' };
-      }
 
-      case 'move_agents_expr': {
-        if (ctx.moveAgentsExpr) {
-          ctx.moveAgentsExpr(args.agentIds, args.xExpr, args.yExpr, args.vars, args.duration);
-          return { success: true, result: `Moving ${args.agentIds.length} agents with expressions` };
+        // NOTE
+        if (args.note) {
+          const { x, y, width, height, contentType = 'text', content, generateImage, imageData } = args.note;
+          ctx.createNote(x, y, width, height, contentType, content, imageData);
+          if (generateImage) {
+            results.push(`Created note with image generation request: "${generateImage}"`);
+          } else {
+            results.push(`Created ${contentType} note at (${x}, ${y})`);
+          }
         }
-        return { success: false, error: 'moveAgentsExpr not implemented' };
-      }
 
-      case 'stop_agents_expr': {
-        if (ctx.stopAgentsExpr) {
-          ctx.stopAgentsExpr(args.agentIds);
-          return { success: true, result: `Stopped ${args.agentIds.length} agents` };
+        // TEXT
+        if (args.text) {
+          const { x, y, content } = args.text;
+          ctx.writeText(x, y, content);
+          results.push(`Wrote text at (${x}, ${y})`);
         }
-        return { success: false, error: 'stopAgentsExpr not implemented' };
-      }
 
-      case 'get_notes': {
-        const notes = ctx.getNotes();
-        return { success: true, result: notes };
-      }
-
-      case 'create_note': {
-        ctx.createNote(args.x, args.y, args.width, args.height, args.content);
-        return { success: true, result: `Created note at (${args.x}, ${args.y})` };
-      }
-
-      case 'get_chips': {
-        const chips = ctx.getChips();
-        return { success: true, result: chips };
-      }
-
-      case 'create_chip': {
-        ctx.createChip(args.x, args.y, args.text, args.color);
-        return { success: true, result: `Created chip "${args.text}"` };
-      }
-
-      case 'get_text_at': {
-        if (ctx.getTextAt) {
-          const lines = ctx.getTextAt(args.x, args.y, args.width, args.height);
-          return { success: true, result: lines };
+        // CHIP
+        if (args.chip) {
+          const { x, y, text, color } = args.chip;
+          ctx.createChip(x, y, text, color);
+          results.push(`Created chip "${text}"`);
         }
-        return { success: false, error: 'getTextAt not implemented' };
-      }
 
-      case 'write_text': {
-        ctx.writeText(args.x, args.y, args.text);
-        return { success: true, result: `Wrote text at (${args.x}, ${args.y})` };
-      }
+        // AGENT
+        if (args.agent) {
+          const { target, create, move, action } = args.agent;
 
-      case 'run_command': {
-        ctx.runCommand(args.command);
-        return { success: true, result: `Executed: ${args.command}` };
-      }
+          // Create new agent
+          if (create) {
+            const agentId = ctx.createAgent(create.x, create.y, create.spriteName);
+            results.push(`Created agent ${agentId} at (${create.x}, ${create.y})`);
+          }
 
-      case 'agent_command': {
-        if (ctx.agentCommand) {
-          ctx.agentCommand(args.agentId, args.command, args.restoreCursor);
-          return { success: true, result: `Agent executed: ${args.command}` };
+          // Resolve target agents
+          const agents = ctx.getAgents();
+          const targetIds = resolveAgentTarget(target, agents);
+
+          // Move
+          if (move && targetIds.length > 0) {
+            if (move.stop) {
+              if (ctx.stopAgentsExpr) {
+                ctx.stopAgentsExpr(targetIds);
+                results.push(`Stopped ${targetIds.length} agents`);
+              }
+            } else if (move.to) {
+              ctx.moveAgents(targetIds, move.to);
+              results.push(`Moving ${targetIds.length} agents to (${move.to.x}, ${move.to.y})`);
+            } else if (move.path && ctx.moveAgentsPath) {
+              ctx.moveAgentsPath(targetIds, move.path);
+              results.push(`Moving ${targetIds.length} agents along path`);
+            } else if (move.expr && ctx.moveAgentsExpr) {
+              ctx.moveAgentsExpr(targetIds, move.expr.x, move.expr.y, move.expr.vars, move.expr.duration);
+              results.push(`Moving ${targetIds.length} agents with expression`);
+            }
+          }
+
+          // Action
+          if (action && targetIds.length > 0 && ctx.agentAction) {
+            for (const agentId of targetIds) {
+              ctx.agentAction(agentId, action.command, action.selection);
+            }
+            results.push(`${targetIds.length} agents executed: ${action.command}`);
+          }
         }
-        return { success: false, error: 'agentCommand not implemented' };
-      }
 
-      case 'agent_action': {
-        if (ctx.agentAction) {
-          ctx.agentAction(args.agentId, args.command, args.selection);
-          return { success: true, result: `Agent action: ${args.command}` };
+        // DELETE
+        if (args.delete) {
+          const { type, id } = args.delete;
+          if (ctx.deleteEntity) {
+            ctx.deleteEntity(type, id);
+            results.push(`Deleted ${type} ${id}`);
+          } else {
+            return { success: false, error: 'deleteEntity not implemented' };
+          }
         }
-        return { success: false, error: 'agentAction not implemented' };
-      }
 
-      case 'sequence': {
-        if (ctx.executeSequence) {
-          // Note: This is async but executeTool is sync - caller handles this
-          ctx.executeSequence(args.operations, args.delayMs);
-          return { success: true, result: `Executing ${args.operations.length} operations` };
+        // COMMAND
+        if (args.command) {
+          ctx.runCommand(args.command);
+          results.push(`Executed: ${args.command}`);
         }
-        return { success: false, error: 'executeSequence not implemented' };
+
+        if (results.length === 0) {
+          return { success: false, error: 'No valid make operation specified' };
+        }
+
+        return { success: true, result: results.join('; ') };
       }
 
       default:
@@ -738,20 +708,5 @@ export function executeTool(
   }
 }
 
-// Convert to Gemini FunctionDeclaration format
-export function toGeminiFunctionDeclarations() {
-  return canvasTools.map(tool => ({
-    name: tool.name,
-    description: tool.description,
-    parametersJsonSchema: tool.parameters,
-  }));
-}
-
-// Convert to MCP tool format
-export function toMCPTools() {
-  return canvasTools.map(tool => ({
-    name: tool.name,
-    description: tool.description,
-    inputSchema: tool.parameters,
-  }));
-}
+// Export tools for external use
+export { canvasTools as tools };

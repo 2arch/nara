@@ -33,6 +33,7 @@ wss.on('connection', (ws, req) => {
 
     ws.on('message', (data) => {
       // Forward to Nara
+      console.log('[Bridge] MCP -> Nara:', data.toString());
       if (naraClient?.readyState === WebSocket.OPEN) {
         naraClient.send(data.toString());
       } else {
@@ -62,6 +63,7 @@ wss.on('connection', (ws, req) => {
 
     ws.on('message', (data) => {
       // Forward to MCP
+      console.log('[Bridge] Nara -> MCP:', data.toString());
       if (mcpClient?.readyState === WebSocket.OPEN) {
         mcpClient.send(data.toString());
       }
