@@ -1,22 +1,20 @@
-import { GoogleGenAI, Content, Part, FunctionCall } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 import { logger } from './logger';
 import { checkUserQuota, incrementUserUsage } from '../firebase';
 import { createAIAbortController } from './ai.utils';
-import { canvasTools, executeTool, ToolContext, toGeminiFunctionDeclarations } from './ai.tools';
 
-// Get Gemini-formatted function declarations
-const geminiFunctionDeclarations = toGeminiFunctionDeclarations();
-
-// Re-export utilities for backward compatibility
+// Re-export utilities
 export { abortCurrentAI, isAIActive, setDialogueWithRevert, createSubtitleCycler } from './ai.utils';
 
+// Re-export tools for external use
+export { canvasTools, executeTool } from './ai.tools';
+export type { ToolContext } from './ai.tools';
+
 // Lazy initialization of the Google GenAI client
-// This ensures the client is only created when needed, not at module load time
 let genaiClient: GoogleGenAI | null = null;
 
 function getAIClient(): GoogleGenAI {
     if (!genaiClient) {
-        // Server-side only - called from API routes
         const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) {
             throw new Error('GEMINI_API_KEY environment variable is not set');
@@ -26,209 +24,22 @@ function getAIClient(): GoogleGenAI {
     return genaiClient;
 }
 
-// Global cache management
-let currentCachedContent: string | null = null;
-let cacheExpiration: number | null = null;
-
-/**
- * Transform text according to given instructions
- */
-export async function transformText(text: string, instructions: string, userId?: string): Promise<string> {
-    const abortController = createAIAbortController();
-    
-    try {
-        // Check user quota before proceeding
-        if (userId) {
-            const quota = await checkUserQuota(userId);
-            if (!quota.canUseAI) {
-                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`;
-            }
-        }
-
-        if (abortController.signal.aborted) {
-            throw new Error('AI operation was interrupted');
-        }
-
-        const response = await Promise.race([
-            getAIClient().models.generateContent({
-                model: 'gemini-2.5-flash-lite',
-                contents: `Transform: "${instructions}"
-
-Text: "${text}"
-
-Output only the result.`,
-                config: {
-                    maxOutputTokens: 75,
-                    temperature: 0.9,
-                    systemInstruction: 'Transform text. Output result only. Be brutally concise.'
-                }
-            }),
-            new Promise((_, reject) => {
-                abortController.signal.addEventListener('abort', () => {
-                    reject(new Error('AI operation was interrupted'));
-                });
-            })
-        ]);
-
-        const result = (response as any).text?.trim() || text;
-
-        // Increment usage after successful response
-        if (userId) {
-            await incrementUserUsage(userId);
-        }
-
-        return result;
-    } catch (error) {
-        if (error instanceof Error && error.message === 'AI operation was interrupted') {
-            logger.debug('AI transform operation was interrupted by user');
-            return '[Interrupted]';
-        }
-        logger.error('Error transforming text:', error);
-        return `Could not transform text`;
-    }
-}
-
-/**
- * Explain text according to given analysis type or general analysis
- */
-export async function explainText(text: string, analysisType: string = 'analysis', userId?: string): Promise<string> {
-    const abortController = createAIAbortController();
-
-    try {
-        // Check user quota before proceeding
-        if (userId) {
-            const quota = await checkUserQuota(userId);
-            if (!quota.canUseAI) {
-                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`;
-            }
-        }
-
-        if (abortController.signal.aborted) {
-            throw new Error('AI operation was interrupted');
-        }
-
-        const prompt = analysisType === 'analysis' 
-            ? `What's the core insight here?
-
-"${text}"`
-            : `What's the ${analysisType} pattern here?
-
-"${text}"`;
-
-        const response = await Promise.race([
-            getAIClient().models.generateContent({
-                model: 'gemini-2.5-flash-lite',
-                contents: prompt,
-                config: {
-                    maxOutputTokens: 60,
-                    temperature: 0.9,
-                    systemInstruction: 'Get to the core insight. Be brutally concise. Maximum 2 sentences.'
-                }
-            }),
-            new Promise((_, reject) => {
-                abortController.signal.addEventListener('abort', () => {
-                    reject(new Error('AI operation was interrupted'));
-                });
-            })
-        ]);
-
-        const result = (response as any).text?.trim() || `Could not analyze the text`;
-
-        // Increment usage after successful response
-        if (userId) {
-            await incrementUserUsage(userId);
-        }
-
-        return result;
-    } catch (error) {
-        if (error instanceof Error && error.message === 'AI operation was interrupted') {
-            logger.debug('AI explain operation was interrupted by user');
-            return '[Interrupted]';
-        }
-        logger.error('Error explaining text:', error);
-        return `Could not explain text`;
-    }
-}
-
-/**
- * Summarize the given text
- */
-export async function summarizeText(text: string, focus?: string, userId?: string): Promise<string> {
-    const abortController = createAIAbortController();
-
-    try {
-        // Check user quota before proceeding
-        if (userId) {
-            const quota = await checkUserQuota(userId);
-            if (!quota.canUseAI) {
-                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`;
-            }
-        }
-
-        if (abortController.signal.aborted) {
-            throw new Error('AI operation was interrupted');
-        }
-
-        const prompt = focus 
-            ? `What's the essence of "${focus}" here?
-
-"${text}"`
-            : `What's the essence here?
-
-"${text}"`;
-
-        const response = await Promise.race([
-            getAIClient().models.generateContent({
-                model: 'gemini-2.5-flash-lite',
-                contents: prompt,
-                config: {
-                    maxOutputTokens: 50,
-                    temperature: 0.9,
-                    systemInstruction: 'Distill to essence. Be brutally concise. Maximum 2 sentences.'
-                }
-            }),
-            new Promise((_, reject) => {
-                abortController.signal.addEventListener('abort', () => {
-                    reject(new Error('AI operation was interrupted'));
-                });
-            })
-        ]);
-
-        const result = (response as any).text?.trim() || `Could not summarize the text`;
-
-        // Increment usage after successful response
-        if (userId) {
-            await incrementUserUsage(userId);
-        }
-
-        return result;
-    } catch (error) {
-        if (error instanceof Error && error.message === 'AI operation was interrupted') {
-            logger.debug('AI summarize operation was interrupted by user');
-            return '[Interrupted]';
-        }
-        logger.error('Error summarizing text:', error);
-        return `Could not summarize text`;
-    }
-}
+// =============================================================================
+// Server-side functions (used by API routes)
+// =============================================================================
 
 /**
  * Generate or edit an image using Gemini's image generation model
- * @param prompt - Text description for image generation or editing
- * @param existingImage - Optional existing image data URL for image-to-image editing
- * @param userId - Optional user ID for quota checking and usage tracking
- * @returns Object containing imageData (base64 data URL) and optional text response
  */
 export async function generateImage(
     prompt: string,
     existingImage?: string,
     userId?: string,
-    aspectRatio?: string // e.g., "16:9", "1:1", "9:16"
+    aspectRatio?: string
 ): Promise<{ imageData: string | null, text: string }> {
     const abortController = createAIAbortController();
 
     try {
-        // Check user quota before proceeding
         if (userId) {
             const quota = await checkUserQuota(userId);
             if (!quota.canUseAI) {
@@ -243,19 +54,15 @@ export async function generateImage(
             throw new Error('AI operation was interrupted');
         }
 
-        // Prepare contents - either text-to-image or image-to-image
         let contents: any[] = [prompt];
 
         if (existingImage) {
-            // existingImage should already be a base64 data URL (converted by caller)
-            // Extract mime type and base64 data
             const matches = existingImage.match(/^data:([^;]+);base64,(.+)$/);
             if (!matches) {
                 throw new Error('Invalid image format - must be base64 data URL');
             }
             const mimeType = matches[1];
             const base64Data = matches[2];
-
             contents = [prompt, { inlineData: { data: base64Data, mimeType } }];
         }
 
@@ -275,14 +82,12 @@ export async function generateImage(
             })
         ]) as any;
 
-        // Extract image and text from response
         let imageData: string | null = null;
         let text = '';
 
         if (response.candidates && response.candidates[0]?.content?.parts) {
             for (const part of response.candidates[0].content.parts) {
                 if (part.inlineData) {
-                    // Convert to data URL
                     const mimeType = part.inlineData.mimeType || 'image/png';
                     imageData = `data:${mimeType};base64,${part.inlineData.data}`;
                 } else if (part.text) {
@@ -295,7 +100,6 @@ export async function generateImage(
             throw new Error('No image generated in response');
         }
 
-        // Increment usage after successful generation
         if (userId) {
             await incrementUserUsage(userId);
         }
@@ -311,375 +115,57 @@ export async function generateImage(
     }
 }
 
-// Chat history interface
-export interface ChatMessage {
-    role: 'user' | 'model';
-    content: string;
-    timestamp: number;
-}
-
-// Chat session state
-let chatHistory: ChatMessage[] = [];
-
-// Context for ambient navigation
-let currentWorldContext: {
-    compiledText: string;
-    labels: Array<{ text: string; x: number; y: number; }>;
-    metadata?: string;
-} | null = null;
-
-/**
- * Update the world context for ambient navigation
- */
-export function updateWorldContext(worldContext: {
-    compiledText: string;
-    labels: Array<{ text: string; x: number; y: number; }>;
-    metadata?: string;
-}): void {
-    currentWorldContext = worldContext;
-}
-
-/**
- * Get the current world context
- */
-export function getCurrentWorldContext() {
-    return currentWorldContext;
-}
-
-/**
- * Chat with AI maintaining conversation history
- */
-export async function chatWithAI(
-    message: string,
-    useCache: boolean = true,
-    userId?: string,
-    worldContext?: { compiledText: string; labels: Array<{ text: string; x: number; y: number; }>; metadata?: string }
-): Promise<string> {
-    const abortController = createAIAbortController();
-
-    try {
-        // Check user quota before proceeding
-        if (userId) {
-            const quota = await checkUserQuota(userId);
-            if (!quota.canUseAI) {
-                return `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`;
-            }
-        }
-
-        // Add user message to history
-        chatHistory.push({
-            role: 'user',
-            content: message,
-            timestamp: Date.now()
-        });
-
-        // Prepare conversation context
-        const conversationContext = chatHistory
-            .slice(-10) // Keep last 10 messages for context
-            .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
-            .join('\n');
-
-        let response;
-
-        // Check for abort before making requests
-        if (abortController.signal.aborted) {
-            throw new Error('AI operation was interrupted');
-        }
-
-        // Use provided worldContext or fall back to global currentWorldContext
-        const contextToUse = worldContext || currentWorldContext;
-
-        // Use world context cache if available and enabled
-        if (useCache && contextToUse) {
-            try {
-                // Create or get cached content for world context
-                const cachedContentName = await createWorldContextCache();
-                
-                if (cachedContentName) {
-                    // Use cached content with user message
-                    response = await Promise.race([
-                        getAIClient().models.generateContent({
-                            model: 'gemini-2.5-flash-lite',
-                            contents: message,
-                            config: {
-                                cachedContent: cachedContentName,
-                                maxOutputTokens: 50,
-                                temperature: 0.9,
-                                systemInstruction: 'When responding, please respond without wasting words. Brevity is effective communication, responses should match the initial query in length without leaning into superfluous reflection to maximize focus, without any meta commentary on the personal preference. Respond in all lower case. when canvas context is provided, use it to inform your response but keep replies brief and conversational.'
-                            }
-                        }),
-                        new Promise((_, reject) => {
-                            abortController.signal.addEventListener('abort', () => {
-                                reject(new Error('AI operation was interrupted'));
-                            });
-                        })
-                    ]);
-                } else {
-                    // Fallback to old method if caching fails
-                    const contextContent = `User query: ${message}\n\nCanvas context (for reference): ${contextToUse.compiledText}\nLabels: ${contextToUse.labels.map(l => l.text).join(', ')}`;
-
-                    response = await Promise.race([
-                        getAIClient().models.generateContent({
-                            model: 'gemini-2.5-flash-lite',
-                            contents: contextContent,
-                            config: {
-                                maxOutputTokens: 50,
-                                temperature: 0.9,
-                                systemInstruction: 'When responding, please respond without wasting words. Brevity is effective communication, responses should match the initial query in length without leaning into superfluous reflection to maximize focus, without any meta commentary on the personal preference. Respond in all lower case. when canvas context is provided, use it to inform your response but keep replies brief and conversational.'
-                            }
-                        }),
-                        new Promise((_, reject) => {
-                            abortController.signal.addEventListener('abort', () => {
-                                reject(new Error('AI operation was interrupted'));
-                            });
-                        })
-                    ]);
-                }
-            } catch (error) {
-                if (error instanceof Error && error.message === 'AI operation was interrupted') {
-                    throw error;
-                }
-                logger.error('Error using world context cache, falling back:', error);
-                // Fall back to non-cached request
-                useCache = false;
-            }
-        }
-
-        // If not using cache or cache failed
-        if (!useCache || !response) {
-            // Check for abort again
-            if (abortController.signal.aborted) {
-                throw new Error('AI operation was interrupted');
-            }
-
-            response = await Promise.race([
-                getAIClient().models.generateContent({
-                    model: 'gemini-2.5-flash-lite',
-                    contents: `Previous conversation:
-${conversationContext}
-
-User: ${message}`,
-                    config: {
-                        maxOutputTokens: 75,
-                        temperature: 0.9,
-                        systemInstruction: 'When responding, please respond without wasting words. Brevity is effective communication, responses should match the initial query in length without leaning into superfluous reflection to maximize focus, without any meta commentary on the personal preference. Respond in all lower case. when canvas context is provided, use it to inform your response but keep replies brief and conversational.'
-                    }
-                }),
-                new Promise((_, reject) => {
-                    abortController.signal.addEventListener('abort', () => {
-                        reject(new Error('AI operation was interrupted'));
-                    });
-                })
-            ]);
-        }
-
-        const aiResponse = ((response as any).text?.trim() || 'I could not process that message.').toLowerCase();
-
-        // Add AI response to history
-        chatHistory.push({
-            role: 'model',
-            content: aiResponse,
-            timestamp: Date.now()
-        });
-
-        // Increment usage after successful response
-        if (userId) {
-            await incrementUserUsage(userId);
-        }
-
-        return aiResponse;
-    } catch (error) {
-        if (error instanceof Error && error.message === 'AI operation was interrupted') {
-            logger.debug('AI chat operation was interrupted by user');
-            return '[Interrupted]';
-        }
-        logger.error('Error in chat:', error);
-        return 'Sorry, I encountered an error. Could you try again?';
-    }
-}
-
-/**
- * Clear chat history
- */
-export function clearChatHistory(): void {
-    chatHistory = [];
-}
-
-/**
- * Clear world context
- */
-export function clearWorldContext(): void {
-    currentWorldContext = null;
-}
-
-/**
- * Create or update cached content for world context
- */
-export async function createWorldContextCache(): Promise<string | null> {
-    if (!currentWorldContext) {
-        return null;
-    }
-
-    try {
-        // Check if current cache is still valid
-        if (currentCachedContent && cacheExpiration && Date.now() < cacheExpiration) {
-            return currentCachedContent;
-        }
-
-        // Create comprehensive world context content
-        const contextText = `Canvas World Context:
-
-Compiled Text Content:
-${currentWorldContext.compiledText}
-
-Labels and Positions:
-${currentWorldContext.labels.map(l => `- "${l.text}" at (${l.x}, ${l.y})`).join('\n')}
-
-Metadata:
-${currentWorldContext.metadata || 'No additional metadata'}
-
-This context represents the current state of the canvas/world that the user is working with. Use this information to provide contextually relevant responses about the canvas content, spatial relationships, and connections between elements.`;
-
-        // Gemini caching requires minimum 2048 tokens
-        // Rough estimate: 1 token ≈ 4 characters
-        const estimatedTokens = contextText.length / 4;
-
-        if (estimatedTokens < 2048) {
-            logger.debug(`Context too small for caching (estimated ${Math.floor(estimatedTokens)} tokens, need 2048+). Skipping cache.`);
-            return null;
-        }
-
-        const worldContextContent = [
-            {
-                role: 'user',
-                parts: [
-                    {
-                        text: contextText
-                    }
-                ]
-            }
-        ];
-
-        // Create cached content with 1 hour TTL
-        const cachedContent = await getAIClient().caches.create({
-            model: 'gemini-2.5-flash-lite',
-            config: {
-                contents: worldContextContent,
-                systemInstruction: {
-                    role: 'system',
-                    parts: [{ text: 'When responding, please respond without wasting words. Brevity is effective communication, responses should match the initial query in length without leaning into superfluous reflection to maximize focus, without any meta commentary on the personal preference. Respond in all lower case. when canvas context is provided, use it to inform your response but keep replies brief and conversational.' }]
-                },
-                ttl: '3600s', // 1 hour cache
-                displayName: 'World Context Cache'
-            }
-        });
-
-        // Store cache reference and expiration
-        currentCachedContent = cachedContent.name || null;
-        cacheExpiration = Date.now() + (60 * 60 * 1000); // 1 hour from now
-
-        return currentCachedContent;
-    } catch (error) {
-        logger.error('Error creating world context cache:', error);
-        return null;
-    }
-}
-
-/**
- * Clear cached content
- */
-export async function clearWorldContextCache(): Promise<void> {
-    if (currentCachedContent) {
-        try {
-            await getAIClient().caches.delete({ name: currentCachedContent });
-        } catch (error) {
-            logger.error('Error deleting cache:', error);
-        }
-        currentCachedContent = null;
-        cacheExpiration = null;
-    }
-}
-
-/**
- * Get current chat history
- */
-export function getChatHistory(): ChatMessage[] {
-    return [...chatHistory];
-}
-
-
 /**
  * Generate a video from a text prompt using Google GenAI Veo
  */
 export async function generateVideo(prompt: string): Promise<string | null> {
     try {
-
-        // Start the video generation operation
         let operation = await getAIClient().models.generateVideos({
             model: 'veo-3.0-generate-preview',
             prompt: prompt,
         });
 
-
-        // Poll the operation status until the video is ready
         let pollCount = 0;
-        let maxPolls = 60; // Maximum 5 minutes of polling (60 * 5 seconds)
-        
+        let maxPolls = 60;
+
         while (!operation.done && pollCount < maxPolls) {
             pollCount++;
-            await new Promise((resolve) => setTimeout(resolve, 5000)); // Poll every 5 seconds
-            
+            await new Promise((resolve) => setTimeout(resolve, 5000));
+
             try {
-                // The getVideosOperation expects an object with the operation
                 operation = await getAIClient().operations.getVideosOperation({
                     operation: operation
                 });
             } catch (pollError) {
                 logger.error(`Error polling operation (attempt ${pollCount}):`, pollError);
-                // If the operation is not responding properly, we might have a stale operation
-                // Continue with the existing operation object
             }
-            
         }
-        
+
         if (pollCount >= maxPolls) {
             logger.error('Video generation timed out after 5 minutes');
             return null;
         }
 
-
-        // Get the generated video from the completed operation
         const generatedVideo = operation.response?.generatedVideos?.[0];
-        
-        // Check if we have video bytes directly
+
         if (generatedVideo?.video?.videoBytes) {
-            // Convert base64 video bytes to data URL
             const mimeType = generatedVideo.video.mimeType || 'video/mp4';
-            const dataUrl = `data:${mimeType};base64,${generatedVideo.video.videoBytes}`;
-            return dataUrl;
+            return `data:${mimeType};base64,${generatedVideo.video.videoBytes}`;
         }
-        
-        // Check if we have a URI to download the video from
+
         if (generatedVideo?.video?.uri) {
-            
             try {
-                // Fetch the video from the URI
                 const response = await fetch(generatedVideo.video.uri);
                 if (!response.ok) {
                     logger.error('Failed to fetch video from URI:', response.status, response.statusText);
                     return null;
                 }
-                
-                // Get the video as a blob
+
                 const blob = await response.blob();
-                
-                // Convert blob to data URL
+
                 return new Promise((resolve) => {
                     const reader = new FileReader();
-                    reader.onloadend = () => {
-                        const dataUrl = reader.result as string;
-                        resolve(dataUrl);
-                    };
+                    reader.onloadend = () => resolve(reader.result as string);
                     reader.onerror = () => {
                         logger.error('Failed to convert video blob to data URL');
                         resolve(null);
@@ -688,41 +174,27 @@ export async function generateVideo(prompt: string): Promise<string | null> {
                 });
             } catch (fetchError) {
                 logger.error('Error fetching video from URI:', fetchError);
-                // As a fallback, just return the URI directly
                 return generatedVideo.video.uri;
             }
         }
 
-        // Check for RAI (Responsible AI) filtering
         if (generatedVideo && 'raiReason' in generatedVideo) {
             logger.warn('Video generation blocked by RAI:', (generatedVideo as any).raiReason);
         }
 
-        logger.warn('No video data received from generation. Full response structure:', JSON.stringify(operation, null, 2));
+        logger.warn('No video data received from generation.');
         return null;
     } catch (error) {
         logger.error('Error generating video:', error);
-        // Log more details about the error
-        if (error instanceof Error) {
-            logger.error('Error details:', {
-                message: error.message,
-                stack: error.stack,
-                name: error.name
-            });
-        }
         return null;
     }
 }
 
-
 /**
  * Generate a concise label for a text cluster using AI
- * @param clusterContent Full text content of the cluster
- * @returns Promise<string> Concise label or null if generation fails
  */
 export async function generateClusterLabel(clusterContent: string): Promise<string | null> {
     try {
-
         const response = await getAIClient().models.generateContent({
             model: 'gemini-2.5-flash-lite',
             contents: `Create a very short, descriptive label (2-4 words max) for this text cluster:
@@ -745,7 +217,6 @@ Respond with ONLY the label, no explanation.`,
 
         const label = response.text?.trim();
 
-        // Validate the label is reasonably short and meaningful
         if (label && label.length >= 3 && label.length <= 30 && !label.includes('"')) {
             return label;
         }
@@ -758,28 +229,19 @@ Respond with ONLY the label, no explanation.`,
 }
 
 /**
- * Get autocomplete suggestions using logprobs for next token prediction
- * @param currentText The text typed so far (current word being typed)
- * @param context Optional surrounding context for better predictions
- * @returns Array of suggestion strings sorted by probability
+ * Get autocomplete suggestions
  */
 export async function getAutocompleteSuggestions(
     currentText: string,
     context?: string
 ): Promise<string[]> {
     try {
-        // Don't suggest if text is empty or just whitespace
         if (!currentText || currentText.trim().length === 0) {
             return [];
         }
 
-        // Build prompt with context if available
-        const prompt = context
-            ? `${context}\n${currentText}`
-            : currentText;
+        const prompt = context ? `${context}\n${currentText}` : currentText;
 
-        // Note: Logprobs are not supported for gemini-2.5-flash-lite model
-        // Using simple text generation as fallback for autocomplete
         const response = await getAIClient().models.generateContent({
             model: 'gemini-2.5-flash-lite',
             contents: `Continue this text with 3 possible next words (output format: "word1, word2, word3"): "${prompt}"`,
@@ -791,286 +253,17 @@ export async function getAutocompleteSuggestions(
         });
 
         const result = response.text?.trim();
+        if (!result) return [];
 
-        if (!result) {
-            return [];
-        }
-
-        // Parse comma-separated suggestions
-        const suggestions = result
+        return result
             .split(',')
             .map(s => s.trim())
             .filter(s => s.length > 0 && /^[a-zA-Z]+$/.test(s))
             .slice(0, 3);
-
-        return suggestions;
     } catch (error) {
         logger.error('Error getting autocomplete suggestions:', error);
         return [];
     }
-}
-
-// Re-export tools for external use
-export { canvasTools, executeTool } from './ai.tools';
-export type { ToolContext } from './ai.tools';
-
-// System instruction for action-only mode
-const ACTION_SYSTEM_INSTRUCTION = `You are an AI that controls a canvas application.
-When the user asks you to do something, use the provided tools to accomplish it.
-Do NOT respond with text - only use function calls to perform actions.
-Be precise with coordinates and colors. Use hex colors (e.g., #ff0000 for red).
-The canvas uses integer cell coordinates. Positive X is right, positive Y is down.
-If the user's request doesn't make sense as a canvas action, return no function calls.`;
-
-export interface AIActionResult {
-    toolCalls: Array<{ name: string; args: Record<string, any> }>;
-    error?: string;
-}
-
-/**
- * Get AI-determined actions for a prompt (no text response, just tool calls)
- */
-export async function getAIActions(prompt: string, userId?: string): Promise<AIActionResult> {
-    try {
-        // Check user quota before proceeding
-        if (userId) {
-            const quota = await checkUserQuota(userId);
-            if (!quota.canUseAI) {
-                return {
-                    toolCalls: [],
-                    error: `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today)`,
-                };
-            }
-        }
-
-        const response = await getAIClient().models.generateContent({
-            model: 'gemini-2.0-flash',
-            contents: prompt,
-            config: {
-                systemInstruction: ACTION_SYSTEM_INSTRUCTION,
-                tools: [{ functionDeclarations: geminiFunctionDeclarations }],
-            },
-        });
-
-        // Extract function calls from response
-        const candidate = response.candidates?.[0];
-        if (!candidate?.content?.parts) {
-            return { toolCalls: [] };
-        }
-
-        const toolCalls: Array<{ name: string; args: Record<string, any> }> = [];
-
-        for (const part of candidate.content.parts) {
-            if (part.functionCall) {
-                const name = part.functionCall.name || 'unknown';
-                const args = (part.functionCall.args as Record<string, any>) || {};
-                toolCalls.push({ name, args });
-            }
-        }
-
-        // Increment usage after successful response
-        if (userId && toolCalls.length > 0) {
-            await incrementUserUsage(userId);
-        }
-
-        return { toolCalls };
-    } catch (error: any) {
-        logger.error('Error getting AI actions:', error);
-        return { toolCalls: [], error: error.message };
-    }
-}
-
-// Tool-calling conversation history per session
-const toolConversations = new Map<string, Content[]>();
-
-// System instruction for tool-calling mode
-const TOOL_SYSTEM_INSTRUCTION = `You are a helpful AI assistant integrated into Nara, an infinite canvas application.
-You can interact with the canvas using the provided tools to paint, draw, create notes/chips, move agents, and more.
-
-When the user asks you to do something on the canvas:
-1. Use the appropriate tools to accomplish the task
-2. Be creative but precise with coordinates and colors
-3. Confirm what you did after completing actions
-
-Keep responses concise. Use hex colors (e.g., #ff0000 for red, #00ff00 for green, #0000ff for blue).
-The canvas uses integer cell coordinates. Positive X is right, positive Y is down.`;
-
-// Maximum tool call iterations to prevent infinite loops
-const MAX_TOOL_ITERATIONS = 10;
-
-export interface ToolChatResponse {
-    text: string;
-    toolCalls?: Array<{ name: string; args: any; result: any }>;
-    error?: string;
-}
-
-/**
- * Core tool-calling engine. Executes a prompt with multi-turn tool calling loop.
- * @param message - The user's prompt
- * @param toolContext - Canvas tool implementations
- * @param history - Optional conversation history (mutated in place)
- * @param userId - Optional user ID for quota checking
- */
-export async function callTools(
-    message: string,
-    toolContext: ToolContext,
-    history: Content[] = [],
-    userId?: string
-): Promise<ToolChatResponse> {
-    const abortController = createAIAbortController();
-
-    try {
-        // Check user quota before proceeding
-        if (userId) {
-            const quota = await checkUserQuota(userId);
-            if (!quota.canUseAI) {
-                return {
-                    text: `AI limit reached (${quota.dailyUsed}/${quota.dailyLimit} today). Upgrade for more: /upgrade`,
-                };
-            }
-        }
-
-        // Add user message to history
-        history.push({
-            role: 'user',
-            parts: [{ text: message }],
-        });
-
-        const toolCallResults: Array<{ name: string; args: any; result: any }> = [];
-        let iterations = 0;
-
-        // Tool calling loop
-        while (iterations < MAX_TOOL_ITERATIONS) {
-            iterations++;
-
-            if (abortController.signal.aborted) {
-                throw new Error('AI operation was interrupted');
-            }
-
-            const response = await getAIClient().models.generateContent({
-                model: 'gemini-2.0-flash',
-                contents: history,
-                config: {
-                    systemInstruction: TOOL_SYSTEM_INSTRUCTION,
-                    tools: [{ functionDeclarations: geminiFunctionDeclarations }],
-                },
-            });
-
-            // Check response
-            const candidate = response.candidates?.[0];
-            if (!candidate?.content?.parts) {
-                return { text: 'No response generated', error: 'Empty response from model' };
-            }
-
-            const parts = candidate.content.parts;
-            const functionCalls: FunctionCall[] = [];
-            let textResponse = '';
-
-            // Extract function calls and text
-            for (const part of parts) {
-                if (part.functionCall) {
-                    functionCalls.push(part.functionCall);
-                }
-                if (part.text) {
-                    textResponse += part.text;
-                }
-            }
-
-            // If no function calls, we're done
-            if (functionCalls.length === 0) {
-                history.push({
-                    role: 'model',
-                    parts: [{ text: textResponse }],
-                });
-
-                // Increment usage after successful response
-                if (userId) {
-                    await incrementUserUsage(userId);
-                }
-
-                return {
-                    text: textResponse,
-                    toolCalls: toolCallResults.length > 0 ? toolCallResults : undefined,
-                };
-            }
-
-            // Execute function calls
-            const functionResponses: Part[] = [];
-
-            for (const functionCall of functionCalls) {
-                const name = functionCall.name || 'unknown';
-                const args = functionCall.args || {};
-                logger.debug(`AI calling tool: ${name}`, args);
-
-                const result = executeTool(name, args as Record<string, any>, toolContext);
-                toolCallResults.push({ name, args, result });
-
-                functionResponses.push({
-                    functionResponse: {
-                        name,
-                        response: result,
-                    },
-                });
-            }
-
-            // Add model's function call to history
-            history.push({
-                role: 'model',
-                parts: parts,
-            });
-
-            // Add function responses to history
-            history.push({
-                role: 'user',
-                parts: functionResponses,
-            });
-        }
-
-        // Hit max iterations
-        if (userId) {
-            await incrementUserUsage(userId);
-        }
-
-        return {
-            text: 'Completed maximum tool iterations',
-            toolCalls: toolCallResults,
-            error: 'Hit maximum tool call limit',
-        };
-    } catch (error: any) {
-        if (error.message === 'AI operation was interrupted') {
-            logger.debug('AI tool chat was interrupted');
-            return { text: '[Interrupted]' };
-        }
-        logger.error('Error in tool chat:', error);
-        return { text: 'Sorry, I encountered an error.', error: error.message };
-    }
-}
-
-/**
- * Clear tool session history
- */
-export function clearToolSession(sessionId: string): void {
-    toolConversations.delete(sessionId);
-}
-
-/**
- * Tool session with persistent history across multiple calls.
- * Wraps callTools with session-based history management.
- */
-export async function toolSession(
-    sessionId: string,
-    message: string,
-    toolContext: ToolContext,
-    userId?: string
-): Promise<ToolChatResponse> {
-    // Get or create session history
-    let history = toolConversations.get(sessionId);
-    if (!history) {
-        history = [];
-        toolConversations.set(sessionId, history);
-    }
-
-    return callTools(message, toolContext, history, userId);
 }
 
 // =============================================================================
@@ -1089,39 +282,30 @@ export interface CanvasState {
 /** Context for AI - provide whatever is available, AI decides what to do */
 export interface AIContext {
     userId?: string;
-    selection?: string;           // Selected text content
-    worldContext?: {              // Canvas awareness
+    selection?: string;
+    worldContext?: {
         compiledText: string;
         labels: Array<{ text: string; x: number; y: number }>;
         metadata?: string;
     };
-    referenceImage?: string;      // For image editing
-    aspectRatio?: string;         // For image generation
-    canvasState?: CanvasState;    // For canvas tool execution
+    referenceImage?: string;
+    aspectRatio?: string;
+    canvasState?: CanvasState;
 }
 
 /** Result from ai() - model decides response type */
 export interface AIResult {
-    text?: string;                // Text response (if model chose to respond with text)
-    actions?: Array<{             // Tool actions (if model chose to use tools)
+    text?: string;
+    actions?: Array<{
         tool: string;
         args: Record<string, any>;
     }>;
-    image?: {                     // Image result (if model chose to generate image)
+    image?: {
         imageData: string | null;
         text: string;
     };
     error?: string;
 }
-
-const callAPI = async (body: Record<string, any>): Promise<any> => {
-    const response = await fetch('/api/ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-    });
-    return response.json();
-};
 
 /**
  * Unified AI interface. Gemini decides whether to:
@@ -1131,7 +315,11 @@ const callAPI = async (body: Record<string, any>): Promise<any> => {
  *
  * Just call ai(prompt, context) and let the model figure it out.
  */
-const aiCall = (prompt: string, context?: AIContext): Promise<AIResult> =>
-    callAPI({ prompt, ...context });
-
-export const ai = aiCall;
+export const ai = async (prompt: string, context?: AIContext): Promise<AIResult> => {
+    const response = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, ...context })
+    });
+    return response.json();
+};

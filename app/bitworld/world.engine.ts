@@ -26,12 +26,6 @@ import { BubbleState, createInitialBubbleState, showBubble, hideBubble, isBubble
 
 import { ai, CanvasState } from './ai';
 
-// Keep clearChatHistory as a local import since it's a simple utility
-const clearChatHistory = async () => {
-    const aiModule = await import('./ai');
-    return aiModule.clearChatHistory();
-};
-
 // --- Constants --- (Copied and relevant ones kept)
 const BASE_FONT_SIZE = 16;
 const BASE_CHAR_WIDTH = BASE_FONT_SIZE * 0.6;
