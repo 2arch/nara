@@ -1222,6 +1222,7 @@ export interface WorldEngine {
         moveAgentsPath: (agentIds: string[], path: { x: number; y: number }[]) => { moved: string[]; errors: string[] };
         moveAgentsExpr: (agentIds: string[], xExpr: string, yExpr: string, vars?: Record<string, number>, duration?: number) => { moved: string[]; errors: string[] };
         stopAgentsExpr: (agentIds: string[]) => { stopped: string[] };
+        agentThink: (agentId: string) => Promise<{ thought: string; actions?: any[] } | null>;
     };
     registerAgentHandlers: (handlers: WorldEngine['agentHandlers']) => void;
 }
@@ -5508,6 +5509,27 @@ export function useWorldEngine({
                                 agentHandlersRef.current.stopAgentsExpr(agentIds);
                             }
                         },
+                        setAgentMind: (agentId, persona, goals) => {
+                            // Update agent data with mind info
+                            const agentDataStr = worldData[agentId];
+                            if (!agentDataStr) return;
+                            try {
+                                const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+                                agentData.mind = {
+                                    persona: persona || agentData.mind?.persona || '',
+                                    goals: goals || agentData.mind?.goals || [],
+                                    thoughts: agentData.mind?.thoughts || []
+                                };
+                                setWorldData(prev => ({ ...prev, [agentId]: JSON.stringify(agentData) }));
+                            } catch {}
+                        },
+                        agentThink: async (agentId) => {
+                            // Trigger AI thinking for an agent
+                            if (agentHandlersRef.current?.agentThink) {
+                                return agentHandlersRef.current.agentThink(agentId);
+                            }
+                            return null;
+                        },
                         getNotes: () => {
                             const notes: Array<{ id: string; x: number; y: number; width: number; height: number; contentType?: string; content?: string }> = [];
                             for (const key in worldData) {
@@ -5642,7 +5664,7 @@ export function useWorldEngine({
                     };
 
                     // Try AI chat with tools (multi-turn)
-                    ai(aiPrompt, { canvasState, userId: userUid || undefined }).then((result) => {
+                    ai(aiPrompt, { canvasState, userId: userUid || undefined }).then(async (result) => {
                         // Check for quota error
                         if (result.error?.includes('AI limit reached')) {
                             if (upgradeFlowHandlerRef.current) {
@@ -5655,7 +5677,7 @@ export function useWorldEngine({
                         if (result.actions && result.actions.length > 0) {
                             let executedCount = 0;
                             for (const action of result.actions) {
-                                const execResult = executeTool(action.tool, action.args, toolContext);
+                                const execResult = await executeTool(action.tool, action.args, toolContext);
                                 if (execResult.success) {
                                     executedCount++;
                                     logger.debug('Executed AI action:', action.tool, execResult.result);

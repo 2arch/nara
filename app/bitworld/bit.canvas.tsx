@@ -8,15 +8,16 @@ import { useControllerSystem, createCameraController, createGridController, crea
 import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchicalFrames, HierarchicalFrame, HierarchyLevel, findTextBlockForSelection } from './bit.blocks';
 import { COLOR_MAP, COMMAND_CATEGORIES, COMMAND_HELP } from './commands';
 import { useHostDialogue } from './host.dialogue';
-import { setDialogueWithRevert } from './ai';
+import { setDialogueWithRevert, agentThink as aiAgentThink, updateMind, AgentMind, CanvasState } from './ai';
+import { executeTool, ToolContext } from './ai.tools';
 import { CanvasRecorder } from './tape';
 import { renderStyledRect, getRectStyle, type CellBounds, type BaseRenderContext } from './styles';
 import { useMonogram } from './monogram';
 import { faceOrientationToRotation } from './face';
-import { renderBubble } from './bubble';
+import { renderBubble, BubbleState, showBubble, isBubbleExpired } from './bubble';
 import { terminalManager, type TerminalBuffer } from './terminal.manager';
 import { findSmoothPath, evaluateExpression, ExpressionContext } from './paths';
-import { ghostEffect } from './skins';
+import { ghostEffect, applySkin } from './skins';
 import { useMcpBridge } from '../hooks/useMcpBridge';
 
 // --- Constants --- (Copied and relevant ones kept)
@@ -30,8 +31,12 @@ const GRID_LINE_WIDTH = 1;
 const CURSOR_TRAIL_FADE_MS = 200; // Time in ms for trail to fully fade
 
 // Character sprite constants
-const CHARACTER_WALK_SPRITE_URL = '/sprites/test_walk.png';
-const CHARACTER_IDLE_SPRITE_URL = '/sprites/test_idle.png';
+const CHARACTER_WALK_SPRITE_URL = '/sprites/default_walk.png';
+const CHARACTER_IDLE_SPRITE_URL = '/sprites/default_idle.png';
+
+// Default agent sprite paths (base sprites before ghost effect)
+const AGENT_DEFAULT_WALK_PATH = '/sprites/default_walk.png';
+const AGENT_DEFAULT_IDLE_PATH = '/sprites/default_idle.png';
 const CHARACTER_FRAME_WIDTH = 32;
 const CHARACTER_IDLE_FRAME_WIDTH = 32;
 const CHARACTER_FRAME_HEIGHT = 40;
@@ -1987,6 +1992,10 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const characterAnimationIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const idleTransitionPendingRef = useRef<boolean>(false);
 
+    // Agent sprite state (dedicated sprites with ghost effect, reactive to textColor)
+    const [agentWalkSheet, setAgentWalkSheet] = useState<HTMLImageElement | null>(null);
+    const [agentIdleSheet, setAgentIdleSheet] = useState<HTMLImageElement | null>(null);
+
     // Agent selection and movement state (supports multiple selection)
     const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
     const selectedAgentIdsRef = useRef<Set<string>>(new Set());
@@ -1999,6 +2008,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Refs to avoid stale closure issues in animation loop and draw callback
     const agentMovingRef = useRef<Record<string, boolean>>({});
     const agentVisualPositionsRef = useRef<Record<string, Point>>({});
+    // Cache for recently created agents (before React state commits)
+    const pendingAgentsRef = useRef<Record<string, any>>({});
     const agentTargetsRef = useRef<Record<string, Point>>({});
     const agentFramesRef = useRef<Record<string, number>>({});
     const agentDirectionsRef = useRef<Record<string, number>>({});
@@ -2217,6 +2228,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 spriteName: spriteName || 'default',
                 createdAt: new Date().toISOString(),
             };
+
+            // Add to pending cache immediately (sync) for subsequent operations
+            pendingAgentsRef.current[agentId] = agentData;
 
             engine.setWorldData(prev => ({
                 ...prev,
@@ -2622,7 +2636,816 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             }
             return { success: false, error: `Unknown entity type: ${type}` };
         },
+        editNote: (noteId, edit) => {
+            // CRDT-style note editing operations
+            const noteDataStr = engine.worldData[noteId];
+            if (!noteDataStr) {
+                return { success: false, error: `Note ${noteId} not found` };
+            }
+
+            try {
+                const noteData = typeof noteDataStr === 'string' ? JSON.parse(noteDataStr) : noteDataStr;
+                const GRID_CELL_SPAN = 2;
+
+                // Helper: convert grid data to lines array
+                const gridToLines = (data: Record<string, string>): string[] => {
+                    if (!data || Object.keys(data).length === 0) return [];
+                    let maxY = 0;
+                    for (const key of Object.keys(data)) {
+                        const [, yStr] = key.split(',');
+                        const y = parseInt(yStr, 10);
+                        if (!isNaN(y) && y > maxY) maxY = y;
+                    }
+                    const lines: string[] = [];
+                    for (let y = 0; y <= maxY; y += GRID_CELL_SPAN) {
+                        let line = '';
+                        let maxX = 0;
+                        for (const key of Object.keys(data)) {
+                            const [xStr, yStr] = key.split(',');
+                            if (parseInt(yStr, 10) === y) {
+                                maxX = Math.max(maxX, parseInt(xStr, 10));
+                            }
+                        }
+                        for (let x = 0; x <= maxX; x++) {
+                            line += data[`${x},${y}`] || ' ';
+                        }
+                        lines.push(line.trimEnd());
+                    }
+                    return lines;
+                };
+
+                // Helper: convert lines array to grid data
+                const linesToGrid = (lines: string[]): Record<string, string> => {
+                    const data: Record<string, string> = {};
+                    for (let lineY = 0; lineY < lines.length; lineY++) {
+                        const line = lines[lineY];
+                        for (let charX = 0; charX < line.length; charX++) {
+                            if (line[charX] !== ' ') { // Skip spaces to save storage
+                                data[`${charX},${lineY * GRID_CELL_SPAN}`] = line[charX];
+                            }
+                        }
+                    }
+                    return data;
+                };
+
+                // Handle table/data notes separately
+                if (noteData.contentType === 'data' && edit.operation === 'cell' && 'cell' in edit) {
+                    const { row, col, value } = edit.cell;
+                    if (!noteData.tableData) {
+                        return { success: false, error: 'Note has no table data' };
+                    }
+                    const cells = { ...noteData.tableData.cells };
+                    cells[`${row},${col}`] = value;
+                    noteData.tableData = { ...noteData.tableData, cells };
+                    engine.setWorldData(prev => ({
+                        ...prev,
+                        [noteId]: JSON.stringify(noteData),
+                    }));
+                    return { success: true };
+                }
+
+                // For text/script notes, work with character grid
+                const existingData = noteData.data || {};
+                let lines = gridToLines(existingData);
+
+                switch (edit.operation) {
+                    case 'append': {
+                        const newLines = edit.text.split('\n');
+                        lines = [...lines, ...newLines];
+                        break;
+                    }
+                    case 'insert': {
+                        const { line: insertLine, column: insertCol } = edit.position;
+                        const newLines = edit.text.split('\n');
+                        // Ensure lines array is long enough
+                        while (lines.length <= insertLine) lines.push('');
+                        if (newLines.length === 1) {
+                            // Single line insert
+                            const targetLine = lines[insertLine] || '';
+                            lines[insertLine] = targetLine.slice(0, insertCol) + newLines[0] + targetLine.slice(insertCol);
+                        } else {
+                            // Multi-line insert
+                            const targetLine = lines[insertLine] || '';
+                            const before = targetLine.slice(0, insertCol);
+                            const after = targetLine.slice(insertCol);
+                            lines[insertLine] = before + newLines[0];
+                            for (let i = 1; i < newLines.length - 1; i++) {
+                                lines.splice(insertLine + i, 0, newLines[i]);
+                            }
+                            lines.splice(insertLine + newLines.length - 1, 0, newLines[newLines.length - 1] + after);
+                        }
+                        break;
+                    }
+                    case 'delete': {
+                        const { startLine, startColumn, endLine, endColumn } = edit.range;
+                        if (startLine === endLine) {
+                            // Single line deletion
+                            const line = lines[startLine] || '';
+                            lines[startLine] = line.slice(0, startColumn) + line.slice(endColumn);
+                        } else {
+                            // Multi-line deletion
+                            const firstLine = (lines[startLine] || '').slice(0, startColumn);
+                            const lastLine = (lines[endLine] || '').slice(endColumn);
+                            lines[startLine] = firstLine + lastLine;
+                            lines.splice(startLine + 1, endLine - startLine);
+                        }
+                        break;
+                    }
+                    case 'replace': {
+                        const { startLine, startColumn, endLine, endColumn } = edit.range;
+                        const newLines = edit.text.split('\n');
+                        if (startLine === endLine && newLines.length === 1) {
+                            // Simple single-line replace
+                            const line = lines[startLine] || '';
+                            lines[startLine] = line.slice(0, startColumn) + newLines[0] + line.slice(endColumn);
+                        } else {
+                            // Multi-line replace: delete range then insert
+                            const firstLine = (lines[startLine] || '').slice(0, startColumn);
+                            const lastLine = (lines[endLine] || '').slice(endColumn);
+                            // Remove lines in range
+                            lines.splice(startLine, endLine - startLine + 1);
+                            // Insert new content
+                            const combined = newLines.map((l, i) => {
+                                if (i === 0) return firstLine + l;
+                                if (i === newLines.length - 1) return l + lastLine;
+                                return l;
+                            });
+                            lines.splice(startLine, 0, ...combined);
+                        }
+                        break;
+                    }
+                    case 'clear': {
+                        lines = [];
+                        break;
+                    }
+                    default:
+                        return { success: false, error: `Unknown operation: ${(edit as any).operation}` };
+                }
+
+                // Convert back to grid and update note
+                noteData.data = linesToGrid(lines);
+
+                // Auto-resize note to fit content
+                let maxLineLen = 0;
+                for (const line of lines) {
+                    maxLineLen = Math.max(maxLineLen, line.length);
+                }
+                const neededWidth = maxLineLen + 2;
+                const neededHeight = (lines.length * GRID_CELL_SPAN) + 2;
+                const currentWidth = noteData.endX - noteData.startX;
+                const currentHeight = noteData.endY - noteData.startY;
+                if (neededWidth > currentWidth) {
+                    noteData.endX = noteData.startX + neededWidth;
+                }
+                if (neededHeight > currentHeight) {
+                    noteData.endY = noteData.startY + neededHeight;
+                }
+
+                engine.setWorldData(prev => ({
+                    ...prev,
+                    [noteId]: JSON.stringify(noteData),
+                }));
+
+                return { success: true };
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        },
+        runScript: async (noteId) => {
+            // Execute a script note by ID and return output
+            const noteDataStr = engine.worldData[noteId];
+            if (!noteDataStr) {
+                return { success: false, error: `Note ${noteId} not found` };
+            }
+
+            try {
+                const noteData = typeof noteDataStr === 'string' ? JSON.parse(noteDataStr) : noteDataStr;
+
+                if (noteData.contentType !== 'script') {
+                    return { success: false, error: 'Not a script note' };
+                }
+
+                const scriptData = noteData.scriptData || { language: 'javascript', status: 'idle' };
+                const { startX, startY, endX, endY } = noteData;
+
+                // Extract script content from note data
+                let noteDataObj: Record<string, any> = {};
+                const rawData = noteData.data;
+
+                if (typeof rawData === 'string') {
+                    try {
+                        noteDataObj = JSON.parse(rawData);
+                    } catch {
+                        noteDataObj = {};
+                    }
+                } else if (rawData && typeof rawData === 'object') {
+                    noteDataObj = rawData;
+                }
+
+                // Reconstruct script content
+                let scriptContent = '';
+                const keys = Object.keys(noteDataObj);
+
+                if (keys.length === 0) {
+                    return { success: false, error: 'Script is empty' };
+                }
+
+                // Check if line-based or coordinate-based
+                const isLineBased = keys.some(k => /^\d+$/.test(k));
+
+                if (isLineBased) {
+                    const lineNumbers = keys.filter(k => /^\d+$/.test(k)).map(Number).sort((a, b) => a - b);
+                    scriptContent = lineNumbers.map(n => noteDataObj[n.toString()] || '').join('\n');
+                } else {
+                    const noteWidth = endX - startX + 1;
+                    const lines: string[] = [];
+                    let maxY = 0;
+
+                    for (const key of keys) {
+                        const parts = key.split(',');
+                        if (parts.length === 2) {
+                            const y = parseInt(parts[1]);
+                            if (!isNaN(y) && y > maxY) maxY = y;
+                        }
+                    }
+
+                    const GRID_CELL_SPAN = 2;
+                    for (let y = 0; y <= maxY; y += GRID_CELL_SPAN) {
+                        let line = '';
+                        for (let x = 0; x < noteWidth; x++) {
+                            const coordKey = `${x},${y}`;
+                            const charData = noteDataObj[coordKey];
+                            if (charData) {
+                                line += typeof charData === 'string' ? charData : (charData.char || ' ');
+                            } else {
+                                line += ' ';
+                            }
+                        }
+                        lines.push(line.trimEnd());
+                    }
+                    scriptContent = lines.join('\n');
+                }
+
+                scriptContent = scriptContent.trim();
+
+                if (!scriptContent) {
+                    return { success: false, error: 'Script is empty' };
+                }
+
+                // Execute JavaScript
+                if (scriptData.language === 'javascript') {
+                    const outputs: string[] = [];
+                    const print = (...args: any[]) => {
+                        const message = args.map(a =>
+                            typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)
+                        ).join(' ');
+                        outputs.push(message);
+                    };
+                    const log = print;
+
+                    try {
+                        const scriptFunction = new Function('print', 'log', 'console', scriptContent);
+                        const result = scriptFunction(print, log, console);
+
+                        if (result !== undefined) {
+                            outputs.push(`→ ${typeof result === 'object' ? JSON.stringify(result) : result}`);
+                        }
+
+                        // Update status to success
+                        engine.setWorldData(prev => ({
+                            ...prev,
+                            [noteId]: JSON.stringify({
+                                ...noteData,
+                                scriptData: { ...scriptData, status: 'success' }
+                            })
+                        }));
+
+                        return { success: true, output: outputs };
+                    } catch (error: any) {
+                        // Update status to error
+                        engine.setWorldData(prev => ({
+                            ...prev,
+                            [noteId]: JSON.stringify({
+                                ...noteData,
+                                scriptData: { ...scriptData, status: 'error' }
+                            })
+                        }));
+
+                        return { success: false, error: error.message, output: outputs };
+                    }
+                } else {
+                    // Python not implemented in MCP yet
+                    return { success: false, error: 'Python execution via MCP not yet implemented' };
+                }
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        },
+        setAgentMind: (agentId, persona, goals) => {
+            // Update agent data with mind info
+            // Check both worldData and pending cache (for recently created agents)
+            const agentDataStr = engine.worldData[agentId];
+            const pendingAgent = pendingAgentsRef.current[agentId];
+            if (!agentDataStr && !pendingAgent) {
+                return { success: false, error: `Agent ${agentId} not found` };
+            }
+            try {
+                const agentData = pendingAgent || (typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr);
+                agentData.mind = {
+                    persona: persona || agentData.mind?.persona || '',
+                    goals: goals || agentData.mind?.goals || [],
+                    thoughts: agentData.mind?.thoughts || [],
+                    observations: agentData.mind?.observations || []
+                };
+                // Update pending cache too
+                pendingAgentsRef.current[agentId] = agentData;
+                engine.setWorldData(prev => ({
+                    ...prev,
+                    [agentId]: JSON.stringify(agentData)
+                }));
+                console.log(`[Agent Mind] Set mind for ${agentId}:`, agentData.mind);
+                return { success: true };
+            } catch (e: any) {
+                return { success: false, error: e.message };
+            }
+        },
     });
+
+    // =========================================================================
+    // AUTONOMOUS AGENT THINKING (Turn-based conversation)
+    // Agents take turns speaking for natural dialogue flow
+    // =========================================================================
+    const TURN_DELAY = 4000; // 4 seconds between turns
+    const BUBBLE_DURATION = 6000; // How long bubbles stay visible
+    const agentThinkingRef = useRef<Set<string>>(new Set()); // Track which agents are currently thinking
+    const agentBubblesRef = useRef<Record<string, BubbleState>>({}); // Track speech bubbles for each agent
+    const currentTurnRef = useRef<number>(0); // Index of current speaker in the conversation
+
+    useEffect(() => {
+        // Find all agents with a mind and tick their thinking
+        const tickThinking = async () => {
+            const agentsWithMind: Array<{ id: string; data: any; pos: { x: number; y: number } }> = [];
+
+            for (const key in engine.worldData) {
+                if (!key.startsWith('agent_')) continue;
+                try {
+                    const dataStr = engine.worldData[key];
+                    const data = typeof dataStr === 'string' ? JSON.parse(dataStr) : dataStr;
+                    if (data.mind && data.mind.persona) {
+                        // Skip if already thinking
+                        if (agentThinkingRef.current.has(key)) continue;
+
+                        const pos = agentVisualPositions[key] || { x: data.x, y: data.y };
+                        agentsWithMind.push({ id: key, data, pos });
+                    }
+                } catch (e) {
+                    // Skip invalid agent data
+                }
+            }
+
+            if (agentsWithMind.length === 0) return;
+
+            // Turn-based: only process one agent per tick
+            // Sort by ID for consistent ordering
+            agentsWithMind.sort((a, b) => a.id.localeCompare(b.id));
+            const turnIndex = currentTurnRef.current % agentsWithMind.length;
+            const currentAgent = agentsWithMind[turnIndex];
+
+            // Advance turn for next tick
+            currentTurnRef.current = (currentTurnRef.current + 1) % agentsWithMind.length;
+
+            // Build canvas state for perception
+            const notes: CanvasState['notes'] = [];
+            const agents: CanvasState['agents'] = [];
+            const chips: CanvasState['chips'] = [];
+
+            for (const key in engine.worldData) {
+                try {
+                    const dataStr = engine.worldData[key];
+                    const data = typeof dataStr === 'string' ? JSON.parse(dataStr) : dataStr;
+
+                    if (key.startsWith('note_') && data.type === 'note') {
+                        // Extract text content from note cells
+                        let content = '';
+                        if (data.contentType === 'text') {
+                            const lines: string[] = [];
+                            for (let y = data.startY; y <= data.endY; y++) {
+                                let line = '';
+                                for (let x = data.startX; x <= data.endX; x++) {
+                                    const cellKey = `${x},${y}`;
+                                    const cellData = engine.worldData[cellKey];
+                                    const char = cellData && !engine.isImageData(cellData) ? engine.getCharacter(cellData) : ' ';
+                                    line += char;
+                                }
+                                lines.push(line.trimEnd());
+                            }
+                            content = lines.join('\n').trim();
+                        }
+                        notes.push({
+                            id: key,
+                            x: data.startX,
+                            y: data.startY,
+                            width: data.endX - data.startX + 1,
+                            height: data.endY - data.startY + 1,
+                            contentType: data.contentType,
+                            content
+                        });
+                    } else if (key.startsWith('agent_')) {
+                        const pos = agentVisualPositions[key] || { x: data.x, y: data.y };
+                        // Get what this agent last said out loud (not internal thoughts)
+                        // lastSpoken is set when bubble is shown, separate from mind.thoughts
+                        const recentSpeech = data.lastSpoken || undefined;
+                        agents.push({
+                            id: key,
+                            x: pos.x,
+                            y: pos.y,
+                            spriteName: data.spriteName || data.name,
+                            recentSpeech
+                        });
+                    } else if (key.startsWith('chip_')) {
+                        chips.push({
+                            id: key,
+                            x: data.x,
+                            y: data.y,
+                            text: data.text,
+                            color: data.color
+                        });
+                    }
+                } catch (e) {
+                    // Skip invalid data
+                }
+            }
+
+            const canvasState: CanvasState = {
+                notes,
+                agents,
+                chips,
+                cursorPosition: engine.cursorPos,
+                viewport: { offset: engine.viewOffset, zoomLevel: engine.zoomLevel },
+                selection: { start: engine.selectionStart, end: engine.selectionEnd }
+            };
+
+            // Turn-based: only one agent speaks per tick
+            const { id, data, pos } = currentAgent;
+
+            // Skip if already thinking
+            if (agentThinkingRef.current.has(id)) return;
+            agentThinkingRef.current.add(id);
+
+            try {
+                const mind: AgentMind = {
+                    persona: data.mind.persona || '',
+                    goals: data.mind.goals || [],
+                    thoughts: data.mind.thoughts || [],
+                    observations: data.mind.observations || []
+                };
+
+                const agentName = data.spriteName || id.split('_')[1] || 'Agent';
+                console.log(`[${agentName}] Thinking...`);
+                const thought = await aiAgentThink(id, pos, mind, canvasState);
+                console.log(`[${agentName}] Says: "${thought.thought}"`);
+
+                // Show agent's thought in a speech bubble
+                agentBubblesRef.current[id] = showBubble(thought.thought, BUBBLE_DURATION);
+
+                // Update agent's mind with new thought AND set lastSpoken
+                // lastSpoken is what others can "hear" - separate from internal thoughts
+                const updatedMind = updateMind(mind, thought);
+                engine.setWorldData(prev => {
+                    const agentDataStr = prev[id];
+                    if (!agentDataStr) return prev;
+                    try {
+                        const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+                        agentData.mind = updatedMind;
+                        agentData.lastSpoken = thought.thought; // What others can hear
+                        return { ...prev, [id]: JSON.stringify(agentData) };
+                    } catch {
+                        return prev;
+                    }
+                });
+
+                // Execute actions if the agent returned any
+                if (thought.actions && thought.actions.length > 0) {
+                    for (const action of thought.actions) {
+                        // Handle move_agent
+                        if (action.tool === 'move_agent' && action.args) {
+                            const { agentId: targetAgentId, destination } = action.args;
+                            if (destination && typeof destination.x === 'number' && typeof destination.y === 'number') {
+                                const startPos = agentVisualPositions[targetAgentId] || { x: pos.x, y: pos.y };
+                                const path = findSmoothPath(startPos, destination, engine.worldData);
+                                agentPathsRef.current[targetAgentId] = path;
+                                agentPathIndicesRef.current[targetAgentId] = 0;
+                                setAgentMoving(prev => {
+                                    const updated = { ...prev, [targetAgentId]: true };
+                                    agentMovingRef.current = updated;
+                                    return updated;
+                                });
+                                console.log(`[${agentName}] Moving to (${destination.x}, ${destination.y})`);
+                            }
+                        }
+
+                        // Handle edit_note (CRDT-style note editing from ai.agents.ts)
+                        if (action.tool === 'edit_note' && action.args) {
+                            const { noteId, operation, text: editText } = action.args;
+                            const GRID_CELL_SPAN = 2;
+
+                            if (noteId && operation === 'append' && editText) {
+                                const existingNoteData = engine.worldData[noteId];
+                                if (existingNoteData && typeof existingNoteData === 'string') {
+                                    try {
+                                        const noteData = JSON.parse(existingNoteData);
+                                        const existingData = noteData.data || {};
+
+                                        // Find max Y to append after
+                                        let maxY = 0;
+                                        for (const key of Object.keys(existingData)) {
+                                            const [, yStr] = key.split(',');
+                                            const y = parseInt(yStr, 10);
+                                            if (y > maxY) maxY = y;
+                                        }
+
+                                        const newStartY = maxY + GRID_CELL_SPAN;
+                                        for (let charX = 0; charX < editText.length; charX++) {
+                                            existingData[`${charX},${newStartY}`] = editText[charX];
+                                        }
+
+                                        noteData.data = existingData;
+                                        // Expand note height if needed
+                                        const neededHeight = (newStartY / GRID_CELL_SPAN) + 3;
+                                        const currentHeight = noteData.endY - noteData.startY;
+                                        if (neededHeight > currentHeight) {
+                                            noteData.endY = noteData.startY + neededHeight;
+                                        }
+                                        // Expand width if needed
+                                        const neededWidth = editText.length + 2;
+                                        const currentWidth = noteData.endX - noteData.startX;
+                                        if (neededWidth > currentWidth) {
+                                            noteData.endX = noteData.startX + neededWidth;
+                                        }
+
+                                        engine.setWorldData(prev => ({
+                                            ...prev,
+                                            [noteId]: JSON.stringify(noteData),
+                                        }));
+                                        console.log(`[${agentName}] Appended to note: "${editText.slice(0, 40)}..."`);
+                                    } catch (e) {
+                                        console.error(`[${agentName}] Failed to edit note:`, e);
+                                    }
+                                } else {
+                                    console.warn(`[${agentName}] Note ${noteId} not found`);
+                                }
+                            }
+                        }
+
+                        // Handle write_to_doc (new simplified action)
+                        if (action.tool === 'write_to_doc' && action.args) {
+                            const { noteId, text, agentName, createAt } = action.args;
+                            const GRID_CELL_SPAN = 2;
+                            const lineToAdd = `[${agentName}] ${text}`;
+
+                            if (noteId) {
+                                // Append to existing note
+                                const existingNoteData = engine.worldData[noteId];
+                                if (existingNoteData && typeof existingNoteData === 'string') {
+                                    try {
+                                        const noteData = JSON.parse(existingNoteData);
+                                        const existingData = noteData.data || {};
+
+                                        // Find max Y to append after
+                                        let maxY = 0;
+                                        for (const key of Object.keys(existingData)) {
+                                            const [, yStr] = key.split(',');
+                                            const y = parseInt(yStr, 10);
+                                            if (y > maxY) maxY = y;
+                                        }
+
+                                        const newStartY = maxY + GRID_CELL_SPAN;
+                                        for (let charX = 0; charX < lineToAdd.length; charX++) {
+                                            existingData[`${charX},${newStartY}`] = lineToAdd[charX];
+                                        }
+
+                                        noteData.data = existingData;
+                                        // Expand note height if needed
+                                        const neededHeight = (newStartY / GRID_CELL_SPAN) + 3;
+                                        const currentHeight = noteData.endY - noteData.startY;
+                                        if (neededHeight > currentHeight) {
+                                            noteData.endY = noteData.startY + neededHeight;
+                                        }
+                                        // Expand width if needed
+                                        const neededWidth = lineToAdd.length + 2;
+                                        const currentWidth = noteData.endX - noteData.startX;
+                                        if (neededWidth > currentWidth) {
+                                            noteData.endX = noteData.startX + neededWidth;
+                                        }
+
+                                        engine.setWorldData(prev => ({
+                                            ...prev,
+                                            [noteId]: JSON.stringify(noteData),
+                                        }));
+                                        console.log(`[${agentName}] Wrote to shared doc: "${text.slice(0, 40)}..."`);
+                                    } catch (e) {
+                                        console.error(`[${agentName}] Failed to write to doc:`, e);
+                                    }
+                                }
+                            } else if (createAt) {
+                                // Create new shared doc
+                                const newNoteId = `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                                const noteData: Record<string, any> = {
+                                    type: 'note',  // Required for note detection in canvasState
+                                    startX: createAt.x,
+                                    startY: createAt.y,
+                                    endX: createAt.x + Math.max(30, lineToAdd.length + 2),
+                                    endY: createAt.y + 15,
+                                    contentType: 'text',
+                                    createdAt: new Date().toISOString(),
+                                    data: {},
+                                };
+
+                                for (let charX = 0; charX < lineToAdd.length; charX++) {
+                                    noteData.data[`${charX},0`] = lineToAdd[charX];
+                                }
+
+                                engine.setWorldData(prev => ({
+                                    ...prev,
+                                    [newNoteId]: JSON.stringify(noteData),
+                                }));
+                                console.log(`[${agentName}] Created shared doc: "${text.slice(0, 40)}..."`);
+                            }
+                        }
+
+                        if (action.tool === 'make' && action.args) {
+                            const args = action.args;
+                            console.log(`[${agentName}] Action:`, args);
+
+                            // Handle note creation
+                            // Helper to convert content to grid format
+                            const GRID_CELL_SPAN = 2;
+                            const contentToGrid = (text: string): Record<string, string> => {
+                                const data: Record<string, string> = {};
+                                const lines = text.split('\n');
+                                for (let lineY = 0; lineY < lines.length; lineY++) {
+                                    const line = lines[lineY];
+                                    for (let charX = 0; charX < line.length; charX++) {
+                                        data[`${charX},${lineY * GRID_CELL_SPAN}`] = line[charX];
+                                    }
+                                }
+                                return data;
+                            };
+
+                            // Handle note editing (append to existing note)
+                            if (args.edit_note) {
+                                const { id: noteId, append } = args.edit_note;
+                                const existingNoteData = engine.worldData[noteId];
+                                if (existingNoteData && typeof existingNoteData === 'string') {
+                                    try {
+                                        const noteData = JSON.parse(existingNoteData as string);
+                                        // Get existing content
+                                        const existingData = noteData.data || {};
+                                        // Find the last line (max y coordinate)
+                                        let maxY = 0;
+                                        for (const key of Object.keys(existingData)) {
+                                            const [, yStr] = key.split(',');
+                                            const y = parseInt(yStr, 10);
+                                            if (y > maxY) maxY = y;
+                                        }
+                                        // Add new content starting after the last line
+                                        const newStartY = maxY + GRID_CELL_SPAN;
+                                        const appendLines = append.split('\n');
+                                        for (let lineY = 0; lineY < appendLines.length; lineY++) {
+                                            const line = appendLines[lineY];
+                                            for (let charX = 0; charX < line.length; charX++) {
+                                                existingData[`${charX},${newStartY + lineY * GRID_CELL_SPAN}`] = line[charX];
+                                            }
+                                        }
+                                        noteData.data = existingData;
+                                        // Maybe expand note height
+                                        const newHeight = (newStartY + appendLines.length * GRID_CELL_SPAN) / GRID_CELL_SPAN + 2;
+                                        const currentHeight = noteData.endY - noteData.startY;
+                                        if (newHeight > currentHeight) {
+                                            noteData.endY = noteData.startY + newHeight;
+                                        }
+                                        engine.setWorldData(prev => ({
+                                            ...prev,
+                                            [noteId]: JSON.stringify(noteData),
+                                        }));
+                                        console.log(`[${agentName}] Edited note ${noteId}, appended: "${append.slice(0, 50)}..."`);
+                                    } catch (e) {
+                                        console.error(`[${agentName}] Failed to edit note:`, e);
+                                    }
+                                } else {
+                                    console.warn(`[${agentName}] Note ${noteId} not found for editing`);
+                                }
+                            }
+
+                            // Handle note creation
+                            if (args.note) {
+                                const { x, y, width = 20, height = 10, content, contentType = 'text' } = args.note;
+                                const noteId = `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+                                const noteData: Record<string, any> = {
+                                    type: 'note',  // Required for note detection in canvasState
+                                    startX: x,
+                                    startY: y,
+                                    endX: x + width,
+                                    endY: y + height,
+                                    contentType,
+                                    createdAt: new Date().toISOString(),
+                                };
+
+                                if (content) {
+                                    noteData.data = contentToGrid(content);
+                                }
+
+                                engine.setWorldData(prev => ({
+                                    ...prev,
+                                    [noteId]: JSON.stringify(noteData),
+                                }));
+                                console.log(`[${agentName}] Created note at (${x}, ${y})`);
+                            }
+
+                            // Handle paint operations
+                            if (args.paint) {
+                                if (args.paint.rect) {
+                                    const { x, y, width, height, color } = args.paint.rect;
+                                    const cells: Array<{ x: number; y: number; color: string }> = [];
+                                    for (let dy = 0; dy < height; dy++) {
+                                        for (let dx = 0; dx < width; dx++) {
+                                            cells.push({ x: x + dx, y: y + dy, color });
+                                        }
+                                    }
+                                    engine.mcpPaintCells(cells);
+                                    console.log(`[${agentName}] Painted rect at (${x}, ${y})`);
+                                }
+                                if (args.paint.line) {
+                                    const { x1, y1, x2, y2, color } = args.paint.line;
+                                    // Bresenham's line algorithm
+                                    const cells: Array<{ x: number; y: number; color: string }> = [];
+                                    const dx = Math.abs(x2 - x1);
+                                    const dy = Math.abs(y2 - y1);
+                                    const sx = x1 < x2 ? 1 : -1;
+                                    const sy = y1 < y2 ? 1 : -1;
+                                    let err = dx - dy;
+                                    let cx = x1, cy = y1;
+                                    while (true) {
+                                        cells.push({ x: cx, y: cy, color });
+                                        if (cx === x2 && cy === y2) break;
+                                        const e2 = 2 * err;
+                                        if (e2 > -dy) { err -= dy; cx += sx; }
+                                        if (e2 < dx) { err += dx; cy += sy; }
+                                    }
+                                    engine.mcpPaintCells(cells);
+                                    console.log(`[${agentName}] Painted line`);
+                                }
+                            }
+
+                            // Handle chip creation
+                            if (args.chip) {
+                                const { x, y, text, color } = args.chip;
+                                const chipId = `chip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                                const chipData = { x, y, text, color };
+                                engine.setWorldData(prev => ({
+                                    ...prev,
+                                    [chipId]: JSON.stringify(chipData),
+                                }));
+                                console.log(`[${agentName}] Created chip "${text}" at (${x}, ${y})`);
+                            }
+
+                            // Handle agent movement
+                            if (args.agent?.move?.to) {
+                                const { x: destX, y: destY } = args.agent.move.to;
+                                // Use pathfinding and set up animation
+                                const startPos = agentVisualPositions[id] || { x: pos.x, y: pos.y };
+                                const path = findSmoothPath(startPos, { x: destX, y: destY }, engine.worldData);
+                                agentPathsRef.current[id] = path;
+                                agentPathIndicesRef.current[id] = 0;
+                                setAgentMoving(prev => {
+                                    const updated = { ...prev, [id]: true };
+                                    agentMovingRef.current = updated;
+                                    return updated;
+                                });
+                                console.log(`[${agentName}] Moving to (${destX}, ${destY})`);
+                            }
+                        }
+                    }
+                }
+            } catch (e: any) {
+                console.error(`[${data.spriteName || id}] Think error:`, e.message);
+            } finally {
+                agentThinkingRef.current.delete(id);
+            }
+        };
+
+        // Start the turn-based thinking loop
+        const interval = setInterval(tickThinking, TURN_DELAY);
+
+        // Also do an initial tick after a short delay
+        const initialTick = setTimeout(tickThinking, 2000);
+
+        return () => {
+            clearInterval(interval);
+            clearTimeout(initialTick);
+        };
+    }, [engine.worldData, agentVisualPositions]);
 
     // Spinner for sprite generation
     const SPINNER_CHARS = ['/', '|', '\\', '—'];
@@ -2663,6 +3486,47 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
         return () => { isMounted = false; };
     }, [engine.characterSprite]);
+
+    // Load agent sprite sheets with ghost effect (reactive to textColor)
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadAgentSprites = async () => {
+            try {
+                const ghostColor = engine.textColor || '#FFFFFF';
+                const [walkDataUrl, idleDataUrl] = await Promise.all([
+                    applySkin(AGENT_DEFAULT_WALK_PATH, 'ghost', { color: ghostColor }),
+                    applySkin(AGENT_DEFAULT_IDLE_PATH, 'ghost', { color: ghostColor })
+                ]);
+
+                if (!isMounted) return;
+
+                const walkImg = new Image();
+                walkImg.onload = () => { if (isMounted) setAgentWalkSheet(walkImg); };
+                walkImg.onerror = (err) => console.error('Failed to load agent walk sprite:', err);
+                walkImg.src = walkDataUrl;
+
+                const idleImg = new Image();
+                idleImg.onload = () => { if (isMounted) setAgentIdleSheet(idleImg); };
+                idleImg.onerror = (err) => console.error('Failed to load agent idle sprite:', err);
+                idleImg.src = idleDataUrl;
+            } catch (err) {
+                console.error('Failed to apply ghost effect to agent sprites:', err);
+                // Fallback: Load raw sprites without ghost effect
+                if (!isMounted) return;
+                const walkImg = new Image();
+                walkImg.onload = () => { if (isMounted) setAgentWalkSheet(walkImg); };
+                walkImg.src = AGENT_DEFAULT_WALK_PATH;
+                const idleImg = new Image();
+                idleImg.onload = () => { if (isMounted) setAgentIdleSheet(idleImg); };
+                idleImg.src = AGENT_DEFAULT_IDLE_PATH;
+            }
+        };
+
+        loadAgentSprites();
+
+        return () => { isMounted = false; };
+    }, [engine.textColor]);
 
     // Character sprite direction detection based on cursor movement
     useEffect(() => {
@@ -7692,17 +8556,17 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                                 agentBottomScreenPos.y >= -agentPixelHeight * 2 &&
                                 agentBottomScreenPos.y <= cssHeight + agentPixelHeight) {
 
-                                // Render agent with character sprite and ghost effect
-                                // Agents always use sprite if available (independent of cursor's isCharacterEnabled)
-                                const hasAvailableSpriteSheet = walkSpriteSheet || idleSpriteSheet;
+                                // Render agent with dedicated ghost-effect sprite (reactive to textColor)
+                                // Agents use their own sprite sheets, independent of cursor's character sprite
+                                const hasAgentSpriteSheet = agentWalkSheet || agentIdleSheet;
 
-                                if (hasAvailableSpriteSheet) {
+                                if (hasAgentSpriteSheet) {
                                     // Use walk sprite when moving, idle when stationary
-                                    const sheetToDraw = isThisAgentMoving && walkSpriteSheet ? walkSpriteSheet : (idleSpriteSheet || walkSpriteSheet)!;
-                                    const frameWidth = (isThisAgentMoving && walkSpriteSheet) ? CHARACTER_FRAME_WIDTH : CHARACTER_IDLE_FRAME_WIDTH;
+                                    const sheetToDraw = isThisAgentMoving && agentWalkSheet ? agentWalkSheet : (agentIdleSheet || agentWalkSheet)!;
+                                    const frameWidth = (isThisAgentMoving && agentWalkSheet) ? CHARACTER_FRAME_WIDTH : CHARACTER_IDLE_FRAME_WIDTH;
                                     const frameHeight = CHARACTER_FRAME_HEIGHT;
                                     // Use correct frame count for walk vs idle sprites
-                                    const maxFrames = (isThisAgentMoving && walkSpriteSheet) ? CHARACTER_FRAMES_PER_DIRECTION : CHARACTER_IDLE_FRAMES_PER_DIRECTION;
+                                    const maxFrames = (isThisAgentMoving && agentWalkSheet) ? CHARACTER_FRAMES_PER_DIRECTION : CHARACTER_IDLE_FRAMES_PER_DIRECTION;
                                     // Use agent's direction and frame for animation - read from refs for 60fps smoothness
                                     const direction = agentDirectionsRef.current[key] ?? 4; // Default south
                                     const rawFrame = agentFramesRef.current[key] || 0;
@@ -7743,7 +8607,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                                             ctx.drawImage(offscreen, destX, destY);
                                         }
                                     } else {
-                                        // Unselected agents: Draw normal sprite
+                                        // Unselected agents: Draw sprite (already has ghost effect in textColor)
                                         ctx.globalAlpha = 1.0;
                                         ctx.drawImage(
                                             sheetToDraw,
@@ -7753,6 +8617,22 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                                     }
 
                                     ctx.globalAlpha = savedAlpha;
+
+                                    // Render agent's speech bubble (if active)
+                                    const agentBubble = agentBubblesRef.current[key];
+                                    if (agentBubble && agentBubble.isVisible && !isBubbleExpired(agentBubble)) {
+                                        const characterCenterX = destX + destWidth / 2;
+                                        const characterTopY = destY;
+                                        renderBubble({
+                                            ctx,
+                                            state: agentBubble,
+                                            characterCenterX,
+                                            characterTopY,
+                                            cellWidth: effectiveCharWidth,
+                                            cellHeight: effectiveCharHeight,
+                                            renderTextFn: (ctx, char, x, y) => renderText(ctx, char, x, y + verticalTextOffset),
+                                        });
+                                    }
                                 } else {
                                     // Fallback: Draw ghost agent as white semi-transparent rectangle
                                     ctx.fillStyle = isSelected ? 'rgba(0, 255, 0, 0.5)' : 'rgba(255, 255, 255, 0.7)';

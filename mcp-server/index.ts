@@ -288,6 +288,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         results.push(`Executed: ${command}`);
       }
 
+      // Handle edit_note (CRDT-style operations)
+      const edit_note = (args as any).edit_note;
+      if (edit_note) {
+        const { noteId, operation, text: editText, position, range, cell } = edit_note;
+        const edit: any = { operation };
+        if (editText !== undefined) edit.text = editText;
+        if (position !== undefined) edit.position = position;
+        if (range !== undefined) edit.range = range;
+        if (cell !== undefined) edit.cell = cell;
+
+        const response = await sendToNara({ type: "edit_note", noteId, edit });
+        if (response.success) {
+          results.push(`Edited note ${noteId}: ${operation}`);
+        } else {
+          results.push(`Edit failed: ${response.error}`);
+        }
+      }
+
       return {
         content: [{ type: "text", text: results.join("\n") || "No operations performed" }],
       };

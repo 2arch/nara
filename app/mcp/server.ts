@@ -121,7 +121,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === "make") {
       // make() - create or modify things
-      const { paint, note, text, chip, agent, delete: deleteOp, command } = args as {
+      const { paint, note, text, chip, agent, delete: deleteOp, command, run_script } = args as {
         paint?: any;
         note?: any;
         text?: any;
@@ -129,6 +129,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         agent?: any;
         delete?: { type: string; id: string };
         command?: string;
+        run_script?: { noteId: string };
       };
 
       const results: string[] = [];
@@ -195,7 +196,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // Handle agent operations
       if (agent) {
-        const { target, create, move, action } = agent;
+        const { target, create, move, action, mind, think } = agent;
 
         // Create new agent
         if (create) {
@@ -208,7 +209,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         // Operations on existing agents (need target)
-        if (target && (move || action)) {
+        if (target && (move || action || mind || think)) {
           // Resolve target to agent IDs
           let agentIds: string[] = [];
 
@@ -270,6 +271,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               }
               results.push(`Executed "${action.command}" on ${agentIds.length} agent(s)`);
             }
+
+            // Handle mind (set persona/goals for autonomous thinking)
+            if (mind) {
+              for (const agentId of agentIds) {
+                await sendToNara({
+                  type: "set_agent_mind",
+                  agentId,
+                  persona: mind.persona,
+                  goals: mind.goals
+                });
+              }
+              results.push(`Set mind for ${agentIds.length} agent(s)`);
+            }
+
+            // Handle think (trigger one thinking cycle)
+            if (think) {
+              // Note: think is handled client-side in the autonomous loop
+              results.push(`Think requested for ${agentIds.length} agent(s) - will happen in next tick`);
+            }
           }
         }
       }
@@ -286,8 +306,52 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         results.push(`Executed: ${command}`);
       }
 
+      // Handle script execution
+      if (run_script) {
+        const response = await sendToNara({ type: "run_script", noteId: run_script.noteId });
+        if (response.success) {
+          const output = response.output?.join(' | ') || 'no output';
+          results.push(`Script output: ${output}`);
+        } else {
+          results.push(`Script error: ${response.error}`);
+        }
+      }
+
+      // Handle edit_note (CRDT-style operations)
+      if ((args as any).edit_note) {
+        const { noteId, operation, text, position, range, cell } = (args as any).edit_note;
+        const edit: any = { operation };
+        if (text !== undefined) edit.text = text;
+        if (position !== undefined) edit.position = position;
+        if (range !== undefined) edit.range = range;
+        if (cell !== undefined) edit.cell = cell;
+
+        const response = await sendToNara({ type: "edit_note", noteId, edit });
+        if (response.success) {
+          results.push(`Edited note ${noteId}: ${operation}`);
+        } else {
+          results.push(`Edit failed: ${response.error}`);
+        }
+      }
+
       return {
         content: [{ type: "text", text: results.join("\n") || "No operations performed" }],
+      };
+    }
+
+    // Handle standalone edit_note tool call
+    if (name === "edit_note") {
+      const { noteId, operation, text, position, range, cell } = args as any;
+      const edit: any = { operation };
+      if (text !== undefined) edit.text = text;
+      if (position !== undefined) edit.position = position;
+      if (range !== undefined) edit.range = range;
+      if (cell !== undefined) edit.cell = cell;
+
+      const response = await sendToNara({ type: "edit_note", noteId, edit });
+      return {
+        content: [{ type: "text", text: response.success ? `Edited note ${noteId}: ${operation}` : `Error: ${response.error}` }],
+        isError: !response.success,
       };
     }
 

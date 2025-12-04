@@ -85,7 +85,8 @@ Examples:
 - make({ agent: { target: { name: 'wizard' }, action: { command: '/paint red' } } })
 - make({ agent: { target: { id: 'abc123' }, move: { stop: true } } })
 - make({ delete: { type: 'note', id: 'note_123,456_789' } })
-- make({ command: '/color blue' })`,
+- make({ command: '/color blue' })
+- make({ run_script: { noteId: 'note_123_abc' } }) - execute a script note by ID`,
     parameters: {
       type: 'object',
       properties: {
@@ -322,6 +323,22 @@ Examples:
                 }
               },
               required: ['command']
+            },
+            mind: {
+              type: 'object',
+              description: 'Set agent mind/persona for autonomous behavior',
+              properties: {
+                persona: { type: 'string', description: 'Who is this agent? What drives it?' },
+                goals: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'What the agent is trying to accomplish'
+                }
+              }
+            },
+            think: {
+              type: 'boolean',
+              description: 'Trigger one thinking cycle for the targeted agent(s). Agent will perceive nearby context and decide what to do.'
             }
           }
         },
@@ -343,6 +360,61 @@ Examples:
         command: {
           type: 'string',
           description: 'Execute a Nara command (e.g., "/color red", "/brush 3")'
+        },
+        // RUN SCRIPT
+        run_script: {
+          type: 'object',
+          description: 'Execute a script note by ID and get the output',
+          properties: {
+            noteId: { type: 'string', description: 'The ID of the script note to execute' }
+          },
+          required: ['noteId']
+        },
+        // EDIT NOTE - CRDT-style patch operations for collaborative editing
+        edit_note: {
+          type: 'object',
+          description: 'Edit an existing note using CRDT-style patch operations. Supports append, insert, delete, and replace.',
+          properties: {
+            noteId: { type: 'string', description: 'The ID of the note to edit' },
+            operation: {
+              type: 'string',
+              enum: ['append', 'insert', 'delete', 'replace', 'clear'],
+              description: 'The type of edit operation'
+            },
+            // For append/insert/replace
+            text: { type: 'string', description: 'Text to insert or append' },
+            // For insert - position in the text
+            position: {
+              type: 'object',
+              description: 'Position for insert operation (line and column)',
+              properties: {
+                line: { type: 'number', description: 'Line number (0-indexed)' },
+                column: { type: 'number', description: 'Column number (0-indexed)' }
+              }
+            },
+            // For delete/replace - range to affect
+            range: {
+              type: 'object',
+              description: 'Range for delete/replace operations',
+              properties: {
+                startLine: { type: 'number', description: 'Start line (0-indexed)' },
+                startColumn: { type: 'number', description: 'Start column (0-indexed)' },
+                endLine: { type: 'number', description: 'End line (0-indexed)' },
+                endColumn: { type: 'number', description: 'End column (0-indexed)' }
+              }
+            },
+            // For table notes - cell-level edits
+            cell: {
+              type: 'object',
+              description: 'For table/data notes: edit a specific cell',
+              properties: {
+                row: { type: 'number', description: 'Row index (0-indexed)' },
+                col: { type: 'number', description: 'Column index (0-indexed)' },
+                value: { type: 'string', description: 'New cell value' }
+              }
+            }
+          },
+          required: ['noteId', 'operation']
         }
       }
     }
@@ -384,13 +456,51 @@ export interface ToolContext {
   moveAgentsExpr?: (agentIds: string[], xExpr: string, yExpr: string, vars?: Record<string, number>, duration?: number) => void;
   stopAgentsExpr?: (agentIds: string[]) => void;
   agentAction?: (agentId: string, command: string, selection?: { width: number; height: number }) => void;
+  setAgentMind?: (agentId: string, persona?: string, goals?: string[]) => void;
+  agentThink?: (agentId: string) => Promise<{ thought: string; actions?: any[] } | null>;
 
   // Deletion
   deleteEntity?: (type: 'note' | 'agent' | 'chip', id: string) => void;
 
   // Commands
   runCommand: (command: string) => void;
+
+  // Script execution
+  runScript?: (noteId: string) => Promise<{ success: boolean; output?: string[]; error?: string }>;
+
+  // Note editing - CRDT-style operations
+  editNote?: (noteId: string, edit: NoteEdit) => { success: boolean; error?: string };
 }
+
+// =============================================================================
+// NOTE EDIT TYPES - CRDT-style patch operations
+// =============================================================================
+
+export interface NoteEditPosition {
+  line: number;
+  column: number;
+}
+
+export interface NoteEditRange {
+  startLine: number;
+  startColumn: number;
+  endLine: number;
+  endColumn: number;
+}
+
+export interface NoteEditCell {
+  row: number;
+  col: number;
+  value: string;
+}
+
+export type NoteEdit =
+  | { operation: 'append'; text: string }
+  | { operation: 'insert'; text: string; position: NoteEditPosition }
+  | { operation: 'delete'; range: NoteEditRange }
+  | { operation: 'replace'; text: string; range: NoteEditRange }
+  | { operation: 'clear' }
+  | { operation: 'cell'; cell: NoteEditCell }
 
 // =============================================================================
 // HELPER FUNCTIONS - Shape generation
@@ -512,11 +622,11 @@ function filterByLocation<T extends { x: number; y: number }>(
   return result;
 }
 
-export function executeTool(
+export async function executeTool(
   toolName: string,
   args: Record<string, any>,
   ctx: ToolContext
-): { success: boolean; result?: any; error?: string } {
+): Promise<{ success: boolean; result?: any; error?: string }> {
   try {
     switch (toolName) {
       // ===================
@@ -676,7 +786,7 @@ export function executeTool(
 
         // AGENT
         if (args.agent) {
-          const { target, create, move, action } = args.agent;
+          const { target, create, move, action, mind, think } = args.agent;
 
           // Create new agent
           if (create) {
@@ -687,6 +797,25 @@ export function executeTool(
           // Resolve target agents
           const agents = ctx.getAgents();
           const targetIds = resolveAgentTarget(target, agents);
+
+          // Set mind (persona/goals) for agents
+          if (mind && targetIds.length > 0 && ctx.setAgentMind) {
+            for (const agentId of targetIds) {
+              ctx.setAgentMind(agentId, mind.persona, mind.goals);
+            }
+            results.push(`Set mind for ${targetIds.length} agents`);
+          }
+
+          // Think - trigger AI reasoning cycle
+          if (think && targetIds.length > 0 && ctx.agentThink) {
+            for (const agentId of targetIds) {
+              const thought = await ctx.agentThink(agentId);
+              if (thought) {
+                results.push(`Agent ${agentId} thinks: "${thought.thought?.slice(0, 100)}..."`);
+                // Actions from thinking are queued by agentThink implementation
+              }
+            }
+          }
 
           // Move
           if (move && targetIds.length > 0) {
@@ -733,11 +862,111 @@ export function executeTool(
           results.push(`Executed: ${args.command}`);
         }
 
+        // RUN SCRIPT
+        if (args.run_script && ctx.runScript) {
+          const { noteId } = args.run_script;
+          // Note: This is async but we return synchronously
+          // The MCP bridge handles this via the run_script command type directly
+          const scriptResult = await ctx.runScript(noteId);
+          if (scriptResult.success) {
+            results.push(`Script executed: ${scriptResult.output?.join(' | ') || 'no output'}`);
+          } else {
+            results.push(`Script error: ${scriptResult.error}`);
+          }
+        }
+
+        // EDIT NOTE
+        if (args.edit_note && ctx.editNote) {
+          const { noteId, operation, text, position, range, cell } = args.edit_note;
+          let edit: NoteEdit;
+
+          switch (operation) {
+            case 'append':
+              if (!text) return { success: false, error: 'append requires text' };
+              edit = { operation: 'append', text };
+              break;
+            case 'insert':
+              if (!text || !position) return { success: false, error: 'insert requires text and position' };
+              edit = { operation: 'insert', text, position };
+              break;
+            case 'delete':
+              if (!range) return { success: false, error: 'delete requires range' };
+              edit = { operation: 'delete', range };
+              break;
+            case 'replace':
+              if (!text || !range) return { success: false, error: 'replace requires text and range' };
+              edit = { operation: 'replace', text, range };
+              break;
+            case 'clear':
+              edit = { operation: 'clear' };
+              break;
+            case 'cell':
+              if (!cell) return { success: false, error: 'cell operation requires cell object' };
+              edit = { operation: 'cell', cell };
+              break;
+            default:
+              return { success: false, error: `Unknown edit operation: ${operation}` };
+          }
+
+          const editResult = ctx.editNote(noteId, edit);
+          if (editResult.success) {
+            results.push(`Edited note ${noteId}: ${operation}`);
+          } else {
+            results.push(`Edit failed: ${editResult.error}`);
+          }
+        }
+
         if (results.length === 0) {
           return { success: false, error: 'No valid make operation specified' };
         }
 
         return { success: true, result: results.join('; ') };
+      }
+
+      // ===================
+      // EDIT_NOTE (standalone tool for direct calls)
+      // ===================
+      case 'edit_note': {
+        if (!ctx.editNote) {
+          return { success: false, error: 'editNote not implemented' };
+        }
+
+        const { noteId, operation, text, position, range, cell } = args;
+        if (!noteId || !operation) {
+          return { success: false, error: 'edit_note requires noteId and operation' };
+        }
+
+        let edit: NoteEdit;
+        switch (operation) {
+          case 'append':
+            if (!text) return { success: false, error: 'append requires text' };
+            edit = { operation: 'append', text };
+            break;
+          case 'insert':
+            if (!text || !position) return { success: false, error: 'insert requires text and position' };
+            edit = { operation: 'insert', text, position };
+            break;
+          case 'delete':
+            if (!range) return { success: false, error: 'delete requires range' };
+            edit = { operation: 'delete', range };
+            break;
+          case 'replace':
+            if (!text || !range) return { success: false, error: 'replace requires text and range' };
+            edit = { operation: 'replace', text, range };
+            break;
+          case 'clear':
+            edit = { operation: 'clear' };
+            break;
+          case 'cell':
+            if (!cell) return { success: false, error: 'cell operation requires cell object' };
+            edit = { operation: 'cell', cell };
+            break;
+          default:
+            return { success: false, error: `Unknown edit operation: ${operation}` };
+        }
+
+        const result = ctx.editNote(noteId, edit);
+        return { success: result.success, result: result.success ? `Edited note ${noteId}` : undefined, error: result.error };
       }
 
       default:

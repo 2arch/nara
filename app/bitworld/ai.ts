@@ -8,7 +8,7 @@ export { abortCurrentAI, isAIActive, setDialogueWithRevert, createSubtitleCycler
 
 // Re-export tools for external use
 export { canvasTools, executeTool } from './ai.tools';
-export type { ToolContext } from './ai.tools';
+export type { ToolContext, NoteEdit, NoteEditPosition, NoteEditRange, NoteEditCell } from './ai.tools';
 
 // Lazy initialization of the Google GenAI client
 let genaiClient: GoogleGenAI | null = null;
@@ -419,7 +419,7 @@ export interface CanvasState {
     cursorPosition: { x: number; y: number };
     viewport: { offset: { x: number; y: number }; zoomLevel: number };
     selection: { start: { x: number; y: number } | null; end: { x: number; y: number } | null };
-    agents: Array<{ id: string; x: number; y: number; spriteName?: string }>;
+    agents: Array<{ id: string; x: number; y: number; spriteName?: string; recentSpeech?: string }>;
     notes: Array<{ id: string; x: number; y: number; width: number; height: number; contentType?: string; content?: string }>;
     chips: Array<{ id: string; x: number; y: number; text: string; color?: string }>;
 }
@@ -499,3 +499,11 @@ export const ai = async (prompt: string, context?: AIContext): Promise<AIResult>
     });
     return response.json();
 };
+
+// =============================================================================
+// Agent thinking - re-exported from ai.agents.ts
+// =============================================================================
+
+// Re-export agent-related types and functions from dedicated module
+export { agentThink, updateMind, createDefaultMind } from './ai.agents';
+export type { AgentMind, AgentThought } from './ai.agents';

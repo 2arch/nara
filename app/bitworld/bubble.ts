@@ -26,9 +26,9 @@ export interface BubbleGridConfig {
 }
 
 export const DEFAULT_BUBBLE_CONFIG: BubbleGridConfig = {
-    backgroundColor: '#ffffff',
+    backgroundColor: 'rgba(255, 255, 255, 0.75)',  // Semi-transparent white
     textColor: '#000000',
-    borderColor: '#000000',
+    borderColor: 'rgba(0, 0, 0, 0.6)',  // Slightly transparent border
     paddingCells: 1,        // 1 cell padding
     tailHeightCells: 2,     // 2 cells tall tail
     tailWidthCells: 3,      // 3 cells wide tail base

@@ -40,6 +40,33 @@ interface ViewportInfo {
   visibleBounds: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
+// Note edit types (matching ai.tools.ts)
+interface NoteEditPosition {
+  line: number;
+  column: number;
+}
+
+interface NoteEditRange {
+  startLine: number;
+  startColumn: number;
+  endLine: number;
+  endColumn: number;
+}
+
+interface NoteEditCell {
+  row: number;
+  col: number;
+  value: string;
+}
+
+type NoteEdit =
+  | { operation: 'append'; text: string }
+  | { operation: 'insert'; text: string; position: NoteEditPosition }
+  | { operation: 'delete'; range: NoteEditRange }
+  | { operation: 'replace'; text: string; range: NoteEditRange }
+  | { operation: 'clear' }
+  | { operation: 'cell'; cell: NoteEditCell };
+
 interface McpBridgeOptions {
   enabled: boolean;
   // Paint tools
@@ -69,6 +96,8 @@ interface McpBridgeOptions {
   createNote: (x: number, y: number, width: number, height: number, contentType?: string, content?: string, imageData?: { src: string; originalWidth: number; originalHeight: number }, generateImage?: string, scriptData?: { language: string }, tableData?: { columns: { width: number }[]; rows: { height: number }[]; cells: Record<string, string>; frozenRows?: number; frozenCols?: number; activeCell?: { row: number; col: number }; cellScrollOffsets?: Record<string, number> }) => { success: boolean; noteId?: string; error?: string };
   createChip: (x: number, y: number, text: string, color?: string) => { success: boolean; chipId?: string; error?: string };
   deleteEntity: (type: 'note' | 'agent' | 'chip', id: string) => { success: boolean; error?: string };
+  // Note editing - CRDT-style operations
+  editNote: (noteId: string, edit: NoteEdit) => { success: boolean; error?: string };
   // Text
   getTextAt: (region: { x: number; y: number; width: number; height: number }) => string[];
   writeText: (pos: { x: number; y: number }, text: string) => void;
@@ -76,6 +105,10 @@ interface McpBridgeOptions {
   runCommand: (command: string) => void;
   agentCommand: (agentId: string, command: string, restoreCursor?: boolean) => { success: boolean; agentPos?: { x: number; y: number }; error?: string };
   agentAction: (agentId: string, command: string, selection?: { width: number; height: number }) => { success: boolean; agentPos?: { x: number; y: number }; error?: string };
+  // Script execution
+  runScript: (noteId: string) => Promise<{ success: boolean; output?: string[]; error?: string }>;
+  // Agent mind
+  setAgentMind: (agentId: string, persona?: string, goals?: string[]) => { success: boolean; error?: string };
 }
 
 export function useMcpBridge(options: McpBridgeOptions) {
@@ -102,9 +135,10 @@ export function useMcpBridge(options: McpBridgeOptions) {
         getCanvasInfo, getViewport, setViewport,
         getSelection, setSelection, clearSelection,
         getAgents, moveAgents, moveAgentsPath, moveAgentsExpr, stopAgentsExpr, createAgent,
-        getNotes, getChips, createNote, createChip, deleteEntity,
+        getNotes, getChips, createNote, createChip, deleteEntity, editNote,
         getTextAt, writeText,
-        runCommand, agentCommand, agentAction
+        runCommand, agentCommand, agentAction,
+        runScript, setAgentMind
       } = optionsRef.current;
 
       const respond = (data: any) => {
@@ -262,6 +296,13 @@ export function useMcpBridge(options: McpBridgeOptions) {
             break;
           }
 
+          case 'edit_note': {
+            const { noteId, edit } = command as { noteId: string; edit: NoteEdit } & McpCommand;
+            const result = editNote(noteId, edit);
+            respond(result);
+            break;
+          }
+
           case 'get_text_at': {
             const { region } = command as { region: { x: number; y: number; width: number; height: number } } & McpCommand;
             const lines = getTextAt(region);
@@ -293,6 +334,23 @@ export function useMcpBridge(options: McpBridgeOptions) {
           case 'agent_action': {
             const { agentId, command: cmdString, selection } = command as { agentId: string; command: string; selection?: { width: number; height: number } } & McpCommand;
             const result = agentAction(agentId, cmdString, selection);
+            respond(result);
+            break;
+          }
+
+          case 'run_script': {
+            const { noteId } = command as { noteId: string } & McpCommand;
+            runScript(noteId).then(result => {
+              respond(result);
+            }).catch(err => {
+              respond({ success: false, error: err.message });
+            });
+            break;
+          }
+
+          case 'set_agent_mind': {
+            const { agentId, persona, goals } = command as { agentId: string; persona?: string; goals?: string[] } & McpCommand;
+            const result = setAgentMind(agentId, persona, goals);
             respond(result);
             break;
           }
