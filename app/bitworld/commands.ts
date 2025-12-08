@@ -328,15 +328,6 @@ export interface ModeState {
         startY: number;
         endY?: number; // For lists/finite bounds
     };
-    isFocusMode: boolean; // Whether focus mode is active (constrained to note or selection)
-    focusRegion?: { // The region to constrain viewport to in focus mode
-        type: 'selection' | 'note';
-        key?: string; // Note key if focusing on note
-        startX: number;
-        endX: number;
-        startY: number;
-        endY: number;
-    };
     isFaceDetectionEnabled: boolean; // Whether face-piloted geometry is active
     isCharacterEnabled: boolean; // Whether character sprite replaces cursor
     characterSprite?: { // Custom character sprite URLs (from /be <prompt>)
@@ -366,6 +357,7 @@ export interface ModeState {
     paintType: 'color' | 'obstacle'; // Type of paint: color (default) or obstacle (blocks pathfinding)
     isAgentMode: boolean; // Whether agent spawning mode is active
     agentSpriteName?: string; // Name of sprite to use for agents (uses ghost effect)
+    isAgentAttached: boolean; // Whether selected agents are attached to cursor
     viewOverlay?: { // View overlay state for fullscreen note viewing
         noteKey: string; // Key of the note being viewed
         content: string; // Wrapped text content for the overlay
@@ -417,6 +409,14 @@ interface UseCommandSystemProps {
         };
     };
     recorder?: DataRecorder;
+    setBounds?: (bounds: { minX: number; minY: number; maxX: number; maxY: number } | undefined) => void; // Set canvas bounds dynamically
+    canvasState?: 0 | 1; // Current canvas state (0=infinite, 1=bounded)
+    setCanvasState?: (state: 0 | 1) => void; // Toggle canvas state (0=infinite, 1=bounded)
+    setBoundedWorldData?: (data: any) => void; // Clear/set ephemeral bounded world data
+    setZoomLevel?: (zoom: number) => void; // Set zoom level for auto-zoom on bound
+    setViewOffset?: (offset: { x: number; y: number }) => void; // Set view offset for centering on bound
+    selectionStart?: { x: number; y: number } | null; // Current selection start for bounding from selection
+    selectionEnd?: { x: number; y: number } | null; // Current selection end for bounding from selection
 }
 
 // --- Command System Constants ---
@@ -426,7 +426,7 @@ const READ_ONLY_COMMANDS = ['signin', 'share'];
 // Commands organized by category for logical ordering
 const AVAILABLE_COMMANDS = [
     // Navigation & View
-    'nav', 'search', 'cam', 'indent', 'zoom', 'map', 'view', 'focus',
+    'nav', 'search', 'cam', 'indent', 'zoom', 'map', 'view', 'bound',
     // Content Creation
     'chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint', 'agent', 'pattern', 'connect', 'export', 'data', 'list', 'grow', 'duplicate', 'name',
     // Special
@@ -447,7 +447,7 @@ const AVAILABLE_COMMANDS = [
 
 // Category mapping for visual organization
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
-    'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map', 'view', 'focus'],
+    'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map', 'view', 'bound'],
     'create': ['chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint', 'agent', 'export', 'data', 'list', 'grow', 'duplicate', 'name'],
     'special': ['mode', 'note', 'mail', 'shell', 'chat', 'talk', 'tutorial', 'help', 'script', 'run'],
     'style': ['bg', 'text', 'font', 'style', 'display', 'be'],
@@ -472,7 +472,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'cam': 'Control camera behavior. Use /cam focus to enable focus mode, which smoothly follows your cursor. Use /cam default to return to normal panning.',
     'indent': 'Toggle text indentation. This affects how new lines are indented when you press Enter, helping you organize thoughts hierarchically.',
     'view': 'View a note as a fullscreen overlay. Position cursor inside a note and type /view. The note content appears centered with margins, text wrapped to fit. Scroll if content overflows. Press Escape to exit.',
-    'focus': 'Constrain viewport to a region. Position cursor in a note OR make a selection, then type /focus. Viewport locks to region bounds (strict, no margins). Great for reliable rendering. Press Escape to exit.',
+    'bound': 'Constrain canvas to a bounded region. Type /bound [width] [height] to limit the canvas (e.g., /bound 1000 1000 for 1M cells). Cursor and panning stay within bounds. Type /bound alone to remove bounds and return to infinite canvas.',
     'chip': 'Create a spatial chip at your current selection. Type /chip \'text\' [color]. Defaults to current text color (accent). Custom colors: /chip \'text\' crimson. Chips show as colored cells with cutout text.',
     'task': 'Create a toggleable task from selected text. Select text, then type /task [color]. Click the highlighted task to toggle completion (adds strikethrough). Click again to un-complete it.',
     'link': 'Create a clickable link from selected text. Select text, then type /link [url]. Click the underlined link to open the URL in a new tab. URLs are auto-detected when pasted.',
@@ -536,7 +536,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllChips, getAllBounds = () => [], availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, currentScale, setCurrentScale, monogramSystem, recorder }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllChips, getAllBounds = () => [], availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, currentScale, setCurrentScale, monogramSystem, recorder, setBounds, canvasState, setCanvasState, setBoundedWorldData, setZoomLevel, setViewOffset, selectionStart, selectionEnd }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const previousBackgroundStateRef = useRef<{
@@ -595,8 +595,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         artifactType: 'images', // Default to image artifacts
         isFullscreenMode: false, // Fullscreen mode not active initially
         fullscreenRegion: undefined, // No fullscreen region initially
-        isFocusMode: false, // Focus mode not active initially
-        focusRegion: undefined, // No focus region initially
         isFaceDetectionEnabled: false, // Face detection not active initially
         isCharacterEnabled: false, // Character sprite cursor not active initially
         faceOrientation: undefined, // No face orientation initially
@@ -606,6 +604,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         paintBrushSize: 1, // Default brush size (1 cell radius)
         paintType: 'color', // Default to color paint (not obstacle)
         isAgentMode: false, // Agent spawning mode not active initially
+        isAgentAttached: false, // Agents not attached to cursor initially
     });
 
     // User's saved sprites
@@ -5105,39 +5104,193 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             return null;
         }
 
-        if (commandToExecute.startsWith('focus')) {
-            // /focus command - constrain viewport to note or selection bounds
+        // /bound command - toggle bounded canvas overlay
+        if (commandToExecute.startsWith('bound')) {
+            const { arg1, arg2 } = parseCurrentInput();
             const cursorPos = commandState.commandStartPos;
 
-            // OPTION 1: Try to find note at cursor position
-            let foundRegion = false;
+            // Helper to apply bounds with auto-zoom
+            const applyBoundsWithZoom = (
+                minX: number, minY: number, maxX: number, maxY: number,
+                width: number, height: number,
+                boundedData: Record<string, any> = {},
+                source: string
+            ) => {
+                if (setBounds) {
+                    setBounds({ minX, minY, maxX, maxY });
+                }
 
+                // Auto-zoom to fit bounded region in viewport
+                if (setZoomLevel && setViewOffset) {
+                    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
+                    const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
+
+                    const baseCharDims = getEffectiveCharDims(1.0);
+                    const cellsWideAtZoom1 = viewportWidth / baseCharDims.width;
+                    const cellsHighAtZoom1 = viewportHeight / baseCharDims.height;
+
+                    const targetFill = 0.8;
+                    const zoomForWidth = (cellsWideAtZoom1 * targetFill) / width;
+                    const zoomForHeight = (cellsHighAtZoom1 * targetFill) / height;
+                    const targetZoom = Math.min(zoomForWidth, zoomForHeight);
+                    const clampedZoom = Math.max(0.5, Math.min(3.0, targetZoom));
+
+                    // Only auto-zoom if bounded region is small
+                    if (clampedZoom > zoomLevel) {
+                        setZoomLevel(clampedZoom);
+
+                        const centerX = minX + width / 2;
+                        const centerY = minY + height / 2;
+                        const charDims = getEffectiveCharDims(clampedZoom);
+                        const offsetX = centerX - (viewportWidth / charDims.width) / 2;
+                        const offsetY = centerY - (viewportHeight / charDims.height) / 2;
+                        setViewOffset({ x: offsetX, y: offsetY });
+                    }
+                }
+
+                if (setCanvasState) setCanvasState(1);
+                if (setBoundedWorldData) setBoundedWorldData(boundedData);
+
+                const cellCount = width * height;
+                const cellCountStr = cellCount >= 1000000
+                    ? `${(cellCount / 1000000).toFixed(1)}M`
+                    : cellCount >= 1000
+                        ? `${(cellCount / 1000).toFixed(1)}K`
+                        : `${cellCount}`;
+
+                setDialogueWithRevert(`Bounded ${source}: ${width}×${height} (${cellCountStr} cells). /bound to exit.`, setDialogueText);
+                clearCommandState();
+            };
+
+            // No args: toggle off if bounded, or check for selection/note, or default to 100x100
+            if (!arg1 && !arg2) {
+                if (canvasState === 1) {
+                    // Already bounded - toggle off (return to infinite)
+                    if (setBounds) setBounds(undefined);
+                    if (setCanvasState) setCanvasState(0);
+                    setDialogueWithRevert("Canvas unbounded - infinite space restored", setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                // Check if there's an active selection - use selection bounds
+                // Skip if it's just the default cursor (1x2) - not a real selection
+                if (selectionStart && selectionEnd) {
+                    const startX = Math.min(selectionStart.x, selectionEnd.x);
+                    const endX = Math.max(selectionStart.x, selectionEnd.x);
+                    const startY = Math.min(selectionStart.y, selectionEnd.y);
+                    const endY = Math.max(selectionStart.y, selectionEnd.y);
+
+                    // Visual bounds (startY - 1 for GRID_CELL_SPAN)
+                    const width = endX - startX + 1;
+                    const height = endY - startY + 1;
+
+                    // Skip default cursor (1x2) - only bound from actual selection
+                    const isActualSelection = width > 1 || (endY - startY) > 0;
+
+                    if (isActualSelection) {
+                        // Capture world data within selection as bounded data
+                        const boundedData: Record<string, any> = {};
+                        for (let y = startY; y <= endY; y++) {
+                            for (let x = startX; x <= endX; x++) {
+                                const key = `${x},${y}`;
+                                if (worldData && worldData[key]) {
+                                    boundedData[key] = worldData[key];
+                                }
+                            }
+                        }
+
+                        // Clear selection after bounding
+                        if (setSelectionStart) setSelectionStart(null);
+                        if (setSelectionEnd) setSelectionEnd(null);
+
+                        applyBoundsWithZoom(
+                            startX, startY - 1, endX + 1, endY,
+                            width, height, boundedData, 'from selection'
+                        );
+                        return null;
+                    }
+                }
+
+                // Check if cursor is over a note - use note bounds and data
+                for (const key in worldData) {
+                    if (key.startsWith('note_')) {
+                        try {
+                            const noteData = JSON.parse(worldData[key] as string);
+                            const { startX, endX, startY, endY, data: noteContent } = noteData;
+
+                            // Check if cursor is within note bounds
+                            if (cursorPos.x >= startX && cursorPos.x <= endX &&
+                                cursorPos.y >= startY && cursorPos.y <= endY) {
+
+                                const width = endX - startX + 1;
+                                const height = endY - startY + 1; // Note content height
+
+                                // Port note content to bounded world data
+                                const boundedData: Record<string, any> = {};
+                                if (noteContent) {
+                                    for (const cellKey in noteContent) {
+                                        boundedData[cellKey] = noteContent[cellKey];
+                                    }
+                                }
+
+                                applyBoundsWithZoom(
+                                    startX, startY - 1, endX + 1, endY,
+                                    width, height, boundedData, 'from note'
+                                );
+                                return null;
+                            }
+                        } catch (e) {
+                            // Skip invalid note data
+                        }
+                    }
+                }
+                // Not over a note - fall through with default 100x100
+            }
+
+            // Determine width/height from args or default
+            const width = arg1 ? parseInt(arg1, 10) : 100;
+            const height = arg2 ? parseInt(arg2, 10) : (arg1 ? width : 100); // Square if only one arg
+
+            if (isNaN(width) || isNaN(height) || width <= 0 || height <= 0) {
+                setDialogueWithRevert("Invalid bounds. Usage: /bound [width] [height]", setDialogueText);
+                clearCommandState();
+                return null;
+            }
+
+            // Set bounds centered on current cursor position
+            const minX = Math.floor(cursorPos.x - width / 2);
+            const minY = Math.floor(cursorPos.y - height / 2);
+
+            // Check if cursor is over a note - rewrap its content to fit the new bounds
+            let boundedData: Record<string, any> = {};
+            let source = '';
             for (const key in worldData) {
                 if (key.startsWith('note_')) {
                     try {
                         const noteData = JSON.parse(worldData[key] as string);
-                        const { startX, endX, startY, endY } = noteData;
+                        const { startX, endX, startY, endY, data: noteContent } = noteData;
 
-                        // Check if cursor is within note bounds
                         if (cursorPos.x >= startX && cursorPos.x <= endX &&
                             cursorPos.y >= startY && cursorPos.y <= endY) {
+                            // Rewrap note content to fit new bounds width
+                            if (noteContent && Object.keys(noteContent).length > 0) {
+                                // Create a modified noteData with new dimensions for rewrapping
+                                const rewrappedNote = rewrapNoteText({
+                                    ...noteData,
+                                    startX: 0,
+                                    endX: width - 1,  // New width
+                                    startY: 0,
+                                    endY: height - 1, // New height (will expand as needed)
+                                    data: noteContent
+                                });
 
-                            // Focus on this note
-                            setModeState(prev => ({
-                                ...prev,
-                                isFocusMode: true,
-                                focusRegion: {
-                                    type: 'note',
-                                    key: key,
-                                    startX,
-                                    endX,
-                                    startY,
-                                    endY
+                                // Use the rewrapped data
+                                if (rewrappedNote.data) {
+                                    boundedData = rewrappedNote.data;
                                 }
-                            }));
-
-                            setDialogueText?.("Focus mode: note - press Esc to exit");
-                            foundRegion = true;
+                            }
+                            source = 'with note content';
                             break;
                         }
                     } catch (e) {
@@ -5146,42 +5299,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 }
             }
 
-            // OPTION 2: If no note found, try selection
-            if (!foundRegion) {
-                const normalized = getNormalizedSelection?.();
-
-                if (!normalized) {
-                    setDialogueText?.("Position cursor in a note or make a selection first");
-                    clearCommandState();
-                    return null;
-                }
-
-                const hasSelection = (normalized.startX !== normalized.endX) ||
-                                    (normalized.startY !== normalized.endY);
-
-                if (!hasSelection) {
-                    setDialogueText?.("Selection must span more than one cell");
-                    clearCommandState();
-                    return null;
-                }
-
-                // Focus on selection
-                setModeState(prev => ({
-                    ...prev,
-                    isFocusMode: true,
-                    focusRegion: {
-                        type: 'selection',
-                        startX: normalized.startX,
-                        endX: normalized.endX,
-                        startY: normalized.startY,
-                        endY: normalized.endY
-                    }
-                }));
-
-                setDialogueText?.("Focus mode: selection - press Esc to exit");
-            }
-
-            clearCommandState();
+            applyBoundsWithZoom(minX, minY, minX + width, minY + height, width, height, boundedData, source);
             return null;
         }
 
@@ -5312,6 +5430,27 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (commandToExecute.startsWith('agent')) {
             const agentArgs = commandToExecute.slice(5).trim();
+
+            // Handle /agent attach - toggle cursor attachment for selected agents
+            if (agentArgs === 'attach') {
+                if (modeState.isAgentAttached) {
+                    // Already attached, detach
+                    setModeState(prev => ({
+                        ...prev,
+                        isAgentAttached: false
+                    }));
+                    setDialogueWithRevert("Agents detached from cursor", setDialogueText);
+                } else {
+                    // Attach selected agents to cursor
+                    setModeState(prev => ({
+                        ...prev,
+                        isAgentAttached: true
+                    }));
+                    setDialogueWithRevert("Agents attached to cursor. Use /agent attach to detach.", setDialogueText);
+                }
+                clearCommandState();
+                return null;
+            }
 
             // If already in agent mode and no arguments, toggle it off
             if (modeState.isAgentMode && !agentArgs) {
@@ -7011,12 +7150,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             setModeState(prev => ({ ...prev, isFullscreenMode: enabled, fullscreenRegion: region })),
         exitFullscreenMode: () =>
             setModeState(prev => ({ ...prev, isFullscreenMode: false, fullscreenRegion: undefined })),
-        isFocusMode: modeState.isFocusMode,
-        focusRegion: modeState.focusRegion,
-        setFocusMode: (enabled: boolean, region?: ModeState['focusRegion']) =>
-            setModeState(prev => ({ ...prev, isFocusMode: enabled, focusRegion: region })),
-        exitFocusMode: () =>
-            setModeState(prev => ({ ...prev, isFocusMode: false, focusRegion: undefined })),
         isFaceDetectionEnabled: modeState.isFaceDetectionEnabled,
         faceOrientation: modeState.faceOrientation,
         setFaceDetectionEnabled: (enabled: boolean) =>
@@ -7048,6 +7181,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         // Agent mode
         isAgentMode: modeState.isAgentMode,
         agentSpriteName: modeState.agentSpriteName,
+        isAgentAttached: modeState.isAgentAttached,
         exitAgentMode: () => setModeState(prev => ({ ...prev, isAgentMode: false, agentSpriteName: undefined })),
+        setAgentAttached: (attached: boolean) => setModeState(prev => ({ ...prev, isAgentAttached: attached })),
     };
 }

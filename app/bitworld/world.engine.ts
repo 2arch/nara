@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useWorldSave } from './world.save'; // Import the new hook
 import { useCommandSystem, CommandState, CommandExecution, BackgroundMode, COLOR_MAP } from './commands'; // Import command system
-import { getSmartIndentation, calculateWordDeletion, extractLineCharacters, detectTextBlocks, findClosestBlock, findBlockForDeletion, extractAllTextBlocks, groupTextBlocksIntoClusters, filterClustersForLabeling, generateTextBlockFrames, generateHierarchicalFrames, HierarchicalFrameSystem, HierarchicalFrame, HierarchyLevel, defaultDistanceConfig, DistanceBasedConfig } from './bit.blocks'; // Import block detection utilities
+import { getSmartIndentation, extractLineCharacters, detectTextBlocks, findClosestBlock, findBlockForDeletion } from './bit.blocks'; // Import block detection utilities
 import { useWorldSettings, WorldSettings } from './settings';
 import { set, ref, increment, runTransaction, serverTimestamp, onValue } from 'firebase/database';
 import { database, auth, storage, getUserProfile } from '@/app/firebase';
@@ -42,6 +42,15 @@ const BLOCK_PREFIX = 'block_';// Circle packing constants
 const MIN_BLOCK_DISTANCE = 6;  // Minimum cells between blocks
 
 // --- Interfaces ---
+
+// World bounds for constrained/bounded canvas mode
+export interface WorldBounds {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+}
+
 export interface StyledCharacter {
     char: string;
     style?: {
@@ -936,6 +945,14 @@ export interface WorldEngine {
     worldData: WorldData;
     commandData: WorldData;
     commandState: CommandState;
+    // Canvas state: 0 = infinite (synced), 1 = bounded (ephemeral)
+    canvasState: 0 | 1;
+    setCanvasState: (state: 0 | 1) => void;
+    boundedWorldData: WorldData; // Ephemeral data for bounded state
+    setBoundedWorldData: React.Dispatch<React.SetStateAction<WorldData>>;
+    bounds?: WorldBounds; // Optional bounds for constrained canvas mode
+    setBounds: (bounds: WorldBounds | undefined) => void; // Set bounds dynamically (undefined = unbounded)
+    isWithinBounds: (x: number, y: number) => boolean; // Check if coordinates are within bounds
     commandSystem: {
         selectCommand: (command: string) => void;
         executeCommandString: (command: string) => void;
@@ -1100,35 +1117,6 @@ export interface WorldEngine {
     loadAvailableStates: () => Promise<string[]>;
     username?: string;
     userUid?: string | null;
-    // Text frame and cluster system
-    textFrames: Array<{
-        boundingBox: {
-            minX: number;
-            maxX: number;
-            minY: number;
-            maxY: number;
-        };
-    }>;
-    framesVisible: boolean;
-    updateTextFrames: () => Promise<void>;
-    // Hierarchical frame system
-    hierarchicalFrames: HierarchicalFrameSystem | null;
-    useHierarchicalFrames: boolean;
-    hierarchicalConfig: DistanceBasedConfig;
-    clusterLabels: Array<{
-        clusterId: string;
-        position: { x: number; y: number };
-        text: string;
-        confidence: number;
-        boundingBox: {
-            minX: number;
-            maxX: number;
-            minY: number;
-            maxY: number;
-        };
-    }>;
-    clustersVisible: boolean;
-    updateClusterLabels: () => Promise<void>;
     isMoveMode: boolean;
     isPaintMode: boolean;
     paintTool: 'brush' | 'fill' | 'lasso' | 'eraser';
@@ -1191,16 +1179,6 @@ export interface WorldEngine {
     // Spatial indexing for efficient viewport-based rendering
     spatialIndex: React.MutableRefObject<Map<string, Set<string>>>;
     queryVisibleEntities: (startWorldX: number, startWorldY: number, endWorldX: number, endWorldY: number) => Set<string>;
-    // Focus mode for constrained viewport
-    isFocusMode: boolean;
-    focusRegion?: {
-        type: 'selection' | 'note';
-        key?: string;
-        startX: number;
-        endX: number;
-        startY: number;
-        endY: number;
-    };
     recorder: DataRecorder;
     // Note text wrapping
     rewrapNoteText: (noteData: any) => any;
@@ -1216,6 +1194,8 @@ export interface WorldEngine {
     // Agent spawning mode
     isAgentMode: boolean;
     agentSpriteName?: string;
+    isAgentAttached: boolean;
+    setAgentAttached: (attached: boolean) => void;
     // Agent movement handlers (registered by BitCanvas which has animation state)
     agentHandlers?: {
         moveAgents: (agentIds: string[], destination: { x: number; y: number }) => { moved: string[]; errors: string[] };
@@ -1254,6 +1234,7 @@ interface UseWorldEngineProps {
             mode?: 'clear' | 'perlin' | 'nara' | 'voronoi' | 'face3d';
         };
     };
+    bounds?: WorldBounds; // Optional bounds for constrained canvas mode (e.g., { minX: 0, minY: 0, maxX: 1000, maxY: 1000 } for 1M cells)
 }
 
 
@@ -1464,6 +1445,7 @@ export function useWorldEngine({
     isReadOnly = false,  // Read-only mode (default to writeable)
     skipInitialBackground = false, // Skip applying initialBackgroundColor
     monogramSystem,      // WebGPU monogram system
+    bounds,              // Optional bounds for constrained canvas mode
 }: UseWorldEngineProps): WorldEngine {
     // === Router ===
     const router = useRouter();
@@ -1506,6 +1488,65 @@ export function useWorldEngine({
 
     // === State ===
     const [worldData, setWorldData] = useState<WorldData>(initialWorldData);
+
+    // === Canvas State Enumeration ===
+    // 0 = infinite (default, synced to Firebase)
+    // 1 = bounded (ephemeral, not synced)
+    const [canvasState, setCanvasState] = useState<0 | 1>(0);
+
+    // Ephemeral world data for bounded state (not synced to Firebase)
+    const [boundedWorldData, setBoundedWorldData] = useState<WorldData>({});
+
+    // === Bounds State (can be changed dynamically via /bound command) ===
+    const [currentBounds, setCurrentBounds] = useState<WorldBounds | undefined>(bounds);
+
+    // Active world data depends on canvas state
+    const activeWorldData = canvasState === 0 ? worldData : boundedWorldData;
+    const setActiveWorldData = canvasState === 0 ? setWorldData : setBoundedWorldData;
+
+    // === Bounds Helpers ===
+    // Check if coordinates are within bounds (always true if unbounded)
+    const isWithinBounds = useCallback((x: number, y: number): boolean => {
+        if (!currentBounds) return true; // Unbounded canvas
+        return x >= currentBounds.minX && x < currentBounds.maxX && y >= currentBounds.minY && y < currentBounds.maxY;
+    }, [currentBounds]);
+
+    // Clamp coordinates to bounds
+    // Note: Y is clamped to minY + 1 because cursor visually spans Y-1 to Y (GRID_CELL_SPAN)
+    // This ensures the cursor's visual top stays within the bounded region
+    const clampToBounds = useCallback((x: number, y: number): Point => {
+        if (!currentBounds) return { x, y }; // Unbounded canvas
+        return {
+            x: Math.max(currentBounds.minX, Math.min(currentBounds.maxX - 1, x)),
+            y: Math.max(currentBounds.minY + 1, Math.min(currentBounds.maxY - 1, y)),
+        };
+    }, [currentBounds]);
+
+    // Clamp viewport offset to keep it within bounds
+    const clampViewportToBounds = useCallback((offset: Point, viewportWidthInCells: number, viewportHeightInCells: number): Point => {
+        if (!currentBounds) return offset; // Unbounded canvas
+
+        const boundsWidth = currentBounds.maxX - currentBounds.minX;
+        const boundsHeight = currentBounds.maxY - currentBounds.minY;
+
+        // If viewport is larger than bounds, center it
+        let clampedX = offset.x;
+        let clampedY = offset.y;
+
+        if (viewportWidthInCells >= boundsWidth) {
+            clampedX = currentBounds.minX - (viewportWidthInCells - boundsWidth) / 2;
+        } else {
+            clampedX = Math.max(currentBounds.minX, Math.min(currentBounds.maxX - viewportWidthInCells, offset.x));
+        }
+
+        if (viewportHeightInCells >= boundsHeight) {
+            clampedY = currentBounds.minY - (viewportHeightInCells - boundsHeight) / 2;
+        } else {
+            clampedY = Math.max(currentBounds.minY, Math.min(currentBounds.maxY - viewportHeightInCells, offset.y));
+        }
+
+        return { x: clampedX, y: clampedY };
+    }, [currentBounds]);
 
     // === Spatial Index for Viewport-Based Rendering ===
     const CHUNK_SIZE = 32; // 32x32 cells per chunk
@@ -1612,9 +1653,11 @@ export function useWorldEngine({
             // But also check if we are landing on an existing character with different scale?
             // For now, respect currentScale as per plan
             const constrainedY = Math.round(newPos.y / currentScale.h) * currentScale.h;
-            return { x: newPos.x, y: constrainedY };
+            // Apply bounds clamping if bounded canvas
+            const clamped = clampToBounds(newPos.x, constrainedY);
+            return clamped;
         });
-    }, [currentScale]);
+    }, [currentScale, clampToBounds]);
 
     const cursorPos = cursorPosInternal;
     const cursorPosRef = useRef<Point>(initialCursorPos); // Ref for synchronous cursor position access
@@ -1821,38 +1864,7 @@ export function useWorldEngine({
         setAgentSelectionStart(state.selectionStart);
         setAgentSelectionEnd(state.selectionEnd);
     }), []);
-    
-    // === Text Frame and Cluster System ===
-    const [textFrames, setTextFrames] = useState<Array<{
-        boundingBox: {
-            minX: number;
-            maxX: number;
-            minY: number;
-            maxY: number;
-        };
-    }>>([]);
-    const [framesVisible, setFramesVisible] = useState<boolean>(false);
-    
-    // === Hierarchical Frame System ===
-    const [hierarchicalFrames, setHierarchicalFrames] = useState<HierarchicalFrameSystem | null>(null);
-    const [useHierarchicalFrames, setUseHierarchicalFrames] = useState<boolean>(true);
-    const [showAllLevels, setShowAllLevels] = useState<boolean>(true);
-    const [hierarchicalConfig, setHierarchicalConfig] = useState<DistanceBasedConfig>(defaultDistanceConfig);
-    
-    const [clusterLabels, setClusterLabels] = useState<Array<{
-        clusterId: string;
-        position: { x: number; y: number };
-        text: string;
-        confidence: number;
-        boundingBox: {
-            minX: number;
-            maxX: number;
-            minY: number;
-            maxY: number;
-        };
-    }>>([]);
-    const [clustersVisible, setClustersVisible] = useState<boolean>(false);
-    
+
     // === State Management System ===
     const [statePrompt, setStatePrompt] = useState<{
         type: 'load_confirm' | 'save_before_load_confirm' | 'save_before_load_name' | 'delete_confirm' | null;
@@ -2018,171 +2030,7 @@ export function useWorldEngine({
         return screenToWorld(centerScreenX, centerScreenY, zoomLevel, viewOffset);
     }, [zoomLevel, viewOffset, getEffectiveCharDims, screenToWorld]);
 
-        // === Text Frame Generation (No AI) ===
-    const updateTextFrames = useCallback(async () => {
-        try {
-            
-            if (useHierarchicalFrames) {
-                // Generate hierarchical frames based on distance from viewport
-                const viewportCenter = getViewportCenter();
-                const hierarchicalSystem = generateHierarchicalFrames(
-                    worldData, 
-                    viewportCenter, 
-                    zoomLevel, 
-                    hierarchicalConfig,
-                    undefined,
-                    showAllLevels
-                );
-                logger.debug('Generated hierarchical frames:', hierarchicalSystem.activeFrames.length);
-                logger.debug('Levels:', Object.fromEntries(hierarchicalSystem.levels));
-                
-                setHierarchicalFrames(hierarchicalSystem);
-                
-                // Also generate simple frames for backward compatibility
-                const simpleFrames = hierarchicalSystem.activeFrames.map(frame => ({
-                    boundingBox: frame.boundingBox
-                }));
-                setTextFrames(simpleFrames);
-            } else {
-                // Generate simple bounding frames around text clusters
-                const frames = generateTextBlockFrames(worldData);
-                logger.debug('Generated simple frames:', frames.length);
-                
-                setTextFrames(frames);
-                setHierarchicalFrames(null);
-            }
-        } catch (error) {
-            logger.error('Error updating text frames:', error);
-        }
-    }, [worldData, useHierarchicalFrames, zoomLevel, hierarchicalConfig, showAllLevels, getViewportCenter]);
-
-    // === Text Cluster Label Generation ===
-    const updateClusterLabels = useCallback(async () => {
-        try {
-            
-            // Import clustering functions
-            const { 
-                filterClustersForLabeling, 
-                generateClusterLabels,
-                HierarchyLevel
-            } = await import('./bit.blocks');
-
-            let clustersToLabel;
-
-            if (useHierarchicalFrames && hierarchicalFrames) {
-                // Use L2 frames directly - create synthetic clusters from blue frame bounding boxes
-                const l2Frames = hierarchicalFrames.levels.get(HierarchyLevel.GROUPED) || [];
-                logger.debug('Found L2 frames:', l2Frames.length);
-                
-                // Create synthetic clusters directly from L2 frame bounding boxes (filter out invalid ones)
-                clustersToLabel = l2Frames
-                    .filter(frame => {
-                        const bbox = frame.boundingBox;
-                        const isValid = !isNaN(bbox.minX) && !isNaN(bbox.maxX) && !isNaN(bbox.minY) && !isNaN(bbox.maxY);
-                        if (!isValid) {
-                            logger.debug('Filtering out invalid L2 frame:', frame.id, bbox);
-                        }
-                        return isValid;
-                    })
-                    .map((frame, index) => ({
-                        id: `l2_frame_${index}`,
-                        blocks: [], // Not needed for labeling
-                        lines: [], // Not needed for labeling
-                        boundingBox: frame.boundingBox,
-                        density: 1.0, // Set high enough to pass filtering
-                        totalCharacters: 100, // Fake values to pass filtering
-                        estimatedWords: 10,
-                        centroid: frame.center,
-                        leftMargin: frame.boundingBox.minX
-                    }));
-                logger.debug('Using synthetic L2 clusters from blue frames:', clustersToLabel.length);
-            } else {
-                // Fallback: generate frames first to get clusters
-                logger.debug('No hierarchical frames available, generating them first...');
-                await updateTextFrames();
-                
-                if (hierarchicalFrames) {
-                    const l2Frames = hierarchicalFrames.levels.get(HierarchyLevel.GROUPED) || [];
-                    clustersToLabel = l2Frames
-                        .filter(frame => {
-                            const bbox = frame.boundingBox;
-                            const isValid = !isNaN(bbox.minX) && !isNaN(bbox.maxX) && !isNaN(bbox.minY) && !isNaN(bbox.maxY);
-                            if (!isValid) {
-                                logger.debug('Filtering out invalid L2 frame:', frame.id, bbox);
-                            }
-                            return isValid;
-                        })
-                        .map((frame, index) => ({
-                            id: `l2_frame_${index}`,
-                            blocks: [], 
-                            lines: [], 
-                            boundingBox: frame.boundingBox,
-                            density: 1.0,
-                            totalCharacters: 100,
-                            estimatedWords: 10,
-                            centroid: frame.center,
-                            leftMargin: frame.boundingBox.minX
-                        }));
-                    logger.debug('Generated synthetic L2 clusters from blue frames:', clustersToLabel.length);
-                } else {
-                    logger.debug('Failed to generate hierarchical frames, skipping cluster labels');
-                    return;
-                }
-            }
-            
-            // Debug L2 cluster properties
-            clustersToLabel.forEach((cluster, i) => {
-                logger.debug(`L2 cluster ${i}:`, {
-                    id: cluster.id,
-                    blocks: cluster.blocks.length,
-                    density: cluster.density,
-                    words: cluster.estimatedWords,
-                    boundingBox: cluster.boundingBox
-                });
-            });
-            
-            // Skip filtering - use all valid L2 clusters directly for labeling
-            logger.debug('Using all L2 clusters directly for labeling:', clustersToLabel.length);
-            
-            // Generate AI labels for L2 clusters
-            const aiLabels = await generateClusterLabels(clustersToLabel, worldData);
-            logger.debug('Generated AI labels for L2:', aiLabels.length);
-            
-            // Convert to simplified format for rendering
-            const simplifiedLabels = aiLabels.map(label => ({
-                clusterId: label.clusterId,
-                position: label.position,
-                text: label.text,
-                confidence: label.confidence,
-                boundingBox: label.boundingBox
-            }));
-            
-            logger.debug('Final L2 cluster labels:', simplifiedLabels);
-            setClusterLabels(simplifiedLabels);
-            
-            // Save cluster regions to Firebase if we have a current state
-            if (currentStateName && userUid) {
-                try {
-                    const regionsRef = ref(database, getUserPath(`${currentStateName}/regions`));
-                    const regionsData = {
-                        clusters: simplifiedLabels,
-                        lastGenerated: Date.now(),
-                        clustersVisible: true // Set to true since we just generated
-                    };
-                    await set(regionsRef, regionsData);
-                    logger.debug('Cluster regions saved to Firebase');
-                } catch (error) {
-                    logger.error('Failed to save cluster regions:', error);
-                }
-            }
-            
-        } catch (error) {
-            logger.error('Error updating cluster labels:', error);
-            // Don't clear existing labels on error, just log it
-        }
-    }, [worldData, currentStateName, userUid, getUserPath, useHierarchicalFrames, hierarchicalFrames, updateTextFrames]);
-
-            // Helper function to upload images to Firebase Storage
+    // Helper function to upload images to Firebase Storage
     const uploadImageToStorage = useCallback(async (dataUrl: string, mimeType: string = 'image/png'): Promise<string> => {
         if (!userUid || !currentStateName) {
             // Fallback to base64 if no storage available
@@ -2209,19 +2057,6 @@ export function useWorldEngine({
             return dataUrl;
         }
     }, [userUid, currentStateName]);
-    
-    // === Responsive Frame Updates ===
-    // Auto-update frames when world data changes (with debounce)
-    useEffect(() => {
-        if (!framesVisible) return; // Only auto-update if frames are visible
-        
-        const debounceTimeout = setTimeout(() => {
-            updateTextFrames();
-            // Note: Cluster labels (AI) only regenerate when explicitly requested via /cluster command
-        }, 500); // 500ms debounce to avoid excessive updates while typing
-        
-        return () => clearTimeout(debounceTimeout);
-    }, [worldData, framesVisible, updateTextFrames]);
 
     // === Selection Helper Functions ===
     // Helper function to get normalized selection bounds
@@ -2332,10 +2167,6 @@ export function useWorldEngine({
         fullscreenRegion,
         setFullscreenMode,
         exitFullscreenMode,
-        isFocusMode,
-        focusRegion,
-        setFocusMode,
-        exitFocusMode,
         restorePreviousBackground,
         executeCommand,
         executeCommandString,
@@ -2358,7 +2189,9 @@ export function useWorldEngine({
         setViewOverlayScroll,
         isAgentMode,
         agentSpriteName,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid: authenticatedUserUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, currentScale, setCurrentScale, recorder, triggerUpgradeFlow: () => {
+        isAgentAttached,
+        setAgentAttached,
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid: authenticatedUserUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, currentScale, setCurrentScale, recorder, setBounds: setCurrentBounds, canvasState, setCanvasState, setBoundedWorldData, setZoomLevel, setViewOffset, selectionStart, selectionEnd, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
         }
@@ -2624,77 +2457,6 @@ export function useWorldEngine({
         }
     }, [isFullscreenMode, fullscreenRegion, getEffectiveCharDims]);
 
-    // === Focus Mode Auto-Fit ===
-    useEffect(() => {
-        if (isFocusMode && focusRegion) {
-            // Calculate zoom to fit region width and height
-            const regionWidth = focusRegion.endX - focusRegion.startX + 1;
-            const regionHeight = focusRegion.endY - focusRegion.startY + 1;
-            const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
-            const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
-
-            const { width: baseCharWidth, height: baseCharHeight } = getEffectiveCharDims(1.0);
-
-            // Calculate zoom to fit width OR height (whichever is more constraining)
-            const zoomForWidth = viewportWidth / (regionWidth * baseCharWidth);
-            const zoomForHeight = viewportHeight / (regionHeight * baseCharHeight);
-
-            // Use the smaller zoom (ensures entire region fits)
-            const requiredZoom = Math.min(zoomForWidth, zoomForHeight);
-
-            // Clamp zoom to reasonable bounds (0.1 to 5.0)
-            const constrainedZoom = Math.max(0.1, Math.min(5.0, requiredZoom));
-            setZoomLevel(constrainedZoom);
-
-            // Center viewport on region
-            const centerX = (focusRegion.startX + focusRegion.endX) / 2;
-            const centerY = (focusRegion.startY + focusRegion.endY) / 2;
-
-            setViewOffset({
-                x: centerX - (viewportWidth / (2 * baseCharWidth * constrainedZoom)),
-                y: centerY - (viewportHeight / (2 * baseCharHeight * constrainedZoom))
-            });
-        }
-    }, [isFocusMode, focusRegion, getEffectiveCharDims]);
-
-    // === Dynamic Note Tracking for Focus Mode ===
-    useEffect(() => {
-        if (isFocusMode && focusRegion?.type === 'note' && focusRegion.key) {
-            // Check if the focused note still exists and update bounds
-            const noteData = worldData[focusRegion.key];
-            if (noteData) {
-                try {
-                    const parsed = JSON.parse(noteData as string);
-                    const { startX, endX, startY, endY } = parsed;
-
-                    // Update focus region if note bounds changed
-                    if (startX !== focusRegion.startX ||
-                        endX !== focusRegion.endX ||
-                        startY !== focusRegion.startY ||
-                        endY !== focusRegion.endY) {
-
-                        setFocusMode(true, {
-                            type: 'note',
-                            key: focusRegion.key,
-                            startX,
-                            endX,
-                            startY,
-                            endY
-                        });
-                    }
-                } catch (e) {
-                    // Note data invalid - exit focus mode
-                    exitFocusMode();
-                    setDialogueWithRevert("Note deleted - exited focus mode", setDialogueText);
-                }
-            } else {
-                // Note deleted - exit focus mode
-                exitFocusMode();
-                setDialogueWithRevert("Note deleted - exited focus mode", setDialogueText);
-            }
-        }
-    }, [worldData, isFocusMode, focusRegion, setFocusMode, exitFocusMode, setDialogueText]);
-
     // === Ambient Text Compilation System ===
     const [compiledTextCache, setCompiledTextCache] = useState<{ [lineY: number]: string }>({});
     const lastCompiledRef = useRef<{ [lineY: number]: string }>({});
@@ -2878,14 +2640,9 @@ export function useWorldEngine({
                 timestamp: Date.now(),
                 cursorPos,
                 viewOffset,
-                zoomLevel,
-                regions: {
-                    clusters: clusterLabels,
-                    lastGenerated: clusterLabels.length > 0 ? Date.now() : null,
-                    clustersVisible: clustersVisible
-                }
+                zoomLevel
             };
-            
+
             await set(stateRef, stateData);
             setCurrentStateName(stateName); // Track that we're now in this state
             return true;
@@ -2893,7 +2650,7 @@ export function useWorldEngine({
             logger.error('Error saving state:', error);
             return false;
         }
-    }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel, clusterLabels, clustersVisible, getUserPath, userUid]);
+    }, [worldId, worldData, settings, cursorPos, viewOffset, zoomLevel, getUserPath, userUid]);
 
     const loadState = useCallback(async (stateName: string): Promise<boolean> => {
         if (!worldId || userUid === undefined) return false;
@@ -2920,15 +2677,6 @@ export function useWorldEngine({
                 }
                 if (stateData.zoomLevel) {
                     setZoomLevel(stateData.zoomLevel);
-                }
-                if (stateData.regions) {
-                    // Restore cluster regions if they exist
-                    if (stateData.regions.clusters) {
-                        setClusterLabels(stateData.regions.clusters);
-                    }
-                    if (stateData.regions.clustersVisible !== undefined) {
-                        setClustersVisible(stateData.regions.clustersVisible);
-                    }
                 }
             } else {
                 return false;
@@ -4532,13 +4280,6 @@ export function useWorldEngine({
         if (key === 'Escape' && viewOverlay) {
             exitViewOverlay();
             setDialogueWithRevert("Exited view mode", setDialogueText);
-            return true;
-        }
-
-        // === Focus Mode Exit ===
-        if (key === 'Escape' && isFocusMode) {
-            exitFocusMode();
-            setDialogueWithRevert("Exited focus mode", setDialogueText);
             return true;
         }
 
@@ -6334,72 +6075,6 @@ export function useWorldEngine({
                     // Clear selection
                     setSelectionStart(null);
                     setSelectionEnd(null);
-                } else if (exec.command === 'margin') {
-                    // /margin command - create a margin note for selected text
-                    if (selectionStart && selectionEnd) {
-                        const hasSelection = selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y;
-
-                        if (hasSelection) {
-                            // Use dynamic import to load margin calculation functions
-                            import('./bit.blocks').then(({ findTextBlockForSelection, calculateMarginPlacement }) => {
-                                const normalized = getNormalizedSelection();
-
-                                if (normalized) {
-                                    // Find the text block containing this selection
-                                    const textBlock = findTextBlockForSelection(normalized, worldData);
-
-                                    if (textBlock) {
-                                        // Calculate margin placement (right, left, or bottom)
-                                        const marginPlacement = calculateMarginPlacement(
-                                            textBlock,
-                                            normalized.startY,
-                                            worldData
-                                        );
-
-                                        if (marginPlacement) {
-                                            // Create note region using helper
-                                            const { noteKey, noteData } = createNote({
-                                                bounds: {
-                                                    startX: marginPlacement.startX,
-                                                    endX: marginPlacement.endX,
-                                                    startY: marginPlacement.startY,
-                                                    endY: marginPlacement.endY
-                                                }
-                                            });
-
-                                            // Store note region in worldData with unique key
-                                            setWorldData(prev => ({
-                                                ...prev,
-                                                [noteKey]: JSON.stringify(noteData)
-                                            }));
-
-                                            const width = marginPlacement.endX - marginPlacement.startX + 1;
-                                            const height = marginPlacement.endY - marginPlacement.startY + 1;
-                                            setDialogueWithRevert(
-                                                `Margin note created (${width}×${height}) on ${marginPlacement.position}`,
-                                                setDialogueText
-                                            );
-
-                                            // Clear selection
-                                            setSelectionStart(null);
-                                            setSelectionEnd(null);
-                                        } else {
-                                            setDialogueWithRevert("Could not find available margin space", setDialogueText);
-                                        }
-                                    } else {
-                                        setDialogueWithRevert("Could not find text block for selection", setDialogueText);
-                                    }
-                                }
-                            }).catch((error) => {
-                                console.error('[/margin] Error loading margin functions:', error);
-                                setDialogueWithRevert("Error creating margin note", setDialogueText);
-                            });
-                        } else {
-                            setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
-                        }
-                    } else {
-                        setDialogueWithRevert("Make a selection first", setDialogueText);
-                    }
                 } else if (exec.command === 'signin') {
                     // Trigger sign in flow via callback
                     if (hostDialogueHandlerRef.current) {
@@ -6600,99 +6275,6 @@ export function useWorldEngine({
                             setDialogueWithRevert(`Failed to rename state "${oldName}"`, setDialogueText);
                         }
                     });
-                } else if (exec.command === 'cluster') {
-                    if (exec.args.length === 0) {
-                        // Generate frames + AI clusters + waypoints (everything)
-                        updateTextFrames();
-                        updateClusterLabels();
-                        setFramesVisible(true);
-                        setClustersVisible(true);
-                        setDialogueWithRevert("Generating frames + AI cluster analysis with waypoints...", setDialogueText, 3000);
-                    } else if (exec.args[0] === 'on') {
-                        // Turn on cluster and frame visibility
-                        setFramesVisible(true);
-                        setClustersVisible(true);
-                        setDialogueWithRevert("Cluster labels and frames visible", setDialogueText);
-                    } else if (exec.args[0] === 'off') {
-                        // Turn off cluster and frame visibility
-                        setFramesVisible(false);
-                        setClustersVisible(false);
-                        setDialogueWithRevert("Cluster labels and frames hidden", setDialogueText);
-                    } else if (exec.args[0] === 'refresh') {
-                        // Force regeneration of everything
-                        updateTextFrames();
-                        updateClusterLabels();
-                        setDialogueWithRevert("Force regenerating frames + clusters + waypoints...", setDialogueText, 3000);
-                    } else {
-                        setDialogueWithRevert("Usage: /cluster [on|off|refresh] - Generate frames + AI clusters + waypoints. Use /frames for frames only.", setDialogueText);
-                    }
-                } else if (exec.command === 'frames') {
-                    if (exec.args.length === 0 || exec.args[0] === 'toggle') {
-                        // Generate frames and toggle visibility
-                        updateTextFrames();
-                        const newVisibility = !framesVisible;
-                        setFramesVisible(newVisibility);
-                        const statusText = newVisibility ? 'visible' : 'hidden';
-                        setDialogueWithRevert(`Generating text frames... frames ${statusText}`, setDialogueText, 2000);
-                    } else if (exec.args[0] === 'on') {
-                        // Generate frames and turn on visibility
-                        updateTextFrames();
-                        setFramesVisible(true);
-                        setDialogueWithRevert("Generating text frames... frames visible", setDialogueText, 2000);
-                    } else if (exec.args[0] === 'off') {
-                        // Turn off frame visibility
-                        setFramesVisible(false);
-                        setDialogueWithRevert("Text frames hidden", setDialogueText);
-                    } else if (exec.args[0] === 'hierarchical') {
-                        if (exec.args[1] === 'on') {
-                            setUseHierarchicalFrames(true);
-                            updateTextFrames();
-                            setFramesVisible(true);
-                            setDialogueWithRevert("Hierarchical frames enabled - distance-based clustering active", setDialogueText, 2500);
-                        } else if (exec.args[1] === 'off') {
-                            setUseHierarchicalFrames(false);
-                            updateTextFrames();
-                            setDialogueWithRevert("Hierarchical frames disabled - using simple frames", setDialogueText, 2000);
-                        } else {
-                            setDialogueWithRevert("Usage: /frames hierarchical [on|off] - Enable/disable distance-based clustering", setDialogueText);
-                        }
-                    } else if (exec.args[0] === 'config') {
-                        if (exec.args[1] === 'radius' && exec.args[2]) {
-                            const newRadius = parseInt(exec.args[2], 10);
-                            if (!isNaN(newRadius) && newRadius > 0) {
-                                setHierarchicalConfig({...hierarchicalConfig, baseRadius: newRadius});
-                                if (useHierarchicalFrames) updateTextFrames();
-                                setDialogueWithRevert(`Base merge radius set to ${newRadius}`, setDialogueText);
-                            } else {
-                                setDialogueWithRevert("Invalid radius - must be positive number", setDialogueText);
-                            }
-                        } else if (exec.args[1] === 'scaling' && exec.args[2]) {
-                            const newScaling = parseInt(exec.args[2], 10);
-                            if (!isNaN(newScaling) && newScaling > 0) {
-                                setHierarchicalConfig({...hierarchicalConfig, distanceScaling: newScaling});
-                                if (useHierarchicalFrames) updateTextFrames();
-                                setDialogueWithRevert(`Distance scaling set to ${newScaling}`, setDialogueText);
-                            } else {
-                                setDialogueWithRevert("Invalid scaling - must be positive number", setDialogueText);
-                            }
-                        } else {
-                            setDialogueWithRevert("Usage: /frames config [radius|scaling] <value> - Configure hierarchical parameters", setDialogueText);
-                        }
-                    } else if (exec.args[0] === 'levels') {
-                        if (exec.args[1] === 'all') {
-                            setShowAllLevels(true);
-                            if (useHierarchicalFrames) updateTextFrames();
-                            setDialogueWithRevert("Showing all hierarchy levels simultaneously", setDialogueText);
-                        } else if (exec.args[1] === 'distance') {
-                            setShowAllLevels(false);
-                            if (useHierarchicalFrames) updateTextFrames();
-                            setDialogueWithRevert("Showing levels based on distance from viewport", setDialogueText);
-                        } else {
-                            setDialogueWithRevert("Usage: /frames levels [all|distance] - Control level display mode", setDialogueText);
-                        }
-                    } else {
-                        setDialogueWithRevert("Usage: /frames [on|off|toggle|hierarchical|config|levels] - Control frame generation and display", setDialogueText);
-                    }
                 } else if (exec.command === 'spawn') {
                     // Set spawn point at current cursor position
                     const spawnPoint = { x: cursorPos.x, y: cursorPos.y };
@@ -6803,10 +6385,6 @@ export function useWorldEngine({
                     // Clear any selections
                     setSelectionStart(null);
                     setSelectionEnd(null);
-                    // Clear cluster labels and frames
-                    setClusterLabels([]);
-                    setTextFrames([]);
-                    setHierarchicalFrames(null);
                     // Clear Firebase data (canonical + all client channels)
                     if (clearWorldData) {
                         clearWorldData().catch(err => {
@@ -10373,11 +9951,6 @@ export function useWorldEngine({
             
             logger.debug('Final targetIndent after viewport check:', targetIndent);
 
-            // Focus mode: constrain indent to focus region bounds
-            if (isFocusMode && focusRegion && targetIndent !== undefined && targetIndent !== null) {
-                targetIndent = Math.max(focusRegion.startX, Math.min(focusRegion.endX, targetIndent));
-            }
-
             nextCursorPos.y = cursorPos.y + currentScale.h; // Move down by current scale
             // Failsafe: if targetIndent is NaN, undefined, or null, use previous cursor X position
             if (targetIndent !== undefined && targetIndent !== null && !isNaN(targetIndent)) {
@@ -12002,18 +11575,6 @@ export function useWorldEngine({
             // Move cursor right by the width of the current scale
             let proposedCursorPos = { x: cursorAfterDelete.x + currentScale.w, y: cursorAfterDelete.y };
 
-            // Focus mode: prevent typing beyond region bounds
-            if (isFocusMode && focusRegion) {
-                // For selection-based focus, enforce strict bounds
-                // For note-based focus, allow note to grow (dynamic tracking will update bounds)
-                if (focusRegion.type === 'selection') {
-                    if (proposedCursorPos.x > focusRegion.endX || proposedCursorPos.y > focusRegion.endY) {
-                        // Would exceed selection bounds - don't allow typing
-                        return true;
-                    }
-                }
-            }
-
             // Check for note region word wrapping (if not already handled by bounded region)
             if (!worldDataChanged) {
                 const noteRegion = getNoteRegion(dataToDeleteFrom, cursorAfterDelete);
@@ -12527,15 +12088,6 @@ export function useWorldEngine({
 
         // === Update State ===
         if (moved) {
-            // Constrain cursor to focus region bounds if in focus mode
-            if (isFocusMode && focusRegion) {
-                nextCursorPos.x = Math.max(focusRegion.startX, Math.min(focusRegion.endX, nextCursorPos.x));
-                nextCursorPos.y = Math.max(focusRegion.startY, Math.min(focusRegion.endY, nextCursorPos.y));
-            }
-
-            // View overlay cursor constraining handled by the overlay itself
-            // (viewOverlay no longer has bounds, just noteKey and content)
-
             setCursorPos(nextCursorPos);
             // Update ref synchronously so IME composition handlers see the latest position
             cursorPosRef.current = nextCursorPos;
@@ -13220,40 +12772,6 @@ export function useWorldEngine({
                 setViewOffset({ x: newViewOffsetX, y: newViewOffsetY });
                 return;
             }
-            // Focus mode zoom
-            if (isFocusMode && focusRegion) {
-                const worldPointBeforeZoom = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, effectiveViewOffset);
-                const delta = deltaY * ZOOM_SENSITIVITY;
-                let newZoom = zoomLevel * (1 - delta);
-
-                // Calculate smart zoom bounds
-                const regionWidth = focusRegion.endX - focusRegion.startX + 1;
-                const regionHeight = focusRegion.endY - focusRegion.startY + 1;
-                const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
-                const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
-                const { width: baseCharWidth, height: baseCharHeight } = getEffectiveCharDims(1.0);
-
-                // Fit zoom based on most constraining dimension
-                const fitZoomWidth = viewportWidth / (regionWidth * baseCharWidth);
-                const fitZoomHeight = viewportHeight / (regionHeight * baseCharHeight);
-                const fitZoom = Math.min(fitZoomWidth, fitZoomHeight);
-
-                // Allow zoom from 50% to 300% of fit (more range than fullscreen)
-                const minZoom = Math.max(MIN_ZOOM, fitZoom * 0.5);
-                const maxZoom = Math.min(MAX_ZOOM, fitZoom * 3.0);
-                newZoom = Math.min(Math.max(newZoom, minZoom), maxZoom);
-
-                const { width: effectiveWidthAfter, height: effectiveHeightAfter } = getEffectiveCharDims(newZoom);
-                if (effectiveWidthAfter === 0 || effectiveHeightAfter === 0) return;
-
-                // Keep mouse point fixed during zoom
-                const newViewOffsetX = worldPointBeforeZoom.x - (canvasRelativeX / effectiveWidthAfter);
-                const newViewOffsetY = worldPointBeforeZoom.y - (canvasRelativeY / effectiveHeightAfter);
-
-                setZoomLevel(newZoom);
-                setViewOffset({ x: newViewOffsetX, y: newViewOffsetY });
-                return;
-            }
 
             const worldPointBeforeZoom = screenToWorld(canvasRelativeX, canvasRelativeY, zoomLevel, effectiveViewOffset);
             const delta = deltaY * ZOOM_SENSITIVITY;
@@ -13303,45 +12821,11 @@ export function useWorldEngine({
                         y: Math.max(minY, newY)
                     };
                 });
-            }
-            // Focus mode scrolling
-            else if (isFocusMode && focusRegion) {
-                const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
-                const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
-                const viewportWidthInChars = viewportWidth / effectiveCharWidth;
-                const viewportHeightInChars = viewportHeight / effectiveCharHeight;
-
-                const regionWidth = focusRegion.endX - focusRegion.startX + 1;
-                const regionHeight = focusRegion.endY - focusRegion.startY + 1;
-
-                setViewOffset(prev => {
-                    let newX = prev.x + deltaWorldX;
-                    let newY = prev.y + deltaWorldY;
-
-                    // Apply same constraints as handlePanMove
-                    if (regionWidth <= viewportWidthInChars) {
-                        newX = focusRegion.startX - (viewportWidthInChars - regionWidth) / 2;
-                    } else {
-                        const minX = focusRegion.startX;
-                        const maxX = focusRegion.endX - viewportWidthInChars + 1;
-                        newX = Math.max(minX, Math.min(maxX, newX));
-                    }
-
-                    if (regionHeight <= viewportHeightInChars) {
-                        newY = focusRegion.startY - (viewportHeightInChars - regionHeight) / 2;
-                    } else {
-                        const minY = focusRegion.startY;
-                        const maxY = focusRegion.endY - viewportHeightInChars + 1;
-                        newY = Math.max(minY, Math.min(maxY, newY));
-                    }
-
-                    return { x: newX, y: newY };
-                });
             } else {
                 setViewOffset(prev => ({ x: prev.x + deltaWorldX, y: prev.y + deltaWorldY }));
             }
         }
-    }, [zoomLevel, effectiveViewOffset, screenToWorld, getEffectiveCharDims, findListAt, worldData, isFullscreenMode, fullscreenRegion, isFocusMode, focusRegion, viewOverlay, setViewOverlayScroll]);
+    }, [zoomLevel, effectiveViewOffset, screenToWorld, getEffectiveCharDims, findListAt, worldData, isFullscreenMode, fullscreenRegion, viewOverlay, setViewOverlayScroll]);
 
     const handlePanStart = useCallback((clientX: number, clientY: number): PanStartInfo | null => {
         isPanningRef.current = true;
@@ -13389,41 +12873,14 @@ export function useWorldEngine({
             const minY = fullscreenRegion.startY - verticalMargin;
             newOffset.y = Math.max(minY, newOffset.y);
         }
-        // Apply focus mode constraints
-        else if (isFocusMode && focusRegion) {
-            const { width: effectiveCharWidth, height: effectiveCharHeight } =
-                getEffectiveCharDims(zoomLevel);
+
+        // Apply bounds constraints (if bounded canvas mode)
+        if (currentBounds) {
             const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 800;
             const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
-            const viewportWidthInChars = viewportWidth / effectiveCharWidth;
-            const viewportHeightInChars = viewportHeight / effectiveCharHeight;
-
-            const regionWidth = focusRegion.endX - focusRegion.startX + 1;
-            const regionHeight = focusRegion.endY - focusRegion.startY + 1;
-
-            // No margins for focus mode - strict bounds
-
-            // Constrain X
-            if (regionWidth <= viewportWidthInChars) {
-                // Region fits - center it and lock
-                newOffset.x = focusRegion.startX - (viewportWidthInChars - regionWidth) / 2;
-            } else {
-                // Region larger - allow panning within bounds
-                const minX = focusRegion.startX;
-                const maxX = focusRegion.endX - viewportWidthInChars + 1;
-                newOffset.x = Math.max(minX, Math.min(maxX, newOffset.x));
-            }
-
-            // Constrain Y
-            if (regionHeight <= viewportHeightInChars) {
-                // Region fits - center it and lock
-                newOffset.y = focusRegion.startY - (viewportHeightInChars - regionHeight) / 2;
-            } else {
-                // Region larger - allow panning within bounds
-                const minY = focusRegion.startY;
-                const maxY = focusRegion.endY - viewportHeightInChars + 1;
-                newOffset.y = Math.max(minY, Math.min(maxY, newOffset.y));
-            }
+            const viewportWidthInCells = viewportWidth / effectiveCharWidth;
+            const viewportHeightInCells = viewportHeight / effectiveCharHeight;
+            newOffset = clampViewportToBounds(newOffset, viewportWidthInCells, viewportHeightInCells);
         }
 
         // Track viewport history with throttling to prevent infinite loops
@@ -13436,7 +12893,7 @@ export function useWorldEngine({
         }
 
         return newOffset;
-    }, [zoomLevel, getEffectiveCharDims, viewOffset, isFullscreenMode, fullscreenRegion, isFocusMode, focusRegion]);
+    }, [zoomLevel, getEffectiveCharDims, viewOffset, isFullscreenMode, fullscreenRegion, currentBounds, clampViewportToBounds]);
 
     const handlePanEnd = useCallback((newOffset: Point): void => {
         if (isPanningRef.current) {
@@ -13692,6 +13149,7 @@ export function useWorldEngine({
 
     const placeCharacter = useCallback((char: string, x: number, y: number): void => {
         if (char.length !== 1) return; // Only handle single characters
+        if (!isWithinBounds(x, y)) return; // Reject writes outside bounds
         const key = `${x},${y}`;
         
         // Check for custom scale/style
@@ -13994,6 +13452,13 @@ export function useWorldEngine({
         worldData,
         commandData,
         commandState,
+        canvasState,
+        setCanvasState,
+        boundedWorldData,
+        setBoundedWorldData,
+        bounds: currentBounds,
+        setBounds: setCurrentBounds,
+        isWithinBounds,
         commandSystem: { selectCommand, executeCommandString, startCommand, startCommandWithInput, addCharacter },
         chatData,
         suggestionData,
@@ -14136,17 +13601,6 @@ export function useWorldEngine({
         loadAvailableStates,
         username, // Expose username for routing
         userUid, // Expose userUid for Firebase operations
-        // Text frame and cluster system
-        textFrames,
-        framesVisible,
-        updateTextFrames,
-        // Hierarchical frame system
-        hierarchicalFrames,
-        useHierarchicalFrames,
-        hierarchicalConfig,
-        clusterLabels,
-        clustersVisible,
-        updateClusterLabels,
         isMoveMode,
         isPaintMode,
         paintColor,
@@ -14519,9 +13973,6 @@ export function useWorldEngine({
         // Spatial indexing
         spatialIndex: spatialIndexRef,
         queryVisibleEntities,
-        // Focus mode
-        isFocusMode,
-        focusRegion,
         recorder,
         // Note text wrapping
         rewrapNoteText: rewrapNoteTextInternal,
@@ -14532,6 +13983,8 @@ export function useWorldEngine({
         // Agent mode
         isAgentMode,
         agentSpriteName,
+        isAgentAttached,
+        setAgentAttached,
         // Agent movement handlers (registered by BitCanvas)
         agentHandlers: agentHandlersRef.current,
         registerAgentHandlers: (handlers: WorldEngine['agentHandlers']) => {

@@ -5,7 +5,6 @@ import type { WorldData, Point, WorldEngine, PanStartInfo, StyledCharacter, Pain
 import { getCharScale, rewrapNoteText, findConnectedPaintRegion, getAllPaintBlobs, isPaintedCell, getPaintColorAt, findBlobAt, resizePaintBlob, regeneratePatternPaint } from './world.engine';
 import { useDialogue, useDebugDialogue } from './dialogue';
 import { useControllerSystem, createCameraController, createGridController, createTapeController, createCommandController } from './controllers';
-import { detectTextBlocks, extractLineCharacters, renderFrames, renderHierarchicalFrames, HierarchicalFrame, HierarchyLevel, findTextBlockForSelection } from './bit.blocks';
 import { COLOR_MAP, COMMAND_CATEGORIES, COMMAND_HELP } from './commands';
 import { useHostDialogue } from './host.dialogue';
 import { setDialogueWithRevert, agentThink as aiAgentThink, updateMind, AgentMind, CanvasState } from './ai';
@@ -3902,6 +3901,80 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         };
     }, []); // Empty dependency array - only run once on mount
 
+    // Agent attach to cursor - continuously update target paths for selected agents
+    // Uses the existing path-based movement system for consistent constant-speed movement
+    const lastAttachTargetRef = useRef<Point | null>(null);
+
+    // Use engine.cursorPos - it updates for both typing and clicks
+    const attachTarget = engine.cursorPos;
+
+    useEffect(() => {
+        if (!engine.isAgentAttached || selectedAgentIds.size === 0) {
+            lastAttachTargetRef.current = null;
+            return;
+        }
+
+        // Only update if cursor has moved significantly (avoid spamming path updates)
+        const lastTarget = lastAttachTargetRef.current;
+        if (lastTarget &&
+            Math.abs(attachTarget.x - lastTarget.x) < 0.5 &&
+            Math.abs(attachTarget.y - lastTarget.y) < 0.5) {
+            return;
+        }
+        lastAttachTargetRef.current = { x: attachTarget.x, y: attachTarget.y };
+
+        const selectedArray = Array.from(selectedAgentIds);
+        const agentCount = selectedArray.length;
+        const cursorScale = engine.currentScale || { w: 1, h: 2 };
+        const spacingX = cursorScale.w * 1.2;
+        const spacingY = cursorScale.h * 1.2;
+
+        // Simple grid offset to the right of cursor
+        const getSpreadOffset = (index: number, total: number): { x: number; y: number } => {
+            const cols = Math.ceil(Math.sqrt(total));
+            const row = Math.floor(index / cols);
+            const col = index % cols;
+            return {
+                x: (col + 1) * spacingX,  // +1 to offset right of cursor
+                y: row * spacingY
+            };
+        };
+
+        // Update each agent's path to move toward cursor
+        selectedArray.forEach((agentId, index) => {
+            const offset = getSpreadOffset(index, agentCount);
+            const targetX = attachTarget.x + offset.x;
+            const targetY = attachTarget.y + offset.y;
+
+            // Get current position
+            let currentPos = agentVisualPositionsRef.current[agentId];
+            if (!currentPos) {
+                const agentDataStr = engine.worldData[agentId];
+                if (agentDataStr) {
+                    const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+                    currentPos = { x: agentData.x, y: agentData.y };
+                    agentVisualPositionsRef.current[agentId] = currentPos;
+                } else {
+                    return;
+                }
+            }
+
+            // Set a direct path from current position to target (simple straight line)
+            const targetPos = { x: targetX, y: targetY };
+            agentPathsRef.current[agentId] = [currentPos, targetPos];
+            agentPathIndicesRef.current[agentId] = 0;
+
+            // Mark as moving to trigger the existing animation system
+            if (!agentMovingRef.current[agentId]) {
+                setAgentMoving(prev => {
+                    const updated = { ...prev, [agentId]: true };
+                    agentMovingRef.current = updated;
+                    return updated;
+                });
+            }
+        });
+    }, [engine.isAgentAttached, selectedAgentIds, attachTarget, engine.currentScale, engine.worldData]);
+
     // Track host mode dim fade-in (should only happen once when host mode activates)
     const hostDimFadeStartRef = useRef<number | null>(null);
     const hasHostDimFadedInRef = useRef<boolean>(false);
@@ -6077,14 +6150,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     continue; // Skip chips outside viewport
                 }
 
-                // Focus mode: skip chips outside focus region
-                if (engine.isFocusMode && engine.focusRegion) {
-                    if (chipMaxX < engine.focusRegion.startX || chipMinX > engine.focusRegion.endX ||
-                        chipMaxY < engine.focusRegion.startY || chipMinY > engine.focusRegion.endY) {
-                        continue;
-                    }
-                }
-
                 // Type-based rendering
                 switch (type) {
                     case 'task': {
@@ -6683,14 +6748,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10);
             const worldY = parseInt(yStr, 10);
-
-            // Focus mode: skip rendering content outside focus region
-            if (engine.isFocusMode && engine.focusRegion) {
-                if (worldX < engine.focusRegion.startX || worldX > engine.focusRegion.endX ||
-                    worldY < engine.focusRegion.startY || worldY > engine.focusRegion.endY) {
-                    continue;
-                }
-            }
 
             // Skip positions that are currently being used for IME composition preview
             if (engine.isComposing && engine.compositionStartPos && engine.compositionText) {
@@ -7447,125 +7504,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             }
         }
 
-        // === Render Text Frames (Simple Bounding Boxes or Hierarchical) ===
-        if (engine.framesVisible) {
-            if (engine.hierarchicalFrames && engine.useHierarchicalFrames) {
-                // Render hierarchical frames with level-specific styling
-                renderHierarchicalFrames(
-                    ctx,
-                    engine.hierarchicalFrames.activeFrames,
-                    engine.worldToScreen,
-                    viewBounds,
-                    currentZoom,
-                    currentOffset
-                );
-            } else if (engine.textFrames.length > 0) {
-                // Render simple frames
-                renderFrames(
-                    ctx, 
-                    engine.textFrames, 
-                    engine.worldToScreen, 
-                    viewBounds, 
-                    currentZoom, 
-                    currentOffset
-                );
-            }
-        }
-
-        // === Render Cluster Frames (AI Clusters) ===
-        if (engine.clustersVisible && engine.clusterLabels.length > 0) {
-            renderFrames(
-                ctx, 
-                engine.clusterLabels, 
-                engine.worldToScreen, 
-                viewBounds, 
-                currentZoom, 
-                currentOffset,
-                { strokeStyle: '#FF69B4', lineWidth: 2, dashPattern: [3, 3] } // Pink style for L2 clusters
-            );
-        }
-
-        // === Render Cluster Waypoint Arrows ===
-        if (engine.clustersVisible && engine.clusterLabels.length > 0) {
-            for (const clusterLabel of engine.clusterLabels) {
-            const { position, text } = clusterLabel;
-            
-            // Check if cluster is outside current viewport
-            const isClusterVisible = position.x >= viewBounds.minX && 
-                                   position.x <= viewBounds.maxX &&
-                                   position.y >= viewBounds.minY && 
-                                   position.y <= viewBounds.maxY;
-            
-            if (!isClusterVisible) {
-                // Convert cluster position to screen coordinates for direction calculation
-                const clusterScreenPos = engine.worldToScreen(position.x, position.y, currentZoom, currentOffset);
-                
-                // Find intersection point on viewport edge
-                const intersection = getViewportEdgeIntersection(
-                    viewportCenterScreen.x,
-                    viewportCenterScreen.y,
-                    clusterScreenPos.x,
-                    clusterScreenPos.y,
-                    cssWidth,
-                    cssHeight
-                );
-                
-                if (intersection) {
-                    // Adjust intersection point to be within margin from edge
-                    const edgeBuffer = ARROW_MARGIN;
-                    let adjustedX = intersection.x;
-                    let adjustedY = intersection.y;
-                    
-                    // Clamp to viewport bounds with margin
-                    adjustedX = Math.max(edgeBuffer, Math.min(cssWidth - edgeBuffer, adjustedX));
-                    adjustedY = Math.max(edgeBuffer, Math.min(cssHeight - edgeBuffer, adjustedY));
-                    
-                    // Draw the green waypoint arrow for cluster
-                    drawArrow(ctx, adjustedX, adjustedY, intersection.angle, '#00FF00');
-                    
-                    // Draw the cluster label text next to the arrow
-                    const viewportCenter = engine.getViewportCenter();
-                    const deltaCenterX = position.x - viewportCenter.x;
-                    const deltaCenterY = position.y - viewportCenter.y;
-                    const distanceFromCenter = Math.round(Math.sqrt(deltaCenterX * deltaCenterX + deltaCenterY * deltaCenterY));
-                    
-                    ctx.fillStyle = '#00FF00'; // Green color for cluster labels
-                    ctx.font = `${effectiveFontSize}px ${fontFamily}`;
-                    const textOffset = ARROW_SIZE * 1.5;
-                    
-                    let textX = adjustedX - Math.cos(intersection.angle) * textOffset;
-                    let textY = adjustedY - Math.sin(intersection.angle) * textOffset;
-                    
-                    // Adjust alignment to keep text inside the screen bounds
-                    if (Math.abs(intersection.angle) < Math.PI / 2) {
-                        ctx.textAlign = 'right';
-                    } else {
-                        ctx.textAlign = 'left';
-                    }
-                    
-                    if (intersection.angle > Math.PI / 4 && intersection.angle < 3 * Math.PI / 4) {
-                        ctx.textBaseline = 'bottom';
-                    } else if (intersection.angle < -Math.PI / 4 && intersection.angle > -3 * Math.PI / 4) {
-                        ctx.textBaseline = 'top';
-                    } else {
-                        ctx.textBaseline = 'middle';
-                    }
-                    
-                    // Draw cluster label with distance (if enabled)
-                    if (engine.settings.labelProximityThreshold < 999999) {
-                        ctx.fillText(`${text} [${distanceFromCenter}]`, textX, textY);
-                    } else {
-                        ctx.fillText(text, textX, textY);
-                    }
-                    
-                    // Reset to defaults
-                    ctx.textAlign = 'left';
-                    ctx.textBaseline = 'top';
-                }
-            }
-        }
-        }
-
         // === Render Text and Mail Notes ===
         // Render all text notes and mail notes (extra buffer for sprite borders)
         const visibleNotes = engine.queryVisibleEntities(startWorldX - 10, startWorldY - 10, endWorldX + 10, endWorldY + 10);
@@ -7573,13 +7511,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             if (key.startsWith('note_')) {
                 const note = parseNoteFromWorldData(key, engine.worldData[key]);
                 if (note) {
-                    // Focus mode: skip notes outside focus region
-                    if (engine.isFocusMode && engine.focusRegion) {
-                        if (note.endX < engine.focusRegion.startX || note.startX > engine.focusRegion.endX ||
-                            note.endY < engine.focusRegion.startY || note.startY > engine.focusRegion.endY) {
-                            continue;
-                        }
-                    }
                     renderNote(note, noteRenderCtx);
                 }
             }
@@ -7957,6 +7888,55 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
         // === LAYER 2: OVERLAYS (Selections, Highlights, Borders) ===
 
+        // === Render Bounded Canvas Overlay ===
+        // When canvasState is 1 (bounded), dim area outside bounds and draw border
+        if (engine.canvasState === 1 && engine.bounds) {
+            const bounds = engine.bounds;
+
+            // Convert bounds to screen coordinates
+            const boundsScreenMinX = (bounds.minX - currentOffset.x) * effectiveCharWidth;
+            const boundsScreenMinY = (bounds.minY - currentOffset.y) * effectiveCharHeight;
+            const boundsScreenMaxX = (bounds.maxX - currentOffset.x) * effectiveCharWidth;
+            const boundsScreenMaxY = (bounds.maxY - currentOffset.y) * effectiveCharHeight;
+
+            // Dim areas outside bounds (semi-transparent overlay)
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+
+            // Top region (above bounds)
+            if (boundsScreenMinY > 0) {
+                ctx.fillRect(0, 0, cssWidth, boundsScreenMinY);
+            }
+
+            // Bottom region (below bounds)
+            if (boundsScreenMaxY < cssHeight) {
+                ctx.fillRect(0, boundsScreenMaxY, cssWidth, cssHeight - boundsScreenMaxY);
+            }
+
+            // Left region (left of bounds, between top and bottom)
+            if (boundsScreenMinX > 0) {
+                const topY = Math.max(0, boundsScreenMinY);
+                const bottomY = Math.min(cssHeight, boundsScreenMaxY);
+                ctx.fillRect(0, topY, boundsScreenMinX, bottomY - topY);
+            }
+
+            // Right region (right of bounds, between top and bottom)
+            if (boundsScreenMaxX < cssWidth) {
+                const topY = Math.max(0, boundsScreenMinY);
+                const bottomY = Math.min(cssHeight, boundsScreenMaxY);
+                ctx.fillRect(boundsScreenMaxX, topY, cssWidth - boundsScreenMaxX, bottomY - topY);
+            }
+
+            // Draw border around bounded region
+            ctx.strokeStyle = getTextColor(engine, 0.8);
+            ctx.lineWidth = 2;
+            ctx.strokeRect(
+                boundsScreenMinX,
+                boundsScreenMinY,
+                boundsScreenMaxX - boundsScreenMinX,
+                boundsScreenMaxY - boundsScreenMinY
+            );
+        }
+
         // === Render Selection Area ===
         if (engine.selectionStart && engine.selectionEnd) {
             const start = engine.selectionStart;
@@ -8004,15 +7984,9 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             // This ensures clicking near chips falls through to box selection
             if (!overlapsChip && startedOnChar) {
                 // Text-editor-style selection: highlight only cells with characters, line by line
-                // First, find the text block that contains the selection
-                const textBlock = findTextBlockForSelection(
-                    { startX: minX, endX: maxX, startY: minY, endY: maxY },
-                    engine.worldData
-                );
-
-                // Use text block boundaries to constrain the selection horizontally
-                const blockMinX = textBlock ? textBlock.minX : minX;
-                const blockMaxX = textBlock ? textBlock.maxX : maxX;
+                // Use selection boundaries directly
+                const blockMinX = minX;
+                const blockMaxX = maxX;
 
                 for (let worldY = minY; worldY <= maxY; worldY++) {
                     const isFirstLine = worldY === Math.floor(start.y);
@@ -9532,7 +9506,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         isClickMovementRef.current = true;
 
         // Handle agent movement (works outside of agent mode when agents are selected)
-        if (selectedAgentIds.size > 0 && !engine.isAgentMode) {
+        // Skip if agents are attached - they follow cursor automatically
+        if (selectedAgentIds.size > 0 && !engine.isAgentMode && !engine.isAgentAttached) {
             const worldPos = engine.screenToWorld(clickX, clickY, engine.zoomLevel, engine.viewOffset);
             const clickWorldX = Math.round(worldPos.x);
             const clickWorldY = Math.round(worldPos.y);
@@ -12732,9 +12707,10 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
             // If this was a tap (no movement), handle agent interactions
             // - Agent mode: tap creates new agent
-            // - Agents selected: tap moves them
+            // - Agents selected (not attached): tap moves them
             // Use ref for immediate value (not stale from closure)
-            if (!touchHasMovedRef.current && (engine.isAgentMode || selectedAgentIdsRef.current.size > 0)) {
+            // Skip if attached - agents follow cursor automatically
+            if (!touchHasMovedRef.current && (engine.isAgentMode || (selectedAgentIdsRef.current.size > 0 && !engine.isAgentAttached))) {
                 const endTouches = Array.from(e.changedTouches).map(touch => ({
                     x: touch.clientX - rect.left,
                     y: touch.clientY - rect.top
@@ -12775,8 +12751,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     // Don't treat as click to avoid clearing the selection
                     const hasActiveSelection = engine.selectionStart !== null && engine.selectionEnd !== null;
 
-                    // If agents are selected, route through handleCanvasClick for tap-to-move
-                    if (selectedAgentIdsRef.current.size > 0) {
+                    // If agents are selected (and not attached), route through handleCanvasClick for tap-to-move
+                    if (selectedAgentIdsRef.current.size > 0 && !engine.isAgentAttached) {
                         // Don't handle touch end if command menu was just opened
                         if (commandMenuJustOpenedRef.current) {
                             return;
