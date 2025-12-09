@@ -11602,14 +11602,22 @@ export function useWorldEngine({
 
                     // Check if next line is within bounds
                     if (nextLineY < currentBounds.maxY) {
-                        // Find last space on current line to do word wrapping
                         const currentLineY = cursorAfterDelete.y;
+
+                        // First, type the character at cursor position (like note wrapping does)
+                        let updatedWorldData = { ...dataToDeleteFrom };
+                        const currentCharKey = `${cursorAfterDelete.x},${currentLineY}`;
+                        updatedWorldData[currentCharKey] = currentTextStyle
+                            ? { char: key, style: currentTextStyle }
+                            : key;
+
+                        // Find last space on current line to do word wrapping
                         let wrapPoint = currentBounds.minX;
 
-                        // Scan backwards from the right edge to find the last space
-                        for (let x = currentBounds.maxX; x >= currentBounds.minX; x--) {
+                        // Scan backwards from the right edge to find the last space (including char we just typed)
+                        for (let x = currentBounds.maxX - 1; x >= currentBounds.minX; x--) {
                             const charKey = `${x},${currentLineY}`;
-                            const charData = dataToDeleteFrom[charKey];
+                            const charData = updatedWorldData[charKey];
                             const char = typeof charData === 'string' ? charData :
                                         (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
 
@@ -11620,46 +11628,57 @@ export function useWorldEngine({
                         }
 
                         // Collect text from wrap point to end of line
-                        if (wrapPoint > currentBounds.minX && wrapPoint <= currentBounds.maxX) {
+                        if (wrapPoint > currentBounds.minX && wrapPoint < currentBounds.maxX) {
                             const textToWrap: Array<{x: number, char: string, style?: any}> = [];
 
-                            for (let x = wrapPoint; x <= currentBounds.maxX; x++) {
+                            for (let x = wrapPoint; x < currentBounds.maxX; x++) {
                                 const charKey = `${x},${currentLineY}`;
-                                const charData = dataToDeleteFrom[charKey];
+                                const charData = updatedWorldData[charKey];
                                 if (charData) {
                                     const char = typeof charData === 'string' ? charData :
                                                (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
                                     const style = (charData && typeof charData === 'object' && 'style' in charData) ? charData.style : undefined;
-                                    if (char && char !== ' ') {
+                                    if (char) {
                                         textToWrap.push({x, char, style});
                                     }
                                 }
                             }
 
                             // Remove wrapped text from current line
-                            nextWorldData = { ...dataToDeleteFrom };
-                            for (let x = wrapPoint; x <= currentBounds.maxX; x++) {
+                            for (let x = wrapPoint; x < currentBounds.maxX; x++) {
                                 const charKey = `${x},${currentLineY}`;
-                                delete nextWorldData[charKey];
+                                delete updatedWorldData[charKey];
                             }
 
                             // Add wrapped text to next line
                             let newX = currentBounds.minX;
                             for (const {char, style} of textToWrap) {
                                 const newKey = `${newX},${nextLineY}`;
-                                nextWorldData[newKey] = style ? {char, style} : char;
+                                updatedWorldData[newKey] = style ? {char, style} : char;
                                 newX++;
                             }
 
-                            // Update cursor position to after wrapped text on next line
-                            proposedCursorPos = { x: newX, y: nextLineY };
-                            worldDataChanged = true;
+                            // Update state directly and return (like note wrapping)
+                            setActiveWorldData(updatedWorldData);
+                            setCursorPos({ x: newX, y: nextLineY });
+                            return true;
                         } else {
-                            // No space found - just wrap cursor to next line
-                            proposedCursorPos = { x: currentBounds.minX, y: nextLineY };
+                            // No space found - keep char on current line, wrap cursor to next line
+                            setActiveWorldData(updatedWorldData);
+                            setCursorPos({ x: currentBounds.minX, y: nextLineY });
+                            return true;
                         }
+                    } else {
+                        // Next line would be past maxY - type char but don't move cursor past edge
+                        let updatedWorldData = { ...dataToDeleteFrom };
+                        const currentCharKey = `${cursorAfterDelete.x},${cursorAfterDelete.y}`;
+                        updatedWorldData[currentCharKey] = currentTextStyle
+                            ? { char: key, style: currentTextStyle }
+                            : key;
+                        setActiveWorldData(updatedWorldData);
+                        // Cursor stays where it is (at the edge)
+                        return true;
                     }
-                    // If next line would be past maxY, cursor stays at edge (no more typing)
                 }
             }
 
