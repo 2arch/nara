@@ -11593,6 +11593,76 @@ export function useWorldEngine({
             // Move cursor right by the width of the current scale
             let proposedCursorPos = { x: cursorAfterDelete.x + currentScale.w, y: cursorAfterDelete.y };
 
+            // Check for bounded region word wrapping (when canvasState === 1)
+            if (!worldDataChanged && canvasState === 1 && currentBounds) {
+                // Check if we would type past the right edge of bounds
+                if (proposedCursorPos.x > currentBounds.maxX) {
+                    // Wrap to next line
+                    const nextLineY = cursorAfterDelete.y + GRID_CELL_SPAN;
+
+                    // Check if next line is within bounds
+                    if (nextLineY < currentBounds.maxY) {
+                        // Find last space on current line to do word wrapping
+                        const currentLineY = cursorAfterDelete.y;
+                        let wrapPoint = currentBounds.minX;
+
+                        // Scan backwards from the right edge to find the last space
+                        for (let x = currentBounds.maxX; x >= currentBounds.minX; x--) {
+                            const charKey = `${x},${currentLineY}`;
+                            const charData = dataToDeleteFrom[charKey];
+                            const char = typeof charData === 'string' ? charData :
+                                        (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
+
+                            if (char === ' ') {
+                                wrapPoint = x + 1; // Wrap after the space
+                                break;
+                            }
+                        }
+
+                        // Collect text from wrap point to end of line
+                        if (wrapPoint > currentBounds.minX && wrapPoint <= currentBounds.maxX) {
+                            const textToWrap: Array<{x: number, char: string, style?: any}> = [];
+
+                            for (let x = wrapPoint; x <= currentBounds.maxX; x++) {
+                                const charKey = `${x},${currentLineY}`;
+                                const charData = dataToDeleteFrom[charKey];
+                                if (charData) {
+                                    const char = typeof charData === 'string' ? charData :
+                                               (charData && typeof charData === 'object' && 'char' in charData) ? charData.char : '';
+                                    const style = (charData && typeof charData === 'object' && 'style' in charData) ? charData.style : undefined;
+                                    if (char && char !== ' ') {
+                                        textToWrap.push({x, char, style});
+                                    }
+                                }
+                            }
+
+                            // Remove wrapped text from current line
+                            nextWorldData = { ...dataToDeleteFrom };
+                            for (let x = wrapPoint; x <= currentBounds.maxX; x++) {
+                                const charKey = `${x},${currentLineY}`;
+                                delete nextWorldData[charKey];
+                            }
+
+                            // Add wrapped text to next line
+                            let newX = currentBounds.minX;
+                            for (const {char, style} of textToWrap) {
+                                const newKey = `${newX},${nextLineY}`;
+                                nextWorldData[newKey] = style ? {char, style} : char;
+                                newX++;
+                            }
+
+                            // Update cursor position to after wrapped text on next line
+                            proposedCursorPos = { x: newX, y: nextLineY };
+                            worldDataChanged = true;
+                        } else {
+                            // No space found - just wrap cursor to next line
+                            proposedCursorPos = { x: currentBounds.minX, y: nextLineY };
+                        }
+                    }
+                    // If next line would be past maxY, cursor stays at edge (no more typing)
+                }
+            }
+
             // Check for note region word wrapping (if not already handled by bounded region)
             if (!worldDataChanged) {
                 const noteRegion = getNoteRegion(dataToDeleteFrom, cursorAfterDelete);
