@@ -11595,8 +11595,8 @@ export function useWorldEngine({
 
             // Check for bounded region word wrapping (when canvasState === 1)
             if (!worldDataChanged && canvasState === 1 && currentBounds) {
-                // Check if we would type past the right edge of bounds
-                if (proposedCursorPos.x > currentBounds.maxX) {
+                // Check if we would type past the right edge of bounds (maxX is exclusive)
+                if (proposedCursorPos.x >= currentBounds.maxX) {
                     // Wrap to next line
                     const nextLineY = cursorAfterDelete.y + GRID_CELL_SPAN;
 
@@ -12217,7 +12217,8 @@ export function useWorldEngine({
         cursorPos, worldData, activeWorldData, setActiveWorldData, selectionStart, selectionEnd, commandState, chatMode, chatData, // State dependencies
         currentMode, addEphemeralText, cameraMode, viewOffset, zoomLevel, getEffectiveCharDims, // Mode system dependencies
         getNormalizedSelection, deleteSelectedCharacters, copySelectedCharacters, cutSelection, pasteText, getSelectedText, // Callback dependencies
-        handleCommandKeyDown, textColor, currentTextStyle, findListAt, getNoteRegion, getMailRegion
+        handleCommandKeyDown, textColor, currentTextStyle, findListAt, getNoteRegion, getMailRegion,
+        canvasState, currentBounds // Bounded mode dependencies
         // Include setters used directly in the handler (if any, preferably avoid)
         // setCursorPos, setWorldData, setSelectionStart, setSelectionEnd // Setters are stable, no need to list
     ]);
