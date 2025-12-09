@@ -950,6 +950,8 @@ export interface WorldEngine {
     setCanvasState: (state: 0 | 1) => void;
     boundedWorldData: WorldData; // Ephemeral data for bounded state
     setBoundedWorldData: React.Dispatch<React.SetStateAction<WorldData>>;
+    boundedSource: { type: 'note' | 'selection' | 'empty'; noteKey?: string; originalBounds: { minX: number; minY: number; maxX: number; maxY: number }; boundedMinX: number; boundedMinY: number } | null;
+    setBoundedSource: React.Dispatch<React.SetStateAction<{ type: 'note' | 'selection' | 'empty'; noteKey?: string; originalBounds: { minX: number; minY: number; maxX: number; maxY: number }; boundedMinX: number; boundedMinY: number } | null>>;
     bounds?: WorldBounds; // Optional bounds for constrained canvas mode
     setBounds: (bounds: WorldBounds | undefined) => void; // Set bounds dynamically (undefined = unbounded)
     isWithinBounds: (x: number, y: number) => boolean; // Check if coordinates are within bounds
@@ -1497,6 +1499,16 @@ export function useWorldEngine({
     // Ephemeral world data for bounded state (not synced to Firebase)
     const [boundedWorldData, setBoundedWorldData] = useState<WorldData>({});
 
+    // Track source for bounded editing (to sync changes back when exiting)
+    // Unified interface for notes, selections, or empty bounds
+    const [boundedSource, setBoundedSource] = useState<{
+        type: 'note' | 'selection' | 'empty';
+        noteKey?: string; // For notes - key to sync back to
+        originalBounds: { minX: number; minY: number; maxX: number; maxY: number }; // Original source bounds
+        boundedMinX: number; // Translation offset for coordinate mapping
+        boundedMinY: number;
+    } | null>(null);
+
     // === Bounds State (can be changed dynamically via /bound command) ===
     const [currentBounds, setCurrentBounds] = useState<WorldBounds | undefined>(bounds);
 
@@ -1512,13 +1524,13 @@ export function useWorldEngine({
     }, [currentBounds]);
 
     // Clamp coordinates to bounds
-    // Note: Y is clamped to minY + 1 because cursor visually spans Y-1 to Y (GRID_CELL_SPAN)
-    // This ensures the cursor's visual top stays within the bounded region
+    // Note: minY should be grid-aligned (even number for GRID_CELL_SPAN=2) so cursor and text align
+    // Cursor visual top may extend above minY by 1 cell, but this ensures coordinate alignment
     const clampToBounds = useCallback((x: number, y: number): Point => {
         if (!currentBounds) return { x, y }; // Unbounded canvas
         return {
             x: Math.max(currentBounds.minX, Math.min(currentBounds.maxX - 1, x)),
-            y: Math.max(currentBounds.minY + 1, Math.min(currentBounds.maxY - 1, y)),
+            y: Math.max(currentBounds.minY, Math.min(currentBounds.maxY - 1, y)),
         };
     }, [currentBounds]);
 
@@ -1540,9 +1552,11 @@ export function useWorldEngine({
         }
 
         if (viewportHeightInCells >= boundsHeight) {
-            clampedY = currentBounds.minY - (viewportHeightInCells - boundsHeight) / 2;
+            // Center viewport, but account for visual -1 offset (characters at Y render from Y-1)
+            clampedY = currentBounds.minY - 1 - (viewportHeightInCells - boundsHeight) / 2;
         } else {
-            clampedY = Math.max(currentBounds.minY, Math.min(currentBounds.maxY - viewportHeightInCells, offset.y));
+            // Allow panning to minY - 1 to show visual top of characters at minY
+            clampedY = Math.max(currentBounds.minY - 1, Math.min(currentBounds.maxY - viewportHeightInCells, offset.y));
         }
 
         return { x: clampedX, y: clampedY };
@@ -2191,7 +2205,7 @@ export function useWorldEngine({
         agentSpriteName,
         isAgentAttached,
         setAgentAttached,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid: authenticatedUserUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, currentScale, setCurrentScale, recorder, setBounds: setCurrentBounds, canvasState, setCanvasState, setBoundedWorldData, setZoomLevel, setViewOffset, selectionStart, selectionEnd, triggerUpgradeFlow: () => {
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid: authenticatedUserUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, currentScale, setCurrentScale, recorder, setBounds: setCurrentBounds, canvasState, setCanvasState, setBoundedWorldData, boundedSource, setBoundedSource, boundedWorldData, setZoomLevel, setViewOffset, selectionStart, selectionEnd, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
         }
@@ -4143,7 +4157,7 @@ export function useWorldEngine({
 
         let preventDefault = true;
         let nextCursorPos = { ...cursorPos };
-        let nextWorldData = { ...worldData }; // Create mutable copy only if needed
+        let nextWorldData = { ...activeWorldData }; // Create mutable copy - uses boundedWorldData when canvasState === 1
         let moved = false;
         let worldDataChanged = false; // Track if world data is modified synchronously
 
@@ -11545,14 +11559,14 @@ export function useWorldEngine({
                 }
             }
 
-            let dataToDeleteFrom = worldData;
+            let dataToDeleteFrom = activeWorldData;
             let cursorAfterDelete = cursorPos;
 
             if (currentSelectionActive) {
                 // Inline deletion logic to avoid async issues and manage state batching
                 const selection = getNormalizedSelection();
                 if (selection) {
-                    let tempWorldData = { ...worldData };
+                    let tempWorldData = { ...activeWorldData };
                     let deleted = false;
                     for (let y = selection.startY; y <= selection.endY; y++) {
                         for (let x = selection.startX; x <= selection.endX; x++) {
@@ -12007,6 +12021,11 @@ export function useWorldEngine({
                     if (recorder.isRecording) {
                         recorder.recordContentChange(currentKey, charData);
                     }
+
+                    // Move cursor right after typing (by character width)
+                    nextCursorPos.x = cursorAfterDelete.x + currentScale.w;
+                    nextCursorPos.y = cursorAfterDelete.y;
+                    moved = true;
                 }
 
                 worldDataChanged = true; // Mark that synchronous data change occurred
@@ -12114,13 +12133,14 @@ export function useWorldEngine({
         }
 
         // Only update worldData if it changed *synchronously* during this handler execution
+        // Use setActiveWorldData to correctly target boundedWorldData when canvasState === 1
         if (worldDataChanged) {
-             setWorldData(nextWorldData); // This triggers the useWorldSave hook
+             setActiveWorldData(nextWorldData);
         }
 
         return preventDefault;
     }, [
-        cursorPos, worldData, selectionStart, selectionEnd, commandState, chatMode, chatData, // State dependencies
+        cursorPos, worldData, activeWorldData, setActiveWorldData, selectionStart, selectionEnd, commandState, chatMode, chatData, // State dependencies
         currentMode, addEphemeralText, cameraMode, viewOffset, zoomLevel, getEffectiveCharDims, // Mode system dependencies
         getNormalizedSelection, deleteSelectedCharacters, copySelectedCharacters, cutSelection, pasteText, getSelectedText, // Callback dependencies
         handleCommandKeyDown, textColor, currentTextStyle, findListAt, getNoteRegion, getMailRegion
@@ -13137,51 +13157,52 @@ export function useWorldEngine({
 
     const deleteCharacter = useCallback((x: number, y: number): void => {
         const key = `${x},${y}`;
-        const newWorldData = { ...worldData };
-        delete newWorldData[key];
-        setWorldData(newWorldData);
+        const newData = { ...activeWorldData };
+        delete newData[key];
+        setActiveWorldData(newData);
 
-        // Record deletion immediately for accurate playback
-        if (recorder.isRecording) {
+        // Record deletion immediately for accurate playback (only in unbounded mode)
+        if (canvasState === 0 && recorder.isRecording) {
             recorder.recordContentChange(key, null);
         }
-    }, [worldData, recorder]);
+    }, [activeWorldData, setActiveWorldData, canvasState, recorder]);
 
     const placeCharacter = useCallback((char: string, x: number, y: number): void => {
         if (char.length !== 1) return; // Only handle single characters
         if (!isWithinBounds(x, y)) return; // Reject writes outside bounds
         const key = `${x},${y}`;
-        
+
         // Check for custom scale/style
         const hasCustomStyle = currentTextStyle.color !== textColor || currentTextStyle.background !== undefined;
         const hasCustomScale = currentScale.w !== 1 || currentScale.h !== 2;
-        
+
         let charData: string | StyledCharacter = char;
-        
+
         if (hasCustomStyle || hasCustomScale) {
             const styledChar: StyledCharacter = { char };
-            
+
             if (hasCustomStyle) {
                 styledChar.style = { color: currentTextStyle.color };
                 if (currentTextStyle.background) styledChar.style.background = currentTextStyle.background;
             }
-            
+
             if (hasCustomScale) {
                 styledChar.scale = { ...currentScale };
             }
-            
+
             charData = styledChar;
         }
 
-        const newWorldData = { ...worldData };
-        newWorldData[key] = charData;
-        setWorldData(newWorldData);
+        // Use activeWorldData/setActiveWorldData to write to correct data source
+        const newData = { ...activeWorldData };
+        newData[key] = charData;
+        setActiveWorldData(newData);
 
-        // Record character placement immediately for accurate playback
-        if (recorder.isRecording) {
+        // Record character placement immediately for accurate playback (only in unbounded mode)
+        if (canvasState === 0 && recorder.isRecording) {
             recorder.recordContentChange(key, charData);
         }
-    }, [worldData, currentScale, currentTextStyle, textColor, recorder]);
+    }, [activeWorldData, setActiveWorldData, canvasState, currentScale, currentTextStyle, textColor, recorder, isWithinBounds]);
 
     const batchMoveCharacters = useCallback((moves: Array<{fromX: number, fromY: number, toX: number, toY: number, char: string}>): void => {
         const newWorldData = { ...worldData };
@@ -13449,13 +13470,15 @@ export function useWorldEngine({
 
 
     return {
-        worldData,
+        worldData: activeWorldData, // Returns boundedWorldData when canvasState === 1
         commandData,
         commandState,
         canvasState,
         setCanvasState,
         boundedWorldData,
         setBoundedWorldData,
+        boundedSource,
+        setBoundedSource,
         bounds: currentBounds,
         setBounds: setCurrentBounds,
         isWithinBounds,

@@ -413,6 +413,9 @@ interface UseCommandSystemProps {
     canvasState?: 0 | 1; // Current canvas state (0=infinite, 1=bounded)
     setCanvasState?: (state: 0 | 1) => void; // Toggle canvas state (0=infinite, 1=bounded)
     setBoundedWorldData?: (data: any) => void; // Clear/set ephemeral bounded world data
+    boundedSource?: { type: 'note' | 'selection' | 'empty'; noteKey?: string; originalBounds: { minX: number; minY: number; maxX: number; maxY: number }; boundedMinX: number; boundedMinY: number } | null;
+    setBoundedSource?: (source: { type: 'note' | 'selection' | 'empty'; noteKey?: string; originalBounds: { minX: number; minY: number; maxX: number; maxY: number }; boundedMinX: number; boundedMinY: number } | null) => void;
+    boundedWorldData?: Record<string, any>; // Current bounded world data for syncing back
     setZoomLevel?: (zoom: number) => void; // Set zoom level for auto-zoom on bound
     setViewOffset?: (offset: { x: number; y: number }) => void; // Set view offset for centering on bound
     selectionStart?: { x: number; y: number } | null; // Current selection start for bounding from selection
@@ -536,7 +539,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllChips, getAllBounds = () => [], availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, currentScale, setCurrentScale, monogramSystem, recorder, setBounds, canvasState, setCanvasState, setBoundedWorldData, setZoomLevel, setViewOffset, selectionStart, selectionEnd }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllChips, getAllBounds = () => [], availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, currentScale, setCurrentScale, monogramSystem, recorder, setBounds, canvasState, setCanvasState, setBoundedWorldData, boundedSource, setBoundedSource, boundedWorldData, setZoomLevel, setViewOffset, selectionStart, selectionEnd }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const previousBackgroundStateRef = useRef<{
@@ -5110,11 +5113,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const cursorPos = commandState.commandStartPos;
 
             // Helper to apply bounds with auto-zoom
+            // sourceInfo: { type, noteKey?, originalBounds } for syncing edits back
             const applyBoundsWithZoom = (
                 minX: number, minY: number, maxX: number, maxY: number,
                 width: number, height: number,
                 boundedData: Record<string, any> = {},
-                source: string
+                source: string,
+                sourceInfo?: { type: 'note' | 'selection' | 'empty'; noteKey?: string; originalBounds: { minX: number; minY: number; maxX: number; maxY: number } }
             ) => {
                 if (setBounds) {
                     setBounds({ minX, minY, maxX, maxY });
@@ -5151,6 +5156,19 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 if (setCanvasState) setCanvasState(1);
                 if (setBoundedWorldData) setBoundedWorldData(boundedData);
 
+                // Track source for syncing edits back when exiting bounded mode
+                if (setBoundedSource) {
+                    if (sourceInfo) {
+                        setBoundedSource({
+                            ...sourceInfo,
+                            boundedMinX: minX,
+                            boundedMinY: minY
+                        });
+                    } else {
+                        setBoundedSource({ type: 'empty', originalBounds: { minX, minY, maxX, maxY }, boundedMinX: minX, boundedMinY: minY });
+                    }
+                }
+
                 const cellCount = width * height;
                 const cellCountStr = cellCount >= 1000000
                     ? `${(cellCount / 1000000).toFixed(1)}M`
@@ -5166,9 +5184,102 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             if (!arg1 && !arg2) {
                 if (canvasState === 1) {
                     // Already bounded - toggle off (return to infinite)
+                    // Sync edits back to source based on type
+                    if (boundedSource && boundedWorldData && worldData && setWorldData) {
+                        const { type, noteKey, originalBounds, boundedMinX, boundedMinY } = boundedSource;
+
+                        if (type === 'note' && noteKey) {
+                            // Sync back to note - rewrap content to fit original note dimensions
+                            const noteValue = worldData[noteKey];
+                            if (noteValue && typeof noteValue === 'string') {
+                                try {
+                                    const noteData = JSON.parse(noteValue);
+                                    const origWidth = originalBounds.maxX - originalBounds.minX;
+
+                                    // Rewrap boundedWorldData to fit original note dimensions
+                                    const rewrappedNote = rewrapNoteText({
+                                        ...noteData,
+                                        startX: 0,
+                                        endX: origWidth,
+                                        startY: 0,
+                                        endY: originalBounds.maxY - originalBounds.minY,
+                                        data: (() => {
+                                            // Convert bounded coords to relative coords first
+                                            const tempData: Record<string, any> = {};
+                                            for (const coordKey in boundedWorldData) {
+                                                const [xStr, yStr] = coordKey.split(',');
+                                                const absX = parseInt(xStr, 10);
+                                                const absY = parseInt(yStr, 10);
+                                                const relX = absX - boundedMinX;
+                                                const relY = absY - boundedMinY;
+                                                if (relX >= 0 && relY >= 0) {
+                                                    tempData[`${relX},${relY}`] = boundedWorldData[coordKey];
+                                                }
+                                            }
+                                            return tempData;
+                                        })()
+                                    });
+
+                                    // Update note data with rewrapped content
+                                    noteData.data = rewrappedNote.data || {};
+                                    const newWorldData = { ...worldData };
+                                    newWorldData[noteKey] = JSON.stringify(noteData);
+                                    setWorldData(newWorldData);
+                                    setDialogueWithRevert("Canvas unbounded - note changes saved", setDialogueText);
+                                } catch (e) {
+                                    setDialogueWithRevert("Canvas unbounded - failed to save note changes", setDialogueText);
+                                }
+                            }
+                        } else if (type === 'selection') {
+                            // Sync back to selection - rewrap and write as individual characters
+                            const origWidth = originalBounds.maxX - originalBounds.minX + 1;
+
+                            // Rewrap to fit original selection dimensions
+                            const rewrappedData = rewrapNoteText({
+                                startX: 0,
+                                endX: origWidth,
+                                startY: 0,
+                                endY: originalBounds.maxY - originalBounds.minY + 1,
+                                data: (() => {
+                                    const tempData: Record<string, any> = {};
+                                    for (const coordKey in boundedWorldData) {
+                                        const [xStr, yStr] = coordKey.split(',');
+                                        const absX = parseInt(xStr, 10);
+                                        const absY = parseInt(yStr, 10);
+                                        const relX = absX - boundedMinX;
+                                        const relY = absY - boundedMinY;
+                                        if (relX >= 0 && relY >= 0) {
+                                            tempData[`${relX},${relY}`] = boundedWorldData[coordKey];
+                                        }
+                                    }
+                                    return tempData;
+                                })()
+                            });
+
+                            // Write rewrapped data back to worldData at original selection position
+                            const newWorldData = { ...worldData };
+                            if (rewrappedData.data) {
+                                for (const coordKey in rewrappedData.data) {
+                                    const [xStr, yStr] = coordKey.split(',');
+                                    const relX = parseInt(xStr, 10);
+                                    const relY = parseInt(yStr, 10);
+                                    const absKey = `${originalBounds.minX + relX},${originalBounds.minY + relY}`;
+                                    newWorldData[absKey] = rewrappedData.data[coordKey];
+                                }
+                            }
+                            setWorldData(newWorldData);
+                            setDialogueWithRevert("Canvas unbounded - selection changes saved", setDialogueText);
+                        } else {
+                            setDialogueWithRevert("Canvas unbounded - infinite space restored", setDialogueText);
+                        }
+                    } else {
+                        setDialogueWithRevert("Canvas unbounded - infinite space restored", setDialogueText);
+                    }
+
                     if (setBounds) setBounds(undefined);
                     if (setCanvasState) setCanvasState(0);
-                    setDialogueWithRevert("Canvas unbounded - infinite space restored", setDialogueText);
+                    if (setBoundedSource) setBoundedSource(null);
+                    if (setBoundedWorldData) setBoundedWorldData({});
                     clearCommandState();
                     return null;
                 }
@@ -5205,8 +5316,9 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         if (setSelectionEnd) setSelectionEnd(null);
 
                         applyBoundsWithZoom(
-                            startX, startY - 1, endX + 1, endY,
-                            width, height, boundedData, 'from selection'
+                            startX, startY, endX + 1, endY + 1,
+                            width, height, boundedData, 'from selection',
+                            { type: 'selection', originalBounds: { minX: startX, minY: startY, maxX: endX, maxY: endY } }
                         );
                         return null;
                     }
@@ -5227,16 +5339,24 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                                 const height = endY - startY + 1; // Note content height
 
                                 // Port note content to bounded world data
+                                // Note content uses relative coordinates (0,0 = note's startX, startY)
+                                // boundedWorldData uses absolute coordinates
                                 const boundedData: Record<string, any> = {};
                                 if (noteContent) {
                                     for (const cellKey in noteContent) {
-                                        boundedData[cellKey] = noteContent[cellKey];
+                                        const [xStr, yStr] = cellKey.split(',');
+                                        const relX = parseInt(xStr, 10);
+                                        const relY = parseInt(yStr, 10);
+                                        // Translate to absolute coordinates
+                                        const absKey = `${startX + relX},${startY + relY}`;
+                                        boundedData[absKey] = noteContent[cellKey];
                                     }
                                 }
 
                                 applyBoundsWithZoom(
-                                    startX, startY - 1, endX + 1, endY,
-                                    width, height, boundedData, 'from note'
+                                    startX, startY, endX + 1, endY + 1,
+                                    width, height, boundedData, 'from note',
+                                    { type: 'note', noteKey: key, originalBounds: { minX: startX, minY: startY, maxX: endX, maxY: endY } }
                                 );
                                 return null;
                             }
@@ -5259,12 +5379,16 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             }
 
             // Set bounds centered on current cursor position
+            // Ensure minY is aligned to GRID_CELL_SPAN (2) for cursor/text alignment
             const minX = Math.floor(cursorPos.x - width / 2);
-            const minY = Math.floor(cursorPos.y - height / 2);
+            const rawMinY = Math.floor(cursorPos.y - height / 2);
+            const minY = Math.floor(rawMinY / 2) * 2; // Align to even number (GRID_CELL_SPAN = 2)
 
             // Check if cursor is over a note - rewrap its content to fit the new bounds
             let boundedData: Record<string, any> = {};
             let source = '';
+            let sourceNoteKey: string | undefined = undefined;
+            let originalNoteBounds: { minX: number; minY: number; maxX: number; maxY: number } | undefined = undefined;
             for (const key in worldData) {
                 if (key.startsWith('note_')) {
                     try {
@@ -5276,21 +5400,33 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                             // Rewrap note content to fit new bounds width
                             if (noteContent && Object.keys(noteContent).length > 0) {
                                 // Create a modified noteData with new dimensions for rewrapping
+                                // Note: rewrapNoteText uses noteWidth = endX - startX for line length
                                 const rewrappedNote = rewrapNoteText({
                                     ...noteData,
                                     startX: 0,
-                                    endX: width - 1,  // New width
+                                    endX: width,      // rewrap uses endX - startX = width for line length
                                     startY: 0,
-                                    endY: height - 1, // New height (will expand as needed)
+                                    endY: height,     // Height will expand as needed during rewrap
                                     data: noteContent
                                 });
 
-                                // Use the rewrapped data
+                                // Translate rewrapped coordinates to bounded region position
+                                // Rewrapped data is relative to (0,0), bounded region starts at (minX, minY)
+                                // minY is already aligned to GRID_CELL_SPAN for cursor/text alignment
                                 if (rewrappedNote.data) {
-                                    boundedData = rewrappedNote.data;
+                                    for (const coordKey in rewrappedNote.data) {
+                                        const [xStr, yStr] = coordKey.split(',');
+                                        const relX = parseInt(xStr, 10);
+                                        const relY = parseInt(yStr, 10);
+                                        // Translate to bounded region coordinates (no Y offset needed since minY is grid-aligned)
+                                        const newKey = `${minX + relX},${minY + relY}`;
+                                        boundedData[newKey] = rewrappedNote.data[coordKey];
+                                    }
                                 }
                             }
                             source = 'with note content';
+                            sourceNoteKey = key; // Track note key for syncing edits back
+                            originalNoteBounds = { minX: startX, minY: startY, maxX: endX, maxY: endY };
                             break;
                         }
                     } catch (e) {
@@ -5299,7 +5435,13 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 }
             }
 
-            applyBoundsWithZoom(minX, minY, minX + width, minY + height, width, height, boundedData, source);
+            applyBoundsWithZoom(
+                minX, minY, minX + width, minY + height,
+                width, height, boundedData, source || 'empty bounds',
+                sourceNoteKey && originalNoteBounds
+                    ? { type: 'note', noteKey: sourceNoteKey, originalBounds: originalNoteBounds }
+                    : undefined
+            );
             return null;
         }
 

@@ -7505,13 +7505,16 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         }
 
         // === Render Text and Mail Notes ===
-        // Render all text notes and mail notes (extra buffer for sprite borders)
-        const visibleNotes = engine.queryVisibleEntities(startWorldX - 10, startWorldY - 10, endWorldX + 10, endWorldY + 10);
-        for (const key of visibleNotes) {
-            if (key.startsWith('note_')) {
-                const note = parseNoteFromWorldData(key, engine.worldData[key]);
-                if (note) {
-                    renderNote(note, noteRenderCtx);
+        // Skip note rendering in bounded mode - note content is extracted to boundedWorldData as characters
+        if (engine.canvasState === 0) {
+            // Render all text notes and mail notes (extra buffer for sprite borders)
+            const visibleNotes = engine.queryVisibleEntities(startWorldX - 10, startWorldY - 10, endWorldX + 10, endWorldY + 10);
+            for (const key of visibleNotes) {
+                if (key.startsWith('note_')) {
+                    const note = parseNoteFromWorldData(key, engine.worldData[key]);
+                    if (note) {
+                        renderNote(note, noteRenderCtx);
+                    }
                 }
             }
         }
@@ -7894,8 +7897,9 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             const bounds = engine.bounds;
 
             // Convert bounds to screen coordinates
+            // Note: Visual minY is bounds.minY - 1 because characters at Y render with top at Y-1 (GRID_CELL_SPAN)
             const boundsScreenMinX = (bounds.minX - currentOffset.x) * effectiveCharWidth;
-            const boundsScreenMinY = (bounds.minY - currentOffset.y) * effectiveCharHeight;
+            const boundsScreenMinY = (bounds.minY - 1 - currentOffset.y) * effectiveCharHeight;
             const boundsScreenMaxX = (bounds.maxX - currentOffset.x) * effectiveCharWidth;
             const boundsScreenMaxY = (bounds.maxY - currentOffset.y) * effectiveCharHeight;
 
