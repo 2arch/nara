@@ -10697,11 +10697,11 @@ export function useWorldEngine({
                 }
             } else if (metaKey) {
                 // Cmd+Backspace: Delete whole line (using text block detection with 2+ cell gap rule)
-                nextWorldData = { ...worldData }; // Create a copy before modifying
+                nextWorldData = { ...activeWorldData }; // Create a copy before modifying
 
                 // Use text block detection to find the current block
                 // Don't include spaces - we want to detect gaps based on empty cells
-                const lineChars = extractLineCharacters(worldData, cursorPos.y, false);
+                const lineChars = extractLineCharacters(activeWorldData, cursorPos.y, false);
                 if (lineChars.length === 0) {
                     // No characters on this line
                     nextCursorPos.x = cursorPos.x;
@@ -10769,10 +10769,10 @@ export function useWorldEngine({
                 }
             } else if (altKey) {
                 // Option+Backspace: Delete word or spaces, respecting 2+ cell gap block boundaries
-                nextWorldData = { ...worldData }; // Create a copy before modifying
+                nextWorldData = { ...activeWorldData }; // Create a copy before modifying
 
                 // Get text blocks on this line (don't include spaces to detect gaps)
-                const lineChars = extractLineCharacters(worldData, cursorPos.y, false);
+                const lineChars = extractLineCharacters(activeWorldData, cursorPos.y, false);
                 if (lineChars.length === 0) {
                     nextCursorPos.x = cursorPos.x;
                 } else {
@@ -10783,7 +10783,7 @@ export function useWorldEngine({
                         // Check what type of character we're starting on
                         let x = cursorPos.x - 1;
                         const startKey = `${x},${cursorPos.y}`;
-                        const startCharData = worldData[startKey];
+                        const startCharData = activeWorldData[startKey];
 
                         if (!startCharData) {
                             // No character at cursor position, fallback to regular backspace
@@ -10796,7 +10796,7 @@ export function useWorldEngine({
                             // Don't go past the start of the current block
                             while (x >= currentBlock.start) {
                                 const key = `${x},${cursorPos.y}`;
-                                const charData = worldData[key];
+                                const charData = activeWorldData[key];
 
                                 if (!charData) {
                                     // Empty cell - stop here (we've hit the block boundary)
@@ -10874,7 +10874,7 @@ export function useWorldEngine({
                             } else {
                                 // Nothing deleted, fallback to regular backspace
                                 const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
-                                if (worldData[deleteKey]) {
+                                if (activeWorldData[deleteKey]) {
                                     delete nextWorldData[deleteKey];
                                     worldDataChanged = true;
                                 }
@@ -10884,7 +10884,7 @@ export function useWorldEngine({
                     } else {
                         // No block found, fallback to regular backspace
                         const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
-                        if (worldData[deleteKey]) {
+                        if (activeWorldData[deleteKey]) {
                             delete nextWorldData[deleteKey];
                             worldDataChanged = true;
                         }
@@ -10893,9 +10893,10 @@ export function useWorldEngine({
                 }
             } else {
                 // Regular Backspace: Check for task first, then link, then label
+                // Note: tasks/links/labels only exist in worldData (not bounded mode)
                 const taskToDelete = findTaskAt(cursorPos.x - 1, cursorPos.y);
                 if (taskToDelete) {
-                    nextWorldData = { ...worldData };
+                    nextWorldData = { ...activeWorldData };
                     delete nextWorldData[taskToDelete.key];
                     worldDataChanged = true;
                     // Move cursor to the start of where the task was
@@ -10904,7 +10905,7 @@ export function useWorldEngine({
                 } else {
                     const linkToDelete = findLinkAt(cursorPos.x - 1, cursorPos.y);
                     if (linkToDelete) {
-                        nextWorldData = { ...worldData };
+                        nextWorldData = { ...activeWorldData };
                         delete nextWorldData[linkToDelete.key];
                         worldDataChanged = true;
                         // Move cursor to the start of where the link was
@@ -10913,7 +10914,7 @@ export function useWorldEngine({
                     } else {
                         const labelToDelete = findLabelAt(cursorPos.x - 1, cursorPos.y);
                         if (labelToDelete) {
-                            nextWorldData = { ...worldData };
+                            nextWorldData = { ...activeWorldData };
                             delete nextWorldData[labelToDelete.key];
                             worldDataChanged = true;
                             // Move cursor to the start of where the label was
@@ -10923,11 +10924,12 @@ export function useWorldEngine({
                             nextCursorPos.y = parseInt(lyStr, 10);
                         } else {
                         // Check if we're within a note region first
-                        const noteRegion = getNoteRegion(worldData, cursorPos);
+                        // Use activeWorldData so bounded mode (with individual chars, no note_ keys) skips this
+                        const noteRegion = getNoteRegion(activeWorldData, cursorPos);
                         if (noteRegion && cursorPos.x === noteRegion.startX) {
                             // We're at the start of a line within a note region
                             // Check if there's a previous line in content space (not just viewport space)
-                            const containingNote = findTextNoteContainingPoint(cursorPos.x, cursorPos.y, worldData);
+                            const containingNote = findTextNoteContainingPoint(cursorPos.x, cursorPos.y, activeWorldData);
                             if (containingNote && containingNote.data.data) {
                                 const noteData = containingNote.data;
                                 const currentScrollOffset = noteData.scrollOffset || 0;
@@ -10952,7 +10954,7 @@ export function useWorldEngine({
 
                                 // If we found a character, delete it
                                 if (lastCharX >= noteRegion.startX) {
-                                    nextWorldData = { ...worldData };
+                                    nextWorldData = { ...activeWorldData };
                                     const relativeDeleteKey = `${lastCharX - noteData.startX},${prevRelativeY}`;
                                     delete noteData.data[relativeDeleteKey];
 
@@ -10984,11 +10986,11 @@ export function useWorldEngine({
                             const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
 
                             // Check if this is a text note with embedded data
-                            const containingNote = findTextNoteContainingPoint(cursorPos.x - 1, cursorPos.y, worldData);
+                            const containingNote = findTextNoteContainingPoint(cursorPos.x - 1, cursorPos.y, activeWorldData);
 
                             if (containingNote) {
                                 const noteData = containingNote.data;
-                                nextWorldData = { ...worldData };
+                                nextWorldData = { ...activeWorldData };
 
                                 // Check if this is a data note (table) - use cell-based storage
                                 if (noteData.contentType === 'data' && noteData.tableData) {
@@ -11055,9 +11057,9 @@ export function useWorldEngine({
                                         worldDataChanged = true;
                                     }
                                 }
-                            } else if (worldData[deleteKey]) {
-                                // Delete from global worldData (legacy/backward compat)
-                                nextWorldData = { ...worldData };
+                            } else if (activeWorldData[deleteKey]) {
+                                // Delete from activeWorldData (handles both bounded and unbounded mode)
+                                nextWorldData = { ...activeWorldData };
                                 delete nextWorldData[deleteKey];
                                 worldDataChanged = true;
                             }
@@ -11065,7 +11067,8 @@ export function useWorldEngine({
                             moved = true;
                         } else {
                             // Check if we're within a mail region
-                            const mailRegion = getMailRegion(worldData, cursorPos);
+                            // Use activeWorldData so bounded mode skips this
+                            const mailRegion = getMailRegion(activeWorldData, cursorPos);
                             if (mailRegion && cursorPos.x === mailRegion.startX && cursorPos.y > mailRegion.startY) {
                                 // We're at the start of a line within a mail region (but not the first line)
                                 // Move cursor to the end of the previous line within the mail
@@ -11076,8 +11079,8 @@ export function useWorldEngine({
                             } else if (mailRegion && cursorPos.x > mailRegion.startX) {
                                 // We're within a mail region but not at the start - do normal backspace
                                 const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
-                                if (worldData[deleteKey]) {
-                                    nextWorldData = { ...worldData };
+                                if (activeWorldData[deleteKey]) {
+                                    nextWorldData = { ...activeWorldData };
                                     delete nextWorldData[deleteKey];
                                     worldDataChanged = true;
                                 }
@@ -11086,14 +11089,14 @@ export function useWorldEngine({
                             } else {
                                 // Check if we're at the beginning of a line (need to merge with previous line)
                                 // Only merge if cursor is actually before any characters on this line, not at first character
-                                const currentLineChars = extractLineCharacters(worldData, cursorPos.y);
+                                const currentLineChars = extractLineCharacters(activeWorldData, cursorPos.y);
                                 const isAtLineStart = currentLineChars.length > 0 ?
                                     cursorPos.x < currentLineChars[0].x :
                                     cursorPos.x === 0;
 
                                 if (isAtLineStart && cursorPos.y > 0) {
                                     // Find the last character position on the previous line
-                                    const prevLineChars = extractLineCharacters(worldData, cursorPos.y - 1);
+                                    const prevLineChars = extractLineCharacters(activeWorldData, cursorPos.y - 1);
                                     let targetX = 0; // Default to start of line if no characters
 
                                     if (prevLineChars.length > 0) {
@@ -11102,7 +11105,7 @@ export function useWorldEngine({
                                     }
 
                                     // Collect all text from current line to move it
-                                    nextWorldData = { ...worldData };
+                                    nextWorldData = { ...activeWorldData };
                                     const currentLineData = currentLineChars.map(c => ({
                                         char: c.char,
                                         originalKey: `${c.x},${cursorPos.y}`
@@ -11126,8 +11129,8 @@ export function useWorldEngine({
                                 } else {
                                     // Delete one character to the left
                                     const deleteKey = `${cursorPos.x - 1},${cursorPos.y}`;
-                                    if (worldData[deleteKey]) {
-                                        nextWorldData = { ...worldData }; // Create copy before modifying
+                                    if (activeWorldData[deleteKey]) {
+                                        nextWorldData = { ...activeWorldData }; // Create copy before modifying
                                         delete nextWorldData[deleteKey]; // Remove char from world
                                         worldDataChanged = true;
                                     }
@@ -11319,30 +11322,31 @@ export function useWorldEngine({
                  }
             } else {
                 // Delete char at current cursor pos, check for task first, then link, then label
+                // Note: tasks/links/labels only exist in worldData (not bounded mode)
                 const taskToDelete = findTaskAt(cursorPos.x, cursorPos.y);
                 if (taskToDelete) {
-                    nextWorldData = { ...worldData };
+                    nextWorldData = { ...activeWorldData };
                     delete nextWorldData[taskToDelete.key];
                     worldDataChanged = true;
                     // Cursor does not move
                 } else {
                     const linkToDelete = findLinkAt(cursorPos.x, cursorPos.y);
                     if (linkToDelete) {
-                        nextWorldData = { ...worldData };
+                        nextWorldData = { ...activeWorldData };
                         delete nextWorldData[linkToDelete.key];
                         worldDataChanged = true;
                         // Cursor does not move
                     } else {
                         const labelToDelete = findLabelAt(cursorPos.x, cursorPos.y);
                         if (labelToDelete) {
-                            nextWorldData = { ...worldData };
+                            nextWorldData = { ...activeWorldData };
                             delete nextWorldData[labelToDelete.key];
                             worldDataChanged = true;
                             // Cursor does not move
                         } else {
                             const deleteKey = `${cursorPos.x},${cursorPos.y}`;
-                            if (worldData[deleteKey]) {
-                                nextWorldData = { ...worldData }; // Create copy before modifying
+                            if (activeWorldData[deleteKey]) {
+                                nextWorldData = { ...activeWorldData }; // Create copy before modifying
                                 delete nextWorldData[deleteKey];
                                 worldDataChanged = true;
                             }
