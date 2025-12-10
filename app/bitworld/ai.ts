@@ -505,5 +505,5 @@ export const ai = async (prompt: string, context?: AIContext): Promise<AIResult>
 // =============================================================================
 
 // Re-export agent-related types and functions from dedicated module
-export { agentThink, updateMind, createDefaultMind } from './ai.agents';
+export { agentThink, agentChat, updateMind, createDefaultMind } from './ai.agents';
 export type { AgentMind, AgentThought } from './ai.agents';

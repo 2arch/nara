@@ -221,6 +221,69 @@ IMPORTANT: Only use the action shown above. Do not invent other keys.`;
 };
 
 /**
+ * Agent chat - respond to a user message in the context of the agent's persona.
+ * This is for direct user→agent communication (when user selects agent and types /(prompt))
+ *
+ * Uses full tool calling (sense/make) so agents can paint, create notes, etc.
+ */
+export const agentChat = async (
+    agentId: string,
+    agentPos: { x: number; y: number },
+    mind: AgentMind,
+    userMessage: string,
+    canvasState: CanvasState
+): Promise<AgentThought> => {
+    const { nearbyNotes, nearbyAgents, nearbyChips } = perceive(agentId, agentPos, canvasState);
+
+    // Build conversation context from agent's memory
+    const conversationHistory = mind.thoughts.length > 0
+        ? `\nyour recent thoughts:\n${mind.thoughts.slice(-4).map(t => `you: "${t}"`).join('\n')}`
+        : '';
+
+    // System context for the agent
+    const systemPrompt = `You are ${mind.persona}. You are an agent on an infinite canvas.
+
+Your position: (${agentPos.x}, ${agentPos.y})
+${nearbyAgents !== 'None nearby' ? `Nearby agents:\n${nearbyAgents}` : 'You are alone.'}
+${nearbyNotes !== 'None nearby' ? `Nearby notes:\n${nearbyNotes}` : ''}
+${nearbyChips !== 'None nearby' ? `Nearby chips:\n${nearbyChips}` : ''}
+${conversationHistory}
+
+You have tools to interact with the canvas:
+- make({ edit_note: { noteId: '...', operation: 'append', text: '...' } }) - EDIT an existing note (preferred!)
+- make({ note: { x, y, width, height, contentType: 'text', content: '...' } }) - create a NEW note (only if none exist nearby)
+- make({ paint: { rect/circle/line/cells: {...} } }) - paint on canvas
+- make({ chip: { x, y, text, color } }) - create a label chip
+- make({ text: { x, y, content } }) - write text directly on canvas
+
+IMPORTANT: If there's a nearby note, use edit_note to append to it. Do NOT create a new note unless necessary.
+When the user asks you to DO something (create, paint, write, edit), USE THE TOOLS. Don't describe - just do it.
+Execute actions immediately without asking for confirmation.`;
+
+    const fullPrompt = `${systemPrompt}
+
+The user says: "${userMessage}"
+
+Respond briefly and take action if requested.`;
+
+    console.log(`[Agent ${agentId.slice(-8)}] User chat:`, userMessage.slice(0, 100));
+
+    // Use ai() with canvasState to enable tool calling
+    const result = await ai(fullPrompt, { canvasState });
+
+    // Extract speech from response
+    const speech = result.text || 'done.';
+
+    // Pass through any actions from tool calls
+    const actions = result.actions;
+
+    return {
+        thought: speech,
+        actions
+    };
+};
+
+/**
  * Update agent mind with new thought (maintains ring buffer)
  */
 export function updateMind(mind: AgentMind, thought: AgentThought): AgentMind {

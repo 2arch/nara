@@ -251,13 +251,15 @@ function handleSense(args: Record<string, any>, canvasState: AIRequest['canvasSt
 }
 
 // Server-side image intent detection (mirrors ai.utils.ts)
+// NOTE: These patterns should only match explicit image generation requests.
+// Do NOT match generic "write", "create", "draw" - only when combined with image/picture/etc.
 const IMAGE_PATTERNS = [
     /^generate\s+(an?\s+)?(image|picture|photo|illustration|drawing|art)/i,
     /^create\s+(an?\s+)?(image|picture|photo|illustration|drawing|art)/i,
-    /^draw\s+(an?\s+)?/i,
-    /^make\s+(an?\s+)?(image|picture|photo|illustration|drawing|art)/i,
-    /^paint\s+(an?\s+)?(image|picture|photo|illustration|drawing|art)/i,
-    /\b(generate|create|make)\s+(me\s+)?(an?\s+)?(image|picture|photo)/i,
+    /^draw\s+(me\s+)?(an?\s+)?(image|picture|photo|illustration|art)/i,
+    /^make\s+(me\s+)?(an?\s+)?(image|picture|photo|illustration|drawing|art)/i,
+    /^paint\s+(me\s+)?(an?\s+)?(image|picture|photo|illustration|drawing|art)/i,
+    /\b(generate|create|make)\s+(me\s+)?(an?\s+)?(image|picture|photo)\b/i,
 ];
 
 function detectImageIntent(input: string): boolean {

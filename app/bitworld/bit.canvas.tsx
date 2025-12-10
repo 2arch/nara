@@ -7,7 +7,7 @@ import { useDialogue, useDebugDialogue } from './dialogue';
 import { useControllerSystem, createCameraController, createGridController, createTapeController, createCommandController } from './controllers';
 import { COLOR_MAP, COMMAND_CATEGORIES, COMMAND_HELP } from './commands';
 import { useHostDialogue } from './host.dialogue';
-import { setDialogueWithRevert, agentThink as aiAgentThink, updateMind, AgentMind, CanvasState } from './ai';
+import { setDialogueWithRevert, agentThink as aiAgentThink, agentChat as aiAgentChat, updateMind, AgentMind, CanvasState } from './ai';
 import { executeTool, ToolContext } from './ai.tools';
 import { CanvasRecorder } from './tape';
 import { renderStyledRect, getRectStyle, type CellBounds, type BaseRenderContext } from './styles';
@@ -16,7 +16,7 @@ import { faceOrientationToRotation } from './face';
 import { renderBubble, BubbleState, showBubble, isBubbleExpired } from './bubble';
 import { terminalManager, type TerminalBuffer } from './terminal.manager';
 import { findSmoothPath, evaluateExpression, ExpressionContext } from './paths';
-import { ghostEffect, applySkin } from './skins';
+import { ghostEffect, applySkin } from './post';
 import { useMcpBridge } from '../hooks/useMcpBridge';
 
 // --- Constants --- (Copied and relevant ones kept)
@@ -1858,6 +1858,17 @@ const entityFinders: Record<string, EntityFinderConfig> = {
             endY: data.endY
         }),
         returnKey: true
+    },
+    object: {
+        prefix: 'object_',
+        parse: true,
+        getBounds: (data) => ({
+            startX: data.startX,
+            endX: data.endX,
+            startY: data.startY,
+            endY: data.endY
+        }),
+        returnKey: true
     }
 };
 
@@ -1952,7 +1963,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     type ResizeHandle = 'top-left' | 'top-right' | 'bottom-right' | 'bottom-left';
     const [resizeState, setResizeState] = useState<{
         active: boolean;
-        type: 'image' | 'note' | 'iframe' | 'pattern' | 'pack' | 'paint' | null;
+        type: 'image' | 'note' | 'iframe' | 'pattern' | 'pack' | 'paint' | 'object' | null;
         key: string | null;
         handle: ResizeHandle | null;
         originalBounds: { startX: number; startY: number; endX: number; endY: number } | null;
@@ -1972,6 +1983,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     });
 
     const [selectedChipKey, setSelectedChipKey] = useState<string | null>(null);
+    const [selectedObjectKey, setSelectedObjectKey] = useState<string | null>(null);
     const [activeTerminalKey, setActiveTerminalKey] = useState<string | null>(null);
     const [terminalUpdateCounter, setTerminalUpdateCounter] = useState<number>(0);
 
@@ -2027,6 +2039,109 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     useEffect(() => { agentFramesRef.current = agentFrames; }, [agentFrames]);
     useEffect(() => { agentDirectionsRef.current = agentDirections; }, [agentDirections]);
     useEffect(() => { selectedAgentIdsRef.current = selectedAgentIds; }, [selectedAgentIds]);
+
+    // Register agent handlers for world engine (enables direct agent chat via /(prompt))
+    useEffect(() => {
+        engine.registerAgentHandlers({
+            moveAgents: (agentIds, destination) => ({ moved: [], errors: [] }), // Stub - real impl in MCP bridge
+            moveAgentsPath: (agentIds, path) => ({ moved: [], errors: [] }),
+            moveAgentsExpr: (agentIds, xExpr, yExpr, vars, duration) => ({ moved: [], errors: [] }),
+            stopAgentsExpr: (agentIds) => ({ stopped: [] }),
+            agentThink: async (agentId) => null,
+            getSelectedAgentIds: () => Array.from(selectedAgentIdsRef.current),
+            chatWithAgent: async (agentId, userMessage) => {
+                const agentDataStr = engine.worldData[agentId];
+                if (!agentDataStr) return null;
+
+                try {
+                    const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+                    const pos = agentVisualPositionsRef.current[agentId] || { x: agentData.x, y: agentData.y };
+
+                    // Build mind from agent data
+                    const mind: AgentMind = {
+                        persona: agentData.mind?.persona || agentData.spriteName || 'A helpful assistant',
+                        goals: agentData.mind?.goals || [],
+                        thoughts: agentData.mind?.thoughts || [],
+                        observations: agentData.mind?.observations || []
+                    };
+
+                    // Gather canvas state
+                    const agents: CanvasState['agents'] = [];
+                    const notes: CanvasState['notes'] = [];
+                    const chips: CanvasState['chips'] = [];
+
+                    for (const key in engine.worldData) {
+                        if (key.startsWith('agent_')) {
+                            try {
+                                const data = typeof engine.worldData[key] === 'string' ? JSON.parse(engine.worldData[key]) : engine.worldData[key];
+                                const visualPos = agentVisualPositionsRef.current[key] || { x: data.x, y: data.y };
+                                agents.push({
+                                    id: key,
+                                    x: visualPos.x,
+                                    y: visualPos.y,
+                                    spriteName: data.spriteName,
+                                    recentSpeech: data.lastSpoken
+                                });
+                            } catch {}
+                        } else if (key.startsWith('note_')) {
+                            try {
+                                const data = typeof engine.worldData[key] === 'string' ? JSON.parse(engine.worldData[key]) : engine.worldData[key];
+                                notes.push({
+                                    id: key,
+                                    x: data.startX || data.x,
+                                    y: data.startY || data.y,
+                                    width: (data.endX || 0) - (data.startX || data.x || 0),
+                                    height: (data.endY || 0) - (data.startY || data.y || 0),
+                                    contentType: data.contentType,
+                                    content: data.content || ''
+                                });
+                            } catch {}
+                        } else if (key.startsWith('chip_')) {
+                            try {
+                                const data = typeof engine.worldData[key] === 'string' ? JSON.parse(engine.worldData[key]) : engine.worldData[key];
+                                chips.push({ id: key, x: data.x, y: data.y, text: data.text || '', color: data.color });
+                            } catch {}
+                        }
+                    }
+
+                    const canvasState: CanvasState = {
+                        cursorPosition: engine.cursorPos,
+                        viewport: { offset: engine.viewOffset, zoomLevel: engine.zoomLevel },
+                        selection: { start: engine.selectionStart, end: engine.selectionEnd },
+                        agents,
+                        notes,
+                        chips
+                    };
+
+                    // Call the agent chat function
+                    const thought = await aiAgentChat(agentId, pos, mind, userMessage, canvasState);
+
+                    // Show response in speech bubble
+                    agentBubblesRef.current[agentId] = showBubble(thought.thought, 8000);
+
+                    // Update agent's mind with new thought
+                    const updatedMind = updateMind(mind, thought);
+                    engine.setWorldData(prev => {
+                        const existingData = prev[agentId];
+                        if (!existingData) return prev;
+                        try {
+                            const data = typeof existingData === 'string' ? JSON.parse(existingData) : existingData;
+                            data.mind = updatedMind;
+                            data.lastSpoken = thought.thought;
+                            return { ...prev, [agentId]: JSON.stringify(data) };
+                        } catch {
+                            return prev;
+                        }
+                    });
+
+                    return { response: thought.thought, actions: thought.actions };
+                } catch (e: any) {
+                    console.error(`[chatWithAgent] Error:`, e.message);
+                    return null;
+                }
+            }
+        });
+    }, [engine]);
 
     // Select agents within selection bounds when selection is made
     useEffect(() => {
@@ -2979,6 +3094,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const agentThinkingRef = useRef<Set<string>>(new Set()); // Track which agents are currently thinking
     const agentBubblesRef = useRef<Record<string, BubbleState>>({}); // Track speech bubbles for each agent
     const currentTurnRef = useRef<number>(0); // Index of current speaker in the conversation
+    const agentUserChatCooldownRef = useRef<Record<string, number>>({}); // Track when agents last chatted with user
+    const USER_CHAT_COOLDOWN = 15000; // 15 seconds cooldown after user chat before autonomous thinking resumes
 
     useEffect(() => {
         // Find all agents with a mind and tick their thinking
@@ -3434,16 +3551,14 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             }
         };
 
-        // Start the turn-based thinking loop
-        const interval = setInterval(tickThinking, TURN_DELAY);
+        // DISABLED: Autonomous thinking loop causes agents to talk continuously
+        // Agents now only respond when user explicitly chats with them via /(prompt)
+        // To re-enable agent-to-agent conversation, uncomment below:
+        // const interval = setInterval(tickThinking, TURN_DELAY);
+        // const initialTick = setTimeout(tickThinking, 2000);
+        // return () => { clearInterval(interval); clearTimeout(initialTick); };
 
-        // Also do an initial tick after a short delay
-        const initialTick = setTimeout(tickThinking, 2000);
-
-        return () => {
-            clearInterval(interval);
-            clearTimeout(initialTick);
-        };
+        return () => {};
     }, [engine.worldData, agentVisualPositions]);
 
     // Spinner for sprite generation
@@ -5354,6 +5469,10 @@ Camera & Viewport Controls:
         return findEntityAtPosition(engine.worldData, pos, 'chip');
     }, [engine]);
 
+    const findObjectAtPosition = useCallback((pos: Point): { key: string, data: any } | null => {
+        return findEntityAtPosition(engine.worldData, pos, 'object');
+    }, [engine]);
+
     const findListAt = useCallback((pos: Point): { key: string; data: any } | null => {
         for (const key in engine.worldData) {
             if (key.startsWith('note_')) {
@@ -6740,10 +6859,58 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             }
         }
 
+        // Render map objects (from /make command with selection)
+        for (const key in engine.worldData) {
+            if (!key.startsWith('object_')) continue;
+
+            try {
+                const objectData = JSON.parse(engine.worldData[key] as string);
+
+                if (objectData.type === 'object' && objectData.imageUrl) {
+                    const objStartX = objectData.startX;
+                    const objStartY = objectData.startY;
+                    const objEndX = objectData.endX;
+                    const objEndY = objectData.endY;
+
+                    // Check if object is within viewport
+                    if (objEndX >= startWorldX - 5 && objStartX <= endWorldX + 5 &&
+                        objEndY >= startWorldY - 5 && objStartY <= endWorldY + 5) {
+
+                        const screenPos = engine.worldToScreen(objStartX, objStartY, currentZoom, currentOffset);
+
+                        // Calculate object dimensions in screen pixels
+                        const widthCells = objEndX - objStartX + 1;
+                        const heightCells = objEndY - objStartY + 1;
+                        const screenWidth = widthCells * effectiveCharWidth;
+                        const screenHeight = heightCells * effectiveCharHeight;
+
+                        const img = imageCache.current.get(objectData.imageUrl);
+                        if (img && img.complete && img.naturalWidth > 0) {
+                            // Draw the object image scaled to fit its cell bounds
+                            ctx.drawImage(img, screenPos.x, screenPos.y, screenWidth, screenHeight);
+                        } else if (!imageCache.current.has(objectData.imageUrl)) {
+                            // Load image
+                            const newImg = new Image();
+                            newImg.crossOrigin = "Anonymous";
+                            newImg.src = objectData.imageUrl;
+                            newImg.onload = () => {
+                                // Trigger re-render when image loads
+                                requestAnimationFrame(() => {});
+                            };
+                            imageCache.current.set(objectData.imageUrl, newImg);
+                        }
+
+                    }
+                }
+            } catch (e) {
+                // Skip invalid object data
+            }
+        }
+
         ctx.fillStyle = engine.textColor;
         for (const key in engine.worldData) {
-            // Skip block, chip, image, paint, and paintblob data - we render those separately
-            if (key.startsWith('block_') || key.startsWith('chip_') || key.startsWith('image_') || key.startsWith('paint_') || key.startsWith('paintblob_')) continue;
+            // Skip block, chip, image, paint, paintblob, and object data - we render those separately
+            if (key.startsWith('block_') || key.startsWith('chip_') || key.startsWith('image_') || key.startsWith('paint_') || key.startsWith('paintblob_') || key.startsWith('object_')) continue;
 
             const [xStr, yStr] = key.split(',');
             const worldX = parseInt(xStr, 10);
@@ -10063,6 +10230,46 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 }
             }
 
+            // Check object resize handles
+            if (selectedObjectKey) {
+                try {
+                    const selectedObjectData = JSON.parse(engine.worldData[selectedObjectKey] as string);
+                    const topLeftScreen = engine.worldToScreen(selectedObjectData.startX, selectedObjectData.startY, engine.zoomLevel, engine.viewOffset);
+                    const bottomRightScreen = engine.worldToScreen(selectedObjectData.endX + 1, selectedObjectData.endY + 1, engine.zoomLevel, engine.viewOffset);
+
+                    const left = topLeftScreen.x;
+                    const right = bottomRightScreen.x;
+                    const top = topLeftScreen.y;
+                    const bottom = bottomRightScreen.y;
+
+                    // Check each corner handle
+                    let handle: ResizeHandle | null = null;
+                    if (isWithinThumb(x, y, left, top)) handle = 'top-left';
+                    else if (isWithinThumb(x, y, right, top)) handle = 'top-right';
+                    else if (isWithinThumb(x, y, right, bottom)) handle = 'bottom-right';
+                    else if (isWithinThumb(x, y, left, bottom)) handle = 'bottom-left';
+
+                    if (handle) {
+                        setResizeState({
+                            active: true,
+                            type: 'object',
+                            key: selectedObjectKey,
+                            handle,
+                            originalBounds: {
+                                startX: selectedObjectData.startX,
+                                startY: selectedObjectData.startY,
+                                endX: selectedObjectData.endX,
+                                endY: selectedObjectData.endY
+                            },
+                            roomIndex: null
+                        });
+                        return; // Early return, don't process other mouse events
+                    }
+                } catch (e) {
+                    // Skip invalid object data
+                }
+            }
+
             // Check note resize handles
             if (selectedNoteKey) {
                 try {
@@ -10829,6 +11036,29 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             }
                         }));
                     }
+                } else if (resizeState.type === 'object' && resizeState.key) {
+                    try {
+                        const objectData = JSON.parse(engine.worldData[resizeState.key] as string);
+                        const updatedObjectData = {
+                            ...objectData,
+                            startX: newBounds.startX,
+                            startY: newBounds.startY,
+                            endX: newBounds.endX,
+                            endY: newBounds.endY
+                        };
+
+                        // Update with new key based on new position
+                        const newObjectKey = `object_${newBounds.startX},${newBounds.startY}_${Date.now()}`;
+                        engine.setWorldData(prev => {
+                            const newData = { ...prev };
+                            delete newData[resizeState.key!];
+                            newData[newObjectKey] = JSON.stringify(updatedObjectData);
+                            return newData;
+                        });
+                        setSelectedObjectKey(newObjectKey);
+                    } catch (e) {
+                        // Skip invalid object data
+                    }
                 } else if (resizeState.type === 'note' && resizeState.key) {
                     try {
                         const noteData = JSON.parse(engine.worldData[resizeState.key] as string);
@@ -11498,6 +11728,45 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 }
             }
 
+            // Check object resize handles
+            if (selectedObjectKey) {
+                try {
+                    const selectedObjectData = JSON.parse(engine.worldData[selectedObjectKey] as string);
+                    const topLeftScreen = engine.worldToScreen(selectedObjectData.startX, selectedObjectData.startY, engine.zoomLevel, engine.viewOffset);
+                    const bottomRightScreen = engine.worldToScreen(selectedObjectData.endX + 1, selectedObjectData.endY + 1, engine.zoomLevel, engine.viewOffset);
+
+                    const left = topLeftScreen.x;
+                    const right = bottomRightScreen.x;
+                    const top = topLeftScreen.y;
+                    const bottom = bottomRightScreen.y;
+
+                    let handle: ResizeHandle | null = null;
+                    if (isWithinThumb(x, y, left, top)) handle = 'top-left';
+                    else if (isWithinThumb(x, y, right, top)) handle = 'top-right';
+                    else if (isWithinThumb(x, y, right, bottom)) handle = 'bottom-right';
+                    else if (isWithinThumb(x, y, left, bottom)) handle = 'bottom-left';
+
+                    if (handle) {
+                        setResizeState({
+                            active: true,
+                            type: 'object',
+                            key: selectedObjectKey,
+                            handle,
+                            originalBounds: {
+                                startX: selectedObjectData.startX,
+                                startY: selectedObjectData.startY,
+                                endX: selectedObjectData.endX,
+                                endY: selectedObjectData.endY
+                            },
+                            roomIndex: null
+                        });
+                        return; // Early return - don't process other touch events
+                    }
+                } catch (e) {
+                    // Skip invalid object data
+                }
+            }
+
             // Check note resize handles
             if (selectedNoteKey) {
                 try {
@@ -11787,11 +12056,12 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             const touchWorldY = Math.floor(worldPos.y);
             const touchWorldPos = { x: touchWorldX, y: touchWorldY };
 
-            // Check if touch is over a moveable object (selection, image, note, mail, chip)
+            // Check if touch is over a moveable object (selection, image, note, mail, chip, object)
             let isOverMoveableObject = false;
             let foundNoteKey: string | null = null;
             let foundMailKey: string | null = null;
             let foundChipKey: string | null = null;
+            let foundObjectKey: string | null = null;
 
             // Check for active selection
             if (engine.selectionStart && engine.selectionEnd) {
@@ -11829,6 +12099,15 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 }
             }
 
+            // Check for ANY map object at this position
+            if (!isOverMoveableObject) {
+                const objectAtPos = findObjectAtPosition(touchWorldPos);
+                if (objectAtPos) {
+                    isOverMoveableObject = true;
+                    foundObjectKey = objectAtPos.key;
+                }
+            }
+
             // If touch is over a moveable object, start long press timer
             if (isOverMoveableObject) {
                 longPressTimerRef.current = setTimeout(() => {
@@ -11837,10 +12116,17 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                         setSelectedNoteKey(foundNoteKey);
                         setSelectedPatternKey(null);
                         setSelectedChipKey(null);
+                        setSelectedObjectKey(null);
                     } else if (foundChipKey) {
                         setSelectedChipKey(foundChipKey);
                         setSelectedNoteKey(null);
                         setSelectedPatternKey(null);
+                        setSelectedObjectKey(null);
+                    } else if (foundObjectKey) {
+                        setSelectedObjectKey(foundObjectKey);
+                        setSelectedNoteKey(null);
+                        setSelectedPatternKey(null);
+                        setSelectedChipKey(null);
                     }
 
                     // Activate long press mode (ready to move or open command menu)
@@ -12226,6 +12512,29 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                         }
                     }));
                 }
+            } else if (resizeState.type === 'object' && resizeState.key) {
+                try {
+                    const objectData = JSON.parse(engine.worldData[resizeState.key] as string);
+                    const updatedObjectData = {
+                        ...objectData,
+                        startX: newBounds.startX,
+                        startY: newBounds.startY,
+                        endX: newBounds.endX,
+                        endY: newBounds.endY
+                    };
+
+                    // Update with new key based on new position
+                    const newObjectKey = `object_${newBounds.startX},${newBounds.startY}_${Date.now()}`;
+                    engine.setWorldData(prev => {
+                        const newData = { ...prev };
+                        delete newData[resizeState.key!];
+                        newData[newObjectKey] = JSON.stringify(updatedObjectData);
+                        return newData;
+                    });
+                    setSelectedObjectKey(newObjectKey);
+                } catch (e) {
+                    // Skip invalid object data
+                }
             } else if (resizeState.type === 'note' && resizeState.key) {
                 try {
                     const noteData = JSON.parse(engine.worldData[resizeState.key] as string);
@@ -12589,6 +12898,32 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                         } catch (e) {
                             // Invalid chip data
                         }
+                    } else if (selectedObjectKey) {
+                        // Move map object
+                        try {
+                            const objectData = JSON.parse(engine.worldData[selectedObjectKey] as string);
+
+                            const newObjectData = {
+                                ...objectData,
+                                startX: objectData.startX + distanceX,
+                                endX: objectData.endX + distanceX,
+                                startY: objectData.startY + distanceY,
+                                endY: objectData.endY + distanceY,
+                                timestamp: Date.now()
+                            };
+
+                            const newObjectKey = `object_${newObjectData.startX},${newObjectData.startY}_${Date.now()}`;
+                            engine.setWorldData(prev => {
+                                const newData = { ...prev };
+                                delete newData[selectedObjectKey];
+                                newData[newObjectKey] = JSON.stringify(newObjectData);
+                                return newData;
+                            });
+
+                            setSelectedObjectKey(newObjectKey);
+                        } catch (e) {
+                            // Invalid object data
+                        }
                     } else if (engine.selectionStart && engine.selectionEnd) {
                         // Move text selection
                         const minX = Math.floor(Math.min(engine.selectionStart.x, engine.selectionEnd.x));
@@ -12715,6 +13050,27 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             // Use ref for immediate value (not stale from closure)
             // Skip if attached - agents follow cursor automatically
             if (!touchHasMovedRef.current && (engine.isAgentMode || (selectedAgentIdsRef.current.size > 0 && !engine.isAgentAttached))) {
+                const endTouches = Array.from(e.changedTouches).map(touch => ({
+                    x: touch.clientX - rect.left,
+                    y: touch.clientY - rect.top
+                }));
+
+                if (endTouches.length > 0) {
+                    const syntheticEvent = {
+                        button: 0,
+                        clientX: endTouches[0].x + rect.left,
+                        clientY: endTouches[0].y + rect.top,
+                        shiftKey: false,
+                        metaKey: false,
+                        ctrlKey: false,
+                        preventDefault: () => {},
+                        stopPropagation: () => {}
+                    } as React.MouseEvent<HTMLCanvasElement>;
+                    handleCanvasClick(syntheticEvent);
+                }
+            } else if (!touchHasMovedRef.current) {
+                // Regular tap (no agents selected, no agent mode) - route to handleCanvasClick
+                // This enables tapping on pack chips, links, tasks, etc.
                 const endTouches = Array.from(e.changedTouches).map(touch => ({
                     x: touch.clientX - rect.left,
                     y: touch.clientY - rect.top

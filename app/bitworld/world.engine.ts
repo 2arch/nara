@@ -1205,6 +1205,8 @@ export interface WorldEngine {
         moveAgentsExpr: (agentIds: string[], xExpr: string, yExpr: string, vars?: Record<string, number>, duration?: number) => { moved: string[]; errors: string[] };
         stopAgentsExpr: (agentIds: string[]) => { stopped: string[] };
         agentThink: (agentId: string) => Promise<{ thought: string; actions?: any[] } | null>;
+        getSelectedAgentIds: () => string[];
+        chatWithAgent: (agentId: string, userMessage: string) => Promise<{ response: string; actions?: any[] } | null>;
     };
     registerAgentHandlers: (handlers: WorldEngine['agentHandlers']) => void;
 }
@@ -1726,6 +1728,9 @@ export function useWorldEngine({
     const lastEscTimeRef = useRef<number | null>(null);
     const [lastEnterX, setLastEnterX] = useState<number | null>(null); // Track X position from last Enter
 
+    // UI pack toggle guard - prevents double-toggle from touch+click events
+    const uiPackToggleTimeRef = useRef<number>(0);
+
     // Host dialogue handler ref
     const hostDialogueHandlerRef = useRef<(() => void) | null>(null);
 
@@ -2205,7 +2210,7 @@ export function useWorldEngine({
         agentSpriteName,
         isAgentAttached,
         setAgentAttached,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid: authenticatedUserUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, currentScale, setCurrentScale, recorder, setBounds: setCurrentBounds, canvasState, setCanvasState, setBoundedWorldData, boundedSource, setBoundedSource, boundedWorldData, setZoomLevel, setViewOffset, selectionStart, selectionEnd, triggerUpgradeFlow: () => {
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid: authenticatedUserUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, currentScale, setCurrentScale, recorder, setBounds: setCurrentBounds, canvasState, setCanvasState, setBoundedWorldData, boundedSource, setBoundedSource, boundedWorldData, setZoomLevel, setViewOffset, selectionStart, selectionEnd, setProcessingRegion, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
         }
@@ -4350,7 +4355,7 @@ export function useWorldEngine({
                         // Navigate to specific coordinates (x, y)
                         const targetX = parseInt(exec.args[0], 10);
                         const targetY = parseInt(exec.args[1], 10);
-                        
+
                         if (!isNaN(targetX) && !isNaN(targetY)) {
                             // Move camera to center on the target position
                             if (typeof window !== 'undefined') {
@@ -4364,6 +4369,41 @@ export function useWorldEngine({
                                     });
                                 }
                             }
+                        }
+                    } else if (exec.args.length >= 1) {
+                        // Navigate to chip by name: /nav chipName
+                        const searchName = exec.args.join(' ').toLowerCase();
+                        let foundChip: { x: number; y: number; text: string } | null = null;
+
+                        // Search all chips for matching text
+                        for (const key in worldData) {
+                            if (key.startsWith('chip_')) {
+                                try {
+                                    const chipData = JSON.parse(worldData[key] as string);
+                                    if (chipData.text && chipData.text.toLowerCase() === searchName) {
+                                        foundChip = { x: chipData.x, y: chipData.y, text: chipData.text };
+                                        break;
+                                    }
+                                } catch {}
+                            }
+                        }
+
+                        if (foundChip) {
+                            // Navigate to chip position
+                            if (typeof window !== 'undefined') {
+                                const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
+                                if (effectiveCharWidth > 0 && effectiveCharHeight > 0) {
+                                    const viewportCharWidth = window.innerWidth / effectiveCharWidth;
+                                    const viewportCharHeight = window.innerHeight / effectiveCharHeight;
+                                    setViewOffset({
+                                        x: foundChip.x - viewportCharWidth / 2,
+                                        y: foundChip.y - viewportCharHeight / 2
+                                    });
+                                    setDialogueWithRevert(`Navigated to "${foundChip.text}"`, setDialogueText);
+                                }
+                            }
+                        } else {
+                            setDialogueWithRevert(`Chip "${searchName}" not found`, setDialogueText);
                         }
                     } else {
                         // Open navigation dialogue
@@ -5117,7 +5157,157 @@ export function useWorldEngine({
                         return true;
                     }
 
-                    // Priority 4: Try AI actions first (tool calling), fall back to chat
+                    // Priority 4: Check if agents are selected - route to agent chat
+                    const selectedAgentIds = agentHandlersRef.current?.getSelectedAgentIds?.() || [];
+                    if (selectedAgentIds.length > 0 && agentHandlersRef.current?.chatWithAgent) {
+                        // Chat with the first selected agent
+                        const agentId = selectedAgentIds[0];
+                        const agentDataStr = worldData[agentId];
+                        let agentName = 'Agent';
+                        if (agentDataStr) {
+                            try {
+                                const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+                                agentName = agentData.spriteName || agentData.name || agentData.mind?.persona?.split('.')[0] || 'Agent';
+                            } catch {}
+                        }
+
+                        setDialogueWithRevert(`Asking ${agentName}...`, setDialogueText);
+
+                        agentHandlersRef.current.chatWithAgent(agentId, aiPrompt).then(async (result) => {
+                            if (result) {
+                                // Agent responded - show in dialogue (bubble is already shown by chatWithAgent)
+                                setDialogueWithRevert(`${agentName}: ${result.response}`, setDialogueText);
+
+                                // Execute any actions the agent returned
+                                if (result.actions && result.actions.length > 0) {
+                                    // Build tool context for action execution
+                                    const { executeTool } = await import('./ai.tools');
+                                    const actionContext = {
+                                        paintCells: (cells: Array<{x: number, y: number, color: string}>) => {
+                                            const cellsByColor = new Map<string, Array<{x: number, y: number}>>();
+                                            for (const cell of cells) {
+                                                const color = cell.color || '#000000';
+                                                if (!cellsByColor.has(color)) cellsByColor.set(color, []);
+                                                cellsByColor.get(color)!.push({ x: Math.floor(cell.x), y: Math.floor(cell.y) });
+                                            }
+                                            setWorldData(prev => {
+                                                let updated = { ...prev };
+                                                for (const [color, colorCells] of cellsByColor) {
+                                                    const { blob } = findOrCreateBlobForCell(updated, colorCells[0].x, colorCells[0].y, color, 'color');
+                                                    const updatedBlob = addCellsToBlob(blob, colorCells);
+                                                    updated[`paintblob_${updatedBlob.id}`] = JSON.stringify(updatedBlob);
+                                                }
+                                                return updated;
+                                            });
+                                        },
+                                        eraseCells: () => {},
+                                        getCursorPosition: () => cursorPos,
+                                        setCursorPosition: (x: number, y: number) => setCursorPos({ x, y }),
+                                        getViewport: () => ({ offset: viewOffset, zoomLevel }),
+                                        setViewport: () => {},
+                                        getSelection: () => ({ start: selectionStart, end: selectionEnd }),
+                                        setSelection: () => {},
+                                        clearSelection: () => {},
+                                        getAgents: () => [],
+                                        createAgent: () => '',
+                                        moveAgents: () => {},
+                                        getNotes: () => [],
+                                        createNote: (x: number, y: number, width: number, height: number, contentType?: string, content?: string) => {
+                                            const noteId = `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                                            const noteData: Record<string, any> = {
+                                                type: 'note',
+                                                startX: x, startY: y,
+                                                endX: x + width, endY: y + height,
+                                                contentType: contentType || 'text',
+                                                content: content || '',
+                                                data: {} as Record<string, string>,
+                                                createdAt: new Date().toISOString(),
+                                            };
+                                            // Write content to note data cells
+                                            if (content) {
+                                                const lines = content.split('\n');
+                                                for (let lineY = 0; lineY < lines.length; lineY++) {
+                                                    for (let charX = 0; charX < lines[lineY].length; charX++) {
+                                                        (noteData.data as Record<string, string>)[`${charX},${lineY * 2}`] = lines[lineY][charX];
+                                                    }
+                                                }
+                                            }
+                                            setWorldData(prev => ({ ...prev, [noteId]: JSON.stringify(noteData) }));
+                                            return noteId;
+                                        },
+                                        getChips: () => [],
+                                        createChip: (x: number, y: number, text: string, color?: string) => {
+                                            const chipId = `chip_${x},${y}_${Date.now()}`;
+                                            setWorldData(prev => ({ ...prev, [chipId]: JSON.stringify({ type: 'chip', x, y, text, color }) }));
+                                        },
+                                        writeText: (x: number, y: number, text: string) => {
+                                            setWorldData(prev => {
+                                                const newData = { ...prev };
+                                                for (let i = 0; i < text.length; i++) {
+                                                    newData[`${x + i},${y}`] = text[i];
+                                                }
+                                                return newData;
+                                            });
+                                        },
+                                        deleteEntity: (type: string, id: string) => {
+                                            setWorldData(prev => {
+                                                const newData = { ...prev };
+                                                delete newData[id];
+                                                return newData;
+                                            });
+                                        },
+                                        runCommand: (command: string) => {
+                                            logger.debug(`[Agent] runCommand:`, command);
+                                        },
+                                        editNote: (noteId: string, edit: any) => {
+                                            const noteDataStr = worldData[noteId];
+                                            if (!noteDataStr) return { success: false, error: 'Note not found' };
+                                            try {
+                                                const noteData = typeof noteDataStr === 'string' ? JSON.parse(noteDataStr) : noteDataStr;
+                                                const existingData = noteData.data || {};
+
+                                                if (edit.operation === 'append' && edit.text) {
+                                                    // Find max Y to append after
+                                                    let maxY = 0;
+                                                    for (const key of Object.keys(existingData)) {
+                                                        const [, yStr] = key.split(',');
+                                                        const y = parseInt(yStr, 10);
+                                                        if (y > maxY) maxY = y;
+                                                    }
+                                                    const newStartY = maxY + 2;
+                                                    for (let charX = 0; charX < edit.text.length; charX++) {
+                                                        existingData[`${charX},${newStartY}`] = edit.text[charX];
+                                                    }
+                                                    noteData.data = existingData;
+                                                    setWorldData(prev => ({ ...prev, [noteId]: JSON.stringify(noteData) }));
+                                                    return { success: true };
+                                                }
+                                                return { success: false, error: 'Unsupported edit operation' };
+                                            } catch (e) {
+                                                return { success: false, error: 'Failed to parse note' };
+                                            }
+                                        },
+                                    };
+
+                                    for (const action of result.actions) {
+                                        logger.debug(`[${agentName}] Executing action:`, action.tool, action.args);
+                                        const execResult = await executeTool(action.tool, action.args, actionContext as any);
+                                        if (!execResult.success) {
+                                            logger.error(`[${agentName}] Action failed:`, execResult.error);
+                                        }
+                                    }
+                                }
+                            } else {
+                                setDialogueWithRevert(`${agentName} didn't respond`, setDialogueText);
+                            }
+                        }).catch((error) => {
+                            setDialogueWithRevert(`Error: ${error.message}`, setDialogueText);
+                        });
+
+                        return true;
+                    }
+
+                    // Priority 5: Try AI actions first (tool calling), fall back to chat
                     setDialogueWithRevert("Asking AI...", setDialogueText);
 
                     // Build tool context for executing AI actions
@@ -5946,30 +6136,117 @@ export function useWorldEngine({
                     setSelectionEnd(null);
                 } else if (exec.command === 'pack') {
                     // /pack command - create a pack chip that collapses region into a labeled chip
-                    if (!selectionStart || !selectionEnd) {
-                        setDialogueWithRevert("Make a selection first", setDialogueText);
-                        return true;
+                    // Supports: 1) selection region, 2) note under cursor
+                    let normalized: { startX: number; endX: number; startY: number; endY: number } | null = null;
+                    let packingNote = false;
+
+                    // First try selection
+                    if (selectionStart && selectionEnd) {
+                        const hasSelection = selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y;
+                        if (hasSelection) {
+                            normalized = getNormalizedSelection();
+                        }
                     }
 
-                    const hasSelection = selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y;
-                    if (!hasSelection) {
-                        setDialogueWithRevert("Selection must span more than one cell", setDialogueText);
-                        return true;
-                    }
-
-                    const normalized = getNormalizedSelection();
+                    // If no selection, check if cursor is over a note
                     if (!normalized) {
+                        const cmdPos = exec.commandStartPos;
+                        const noteAtCursor = findNoteContainingPoint(cmdPos.x, cmdPos.y, worldData);
+                        if (noteAtCursor) {
+                            normalized = {
+                                startX: noteAtCursor.data.startX,
+                                endX: noteAtCursor.data.endX,
+                                startY: noteAtCursor.data.startY,
+                                endY: noteAtCursor.data.endY
+                            };
+                            packingNote = true;
+                        }
+                    }
+
+                    if (!normalized) {
+                        // No selection or note - check if we're instantiating an existing pack by name
+                        if (exec.args.length >= 1) {
+                            const searchName = exec.args.join(' ').toLowerCase();
+                            let foundPack: { key: string; data: any } | null = null;
+
+                            // Search for pack chip with matching text
+                            for (const key in worldData) {
+                                if (key.startsWith('chip_')) {
+                                    try {
+                                        const chipData = JSON.parse(worldData[key] as string);
+                                        if (chipData.type === 'pack' && chipData.text &&
+                                            chipData.text.toLowerCase() === searchName) {
+                                            foundPack = { key, data: chipData };
+                                            break;
+                                        }
+                                    } catch {}
+                                }
+                            }
+
+                            if (foundPack) {
+                                // Create a copy of this pack at cursor position
+                                const cmdPos = exec.commandStartPos;
+                                const newChipKey = `chip_${cmdPos.x},${cmdPos.y}_${Date.now()}`;
+
+                                // Calculate offset from original pack position
+                                const offsetX = cmdPos.x - foundPack.data.x;
+                                const offsetY = cmdPos.y - foundPack.data.y;
+
+                                // Clone the pack data with new position
+                                const newPackData = {
+                                    ...foundPack.data,
+                                    x: cmdPos.x,
+                                    y: cmdPos.y,
+                                    startX: foundPack.data.startX + offsetX,
+                                    endX: foundPack.data.endX + offsetX,
+                                    startY: foundPack.data.startY + offsetY,
+                                    endY: foundPack.data.endY + offsetY,
+                                    timestamp: Date.now(),
+                                    // Update expandedBounds with offset
+                                    expandedBounds: foundPack.data.expandedBounds ? {
+                                        startX: foundPack.data.expandedBounds.startX + offsetX,
+                                        endX: foundPack.data.expandedBounds.endX + offsetX,
+                                        startY: foundPack.data.expandedBounds.startY + offsetY,
+                                        endY: foundPack.data.expandedBounds.endY + offsetY
+                                    } : undefined
+                                };
+
+                                setWorldData(prev => ({
+                                    ...prev,
+                                    [newChipKey]: JSON.stringify(newPackData)
+                                }));
+
+                                setDialogueWithRevert(`Pack "${foundPack.data.text}" instantiated at cursor`, setDialogueText);
+                                return true;
+                            } else {
+                                setDialogueWithRevert(`Pack "${searchName}" not found`, setDialogueText);
+                                return true;
+                            }
+                        }
+
+                        setDialogueWithRevert("Select a region, position cursor over a note, or specify pack name", setDialogueText);
                         return true;
                     }
 
-                    // Require text argument
+                    // Require text argument for creating new pack
                     if (exec.args.length === 0) {
                         setDialogueWithRevert("Usage: /pack [text] [color]", setDialogueText);
                         return true;
                     }
 
                     const packText = exec.args[0];
-                    const colorArg = exec.args[1];
+                    // Check for 'ui' expand mode (can be arg[1] or arg[2])
+                    let colorArg: string | undefined;
+                    let expandMode: 'default' | 'ui' = 'default';
+
+                    for (let i = 1; i < exec.args.length; i++) {
+                        const arg = exec.args[i].toLowerCase();
+                        if (arg === 'ui') {
+                            expandMode = 'ui';
+                        } else if (!colorArg) {
+                            colorArg = exec.args[i];
+                        }
+                    }
 
                     // Store the original selection bounds for expansion
                     const expandedBounds = {
@@ -6056,6 +6333,7 @@ export function useWorldEngine({
                         text: packText,
                         collapsed: true, // Start collapsed
                         expandedBounds, // Store original bounds for expansion
+                        expandMode, // 'default' or 'ui' (ui = expand as bound region)
                         packedData,
                         packedEntities: overlappingEntities,
                         color: textColor,
@@ -6084,7 +6362,8 @@ export function useWorldEngine({
                     const height = expandedBounds.endY - expandedBounds.startY + 1;
                     const cellCount = Object.keys(packedData).length;
                     const entityCount = Object.keys(overlappingEntities).length;
-                    setDialogueWithRevert(`Pack "${packText}" created (${width}×${height}, ${cellCount} cells, ${entityCount} entities). Click to expand.`, setDialogueText);
+                    const sourceType = packingNote ? 'note' : 'region';
+                    setDialogueWithRevert(`Pack "${packText}" created from ${sourceType} (${width}×${height}, ${cellCount} cells, ${entityCount} entities). Click to expand.`, setDialogueText);
 
                     // Clear selection
                     setSelectionStart(null);
@@ -12478,6 +12757,17 @@ export function useWorldEngine({
                         // Handle pack chips
                         if (type === 'pack') {
                             const isCurrentlyCollapsed = chipData.collapsed || false;
+                            const isUiMode = chipData.expandMode === 'ui';
+
+                            // Guard against double-toggle from touch+click events on UI packs
+                            if (isUiMode) {
+                                const now = Date.now();
+                                if (now - uiPackToggleTimeRef.current < 500) {
+                                    // Too soon after last toggle, ignore this click
+                                    return;
+                                }
+                                uiPackToggleTimeRef.current = now;
+                            }
 
                             // Calculate new bounds based on toggle state
                             let newBounds;
@@ -12490,6 +12780,38 @@ export function useWorldEngine({
                                     startY: chipData.startY,
                                     endY: chipData.startY
                                 };
+
+                                // If UI mode, exit bounded editing mode and re-pack the content
+                                if (isUiMode && chipData.expandedBounds) {
+                                    const eb = chipData.expandedBounds;
+
+                                    // Step 1: Capture content from boundedWorldData back into packedData
+                                    const newPackedData: Record<string, string> = {};
+                                    if (boundedWorldData) {
+                                        for (const coordKey in boundedWorldData) {
+                                            const [xStr, yStr] = coordKey.split(',');
+                                            const absX = parseInt(xStr, 10);
+                                            const absY = parseInt(yStr, 10);
+                                            // Only capture cells within the expanded bounds
+                                            if (absX >= eb.startX && absX <= eb.endX &&
+                                                absY >= eb.startY && absY <= eb.endY) {
+                                                const relX = absX - eb.startX;
+                                                const relY = absY - eb.startY;
+                                                const val = boundedWorldData[coordKey];
+                                                newPackedData[`${relX},${relY}`] = typeof val === 'string' ? val : JSON.stringify(val);
+                                            }
+                                        }
+                                    }
+
+                                    // Update chipData with new packedData
+                                    chipData.packedData = newPackedData;
+
+                                    // Step 2: Exit bounded mode
+                                    setCurrentBounds(undefined);
+                                    setCanvasState(0);
+                                    setBoundedWorldData({});
+                                    setBoundedSource(null);
+                                }
                             } else {
                                 // Expanding: grow to expanded bounds
                                 newBounds = chipData.expandedBounds || {
@@ -12498,6 +12820,88 @@ export function useWorldEngine({
                                     startY: chipData.startY,
                                     endY: chipData.endY
                                 };
+
+                                // If UI mode, enter bounded editing mode (like /bound on a note)
+                                if (isUiMode && chipData.expandedBounds) {
+                                    const eb = chipData.expandedBounds;
+
+                                    // Convert pack's relative packedData to absolute coords for boundedWorldData
+                                    const boundedData: Record<string, any> = {};
+
+                                    // First, load individual cells from packedData
+                                    if (chipData.packedData) {
+                                        for (const relKey in chipData.packedData) {
+                                            const [relXStr, relYStr] = relKey.split(',');
+                                            const relX = parseInt(relXStr, 10);
+                                            const relY = parseInt(relYStr, 10);
+                                            const absX = eb.startX + relX;
+                                            const absY = eb.startY + relY;
+                                            boundedData[`${absX},${absY}`] = chipData.packedData[relKey];
+                                        }
+                                    }
+
+                                    // Also extract content from packed notes (notes store text in their data field)
+                                    if (chipData.packedEntities) {
+                                        for (const entityKey in chipData.packedEntities) {
+                                            if (entityKey.startsWith('note_')) {
+                                                try {
+                                                    const noteData = JSON.parse(chipData.packedEntities[entityKey]);
+                                                    // noteData has relative coords, need to convert to absolute
+                                                    if (noteData.data) {
+                                                        for (const cellKey in noteData.data) {
+                                                            const [relXStr, relYStr] = cellKey.split(',');
+                                                            const relX = parseInt(relXStr, 10);
+                                                            const relY = parseInt(relYStr, 10);
+                                                            // Note's relative startX/Y + cell's relative position + pack's absolute origin
+                                                            const absX = eb.startX + noteData.startX + relX;
+                                                            const absY = eb.startY + noteData.startY + relY;
+                                                            boundedData[`${absX},${absY}`] = noteData.data[cellKey];
+                                                        }
+                                                    }
+                                                } catch (e) {
+                                                    // Skip invalid note data
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Set up bounded editing mode (use minX/minY/maxX/maxY format like /bound does)
+                                    setCurrentBounds({
+                                        minX: eb.startX,
+                                        minY: eb.startY,
+                                        maxX: eb.endX + 1,
+                                        maxY: eb.endY + 1
+                                    });
+                                    setBoundedWorldData(boundedData);
+                                    setCanvasState(1);
+                                    setBoundedSource({
+                                        type: 'note', // Treat pack like a note for syncing
+                                        noteKey: key, // The pack chip key
+                                        originalBounds: {
+                                            minX: eb.startX,
+                                            minY: eb.startY,
+                                            maxX: eb.endX,
+                                            maxY: eb.endY
+                                        },
+                                        boundedMinX: eb.startX,
+                                        boundedMinY: eb.startY
+                                    });
+
+                                    // Center viewport on the bound
+                                    if (typeof window !== 'undefined') {
+                                        const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
+                                        if (effectiveCharWidth > 0 && effectiveCharHeight > 0) {
+                                            const viewportCharWidth = window.innerWidth / effectiveCharWidth;
+                                            const viewportCharHeight = window.innerHeight / effectiveCharHeight;
+                                            const centerX = (eb.startX + eb.endX) / 2;
+                                            const centerY = (eb.startY + eb.endY) / 2;
+                                            setViewOffset({
+                                                x: centerX - viewportCharWidth / 2,
+                                                y: centerY - viewportCharHeight / 2
+                                            });
+                                        }
+                                    }
+                                }
                             }
 
                             const updatedChipData = {
@@ -12516,8 +12920,9 @@ export function useWorldEngine({
                                 [key]: JSON.stringify(updatedChipData)
                             }));
 
+                            const modeText = isUiMode ? ' (UI mode)' : '';
                             setDialogueWithRevert(
-                                !isCurrentlyCollapsed ? `Pack collapsed` : `Pack expanded`,
+                                !isCurrentlyCollapsed ? `Pack collapsed${modeText}` : `Pack expanded${modeText}`,
                                 setDialogueText
                             );
                             return;

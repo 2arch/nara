@@ -8,7 +8,7 @@ import type { WorldSettings } from './settings';
 import { useFaceDetection, useSmoothFaceOrientation, faceOrientationToRotation } from './face';
 import { DataRecorder } from './recorder';
 import { saveSprite, getUserSprites, deleteSprite, renameSprite, type SavedSprite, getUserTilesets, deleteTileset, type SavedTileset } from '../firebase';
-import { applySkin, getAvailableEffects } from './skins';
+import { applySkin, getAvailableEffects, cropAndFit } from './post';
 
 // Grid cell span constant (characters occupy 2 vertically-stacked cells)
 const GRID_CELL_SPAN = 2;
@@ -420,6 +420,7 @@ interface UseCommandSystemProps {
     setViewOffset?: (offset: { x: number; y: number }) => void; // Set view offset for centering on bound
     selectionStart?: { x: number; y: number } | null; // Current selection start for bounding from selection
     selectionEnd?: { x: number; y: number } | null; // Current selection end for bounding from selection
+    setProcessingRegion?: (region: { startX: number; endX: number; startY: number; endY: number } | null) => void; // Set processing region for visual feedback
 }
 
 // --- Command System Constants ---
@@ -469,7 +470,7 @@ const DISPLAY_COMMANDS = ['expand', 'scroll'];
 
 // Detailed help descriptions for each command
 export const COMMAND_HELP: { [command: string]: string } = {
-    'nav': 'Navigate to saved chips. Type /nav to see all your chips, then select one to jump to that location. Chips act as spatial bookmarks in your canvas.',
+    'nav': 'Navigate to chips or coordinates. /nav opens chip list, /nav chipName jumps to that chip, /nav x y jumps to coordinates. Chips act as spatial bookmarks.',
     'search': 'Search through all text on your canvas. Type /search followed by your query to find and navigate to specific content. Useful for finding ideas in large canvases.',
     'map': 'Generate a procedural map of ephemeral labels around your viewport. Creates a tasteful exploration terrain with temporary waypoints that disappear when you press Escape.',
     'cam': 'Control camera behavior. Use /cam focus to enable focus mode, which smoothly follows your cursor. Use /cam default to return to normal panning.',
@@ -479,7 +480,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'chip': 'Create a spatial chip at your current selection. Type /chip \'text\' [color]. Defaults to current text color (accent). Custom colors: /chip \'text\' crimson. Chips show as colored cells with cutout text.',
     'task': 'Create a toggleable task from selected text. Select text, then type /task [color]. Click the highlighted task to toggle completion (adds strikethrough). Click again to un-complete it.',
     'link': 'Create a clickable link from selected text. Select text, then type /link [url]. Click the underlined link to open the URL in a new tab. URLs are auto-detected when pasted.',
-    'pack': 'Pack selected world data into a collapsible chip. Select a region (including notes, text, etc), then type /pack [color]. Click the pack chip to toggle between collapsed (hidden) and expanded (visible) states.',
+    'pack': 'Pack world data into a collapsible chip. Select region or cursor over note, then /pack [name] [color]. Or /pack [existingName] to instantiate a copy at cursor. Click pack to toggle collapsed/expanded.',
     'clip': 'Save selected text to your clipboard. Select text, then type /clip to capture it. Access your clips later to paste them anywhere on the canvas.',
     'export': 'Export selected area as a PNG image. Make a selection, then type /export to download it as an image. Use /export --grid to include grid lines in the export.',
     'upload': 'Upload files to your canvas. Images are rasterized to fit. Scripts (.js, .py) become executable script notes - use /run to execute. Also supports .json, .txt, .md, .csv as text notes.',
@@ -539,7 +540,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllChips, getAllBounds = () => [], availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, currentScale, setCurrentScale, monogramSystem, recorder, setBounds, canvasState, setCanvasState, setBoundedWorldData, boundedSource, setBoundedSource, boundedWorldData, setZoomLevel, setViewOffset, selectionStart, selectionEnd }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllChips, getAllBounds = () => [], availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, currentScale, setCurrentScale, monogramSystem, recorder, setBounds, canvasState, setCanvasState, setBoundedWorldData, boundedSource, setBoundedSource, boundedWorldData, setZoomLevel, setViewOffset, selectionStart, selectionEnd, setProcessingRegion }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const previousBackgroundStateRef = useRef<{
@@ -3148,11 +3149,183 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         if (commandToExecute.startsWith('make')) {
             const prompt = commandToExecute.slice(4).trim();
             if (!prompt) {
-                setDialogueWithRevert("Usage: /make <description> or /make <tileset_name>", setDialogueText);
+                setDialogueWithRevert("Usage: /make <description> - with selection for object, or on painted region for tileset", setDialogueText);
                 clearCommandState();
                 return null;
             }
 
+            // Check for selection FIRST - if selection exists, generate map object
+            if (selectionStart && selectionEnd) {
+                const hasSelection = selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y;
+                if (hasSelection) {
+                    // Selection-based map object generation
+                    if (!userUid) {
+                        setDialogueWithRevert("Must be logged in to generate objects", setDialogueText);
+                        clearCommandState();
+                        return null;
+                    }
+
+                    const minX = Math.min(selectionStart.x, selectionEnd.x);
+                    const maxX = Math.max(selectionStart.x, selectionEnd.x);
+                    const minY = Math.min(selectionStart.y, selectionEnd.y);
+                    const maxY = Math.max(selectionStart.y, selectionEnd.y);
+
+                    const widthCells = maxX - minX + 1;
+                    const heightCells = maxY - minY + 1;
+
+                    // Convert to pixels (32px per cell)
+                    const pixelWidth = Math.min(widthCells * 32, 400);
+                    const pixelHeight = Math.min(heightCells * 32, 400);
+
+                    // Set processing region for visual feedback (pulsing)
+                    if (setProcessingRegion) {
+                        setProcessingRegion({ startX: minX, endX: maxX, startY: minY, endY: maxY });
+                    }
+
+                    setDialogueText(`Generating object: "${prompt}" (${widthCells}×${heightCells} cells)...`);
+
+                    const objectApiUrl = process.env.NEXT_PUBLIC_MAPOBJECT_API_URL ||
+                        'https://us-central1-nara-a65bc.cloudfunctions.net/generateMapObject';
+
+                    const objectId = `object_${Date.now()}`;
+
+                    fetch(objectApiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            description: prompt,
+                            userUid,
+                            objectId,
+                            width: pixelWidth,
+                            height: pixelHeight
+                        }),
+                    })
+                    .then(res => {
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        return res.json();
+                    })
+                    .then(async data => {
+                        const jobId = data.jobId;
+
+                        // Poll loop
+                        const pollInterval = 3000;
+                        const maxPolls = 100;
+                        let polls = 0;
+
+                        const poll = async () => {
+                            polls++;
+                            if (polls > maxPolls) throw new Error("Timeout");
+
+                            const statusRes = await fetch(`${objectApiUrl}?jobId=${jobId}`);
+                            if (!statusRes.ok) throw new Error("Poll failed");
+                            const status = await statusRes.json();
+
+                            setDialogueText(`Generating: ${status.currentPhase || status.status} (${status.progress || 0}/4)`);
+
+                            if (status.status === 'complete' && status.imageUrl) {
+                                // Post-process: crop transparent padding and fit to selection
+                                setDialogueText(`Cropping to fit selection...`);
+
+                                // Target dimensions based on selection (32px per cell)
+                                const targetPixelWidth = widthCells * 32;
+                                const targetPixelHeight = heightCells * 32;
+
+                                try {
+                                    const cropResult = await cropAndFit(
+                                        status.imageUrl,
+                                        targetPixelWidth,
+                                        targetPixelHeight
+                                    );
+
+                                    // Store object in worldData with cropped image
+                                    const objectKey = `object_${minX}_${minY}_${Date.now()}`;
+                                    const objectData = {
+                                        type: 'object',
+                                        startX: minX,
+                                        endX: maxX,
+                                        startY: minY,
+                                        endY: maxY,
+                                        imageUrl: cropResult.dataUrl, // Use cropped data URL
+                                        originalImageUrl: status.imageUrl, // Keep original for reference
+                                        description: prompt,
+                                        pixelWidth: targetPixelWidth,
+                                        pixelHeight: targetPixelHeight,
+                                        cropInfo: {
+                                            originalBounds: cropResult.originalBounds,
+                                            scale: cropResult.scale,
+                                            offsetX: cropResult.offsetX,
+                                            offsetY: cropResult.offsetY
+                                        }
+                                    };
+
+                                    if (setWorldData) {
+                                        setWorldData((prev: any) => ({
+                                            ...prev,
+                                            [objectKey]: JSON.stringify(objectData)
+                                        }));
+                                    }
+
+                                    // Clear processing region
+                                    if (setProcessingRegion) {
+                                        setProcessingRegion(null);
+                                    }
+
+                                    const scalePercent = Math.round(cropResult.scale * 100);
+                                    setDialogueText(`Object "${prompt}" created! (${scalePercent}% scale, trimmed)`);
+                                } catch (cropErr) {
+                                    // Fallback to original if cropping fails
+                                    console.warn('Crop failed, using original:', cropErr);
+                                    const objectKey = `object_${minX}_${minY}_${Date.now()}`;
+                                    const objectData = {
+                                        type: 'object',
+                                        startX: minX,
+                                        endX: maxX,
+                                        startY: minY,
+                                        endY: maxY,
+                                        imageUrl: status.imageUrl,
+                                        description: prompt,
+                                        pixelWidth,
+                                        pixelHeight,
+                                    };
+
+                                    if (setWorldData) {
+                                        setWorldData((prev: any) => ({
+                                            ...prev,
+                                            [objectKey]: JSON.stringify(objectData)
+                                        }));
+                                    }
+
+                                    if (setProcessingRegion) {
+                                        setProcessingRegion(null);
+                                    }
+
+                                    setDialogueText(`Object "${prompt}" created!`);
+                                }
+                                return;
+                            } else if (status.status === 'error') {
+                                throw new Error(status.error);
+                            } else {
+                                setTimeout(poll, pollInterval);
+                            }
+                        };
+
+                        poll();
+                    })
+                    .catch(err => {
+                        // Clear processing region on error
+                        if (setProcessingRegion) {
+                            setProcessingRegion(null);
+                        }
+                        setDialogueText(`Error: ${err.message}`);
+                        console.error(err);
+                    });
+
+                    clearCommandState();
+                    return null;
+                }
+            }
+
+            // No selection - fall back to blob-based tileset generation
             const cursorPos = commandState.originalCursorPos;
             if (!cursorPos) {
                 setDialogueWithRevert("Cursor required", setDialogueText);
@@ -3162,7 +3335,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
             const region = findConnectedPaintRegion(worldData, cursorPos.x, cursorPos.y);
             if (!region) {
-                setDialogueWithRevert("No painted region under cursor", setDialogueText);
+                setDialogueWithRevert("No painted region or selection found", setDialogueText);
                 clearCommandState();
                 return null;
             }

@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateTileset = exports.uploadSprites = exports.animateSprite = exports.generateSprite = void 0;
+exports.generateMapObject = exports.generateTileset = exports.uploadSprites = exports.animateSprite = exports.generateSprite = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const admin = __importStar(require("firebase-admin"));
 const jszip_1 = __importDefault(require("jszip"));
@@ -1056,6 +1056,201 @@ exports.generateTileset = (0, https_1.onRequest)({
                 jobId,
                 status: "pending",
                 message: `Poll GET /generateTileset?jobId=${jobId} for status`,
+            });
+        }
+        catch (error) {
+            const errMsg = error instanceof Error ? error.message : "Unknown error";
+            console.error("Failed to create job:", errMsg);
+            res.status(500).json({ error: errMsg });
+        }
+        return;
+    }
+    res.status(405).json({ error: "Method not allowed" });
+});
+// Process map object job
+async function processMapObjectJob(jobId, description, userUid, objectId, width, height) {
+    const jobRef = db.collection("mapObjectJobs").doc(jobId);
+    const apiKey = PIXELLAB_API_KEY;
+    const storagePath = `objects/${userUid}/${objectId}/object.png`;
+    const metadataPath = `objects/${userUid}/${objectId}/metadata.json`;
+    try {
+        await jobRef.update({
+            status: "generating",
+            currentPhase: "requesting map object",
+            progress: 0,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`[${jobId}] Starting map object generation: "${description}" (${width}x${height}px)`);
+        // Step 1: Request map object using the v2 map-objects endpoint
+        const response = await fetchPixellabV2(apiKey, "map-objects", {
+            description,
+            image_size: { width, height },
+            view: "high top-down",
+            outline: "single color outline",
+            shading: "medium shading",
+            detail: "medium detail",
+        });
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Map object request failed: ${response.status} - ${errText}`);
+        }
+        const data = await response.json();
+        const backgroundJobId = data.background_job_id;
+        const pixellabObjectId = data.object_id;
+        console.log(`[${jobId}] Map object job started: ${backgroundJobId}, object_id: ${pixellabObjectId}`);
+        // Step 2: Poll job
+        await jobRef.update({
+            currentPhase: "generating object",
+            progress: 1,
+            pixellabObjectId,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        await pollBackgroundJob(apiKey, backgroundJobId, "map-object", jobRef);
+        console.log(`[${jobId}] Map object generated! Fetching image...`);
+        // Step 3: Fetch the generated image from MCP endpoint (like tilesets do)
+        await jobRef.update({
+            currentPhase: "downloading image",
+            progress: 2,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        // Fetch from the MCP endpoint which provides the PNG directly
+        const mcpDownloadUrl = `https://api.pixellab.ai/mcp/map-objects/${pixellabObjectId}/download`;
+        console.log(`[${jobId}] Fetching from MCP: ${mcpDownloadUrl}`);
+        const pngResponse = await fetchWithTimeout(mcpDownloadUrl, {
+            headers: { "Authorization": `Bearer ${apiKey}` }
+        }, 60000);
+        if (!pngResponse.ok) {
+            throw new Error(`Failed to fetch map object PNG: ${pngResponse.status}`);
+        }
+        const pngBuffer = Buffer.from(await pngResponse.arrayBuffer());
+        console.log(`[${jobId}] Fetched PNG: ${pngBuffer.length} bytes`);
+        // Step 4: Upload to Firebase Storage
+        await jobRef.update({
+            currentPhase: "uploading to storage",
+            progress: 3,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        const bucket = storage.bucket();
+        const file = bucket.file(storagePath);
+        await file.save(pngBuffer, {
+            metadata: { contentType: "image/png" },
+        });
+        await file.makePublic();
+        const resultUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+        console.log(`[${jobId}] Uploaded map object: ${resultUrl}`);
+        // Save metadata.json
+        const metadataFile = bucket.file(metadataPath);
+        const objectMetadata = {
+            id: objectId,
+            description,
+            width,
+            height,
+            createdAt: new Date().toISOString(),
+        };
+        await metadataFile.save(JSON.stringify(objectMetadata, null, 2), {
+            metadata: { contentType: "application/json" },
+        });
+        await metadataFile.makePublic();
+        console.log(`[${jobId}] Metadata saved to ${metadataPath}`);
+        // Complete
+        await jobRef.update({
+            status: "complete",
+            imageUrl: resultUrl,
+            currentPhase: null,
+            progress: 4,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`[${jobId}] Map object complete!`);
+    }
+    catch (error) {
+        const errMsg = error instanceof Error ? error.message : "Unknown error";
+        console.error(`[${jobId}] Map object error:`, errMsg);
+        await jobRef.update({
+            status: "error",
+            error: errMsg,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+    }
+}
+// Map object generation endpoint
+exports.generateMapObject = (0, https_1.onRequest)({
+    timeoutSeconds: 3600,
+    memory: "512MiB",
+    cors: true,
+}, async (req, res) => {
+    // Handle preflight
+    if (req.method === "OPTIONS") {
+        res.status(204).send("");
+        return;
+    }
+    // GET - Poll job status
+    if (req.method === "GET") {
+        const jobId = req.query.jobId;
+        if (!jobId) {
+            res.status(400).json({ error: "jobId query parameter required" });
+            return;
+        }
+        try {
+            const jobDoc = await db.collection("mapObjectJobs").doc(jobId).get();
+            if (!jobDoc.exists) {
+                res.status(404).json({ error: "Job not found" });
+                return;
+            }
+            const job = jobDoc.data();
+            res.status(200).json(job);
+        }
+        catch (error) {
+            const errMsg = error instanceof Error ? error.message : "Unknown error";
+            res.status(500).json({ error: errMsg });
+        }
+        return;
+    }
+    // POST - Start new job
+    if (req.method === "POST") {
+        const { description, userUid, objectId, width, height } = req.body;
+        if (!description || typeof description !== "string") {
+            res.status(400).json({ error: "description is required" });
+            return;
+        }
+        if (!userUid || typeof userUid !== "string") {
+            res.status(400).json({ error: "userUid is required" });
+            return;
+        }
+        if (!objectId || typeof objectId !== "string") {
+            res.status(400).json({ error: "objectId is required" });
+            return;
+        }
+        if (!width || typeof width !== "number" || width < 32 || width > 400) {
+            res.status(400).json({ error: "width must be a number between 32 and 400" });
+            return;
+        }
+        if (!height || typeof height !== "number" || height < 32 || height > 400) {
+            res.status(400).json({ error: "height must be a number between 32 and 400" });
+            return;
+        }
+        try {
+            const jobRef = db.collection("mapObjectJobs").doc();
+            const jobId = jobRef.id;
+            const now = admin.firestore.FieldValue.serverTimestamp();
+            await jobRef.set({
+                status: "pending",
+                description,
+                userUid,
+                objectId,
+                width,
+                height,
+                progress: 0,
+                createdAt: now,
+                updatedAt: now,
+            });
+            console.log(`[${jobId}] Map object job created: "${description}" (${width}x${height}px)`);
+            processMapObjectJob(jobId, description, userUid, objectId, width, height).catch(err => {
+                console.error(`[${jobId}] Background processing failed:`, err);
+            });
+            res.status(202).json({
+                jobId,
+                status: "pending",
+                message: `Poll GET /generateMapObject?jobId=${jobId} for status`,
             });
         }
         catch (error) {
