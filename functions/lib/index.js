@@ -1067,84 +1067,142 @@ exports.generateTileset = (0, https_1.onRequest)({
     }
     res.status(405).json({ error: "Method not allowed" });
 });
-// Process map object job
+// 4 cardinal directions for object rotations
+const OBJECT_DIRECTIONS = ["south", "west", "north", "east"];
+// Process map object job - uses bitforge + generate-8-rotations-v2 for objects with 4 rotations
 async function processMapObjectJob(jobId, description, userUid, objectId, width, height) {
+    var _a;
     const jobRef = db.collection("mapObjectJobs").doc(jobId);
     const apiKey = PIXELLAB_API_KEY;
-    const storagePath = `objects/${userUid}/${objectId}/object.png`;
-    const metadataPath = `objects/${userUid}/${objectId}/metadata.json`;
+    const baseStoragePath = `objects/${userUid}/${objectId}`;
+    const metadataPath = `${baseStoragePath}/metadata.json`;
+    // Clamp dimensions to bitforge limits (16-200px)
+    const clampedWidth = Math.min(Math.max(width, 16), 200);
+    const clampedHeight = Math.min(Math.max(height, 16), 200);
+    // Rotation endpoint has stricter limit (max 84px)
+    const rotationWidth = Math.min(clampedWidth, 84);
+    const rotationHeight = Math.min(clampedHeight, 84);
     try {
         await jobRef.update({
             status: "generating",
-            currentPhase: "requesting map object",
+            currentPhase: "creating object",
             progress: 0,
+            total: 6, // bitforge + rotations + upload
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        console.log(`[${jobId}] Starting map object generation: "${description}" (${width}x${height}px)`);
-        // Step 1: Request map object using the v2 map-objects endpoint
-        const response = await fetchPixellabV2(apiKey, "map-objects", {
+        console.log(`[${jobId}] Starting map object generation: "${description}" (${clampedWidth}x${clampedHeight}px)`);
+        // Step 1: Create image using bitforge with no_background for true transparency
+        const bitforgeResponse = await fetchPixellabV2(apiKey, "create-image-bitforge", {
             description,
-            image_size: { width, height },
+            image_size: { width: clampedWidth, height: clampedHeight },
             view: "high top-down",
+            direction: "south", // Ensure base image faces south for correct rotation mapping
             outline: "single color outline",
             shading: "medium shading",
             detail: "medium detail",
+            no_background: true,
         });
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`Map object request failed: ${response.status} - ${errText}`);
+        if (!bitforgeResponse.ok) {
+            const errText = await bitforgeResponse.text();
+            throw new Error(`Bitforge creation failed: ${bitforgeResponse.status} - ${errText}`);
         }
-        const data = await response.json();
-        const backgroundJobId = data.background_job_id;
-        const pixellabObjectId = data.object_id;
-        console.log(`[${jobId}] Map object job started: ${backgroundJobId}, object_id: ${pixellabObjectId}`);
-        // Step 2: Poll job
+        const bitforgeData = await bitforgeResponse.json();
+        // Bitforge returns base64 directly
+        const base64Image = (_a = bitforgeData.image) === null || _a === void 0 ? void 0 : _a.base64;
+        if (!base64Image) {
+            throw new Error("No base64 image returned from bitforge");
+        }
+        console.log(`[${jobId}] Bitforge complete, saving base image immediately...`);
+        // Step 2: Save base image immediately so client can display it
+        const bucket = storage.bucket();
+        const southPath = `${baseStoragePath}/south.png`;
+        const southFile = bucket.file(southPath);
+        const southBuffer = Buffer.from(base64Image, "base64");
+        await southFile.save(southBuffer, { metadata: { contentType: "image/png" } });
+        await southFile.makePublic();
+        const southUrl = `https://storage.googleapis.com/${bucket.name}/${southPath}`;
+        // Update job with base image - client can use this immediately
         await jobRef.update({
-            currentPhase: "generating object",
+            currentPhase: "generating rotations",
             progress: 1,
-            pixellabObjectId,
+            imageUrl: southUrl,
+            baseImageReady: true,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        await pollBackgroundJob(apiKey, backgroundJobId, "map-object", jobRef);
-        console.log(`[${jobId}] Map object generated! Fetching image...`);
-        // Step 3: Fetch the generated image from MCP endpoint (like tilesets do)
+        console.log(`[${jobId}] Base image ready: ${southUrl}, now generating rotations...`);
+        // Step 3: Generate 8 rotations (we'll use 4 cardinal directions)
+        const rotateResponse = await fetchPixellabV2(apiKey, "generate-8-rotations-v2", {
+            method: "rotate_character",
+            image_size: { width: rotationWidth, height: rotationHeight },
+            reference_image: {
+                image: { base64: `data:image/png;base64,${base64Image}` },
+                width: rotationWidth,
+                height: rotationHeight,
+            },
+            description,
+            view: "high top-down",
+            no_background: true,
+        }, 180000); // 3 minute timeout for rotation generation
+        if (!rotateResponse.ok) {
+            const errText = await rotateResponse.text();
+            throw new Error(`Rotation generation failed: ${rotateResponse.status} - ${errText}`);
+        }
+        const rotateData = await rotateResponse.json();
+        // The API returns 8 images in order: south, south-west, west, north-west, north, north-east, east, south-east
+        const allImages = rotateData.images;
+        if (!allImages || allImages.length < 8) {
+            throw new Error(`Expected 8 rotation images, got ${(allImages === null || allImages === void 0 ? void 0 : allImages.length) || 0}`);
+        }
+        console.log(`[${jobId}] Got 8 rotations, extracting 4 cardinal directions...`);
+        // Step 4: Upload only 4 cardinal directions (indices 0, 2, 4, 6)
         await jobRef.update({
-            currentPhase: "downloading image",
+            currentPhase: "uploading rotations",
             progress: 2,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        // Fetch from the MCP endpoint which provides the PNG directly
-        const mcpDownloadUrl = `https://api.pixellab.ai/mcp/map-objects/${pixellabObjectId}/download`;
-        console.log(`[${jobId}] Fetching from MCP: ${mcpDownloadUrl}`);
-        const pngResponse = await fetchWithTimeout(mcpDownloadUrl, {
-            headers: { "Authorization": `Bearer ${apiKey}` }
-        }, 60000);
-        if (!pngResponse.ok) {
-            throw new Error(`Failed to fetch map object PNG: ${pngResponse.status}`);
+        const rotationUrls = { south: southUrl };
+        // Map direction names to indices in the 8-rotation array
+        const directionIndices = {
+            south: 0,
+            west: 2,
+            north: 4,
+            east: 6,
+        };
+        // Upload west, north, east (skip south - already uploaded from bitforge)
+        for (const direction of OBJECT_DIRECTIONS) {
+            if (direction === "south")
+                continue; // Already uploaded from bitforge
+            const idx = directionIndices[direction];
+            const imgData = allImages[idx];
+            const imgBase64 = imgData.base64;
+            if (!imgBase64) {
+                console.warn(`[${jobId}] No base64 for direction ${direction}`);
+                continue;
+            }
+            const storagePath = `${baseStoragePath}/${direction}.png`;
+            const file = bucket.file(storagePath);
+            const buffer = Buffer.from(imgBase64, "base64");
+            await file.save(buffer, {
+                metadata: { contentType: "image/png" },
+            });
+            await file.makePublic();
+            const publicUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+            rotationUrls[direction] = publicUrl;
+            console.log(`[${jobId}] Uploaded ${direction}: ${publicUrl}`);
         }
-        const pngBuffer = Buffer.from(await pngResponse.arrayBuffer());
-        console.log(`[${jobId}] Fetched PNG: ${pngBuffer.length} bytes`);
-        // Step 4: Upload to Firebase Storage
+        // Step 4: Save metadata.json
         await jobRef.update({
-            currentPhase: "uploading to storage",
-            progress: 3,
+            currentPhase: "saving metadata",
+            progress: 5,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        const bucket = storage.bucket();
-        const file = bucket.file(storagePath);
-        await file.save(pngBuffer, {
-            metadata: { contentType: "image/png" },
-        });
-        await file.makePublic();
-        const resultUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
-        console.log(`[${jobId}] Uploaded map object: ${resultUrl}`);
-        // Save metadata.json
         const metadataFile = bucket.file(metadataPath);
         const objectMetadata = {
             id: objectId,
             description,
-            width,
-            height,
+            width: clampedWidth,
+            height: clampedHeight,
+            rotations: rotationUrls,
             createdAt: new Date().toISOString(),
         };
         await metadataFile.save(JSON.stringify(objectMetadata, null, 2), {
@@ -1152,15 +1210,16 @@ async function processMapObjectJob(jobId, description, userUid, objectId, width,
         });
         await metadataFile.makePublic();
         console.log(`[${jobId}] Metadata saved to ${metadataPath}`);
-        // Complete
+        // Complete - rotations are now ready
         await jobRef.update({
             status: "complete",
-            imageUrl: resultUrl,
+            rotations: rotationUrls,
+            rotationsReady: true,
             currentPhase: null,
-            progress: 4,
+            progress: 6,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        console.log(`[${jobId}] Map object complete!`);
+        console.log(`[${jobId}] Map object complete with 4 rotations!`);
     }
     catch (error) {
         const errMsg = error instanceof Error ? error.message : "Unknown error";

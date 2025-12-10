@@ -287,6 +287,203 @@ export const ghostEffect: PostEffect = (canvas, ctx, options) => {
 };
 
 // ============================================================================
+// BACKGROUND REMOVAL
+// ============================================================================
+
+/**
+ * Calculate color distance between two RGB colors
+ */
+function colorDistance(r1: number, g1: number, b1: number, r2: number, g2: number, b2: number): number {
+    return Math.sqrt(
+        Math.pow(r1 - r2, 2) +
+        Math.pow(g1 - g2, 2) +
+        Math.pow(b1 - b2, 2)
+    );
+}
+
+/**
+ * Detect background color by sampling corners and edges
+ * Returns the most common color found in edge regions
+ */
+export function detectBackgroundColor(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number
+): { r: number; g: number; b: number } | null {
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+
+    // Sample pixels from corners and edges
+    const sampleSize = Math.min(10, Math.floor(Math.min(width, height) / 4));
+    const samples: Array<{ r: number; g: number; b: number }> = [];
+
+    // Sample from corners
+    const corners = [
+        { x: 0, y: 0 },                    // top-left
+        { x: width - 1, y: 0 },            // top-right
+        { x: 0, y: height - 1 },           // bottom-left
+        { x: width - 1, y: height - 1 }    // bottom-right
+    ];
+
+    for (const corner of corners) {
+        for (let dy = 0; dy < sampleSize; dy++) {
+            for (let dx = 0; dx < sampleSize; dx++) {
+                const x = Math.min(Math.max(corner.x + (corner.x === 0 ? dx : -dx), 0), width - 1);
+                const y = Math.min(Math.max(corner.y + (corner.y === 0 ? dy : -dy), 0), height - 1);
+                const idx = (y * width + x) * 4;
+                const alpha = data[idx + 3];
+
+                // Only sample opaque pixels
+                if (alpha > 200) {
+                    samples.push({
+                        r: data[idx],
+                        g: data[idx + 1],
+                        b: data[idx + 2]
+                    });
+                }
+            }
+        }
+    }
+
+    if (samples.length === 0) return null;
+
+    // Find the most common color (clustering by similarity)
+    const colorCounts = new Map<string, { count: number; r: number; g: number; b: number }>();
+    const tolerance = 30; // Colors within this distance are considered the same
+
+    for (const sample of samples) {
+        let foundMatch = false;
+        for (const [key, value] of colorCounts) {
+            if (colorDistance(sample.r, sample.g, sample.b, value.r, value.g, value.b) < tolerance) {
+                value.count++;
+                foundMatch = true;
+                break;
+            }
+        }
+        if (!foundMatch) {
+            const key = `${sample.r},${sample.g},${sample.b}`;
+            colorCounts.set(key, { count: 1, ...sample });
+        }
+    }
+
+    // Return the most common color
+    let maxCount = 0;
+    let bgColor: { r: number; g: number; b: number } | null = null;
+
+    for (const value of colorCounts.values()) {
+        if (value.count > maxCount) {
+            maxCount = value.count;
+            bgColor = { r: value.r, g: value.g, b: value.b };
+        }
+    }
+
+    return bgColor;
+}
+
+/**
+ * Remove background color from image, making it transparent
+ * Uses flood-fill from edges to only remove connected background regions
+ *
+ * @param imageUrl - Source image URL
+ * @param tolerance - Color distance tolerance (default: 40)
+ * @param edgeOnly - If true, only remove background connected to edges (flood-fill)
+ */
+export async function removeBackground(
+    imageUrl: string,
+    tolerance: number = 40,
+    edgeOnly: boolean = true
+): Promise<string> {
+    const img = await loadImage(imageUrl);
+    const { canvas, ctx } = imageToCanvas(img);
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Detect background color
+    const bgColor = detectBackgroundColor(ctx, width, height);
+    if (!bgColor) {
+        return canvas.toDataURL('image/png');
+    }
+
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+
+    if (edgeOnly) {
+        // Flood-fill from edges - only remove background connected to borders
+        const visited = new Set<number>();
+        const toProcess: Array<{ x: number; y: number }> = [];
+
+        // Add all edge pixels to processing queue
+        for (let x = 0; x < width; x++) {
+            toProcess.push({ x, y: 0 });
+            toProcess.push({ x, y: height - 1 });
+        }
+        for (let y = 0; y < height; y++) {
+            toProcess.push({ x: 0, y });
+            toProcess.push({ x: width - 1, y });
+        }
+
+        while (toProcess.length > 0) {
+            const { x, y } = toProcess.pop()!;
+            const key = y * width + x;
+
+            if (visited.has(key)) continue;
+            if (x < 0 || x >= width || y < 0 || y >= height) continue;
+
+            visited.add(key);
+
+            const idx = key * 4;
+            const r = data[idx];
+            const g = data[idx + 1];
+            const b = data[idx + 2];
+            const a = data[idx + 3];
+
+            // Check if this pixel matches background color
+            if (a > 10 && colorDistance(r, g, b, bgColor.r, bgColor.g, bgColor.b) < tolerance) {
+                // Make transparent
+                data[idx + 3] = 0;
+
+                // Add neighbors to queue
+                toProcess.push({ x: x - 1, y });
+                toProcess.push({ x: x + 1, y });
+                toProcess.push({ x, y: y - 1 });
+                toProcess.push({ x, y: y + 1 });
+            }
+        }
+    } else {
+        // Simple threshold - remove all pixels matching background color
+        for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+
+            if (colorDistance(r, g, b, bgColor.r, bgColor.g, bgColor.b) < tolerance) {
+                data[i + 3] = 0; // Make transparent
+            }
+        }
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+    return canvas.toDataURL('image/png');
+}
+
+/**
+ * Remove background and crop to content
+ * Combines removeBackground + cropAndFit for full cleanup
+ */
+export async function removeBackgroundAndFit(
+    imageUrl: string,
+    targetWidth: number,
+    targetHeight: number,
+    tolerance: number = 40
+): Promise<CropFitResult> {
+    // First remove background
+    const cleanedUrl = await removeBackground(imageUrl, tolerance, true);
+
+    // Then crop and fit
+    return cropAndFit(cleanedUrl, targetWidth, targetHeight);
+}
+
+// ============================================================================
 // GEOMETRY EFFECTS
 // ============================================================================
 

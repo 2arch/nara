@@ -1728,7 +1728,7 @@ export function useWorldEngine({
     const lastEscTimeRef = useRef<number | null>(null);
     const [lastEnterX, setLastEnterX] = useState<number | null>(null); // Track X position from last Enter
 
-    // UI pack toggle guard - prevents double-toggle from touch+click events
+    // Pack toggle guard - prevents double-toggle from touch+click events (all packs, not just UI)
     const uiPackToggleTimeRef = useRef<number>(0);
 
     // Host dialogue handler ref
@@ -3456,6 +3456,28 @@ export function useWorldEngine({
                     }
                 } catch (e) {
                     // Skip invalid note data
+                }
+            }
+        }
+        return null;
+    };
+
+    // Helper function to find object containing a point
+    const findObjectContainingPoint = (x: number, y: number, currentWorldData: WorldData): { key: string; data: any } | null => {
+        for (const key in currentWorldData) {
+            if (key.startsWith('object_')) {
+                try {
+                    const objectData = typeof currentWorldData[key] === 'string'
+                        ? JSON.parse(currentWorldData[key] as string)
+                        : currentWorldData[key];
+
+                    // Check if point is inside this object
+                    if (x >= objectData.startX && x <= objectData.endX &&
+                        y >= objectData.startY && y <= objectData.endY) {
+                        return { key, data: objectData };
+                    }
+                } catch (e) {
+                    // Skip invalid object data
                 }
             }
         }
@@ -6164,7 +6186,58 @@ export function useWorldEngine({
                     }
 
                     if (!normalized) {
-                        // No selection or note - check if we're instantiating an existing pack by name
+                        // No selection or note - check if cursor is over an object to assign a pack to it
+                        const cmdPos = exec.commandStartPos;
+                        const objectAtCursor = findObjectContainingPoint(cmdPos.x, cmdPos.y, worldData);
+
+                        if (objectAtCursor && exec.args.length >= 1) {
+                            // Assigning a pack to an object
+                            const searchName = exec.args.join(' ').toLowerCase();
+                            let foundPack: { key: string; data: any } | null = null;
+
+                            // Search for pack chip with matching text
+                            for (const key in worldData) {
+                                if (key.startsWith('chip_')) {
+                                    try {
+                                        const chipData = JSON.parse(worldData[key] as string);
+                                        if (chipData.type === 'pack' && chipData.text &&
+                                            chipData.text.toLowerCase() === searchName) {
+                                            foundPack = { key, data: chipData };
+                                            break;
+                                        }
+                                    } catch {}
+                                }
+                            }
+
+                            if (foundPack) {
+                                // Assign the pack to this object
+                                // Store pack reference and pack data for toggle behavior
+                                const updatedObjectData = {
+                                    ...objectAtCursor.data,
+                                    assignedPack: foundPack.data.text, // Store pack name for reference
+                                    packData: foundPack.data.packedData, // Store packed cell data
+                                    packEntities: foundPack.data.packedEntities, // Store packed entities
+                                    packExpandedBounds: foundPack.data.expandedBounds, // Store original expanded bounds
+                                    packExpandMode: foundPack.data.expandMode || 'default', // Store expand mode
+                                    packColor: foundPack.data.color, // Store pack color
+                                    collapsed: true, // Start collapsed (showing object image)
+                                    timestamp: Date.now()
+                                };
+
+                                setWorldData(prev => ({
+                                    ...prev,
+                                    [objectAtCursor.key]: JSON.stringify(updatedObjectData)
+                                }));
+
+                                setDialogueWithRevert(`Pack "${foundPack.data.text}" assigned to object. Click object to expand.`, setDialogueText);
+                                return true;
+                            } else {
+                                setDialogueWithRevert(`Pack "${searchName}" not found`, setDialogueText);
+                                return true;
+                            }
+                        }
+
+                        // No object either - check if we're instantiating an existing pack by name
                         if (exec.args.length >= 1) {
                             const searchName = exec.args.join(' ').toLowerCase();
                             let foundPack: { key: string; data: any } | null = null;
@@ -6185,7 +6258,6 @@ export function useWorldEngine({
 
                             if (foundPack) {
                                 // Create a copy of this pack at cursor position
-                                const cmdPos = exec.commandStartPos;
                                 const newChipKey = `chip_${cmdPos.x},${cmdPos.y}_${Date.now()}`;
 
                                 // Calculate offset from original pack position
@@ -12759,15 +12831,13 @@ export function useWorldEngine({
                             const isCurrentlyCollapsed = chipData.collapsed || false;
                             const isUiMode = chipData.expandMode === 'ui';
 
-                            // Guard against double-toggle from touch+click events on UI packs
-                            if (isUiMode) {
-                                const now = Date.now();
-                                if (now - uiPackToggleTimeRef.current < 500) {
-                                    // Too soon after last toggle, ignore this click
-                                    return;
-                                }
-                                uiPackToggleTimeRef.current = now;
+                            // Guard against double-toggle from touch+click events (applies to ALL packs)
+                            const now = Date.now();
+                            if (now - uiPackToggleTimeRef.current < 500) {
+                                // Too soon after last toggle, ignore this click
+                                return;
                             }
+                            uiPackToggleTimeRef.current = now;
 
                             // Calculate new bounds based on toggle state
                             let newBounds;
@@ -12930,6 +13000,207 @@ export function useWorldEngine({
                     }
                 } catch (e) {
                     // Skip invalid chip data
+                }
+            }
+        }
+
+        // === Click Object with Assigned Pack ===
+        // Check if clicked on an object that has an assigned pack (toggle like pack)
+        for (const key in worldData) {
+            if (key.startsWith('object_')) {
+                try {
+                    const objectData = JSON.parse(worldData[key] as string);
+
+                    // Only handle objects with assigned packs
+                    if (!objectData.assignedPack) continue;
+
+                    const { startX, endX, startY, endY } = objectData;
+
+                    // Check if click is within object bounds
+                    if (newCursorPos.x >= startX && newCursorPos.x <= endX &&
+                        newCursorPos.y >= startY && newCursorPos.y <= endY) {
+
+                        const isCurrentlyCollapsed = objectData.collapsed !== false; // Default to collapsed
+                        const isUiMode = objectData.packExpandMode === 'ui';
+
+                        // Guard against double-toggle from touch+click events (applies to ALL object packs)
+                        const now = Date.now();
+                        if (now - uiPackToggleTimeRef.current < 500) {
+                            return;
+                        }
+                        uiPackToggleTimeRef.current = now;
+
+                        // Calculate new bounds based on toggle state
+                        let newBounds;
+                        const originalObjectBounds = {
+                            startX: objectData.originalStartX ?? startX,
+                            endX: objectData.originalEndX ?? endX,
+                            startY: objectData.originalStartY ?? startY,
+                            endY: objectData.originalEndY ?? endY
+                        };
+
+                        if (!isCurrentlyCollapsed) {
+                            // Collapsing: shrink back to original object size
+                            newBounds = originalObjectBounds;
+
+                            // If UI mode, exit bounded editing mode and re-pack the content
+                            if (isUiMode && objectData.packExpandedBounds) {
+                                const eb = objectData.packExpandedBounds;
+
+                                // Capture content from boundedWorldData back into packData
+                                const newPackedData: Record<string, string> = {};
+                                if (boundedWorldData) {
+                                    for (const coordKey in boundedWorldData) {
+                                        const [xStr, yStr] = coordKey.split(',');
+                                        const absX = parseInt(xStr, 10);
+                                        const absY = parseInt(yStr, 10);
+                                        // Only capture cells within the expanded bounds
+                                        if (absX >= eb.startX && absX <= eb.endX &&
+                                            absY >= eb.startY && absY <= eb.endY) {
+                                            const relX = absX - eb.startX;
+                                            const relY = absY - eb.startY;
+                                            const val = boundedWorldData[coordKey];
+                                            newPackedData[`${relX},${relY}`] = typeof val === 'string' ? val : JSON.stringify(val);
+                                        }
+                                    }
+                                }
+
+                                objectData.packData = newPackedData;
+
+                                // Exit bounded mode
+                                setCurrentBounds(undefined);
+                                setCanvasState(0);
+                                setBoundedWorldData({});
+                                setBoundedSource(null);
+                            }
+                        } else {
+                            // Expanding: grow to pack's expanded bounds (offset to object position)
+                            const packBounds = objectData.packExpandedBounds;
+                            if (packBounds) {
+                                // Calculate the pack bounds relative to object position
+                                const packWidth = packBounds.endX - packBounds.startX;
+                                const packHeight = packBounds.endY - packBounds.startY;
+                                newBounds = {
+                                    startX: startX,
+                                    endX: startX + packWidth,
+                                    startY: startY,
+                                    endY: startY + packHeight
+                                };
+                            } else {
+                                newBounds = { startX, endX, startY, endY };
+                            }
+
+                            // Store original object bounds if not already stored
+                            if (objectData.originalStartX === undefined) {
+                                objectData.originalStartX = startX;
+                                objectData.originalEndX = endX;
+                                objectData.originalStartY = startY;
+                                objectData.originalEndY = endY;
+                            }
+
+                            // If UI mode, enter bounded editing mode
+                            if (isUiMode && objectData.packExpandedBounds) {
+                                const eb = newBounds;
+
+                                // Convert pack's relative packData to absolute coords for boundedWorldData
+                                const boundedData: Record<string, any> = {};
+
+                                if (objectData.packData) {
+                                    for (const relKey in objectData.packData) {
+                                        const [relXStr, relYStr] = relKey.split(',');
+                                        const relX = parseInt(relXStr, 10);
+                                        const relY = parseInt(relYStr, 10);
+                                        const absX = eb.startX + relX;
+                                        const absY = eb.startY + relY;
+                                        boundedData[`${absX},${absY}`] = objectData.packData[relKey];
+                                    }
+                                }
+
+                                // Also extract content from packed entities
+                                if (objectData.packEntities) {
+                                    for (const entityKey in objectData.packEntities) {
+                                        if (entityKey.startsWith('note_')) {
+                                            try {
+                                                const noteData = JSON.parse(objectData.packEntities[entityKey]);
+                                                if (noteData.data) {
+                                                    for (const cellKey in noteData.data) {
+                                                        const [relXStr, relYStr] = cellKey.split(',');
+                                                        const relX = parseInt(relXStr, 10);
+                                                        const relY = parseInt(relYStr, 10);
+                                                        const absX = eb.startX + noteData.startX + relX;
+                                                        const absY = eb.startY + noteData.startY + relY;
+                                                        boundedData[`${absX},${absY}`] = noteData.data[cellKey];
+                                                    }
+                                                }
+                                            } catch (e) {
+                                                // Skip invalid note data
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Set up bounded editing mode
+                                setCurrentBounds({
+                                    minX: eb.startX,
+                                    minY: eb.startY,
+                                    maxX: eb.endX + 1,
+                                    maxY: eb.endY + 1
+                                });
+                                setBoundedWorldData(boundedData);
+                                setCanvasState(1);
+                                setBoundedSource({
+                                    type: 'note',
+                                    noteKey: key,
+                                    originalBounds: {
+                                        minX: eb.startX,
+                                        minY: eb.startY,
+                                        maxX: eb.endX,
+                                        maxY: eb.endY
+                                    },
+                                    boundedMinX: eb.startX,
+                                    boundedMinY: eb.startY
+                                });
+
+                                // Center viewport on the bound
+                                if (typeof window !== 'undefined') {
+                                    const { width: effectiveCharWidth, height: effectiveCharHeight } = getEffectiveCharDims(zoomLevel);
+                                    if (effectiveCharWidth > 0 && effectiveCharHeight > 0) {
+                                        const viewportCharWidth = window.innerWidth / effectiveCharWidth;
+                                        const viewportCharHeight = window.innerHeight / effectiveCharHeight;
+                                        const centerX = (eb.startX + eb.endX) / 2;
+                                        const centerY = (eb.startY + eb.endY) / 2;
+                                        setViewOffset({
+                                            x: centerX - viewportCharWidth / 2,
+                                            y: centerY - viewportCharHeight / 2
+                                        });
+                                    }
+                                }
+                            }
+                        }
+
+                        const updatedObjectData = {
+                            ...objectData,
+                            collapsed: !isCurrentlyCollapsed,
+                            startX: newBounds.startX,
+                            endX: newBounds.endX,
+                            startY: newBounds.startY,
+                            endY: newBounds.endY
+                        };
+
+                        setWorldData(prev => ({
+                            ...prev,
+                            [key]: JSON.stringify(updatedObjectData)
+                        }));
+
+                        const modeText = isUiMode ? ' (UI mode)' : '';
+                        setDialogueWithRevert(
+                            !isCurrentlyCollapsed ? `Object pack collapsed${modeText}` : `Object pack expanded${modeText}`,
+                            setDialogueText
+                        );
+                        return;
+                    }
+                } catch (e) {
+                    // Skip invalid object data
                 }
             }
         }

@@ -6866,7 +6866,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             try {
                 const objectData = JSON.parse(engine.worldData[key] as string);
 
-                if (objectData.type === 'object' && objectData.imageUrl) {
+                if (objectData.type === 'object') {
                     const objStartX = objectData.startX;
                     const objStartY = objectData.startY;
                     const objEndX = objectData.endX;
@@ -6876,30 +6876,134 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     if (objEndX >= startWorldX - 5 && objStartX <= endWorldX + 5 &&
                         objEndY >= startWorldY - 5 && objStartY <= endWorldY + 5) {
 
-                        const screenPos = engine.worldToScreen(objStartX, objStartY, currentZoom, currentOffset);
+                        // Check if this object has an assigned pack and is expanded
+                        if (objectData.assignedPack && objectData.collapsed === false) {
+                            // Object is expanded - render pack content instead of image
+                            const packColor = objectData.packColor || engine.textColor;
 
-                        // Calculate object dimensions in screen pixels
-                        const widthCells = objEndX - objStartX + 1;
-                        const heightCells = objEndY - objStartY + 1;
-                        const screenWidth = widthCells * effectiveCharWidth;
-                        const screenHeight = heightCells * effectiveCharHeight;
+                            // Render packed cell data from packData (relative coordinates)
+                            if (objectData.packData) {
+                                for (const [relativeKey, cellData] of Object.entries(objectData.packData)) {
+                                    const [relXStr, relYStr] = relativeKey.split(',');
+                                    const relativeX = parseInt(relXStr, 10);
+                                    const relativeY = parseInt(relYStr, 10);
 
-                        const img = imageCache.current.get(objectData.imageUrl);
-                        if (img && img.complete && img.naturalWidth > 0) {
-                            // Draw the object image scaled to fit its cell bounds
-                            ctx.drawImage(img, screenPos.x, screenPos.y, screenWidth, screenHeight);
-                        } else if (!imageCache.current.has(objectData.imageUrl)) {
-                            // Load image
-                            const newImg = new Image();
-                            newImg.crossOrigin = "Anonymous";
-                            newImg.src = objectData.imageUrl;
-                            newImg.onload = () => {
-                                // Trigger re-render when image loads
-                                requestAnimationFrame(() => {});
-                            };
-                            imageCache.current.set(objectData.imageUrl, newImg);
+                                    const worldX = objStartX + relativeX;
+                                    const worldY = objStartY + relativeY;
+
+                                    if (worldX >= startWorldX - 5 && worldX <= endWorldX + 5 &&
+                                        worldY >= startWorldY - 5 && worldY <= endWorldY + 5) {
+
+                                        // Get scale for this character
+                                        const scale = getCharScale(cellData as any);
+
+                                        const screenPos = engine.worldToScreen(worldX, worldY - (scale.h - 1), currentZoom, currentOffset);
+
+                                        if (screenPos.x > -effectiveCharWidth * 2 && screenPos.x < cssWidth + effectiveCharWidth &&
+                                            screenPos.y > -effectiveCharHeight * 2 && screenPos.y < cssHeight + effectiveCharHeight) {
+                                            // Render character from packed data
+                                            const char = engine.getCharacter(cellData as string);
+                                            if (char && char.trim() !== '') {
+                                                ctx.fillStyle = engine.textColor;
+                                                const sx = scale.w;
+                                                const sy = scale.h / 2;
+                                                renderText(ctx, char, screenPos.x, screenPos.y + verticalTextOffset, sx, sy);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Render packed entities (notes, chips) with relative coordinates converted to absolute
+                            if (objectData.packEntities) {
+                                for (const [entityKey, entityValue] of Object.entries(objectData.packEntities)) {
+                                    try {
+                                        const relativeEntity = JSON.parse(entityValue as string);
+                                        // Convert relative coordinates to absolute for rendering
+                                        const absoluteStartX = objStartX + relativeEntity.startX;
+                                        const absoluteStartY = objStartY + relativeEntity.startY;
+
+                                        // Render note data if it exists
+                                        if (entityKey.startsWith('note_') && relativeEntity.data) {
+                                            for (const [relKey, noteCell] of Object.entries(relativeEntity.data)) {
+                                                const [nRelXStr, nRelYStr] = relKey.split(',');
+                                                const noteRelX = parseInt(nRelXStr, 10);
+                                                const noteRelY = parseInt(nRelYStr, 10);
+
+                                                const noteWorldX = absoluteStartX + noteRelX;
+                                                const noteWorldY = absoluteStartY + noteRelY;
+
+                                                if (noteWorldX >= startWorldX - 5 && noteWorldX <= endWorldX + 5 &&
+                                                    noteWorldY >= startWorldY - 5 && noteWorldY <= endWorldY + 5) {
+                                                    const noteScreenPos = engine.worldToScreen(noteWorldX, noteWorldY, currentZoom, currentOffset);
+
+                                                    if (noteScreenPos.x > -effectiveCharWidth * 2 && noteScreenPos.x < cssWidth + effectiveCharWidth &&
+                                                        noteScreenPos.y > -effectiveCharHeight * 2 && noteScreenPos.y < cssHeight + effectiveCharHeight) {
+                                                        const char = engine.getCharacter(noteCell as string);
+                                                        if (char && char.trim() !== '') {
+                                                            ctx.fillStyle = engine.textColor;
+                                                            ctx.fillText(char, noteScreenPos.x, noteScreenPos.y + verticalTextOffset);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } catch (e) {
+                                        // Skip invalid entity data
+                                    }
+                                }
+                            }
+
+                            // Show border outline and subtle background tint when expanded
+                            const topLeftScreen = engine.worldToScreen(objStartX, objStartY - 1, currentZoom, currentOffset);
+                            const bottomRightScreen = engine.worldToScreen(objEndX, objEndY, currentZoom, currentOffset);
+
+                            const width = bottomRightScreen.x - topLeftScreen.x + effectiveCharWidth;
+                            const height = bottomRightScreen.y - topLeftScreen.y + effectiveCharHeight;
+
+                            ctx.strokeStyle = packColor;
+                            ctx.lineWidth = 1;
+                            ctx.strokeRect(topLeftScreen.x, topLeftScreen.y, width, height);
+
+                            // Show subtle background tint when expanded
+                            for (let y = objStartY; y <= objEndY; y += GRID_CELL_SPAN) {
+                                for (let x = objStartX; x <= objEndX; x++) {
+                                    const bottomScreenPos = engine.worldToScreen(x, y, currentZoom, currentOffset);
+                                    const topScreenPos = engine.worldToScreen(x, y - 1, currentZoom, currentOffset);
+                                    if (bottomScreenPos.x > -effectiveCharWidth * 2 && bottomScreenPos.x < cssWidth + effectiveCharWidth &&
+                                        topScreenPos.y > -effectiveCharHeight * 2 && bottomScreenPos.y < cssHeight + effectiveCharHeight) {
+                                        // Use subtle opacity for background tint
+                                        ctx.fillStyle = packColor + '22'; // 22 = ~13% opacity
+                                        ctx.fillRect(topScreenPos.x, topScreenPos.y, effectiveCharWidth, effectiveCharHeight * GRID_CELL_SPAN);
+                                    }
+                                }
+                            }
+                        } else if (objectData.imageUrl) {
+                            // Object is collapsed or has no assigned pack - render image normally
+                            const screenPos = engine.worldToScreen(objStartX, objStartY, currentZoom, currentOffset);
+
+                            // Calculate object dimensions in screen pixels
+                            const widthCells = objEndX - objStartX + 1;
+                            const heightCells = objEndY - objStartY + 1;
+                            const screenWidth = widthCells * effectiveCharWidth;
+                            const screenHeight = heightCells * effectiveCharHeight;
+
+                            const img = imageCache.current.get(objectData.imageUrl);
+                            if (img && img.complete && img.naturalWidth > 0) {
+                                // Draw the object image scaled to fit its cell bounds
+                                ctx.drawImage(img, screenPos.x, screenPos.y, screenWidth, screenHeight);
+                            } else if (!imageCache.current.has(objectData.imageUrl)) {
+                                // Load image
+                                const newImg = new Image();
+                                newImg.crossOrigin = "Anonymous";
+                                newImg.src = objectData.imageUrl;
+                                newImg.onload = () => {
+                                    // Trigger re-render when image loads
+                                    requestAnimationFrame(() => {});
+                                };
+                                imageCache.current.set(objectData.imageUrl, newImg);
+                            }
                         }
-
                     }
                 }
             } catch (e) {
