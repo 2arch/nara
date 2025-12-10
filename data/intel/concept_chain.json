@@ -1,0 +1,4167 @@
+{
+  "metadata": {
+    "domain": "biotech",
+    "total_concepts": 319,
+    "total_connections": 318,
+    "explicit_relationships": 25,
+    "sequential_connections": 293,
+    "chunks_covered": 1
+  },
+  "nodes": [
+    {
+      "text": "Notion",
+      "entity_type": "company",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 0
+    },
+    {
+      "text": "bio-manufacturing",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 1
+    },
+    {
+      "text": "cellular automata",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 2
+    },
+    {
+      "text": "synthetic biology",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 3
+    },
+    {
+      "text": "biologically engineered organisms",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 4
+    },
+    {
+      "text": "materials and manufacturing",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 5
+    },
+    {
+      "text": "controlling manufacturing processes with biological compounds and processes",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 6
+    },
+    {
+      "text": "spider silk",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 7
+    },
+    {
+      "text": "energy-dense biofuels",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 8
+    },
+    {
+      "text": "lab-grown food",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 9
+    },
+    {
+      "text": "bioprinted human tissues",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 10
+    },
+    {
+      "text": "Biomaterials",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 11
+    },
+    {
+      "text": "dangerous and weaponizable properties",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 12
+    },
+    {
+      "text": "bioengineering in manufacturing",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 13
+    },
+    {
+      "text": "production of dangerous weapons",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 14
+    },
+    {
+      "text": "ethical concern",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 15
+    },
+    {
+      "text": "Enhance Transparency",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 16
+    },
+    {
+      "text": "Keep stakeholders in the loop",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 17
+    },
+    {
+      "text": "Week 1 Assignment",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 18
+    },
+    {
+      "text": "Week 2 Assignment",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 19
+    },
+    {
+      "text": "Colab",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 20
+    },
+    {
+      "text": "Opentrons library",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 21
+    },
+    {
+      "text": "automation tools",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 22
+    },
+    {
+      "text": "Post Lab Questions",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 23
+    },
+    {
+      "text": "final project",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 24
+    },
+    {
+      "text": "pseudocode",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 25
+    },
+    {
+      "text": "Python scripts",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 26
+    },
+    {
+      "text": "procedures",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 27
+    },
+    {
+      "text": "3D printed holders",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 28
+    },
+    {
+      "text": "biosynthesise a specific protein",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 29
+    },
+    {
+      "text": "high yield",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 30
+    },
+    {
+      "text": "maximize yield",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 31
+    },
+    {
+      "text": "production process",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 32
+    },
+    {
+      "text": "ferment",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 33
+    },
+    {
+      "text": "temperature",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 34
+    },
+    {
+      "text": "environment",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 35
+    },
+    {
+      "text": "harvest",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 36
+    },
+    {
+      "text": "autonomous artificial selection",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 37
+    },
+    {
+      "text": "breed a type of bacteria",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 38
+    },
+    {
+      "text": "produces the desired protein",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 39
+    },
+    {
+      "text": "application of automation tools",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 40
+    },
+    {
+      "text": "Cell-Free Protein Synthesis",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {
+        "_unused": "CFPS"
+      },
+      "position": 41
+    },
+    {
+      "text": "Flexibility & Control",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 42
+    },
+    {
+      "text": "No cell wall",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 43
+    },
+    {
+      "text": "keep cells alive",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 44
+    },
+    {
+      "text": "mess with the system",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 45
+    },
+    {
+      "text": "add or remove stuff",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 46
+    },
+    {
+      "text": "ions",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 47
+    },
+    {
+      "text": "chaperones",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 48
+    },
+    {
+      "text": "cofactors",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 49
+    },
+    {
+      "text": "Fast",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 50
+    },
+    {
+      "text": "wait for cells to grow",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 51
+    },
+    {
+      "text": "mix and go",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 52
+    },
+    {
+      "text": "better than in vivo",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 53
+    },
+    {
+      "text": "Zian",
+      "entity_type": "company",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 54
+    },
+    {
+      "text": "Alphafold 3",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 55
+    },
+    {
+      "text": "Boltz-1",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 56
+    },
+    {
+      "text": "Autodock Vina",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 57
+    },
+    {
+      "text": "LigandMPNN",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 58
+    },
+    {
+      "text": "Tensor-Mol RosettaFold",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 59
+    },
+    {
+      "text": "pipeline",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 60
+    },
+    {
+      "text": "folding",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 61
+    },
+    {
+      "text": "docked",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 62
+    },
+    {
+      "text": "sequences",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 63
+    },
+    {
+      "text": "protein",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 64
+    },
+    {
+      "text": "ligand",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 65
+    },
+    {
+      "text": "filtering for GC content",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 66
+    },
+    {
+      "text": "T7 promoter",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 67
+    },
+    {
+      "text": "His-tags",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 68
+    },
+    {
+      "text": "stop codon",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 69
+    },
+    {
+      "text": "fragments",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 70
+    },
+    {
+      "text": "fasta",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 71
+    },
+    {
+      "text": "control casein",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 72
+    },
+    {
+      "text": "mass spec",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 73
+    },
+    {
+      "text": "normal vs denatured eGFP spikes",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 74
+    },
+    {
+      "text": "spikes split by charge, salts, isotopes",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 75
+    },
+    {
+      "text": "monocharge m/z",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 76
+    },
+    {
+      "text": "folding algos",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 77
+    },
+    {
+      "text": "Casein",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 78
+    },
+    {
+      "text": "producing energy-dense biofuels",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 79
+    },
+    {
+      "text": "bioengineering as used in manufacturing",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 80
+    },
+    {
+      "text": "production of potentially dangerous weapons",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 81
+    },
+    {
+      "text": "Boolean array with dots arranged in the shape of a pi symbol",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 82
+    },
+    {
+      "text": "Cell-Free Protein Synthesis (CFPS)",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": null,
+      "position": 83
+    },
+    {
+      "text": "protein folding",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": null,
+      "position": 84
+    },
+    {
+      "text": "sequence generation pipeline",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": null,
+      "position": 85
+    },
+    {
+      "text": "docking",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": null,
+      "position": 86
+    },
+    {
+      "text": "casein folding",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": null,
+      "position": 87
+    },
+    {
+      "text": "capsaicin",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": null,
+      "position": 88
+    },
+    {
+      "text": "programming biology",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 89
+    },
+    {
+      "text": "GPU-accelerated tmol",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 90
+    },
+    {
+      "text": "Autodock",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 91
+    },
+    {
+      "text": "Alphafold",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 92
+    },
+    {
+      "text": "casein",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 93
+    },
+    {
+      "text": "pet-28a(+)",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 94
+    },
+    {
+      "text": "Nde1",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 95
+    },
+    {
+      "text": "Xho1",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 96
+    },
+    {
+      "text": "Waters data",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 97
+    },
+    {
+      "text": "eGFP",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 98
+    },
+    {
+      "text": "spikes",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 99
+    },
+    {
+      "text": "charge",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 100
+    },
+    {
+      "text": "salts",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 101
+    },
+    {
+      "text": "isotopes",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 102
+    },
+    {
+      "text": "JavaScript",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 103
+    },
+    {
+      "text": "Benchling & In-silico",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 104
+    },
+    {
+      "text": "restriction enzymes",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 105
+    },
+    {
+      "text": "Gel Art",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 106
+    },
+    {
+      "text": "agarose",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 107
+    },
+    {
+      "text": "microwave",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 108
+    },
+    {
+      "text": "electrophoresis comb",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 109
+    },
+    {
+      "text": "PCR",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 110
+    },
+    {
+      "text": "DNA",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 111
+    },
+    {
+      "text": "buffer",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 112
+    },
+    {
+      "text": "DNA ladder",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 113
+    },
+    {
+      "text": "UV florescence",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 114
+    },
+    {
+      "text": "DNA Design",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 115
+    },
+    {
+      "text": "GFP from jellyfish",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 116
+    },
+    {
+      "text": "Fasta for the protein",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 117
+    },
+    {
+      "text": "Aequorea victoria",
+      "entity_type": "company",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 118
+    },
+    {
+      "text": "Green fluorescent protein",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 119
+    },
+    {
+      "text": "Reverse translation",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 120
+    },
+    {
+      "text": "Codon optimization",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 121
+    },
+    {
+      "text": "GFP",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 122
+    },
+    {
+      "text": "hydrozoa",
+      "entity_type": "company",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 123
+    },
+    {
+      "text": "Hydra vulgaris",
+      "entity_type": "company",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 124
+    },
+    {
+      "text": "Production methods",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 125
+    },
+    {
+      "text": "Plasmid insertion into bacteria",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 126
+    },
+    {
+      "text": "Yeast/Mammalian cell insertion",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": null,
+      "position": 127
+    },
+    {
+      "text": "complex proteins",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": null,
+      "position": 128
+    },
+    {
+      "text": "Bacterial lysate",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": null,
+      "position": 129
+    },
+    {
+      "text": "tRNAs, enzymes, ribosomes",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": null,
+      "position": 130
+    },
+    {
+      "text": "E. coli",
+      "entity_type": "company",
+      "chunk_index": 0,
+      "attributes": null,
+      "position": 131
+    },
+    {
+      "text": "Wheat/Mammalian cell extracts",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": null,
+      "position": 132
+    },
+    {
+      "text": "beta-sheets aggregation",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 133
+    },
+    {
+      "text": "GFP, green fluorescent protein",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 134
+    },
+    {
+      "text": "hydrogen bonds",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 135
+    },
+    {
+      "text": "PDB file",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 136
+    },
+    {
+      "text": "Pymol",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 137
+    },
+    {
+      "text": "Structure with helices, sheets and loops",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 138
+    },
+    {
+      "text": "confidence",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 139
+    },
+    {
+      "text": "ProteinMPNN",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 140
+    },
+    {
+      "text": "SOD1 mutant amino acid sequence",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 141
+    },
+    {
+      "text": "PepMLM",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 142
+    },
+    {
+      "text": "Binder",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 143
+    },
+    {
+      "text": "Pseudo Perplexity",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 144
+    },
+    {
+      "text": "Known_Binder",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 145
+    },
+    {
+      "text": "alphafold2_multimer_v3",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 146
+    },
+    {
+      "text": "pLDDT",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 147
+    },
+    {
+      "text": "pTM",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 148
+    },
+    {
+      "text": "ipTM",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 149
+    },
+    {
+      "text": "protein structure prediction",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 150
+    },
+    {
+      "text": "AlphaFold2 Multimer v3",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 151
+    },
+    {
+      "text": "binder",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 152
+    },
+    {
+      "text": "Isothermal Pulse Titration Microcalorimetry",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 153
+    },
+    {
+      "text": "mutation",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 154
+    },
+    {
+      "text": "SOD1 protein",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 155
+    },
+    {
+      "text": "ALS",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 156
+    },
+    {
+      "text": "binders",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 157
+    },
+    {
+      "text": "Transmembrane amino acids",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 158
+    },
+    {
+      "text": "mutation suggestions",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 159
+    },
+    {
+      "text": "K50L",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {
+        "_unused": "Transmembrane"
+      },
+      "position": 160
+    },
+    {
+      "text": "charged lysine",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 161
+    },
+    {
+      "text": "hydrophobic leucine",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 162
+    },
+    {
+      "text": "lipid compatibility",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 163
+    },
+    {
+      "text": "pore formation",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 164
+    },
+    {
+      "text": "structure",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 165
+    },
+    {
+      "text": "Y39L",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {
+        "_unused": "Transmembrane"
+      },
+      "position": 166
+    },
+    {
+      "text": "tyrosine",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 167
+    },
+    {
+      "text": "transmembrane region",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 168
+    },
+    {
+      "text": "polar hydroxyl group",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 169
+    },
+    {
+      "text": "hydrophobicity",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 170
+    },
+    {
+      "text": "lipid bilayer",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 171
+    },
+    {
+      "text": "A45L",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {
+        "_unused": "Transmembrane"
+      },
+      "position": 172
+    },
+    {
+      "text": "Alanine",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 173
+    },
+    {
+      "text": "S9Q",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {
+        "_unused": "Soluble"
+      },
+      "position": 174
+    },
+    {
+      "text": "hydrophilic",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 175
+    },
+    {
+      "text": "mutation sequence",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 176
+    },
+    {
+      "text": "AlphaFold 2",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 177
+    },
+    {
+      "text": "channel folding behavior",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 178
+    },
+    {
+      "text": "channel structure",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 179
+    },
+    {
+      "text": "square or diamond shape",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 180
+    },
+    {
+      "text": "Csy4",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 181
+    },
+    {
+      "text": "CasErec_mNG",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 182
+    },
+    {
+      "text": "Pgu",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 183
+    },
+    {
+      "text": "mNG",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 184
+    },
+    {
+      "text": "CasE",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 185
+    },
+    {
+      "text": "Csy4rec_mNG",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 186
+    },
+    {
+      "text": "PguRec_mNG",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 187
+    },
+    {
+      "text": "imbalance",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 188
+    },
+    {
+      "text": "repression",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 189
+    },
+    {
+      "text": "expression",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 190
+    },
+    {
+      "text": "Opentrons",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 191
+    },
+    {
+      "text": "transfection",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 192
+    },
+    {
+      "text": "endoribonucleases (ERNs)",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 193
+    },
+    {
+      "text": "decrease protein levels",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 194
+    },
+    {
+      "text": "ERNs",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 195
+    },
+    {
+      "text": "cleaving specific RNA sequences",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 196
+    },
+    {
+      "text": "preventing protein synthesis",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 197
+    },
+    {
+      "text": "proteases",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 198
+    },
+    {
+      "text": "degrade existing proteins",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 199
+    },
+    {
+      "text": "Lipofectamine 3000",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 200
+    },
+    {
+      "text": "cationic liposomes",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 201
+    },
+    {
+      "text": "encapsulate DNA",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 202
+    },
+    {
+      "text": "fuse with cell membranes",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 203
+    },
+    {
+      "text": "facilitating endocytosis",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 204
+    },
+    {
+      "text": "DNA escapes the endosome",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 205
+    },
+    {
+      "text": "DNA enters the nucleus",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 206
+    },
+    {
+      "text": "DNA is expressed",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 207
+    },
+    {
+      "text": "poly-transfection",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 208
+    },
+    {
+      "text": "neuromorphic circuits",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 209
+    },
+    {
+      "text": "Poly-transfection",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 210
+    },
+    {
+      "text": "complex signal processing and computation",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 211
+    },
+    {
+      "text": "mimicking neural network behavior",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 212
+    },
+    {
+      "text": "sophisticated logic gates and response patterns",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 213
+    },
+    {
+      "text": "Streptomyces lincolnensis",
+      "entity_type": "company",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 214
+    },
+    {
+      "text": "lincomycin production",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 215
+    },
+    {
+      "text": "targeted enzyme engineering",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 216
+    },
+    {
+      "text": "antibiotic yield",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 217
+    },
+    {
+      "text": "stabilizing and overexpressing an enzyme",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 218
+    },
+    {
+      "text": "rate-limiting in lincomycin biosynthesis",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 219
+    },
+    {
+      "text": "LmbX",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 220
+    },
+    {
+      "text": "LmbU",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 221
+    },
+    {
+      "text": "biosynthetic pathway",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 222
+    },
+    {
+      "text": "penicillin",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 223
+    },
+    {
+      "text": "plasmid-based engineering",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 224
+    },
+    {
+      "text": "intergeneric conjugation",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 225
+    },
+    {
+      "text": "resistance markers",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 226
+    },
+    {
+      "text": "conjugation",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 227
+    },
+    {
+      "text": "CRISPR",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 228
+    },
+    {
+      "text": "lincomycin resistance",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 229
+    },
+    {
+      "text": "fermentation",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 230
+    },
+    {
+      "text": "production pipeline",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 231
+    },
+    {
+      "text": "metabolic engineering",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 232
+    },
+    {
+      "text": "antibiotic synthesis",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 233
+    },
+    {
+      "text": "DNA design",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 234
+    },
+    {
+      "text": "in silico",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 235
+    },
+    {
+      "text": "Key reagents, plasmids, and strains",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 236
+    },
+    {
+      "text": "Final Project Plan and Schedule",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 237
+    },
+    {
+      "text": "casein protein",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 238
+    },
+    {
+      "text": "bovine casein protein",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 239
+    },
+    {
+      "text": "computational protein design",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 240
+    },
+    {
+      "text": "AlphaFold3",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 241
+    },
+    {
+      "text": "Rosetta",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 242
+    },
+    {
+      "text": "docked protein-ligand complex",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 243
+    },
+    {
+      "text": "PDBQT",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 244
+    },
+    {
+      "text": "protein stability",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 245
+    },
+    {
+      "text": "ESM",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 246
+    },
+    {
+      "text": "Log-likelihood",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 247
+    },
+    {
+      "text": "AF3",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 248
+    },
+    {
+      "text": "shapes",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 249
+    },
+    {
+      "text": "binding poses",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 250
+    },
+    {
+      "text": "binding affinity",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 251
+    },
+    {
+      "text": "RMSD",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 252
+    },
+    {
+      "text": "binding pose",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 253
+    },
+    {
+      "text": "FabFlex",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 254
+    },
+    {
+      "text": "clonal genes",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 255
+    },
+    {
+      "text": "budget",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 256
+    },
+    {
+      "text": "Casein fragment",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 257
+    },
+    {
+      "text": "novel fragments",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 258
+    },
+    {
+      "text": "Expression & Purification Strategy",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 259
+    },
+    {
+      "text": "Vector",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 260
+    },
+    {
+      "text": "pET-28a(+)",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 261
+    },
+    {
+      "text": "NovoPro",
+      "entity_type": "company",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 262
+    },
+    {
+      "text": "inducible expression",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 263
+    },
+    {
+      "text": "promoter that we turn on",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 264
+    },
+    {
+      "text": "N-terminal 6\u00d7His-tag",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 265
+    },
+    {
+      "text": "purification",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 266
+    },
+    {
+      "text": "Ndel",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 267
+    },
+    {
+      "text": "ATG",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 268
+    },
+    {
+      "text": "XhoI",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 269
+    },
+    {
+      "text": "His-tag",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 270
+    },
+    {
+      "text": "clonal gene",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 271
+    },
+    {
+      "text": "Twist",
+      "entity_type": "company",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 272
+    },
+    {
+      "text": "Selection Marker",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 273
+    },
+    {
+      "text": "Kanamycin",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 274
+    },
+    {
+      "text": "Host Strain",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 275
+    },
+    {
+      "text": "BL21(DE3)",
+      "entity_type": "company",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 276
+    },
+    {
+      "text": "T7 RNA polymerase",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 277
+    },
+    {
+      "text": "pET-28a",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 278
+    },
+    {
+      "text": "gene expression",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 279
+    },
+    {
+      "text": "kanamycin induction",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 280
+    },
+    {
+      "text": "IPTG induction",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 281
+    },
+    {
+      "text": "lac repressor",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 282
+    },
+    {
+      "text": "lacUV5",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 283
+    },
+    {
+      "text": "nickel resin purification",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 284
+    },
+    {
+      "text": "His-tagged casein",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 285
+    },
+    {
+      "text": "Ni-NTA resin",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 286
+    },
+    {
+      "text": "imidazole",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 287
+    },
+    {
+      "text": "dialysis",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 288
+    },
+    {
+      "text": "10 kDa dialysis tube",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 289
+    },
+    {
+      "text": "assays to evaluate binding",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 290
+    },
+    {
+      "text": "Isothermal Titration Calorimetry (ITC)",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 291
+    },
+    {
+      "text": "quantify binding constant (Kd) and thermodynamics",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": null,
+      "position": 292
+    },
+    {
+      "text": "binding constant (Kd)",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 293
+    },
+    {
+      "text": "thermodynamics",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 294
+    },
+    {
+      "text": "WT casein",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 295
+    },
+    {
+      "text": "improved designs",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 296
+    },
+    {
+      "text": "Hydrophobic Dye Binding (ANS or Nile Red)",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": null,
+      "position": 297
+    },
+    {
+      "text": "Fluorescence increases upon dye binding to hydrophobic pockets",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": null,
+      "position": 298
+    },
+    {
+      "text": "hydrophobic pockets",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 299
+    },
+    {
+      "text": "Mutant",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 300
+    },
+    {
+      "text": "stronger signal",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 301
+    },
+    {
+      "text": "better capsaicin accommodation",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 302
+    },
+    {
+      "text": "Topical Skin Test (Functional)",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 303
+    },
+    {
+      "text": "skin",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 304
+    },
+    {
+      "text": "redness and discomfort",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 305
+    },
+    {
+      "text": "enhanced capsaicin capture",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 306
+    },
+    {
+      "text": "Gene synthesis",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {
+        "_unused": "codon-optimized for E. coli"
+      },
+      "position": 307
+    },
+    {
+      "text": "DNA synthesis",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 308
+    },
+    {
+      "text": "Fragments and primers",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 309
+    },
+    {
+      "text": "pET-28a(+) vector",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 310
+    },
+    {
+      "text": "BL21(DE3) competent cells",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 311
+    },
+    {
+      "text": "IPTG",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 312
+    },
+    {
+      "text": "ANS/Nile Red dye",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 313
+    },
+    {
+      "text": "Buffers and reagents for lysis, purification, ITC",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 314
+    },
+    {
+      "text": "engineered casein",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 315
+    },
+    {
+      "text": "Primers with NdeI/XhoI sites for cloning",
+      "entity_type": "technology",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 316
+    },
+    {
+      "text": "Computational filtering",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 317
+    },
+    {
+      "text": "lab notebook",
+      "entity_type": "concept",
+      "chunk_index": 0,
+      "attributes": {},
+      "position": 318
+    }
+  ],
+  "edges": [
+    {
+      "source": "Notion",
+      "target": "bio-manufacturing",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "bio-manufacturing",
+      "target": "cellular automata",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "cellular automata",
+      "target": "synthetic biology",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "synthetic biology",
+      "target": "biologically engineered organisms",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "biologically engineered organisms",
+      "target": "materials and manufacturing",
+      "relationship_type": "for",
+      "chunk_index": 0
+    },
+    {
+      "source": "materials and manufacturing",
+      "target": "controlling manufacturing processes with biological compounds and processes",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "controlling manufacturing processes with biological compounds and processes",
+      "target": "spider silk",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "spider silk",
+      "target": "energy-dense biofuels",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "energy-dense biofuels",
+      "target": "lab-grown food",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "lab-grown food",
+      "target": "bioprinted human tissues",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "bioprinted human tissues",
+      "target": "Biomaterials",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Biomaterials",
+      "target": "dangerous and weaponizable properties",
+      "relationship_type": "could have",
+      "chunk_index": 0
+    },
+    {
+      "source": "dangerous and weaponizable properties",
+      "target": "bioengineering in manufacturing",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "bioengineering in manufacturing",
+      "target": "production of dangerous weapons",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "production of dangerous weapons",
+      "target": "ethical concern",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "ethical concern",
+      "target": "Enhance Transparency",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Enhance Transparency",
+      "target": "Keep stakeholders in the loop",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Keep stakeholders in the loop",
+      "target": "Week 1 Assignment",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Week 1 Assignment",
+      "target": "Week 2 Assignment",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Week 2 Assignment",
+      "target": "Colab",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Colab",
+      "target": "Opentrons library",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Opentrons library",
+      "target": "automation tools",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "automation tools",
+      "target": "Post Lab Questions",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Post Lab Questions",
+      "target": "final project",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "final project",
+      "target": "pseudocode",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "pseudocode",
+      "target": "Python scripts",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Python scripts",
+      "target": "procedures",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "procedures",
+      "target": "3D printed holders",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "3D printed holders",
+      "target": "biosynthesise a specific protein",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "biosynthesise a specific protein",
+      "target": "high yield",
+      "relationship_type": "with",
+      "chunk_index": 0
+    },
+    {
+      "source": "high yield",
+      "target": "maximize yield",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "maximize yield",
+      "target": "production process",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "production process",
+      "target": "ferment",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "ferment",
+      "target": "temperature",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "temperature",
+      "target": "environment",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "environment",
+      "target": "harvest",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "harvest",
+      "target": "autonomous artificial selection",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "autonomous artificial selection",
+      "target": "breed a type of bacteria",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "breed a type of bacteria",
+      "target": "produces the desired protein",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "produces the desired protein",
+      "target": "application of automation tools",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "application of automation tools",
+      "target": "Cell-Free Protein Synthesis",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Cell-Free Protein Synthesis",
+      "target": "Flexibility & Control",
+      "relationship_type": "offers",
+      "chunk_index": 0
+    },
+    {
+      "source": "Flexibility & Control",
+      "target": "No cell wall",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "No cell wall",
+      "target": "keep cells alive",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "keep cells alive",
+      "target": "mess with the system",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "mess with the system",
+      "target": "add or remove stuff",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "add or remove stuff",
+      "target": "ions",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "ions",
+      "target": "chaperones",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "chaperones",
+      "target": "cofactors",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "cofactors",
+      "target": "Fast",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Fast",
+      "target": "wait for cells to grow",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "wait for cells to grow",
+      "target": "mix and go",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "mix and go",
+      "target": "better than in vivo",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "better than in vivo",
+      "target": "Zian",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Zian",
+      "target": "Alphafold 3",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Alphafold 3",
+      "target": "Boltz-1",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Boltz-1",
+      "target": "Autodock Vina",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Autodock Vina",
+      "target": "LigandMPNN",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "LigandMPNN",
+      "target": "Tensor-Mol RosettaFold",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Tensor-Mol RosettaFold",
+      "target": "pipeline",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "pipeline",
+      "target": "folding",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "folding",
+      "target": "docked",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "docked",
+      "target": "sequences",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "sequences",
+      "target": "protein",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "protein",
+      "target": "ligand",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "ligand",
+      "target": "filtering for GC content",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "filtering for GC content",
+      "target": "T7 promoter",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "T7 promoter",
+      "target": "His-tags",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "His-tags",
+      "target": "stop codon",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "stop codon",
+      "target": "fragments",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "fragments",
+      "target": "fasta",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "fasta",
+      "target": "control casein",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "control casein",
+      "target": "mass spec",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "mass spec",
+      "target": "normal vs denatured eGFP spikes",
+      "relationship_type": "used for",
+      "chunk_index": 0
+    },
+    {
+      "source": "normal vs denatured eGFP spikes",
+      "target": "spikes split by charge, salts, isotopes",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "spikes split by charge, salts, isotopes",
+      "target": "monocharge m/z",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "monocharge m/z",
+      "target": "folding algos",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "folding algos",
+      "target": "Casein",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Casein",
+      "target": "producing energy-dense biofuels",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "producing energy-dense biofuels",
+      "target": "bioengineering as used in manufacturing",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "bioengineering as used in manufacturing",
+      "target": "production of potentially dangerous weapons",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "production of potentially dangerous weapons",
+      "target": "Boolean array with dots arranged in the shape of a pi symbol",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Boolean array with dots arranged in the shape of a pi symbol",
+      "target": "Cell-Free Protein Synthesis (CFPS)",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Cell-Free Protein Synthesis (CFPS)",
+      "target": "protein folding",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "protein folding",
+      "target": "sequence generation pipeline",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "sequence generation pipeline",
+      "target": "docking",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "docking",
+      "target": "casein folding",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "casein folding",
+      "target": "capsaicin",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "capsaicin",
+      "target": "programming biology",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "programming biology",
+      "target": "GPU-accelerated tmol",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "GPU-accelerated tmol",
+      "target": "Autodock",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Autodock",
+      "target": "Alphafold",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Alphafold",
+      "target": "casein",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "casein",
+      "target": "pet-28a(+)",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "pet-28a(+)",
+      "target": "Nde1",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Nde1",
+      "target": "Xho1",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Xho1",
+      "target": "Waters data",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Waters data",
+      "target": "eGFP",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "eGFP",
+      "target": "spikes",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "spikes",
+      "target": "charge",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "charge",
+      "target": "salts",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "salts",
+      "target": "isotopes",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "isotopes",
+      "target": "JavaScript",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "JavaScript",
+      "target": "Benchling & In-silico",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Benchling & In-silico",
+      "target": "restriction enzymes",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "restriction enzymes",
+      "target": "Gel Art",
+      "relationship_type": "used in",
+      "chunk_index": 0
+    },
+    {
+      "source": "Gel Art",
+      "target": "agarose",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "agarose",
+      "target": "microwave",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "microwave",
+      "target": "electrophoresis comb",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "electrophoresis comb",
+      "target": "PCR",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "PCR",
+      "target": "DNA",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "DNA",
+      "target": "buffer",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "buffer",
+      "target": "DNA ladder",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "DNA ladder",
+      "target": "UV florescence",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "UV florescence",
+      "target": "DNA Design",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "DNA Design",
+      "target": "GFP from jellyfish",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "GFP from jellyfish",
+      "target": "Fasta for the protein",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Fasta for the protein",
+      "target": "Aequorea victoria",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Aequorea victoria",
+      "target": "Green fluorescent protein",
+      "relationship_type": "produces",
+      "chunk_index": 0
+    },
+    {
+      "source": "Green fluorescent protein",
+      "target": "Reverse translation",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Reverse translation",
+      "target": "Codon optimization",
+      "relationship_type": "relates to",
+      "chunk_index": 0
+    },
+    {
+      "source": "Codon optimization",
+      "target": "GFP",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "GFP",
+      "target": "hydrozoa",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "hydrozoa",
+      "target": "Hydra vulgaris",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Hydra vulgaris",
+      "target": "Production methods",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Production methods",
+      "target": "Plasmid insertion into bacteria",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Plasmid insertion into bacteria",
+      "target": "Yeast/Mammalian cell insertion",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Yeast/Mammalian cell insertion",
+      "target": "complex proteins",
+      "relationship_type": "for",
+      "chunk_index": 0
+    },
+    {
+      "source": "complex proteins",
+      "target": "Bacterial lysate",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Bacterial lysate",
+      "target": "tRNAs, enzymes, ribosomes",
+      "relationship_type": "containing",
+      "chunk_index": 0
+    },
+    {
+      "source": "tRNAs, enzymes, ribosomes",
+      "target": "E. coli",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "E. coli",
+      "target": "Wheat/Mammalian cell extracts",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Wheat/Mammalian cell extracts",
+      "target": "beta-sheets aggregation",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "beta-sheets aggregation",
+      "target": "GFP, green fluorescent protein",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "GFP, green fluorescent protein",
+      "target": "hydrogen bonds",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "hydrogen bonds",
+      "target": "PDB file",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "PDB file",
+      "target": "Pymol",
+      "relationship_type": "ported into",
+      "chunk_index": 0
+    },
+    {
+      "source": "Pymol",
+      "target": "Structure with helices, sheets and loops",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Structure with helices, sheets and loops",
+      "target": "confidence",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "confidence",
+      "target": "ProteinMPNN",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "ProteinMPNN",
+      "target": "SOD1 mutant amino acid sequence",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "SOD1 mutant amino acid sequence",
+      "target": "PepMLM",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "PepMLM",
+      "target": "Binder",
+      "relationship_type": "outputs",
+      "chunk_index": 0
+    },
+    {
+      "source": "Binder",
+      "target": "Pseudo Perplexity",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Pseudo Perplexity",
+      "target": "Known_Binder",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Known_Binder",
+      "target": "alphafold2_multimer_v3",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "alphafold2_multimer_v3",
+      "target": "pLDDT",
+      "relationship_type": "outputs",
+      "chunk_index": 0
+    },
+    {
+      "source": "pLDDT",
+      "target": "pTM",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "pTM",
+      "target": "ipTM",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "ipTM",
+      "target": "protein structure prediction",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "protein structure prediction",
+      "target": "AlphaFold2 Multimer v3",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "AlphaFold2 Multimer v3",
+      "target": "binder",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "binder",
+      "target": "Isothermal Pulse Titration Microcalorimetry",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Isothermal Pulse Titration Microcalorimetry",
+      "target": "mutation",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "mutation",
+      "target": "SOD1 protein",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "SOD1 protein",
+      "target": "ALS",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "ALS",
+      "target": "binders",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "binders",
+      "target": "Transmembrane amino acids",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Transmembrane amino acids",
+      "target": "mutation suggestions",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "mutation suggestions",
+      "target": "K50L",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "K50L",
+      "target": "charged lysine",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "charged lysine",
+      "target": "hydrophobic leucine",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "hydrophobic leucine",
+      "target": "lipid compatibility",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "lipid compatibility",
+      "target": "pore formation",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "pore formation",
+      "target": "structure",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "structure",
+      "target": "Y39L",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Y39L",
+      "target": "tyrosine",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "tyrosine",
+      "target": "transmembrane region",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "transmembrane region",
+      "target": "polar hydroxyl group",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "polar hydroxyl group",
+      "target": "hydrophobicity",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "hydrophobicity",
+      "target": "lipid bilayer",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "lipid bilayer",
+      "target": "A45L",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "A45L",
+      "target": "Alanine",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Alanine",
+      "target": "S9Q",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "S9Q",
+      "target": "hydrophilic",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "hydrophilic",
+      "target": "mutation sequence",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "mutation sequence",
+      "target": "AlphaFold 2",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "AlphaFold 2",
+      "target": "channel folding behavior",
+      "relationship_type": "predicts",
+      "chunk_index": 0
+    },
+    {
+      "source": "channel folding behavior",
+      "target": "channel structure",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "channel structure",
+      "target": "square or diamond shape",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "square or diamond shape",
+      "target": "Csy4",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Csy4",
+      "target": "CasErec_mNG",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "CasErec_mNG",
+      "target": "Pgu",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Pgu",
+      "target": "mNG",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "mNG",
+      "target": "CasE",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "CasE",
+      "target": "Csy4rec_mNG",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Csy4rec_mNG",
+      "target": "PguRec_mNG",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "PguRec_mNG",
+      "target": "imbalance",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "imbalance",
+      "target": "repression",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "repression",
+      "target": "expression",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "expression",
+      "target": "Opentrons",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Opentrons",
+      "target": "transfection",
+      "relationship_type": "performs",
+      "chunk_index": 0
+    },
+    {
+      "source": "transfection",
+      "target": "endoribonucleases (ERNs)",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "endoribonucleases (ERNs)",
+      "target": "decrease protein levels",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "decrease protein levels",
+      "target": "ERNs",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "ERNs",
+      "target": "cleaving specific RNA sequences",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "cleaving specific RNA sequences",
+      "target": "preventing protein synthesis",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "preventing protein synthesis",
+      "target": "proteases",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "proteases",
+      "target": "degrade existing proteins",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "degrade existing proteins",
+      "target": "Lipofectamine 3000",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Lipofectamine 3000",
+      "target": "cationic liposomes",
+      "relationship_type": "forms",
+      "chunk_index": 0
+    },
+    {
+      "source": "cationic liposomes",
+      "target": "encapsulate DNA",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "encapsulate DNA",
+      "target": "fuse with cell membranes",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "fuse with cell membranes",
+      "target": "facilitating endocytosis",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "facilitating endocytosis",
+      "target": "DNA escapes the endosome",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "DNA escapes the endosome",
+      "target": "DNA enters the nucleus",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "DNA enters the nucleus",
+      "target": "DNA is expressed",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "DNA is expressed",
+      "target": "poly-transfection",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "poly-transfection",
+      "target": "neuromorphic circuits",
+      "relationship_type": "is useful for building",
+      "chunk_index": 0
+    },
+    {
+      "source": "neuromorphic circuits",
+      "target": "Poly-transfection",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Poly-transfection",
+      "target": "complex signal processing and computation",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "complex signal processing and computation",
+      "target": "mimicking neural network behavior",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "mimicking neural network behavior",
+      "target": "sophisticated logic gates and response patterns",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "sophisticated logic gates and response patterns",
+      "target": "Streptomyces lincolnensis",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Streptomyces lincolnensis",
+      "target": "lincomycin production",
+      "relationship_type": "produces",
+      "chunk_index": 0
+    },
+    {
+      "source": "lincomycin production",
+      "target": "targeted enzyme engineering",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "targeted enzyme engineering",
+      "target": "antibiotic yield",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "antibiotic yield",
+      "target": "stabilizing and overexpressing an enzyme",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "stabilizing and overexpressing an enzyme",
+      "target": "rate-limiting in lincomycin biosynthesis",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "rate-limiting in lincomycin biosynthesis",
+      "target": "LmbX",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "LmbX",
+      "target": "LmbU",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "LmbU",
+      "target": "biosynthetic pathway",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "biosynthetic pathway",
+      "target": "penicillin",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "penicillin",
+      "target": "plasmid-based engineering",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "plasmid-based engineering",
+      "target": "intergeneric conjugation",
+      "relationship_type": "uses",
+      "chunk_index": 0
+    },
+    {
+      "source": "intergeneric conjugation",
+      "target": "resistance markers",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "resistance markers",
+      "target": "conjugation",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "conjugation",
+      "target": "CRISPR",
+      "relationship_type": "chosen over",
+      "chunk_index": 0
+    },
+    {
+      "source": "CRISPR",
+      "target": "lincomycin resistance",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "lincomycin resistance",
+      "target": "fermentation",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "fermentation",
+      "target": "production pipeline",
+      "relationship_type": "part of",
+      "chunk_index": 0
+    },
+    {
+      "source": "production pipeline",
+      "target": "metabolic engineering",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "metabolic engineering",
+      "target": "antibiotic synthesis",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "antibiotic synthesis",
+      "target": "DNA design",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "DNA design",
+      "target": "in silico",
+      "relationship_type": "done in",
+      "chunk_index": 0
+    },
+    {
+      "source": "in silico",
+      "target": "Key reagents, plasmids, and strains",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Key reagents, plasmids, and strains",
+      "target": "Final Project Plan and Schedule",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Final Project Plan and Schedule",
+      "target": "casein protein",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "casein protein",
+      "target": "bovine casein protein",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "bovine casein protein",
+      "target": "computational protein design",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "computational protein design",
+      "target": "AlphaFold3",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "AlphaFold3",
+      "target": "Rosetta",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Rosetta",
+      "target": "docked protein-ligand complex",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "docked protein-ligand complex",
+      "target": "PDBQT",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "PDBQT",
+      "target": "protein stability",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "protein stability",
+      "target": "ESM",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "ESM",
+      "target": "Log-likelihood",
+      "relationship_type": "provides",
+      "chunk_index": 0
+    },
+    {
+      "source": "Log-likelihood",
+      "target": "AF3",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "AF3",
+      "target": "shapes",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "shapes",
+      "target": "binding poses",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "binding poses",
+      "target": "binding affinity",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "binding affinity",
+      "target": "RMSD",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "RMSD",
+      "target": "binding pose",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "binding pose",
+      "target": "FabFlex",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "FabFlex",
+      "target": "clonal genes",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "clonal genes",
+      "target": "budget",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "budget",
+      "target": "Casein fragment",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Casein fragment",
+      "target": "novel fragments",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "novel fragments",
+      "target": "Expression & Purification Strategy",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Expression & Purification Strategy",
+      "target": "Vector",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Vector",
+      "target": "pET-28a(+)",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "pET-28a(+)",
+      "target": "NovoPro",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "NovoPro",
+      "target": "inducible expression",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "inducible expression",
+      "target": "promoter that we turn on",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "promoter that we turn on",
+      "target": "N-terminal 6\u00d7His-tag",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "N-terminal 6\u00d7His-tag",
+      "target": "purification",
+      "relationship_type": "facilitates",
+      "chunk_index": 0
+    },
+    {
+      "source": "purification",
+      "target": "Ndel",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Ndel",
+      "target": "ATG",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "ATG",
+      "target": "XhoI",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "XhoI",
+      "target": "His-tag",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "His-tag",
+      "target": "clonal gene",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "clonal gene",
+      "target": "Twist",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Twist",
+      "target": "Selection Marker",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Selection Marker",
+      "target": "Kanamycin",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Kanamycin",
+      "target": "Host Strain",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Host Strain",
+      "target": "BL21(DE3)",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "BL21(DE3)",
+      "target": "T7 RNA polymerase",
+      "relationship_type": "expresses",
+      "chunk_index": 0
+    },
+    {
+      "source": "T7 RNA polymerase",
+      "target": "pET-28a",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "pET-28a",
+      "target": "gene expression",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "gene expression",
+      "target": "kanamycin induction",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "kanamycin induction",
+      "target": "IPTG induction",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "IPTG induction",
+      "target": "lac repressor",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "lac repressor",
+      "target": "lacUV5",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "lacUV5",
+      "target": "nickel resin purification",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "nickel resin purification",
+      "target": "His-tagged casein",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "His-tagged casein",
+      "target": "Ni-NTA resin",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Ni-NTA resin",
+      "target": "imidazole",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "imidazole",
+      "target": "dialysis",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "dialysis",
+      "target": "10 kDa dialysis tube",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "10 kDa dialysis tube",
+      "target": "assays to evaluate binding",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "assays to evaluate binding",
+      "target": "Isothermal Titration Calorimetry (ITC)",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Isothermal Titration Calorimetry (ITC)",
+      "target": "quantify binding constant (Kd) and thermodynamics",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "quantify binding constant (Kd) and thermodynamics",
+      "target": "binding constant (Kd)",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "binding constant (Kd)",
+      "target": "thermodynamics",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "thermodynamics",
+      "target": "WT casein",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "WT casein",
+      "target": "improved designs",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "improved designs",
+      "target": "Hydrophobic Dye Binding (ANS or Nile Red)",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Hydrophobic Dye Binding (ANS or Nile Red)",
+      "target": "Fluorescence increases upon dye binding to hydrophobic pockets",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Fluorescence increases upon dye binding to hydrophobic pockets",
+      "target": "hydrophobic pockets",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "hydrophobic pockets",
+      "target": "Mutant",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Mutant",
+      "target": "stronger signal",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "stronger signal",
+      "target": "better capsaicin accommodation",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "better capsaicin accommodation",
+      "target": "Topical Skin Test (Functional)",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Topical Skin Test (Functional)",
+      "target": "skin",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "skin",
+      "target": "redness and discomfort",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "redness and discomfort",
+      "target": "enhanced capsaicin capture",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "enhanced capsaicin capture",
+      "target": "Gene synthesis",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Gene synthesis",
+      "target": "DNA synthesis",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "DNA synthesis",
+      "target": "Fragments and primers",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Fragments and primers",
+      "target": "pET-28a(+) vector",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "pET-28a(+) vector",
+      "target": "BL21(DE3) competent cells",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "BL21(DE3) competent cells",
+      "target": "IPTG",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "IPTG",
+      "target": "ANS/Nile Red dye",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "ANS/Nile Red dye",
+      "target": "Buffers and reagents for lysis, purification, ITC",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Buffers and reagents for lysis, purification, ITC",
+      "target": "engineered casein",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "engineered casein",
+      "target": "Primers with NdeI/XhoI sites for cloning",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Primers with NdeI/XhoI sites for cloning",
+      "target": "Computational filtering",
+      "relationship_type": null,
+      "chunk_index": 0
+    },
+    {
+      "source": "Computational filtering",
+      "target": "lab notebook",
+      "relationship_type": null,
+      "chunk_index": 0
+    }
+  ]
+}
