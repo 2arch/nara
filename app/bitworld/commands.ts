@@ -398,7 +398,6 @@ interface UseCommandSystemProps {
     selectedNoteKey?: string | null; // Currently selected note
     selectedPatternKey?: string | null; // Currently selected pattern
     selectedAgentIds?: Set<string>; // Currently selected agent IDs
-    getAgentVisualPositions?: () => Record<string, { x: number; y: number }>; // Get agent positions for cursor detection
     currentScale?: { w: number; h: number }; // Current text scale
     setCurrentScale?: (scale: { w: number; h: number }) => void; // Set current text scale
     monogramSystem?: { // WebGPU monogram background system
@@ -544,7 +543,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllChips, getAllBounds = () => [], availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, selectedAgentIds, getAgentVisualPositions, currentScale, setCurrentScale, monogramSystem, recorder, setBounds, canvasState, setCanvasState, setBoundedWorldData, boundedSource, setBoundedSource, boundedWorldData, setZoomLevel, setViewOffset, selectionStart, selectionEnd, setProcessingRegion }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllChips, getAllBounds = () => [], availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, selectedAgentIds, currentScale, setCurrentScale, monogramSystem, recorder, setBounds, canvasState, setCanvasState, setBoundedWorldData, boundedSource, setBoundedSource, boundedWorldData, setZoomLevel, setViewOffset, selectionStart, selectionEnd, setProcessingRegion }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const previousBackgroundStateRef = useRef<{
@@ -5758,11 +5757,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const agentArgs = commandToExecute.slice(5).trim();
             const argParts = agentArgs.split(/\s+/).filter(p => p.length > 0);
 
-            // Helper: Get target agents from selection or cursor
+            // Helper: Get target agents from selection
             const getTargetAgents = (): Array<{ id: string; data: any }> => {
                 const targets: Array<{ id: string; data: any }> = [];
 
-                // First, check if agents are selected
                 if (selectedAgentIds && selectedAgentIds.size > 0) {
                     for (const agentId of selectedAgentIds) {
                         if (worldData && worldData[agentId]) {
@@ -5772,29 +5770,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                                     : worldData[agentId];
                                 targets.push({ id: agentId, data });
                             } catch {}
-                        }
-                    }
-                }
-
-                // If no selected agents, try to find agent at cursor position
-                if (targets.length === 0 && getAgentVisualPositions) {
-                    const cursorPos = commandState.commandStartPos;
-                    const agentPositions = getAgentVisualPositions();
-
-                    for (const [agentId, pos] of Object.entries(agentPositions)) {
-                        // Check if cursor is on or near this agent (within 2 cells)
-                        const dx = Math.abs(pos.x - cursorPos.x);
-                        const dy = Math.abs(pos.y - cursorPos.y);
-                        if (dx <= 2 && dy <= 2) {
-                            if (worldData && worldData[agentId]) {
-                                try {
-                                    const data = typeof worldData[agentId] === 'string'
-                                        ? JSON.parse(worldData[agentId])
-                                        : worldData[agentId];
-                                    targets.push({ id: agentId, data });
-                                    break; // Take first match
-                                } catch {}
-                            }
                         }
                     }
                 }
