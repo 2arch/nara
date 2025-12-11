@@ -4,6 +4,7 @@ import type { Point, WorldData } from './world.engine';
 import { rewrapNoteText, findConnectedPaintRegion, getAllPaintBlobs, calculatePatternBorderCells, createPaintBlob, regeneratePatternPaint } from './world.engine';
 import { generateImage, generateVideo, setDialogueWithRevert } from './ai';
 import { detectImageIntent } from './ai.utils';
+import { MAKE_ACTIONS, AGENT_MOVEMENT } from './ai.tools';
 import type { WorldSettings } from './settings';
 import { useFaceDetection, useSmoothFaceOrientation, faceOrientationToRotation } from './face';
 import { DataRecorder } from './recorder';
@@ -351,10 +352,10 @@ export interface ModeState {
         isTracked?: boolean; // True if from MediaPipe tracking, false if autonomous
     };
     isPaintMode: boolean; // Whether paint mode is active
-    paintTool: 'brush' | 'fill' | 'lasso' | 'eraser'; // Current paint tool
+    paintTool: 'brush' | 'fill' | 'lasso' | 'eraser' | 'rail'; // Current paint tool
     paintColor: string; // Current paint brush color
     paintBrushSize: number; // Paint brush radius in cells
-    paintType: 'color' | 'obstacle'; // Type of paint: color (default) or obstacle (blocks pathfinding)
+    railFirstNode: { x: number; y: number } | null; // First node for rail drawing (tap-tap)
     isAgentMode: boolean; // Whether agent spawning mode is active
     agentSpriteName?: string; // Name of sprite to use for agents (uses ghost effect)
     isAgentAttached: boolean; // Whether selected agents are attached to cursor
@@ -410,6 +411,7 @@ interface UseCommandSystemProps {
     };
     recorder?: DataRecorder;
     setBounds?: (bounds: { minX: number; minY: number; maxX: number; maxY: number } | undefined) => void; // Set canvas bounds dynamically
+    setBoundWindow?: (window: { windowX: number; windowY: number; windowWidth: number; windowHeight: number; titleBarHeight: number } | undefined) => void; // Set windowed bound mode
     canvasState?: 0 | 1; // Current canvas state (0=infinite, 1=bounded)
     setCanvasState?: (state: 0 | 1) => void; // Toggle canvas state (0=infinite, 1=bounded)
     setBoundedWorldData?: (data: any) => void; // Clear/set ephemeral bounded world data
@@ -485,7 +487,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'export': 'Export selected area as a PNG image. Make a selection, then type /export to download it as an image. Use /export --grid to include grid lines in the export.',
     'upload': 'Upload files to your canvas. Images are rasterized to fit. Scripts (.js, .py) become executable script notes - use /run to execute. Also supports .json, .txt, .md, .csv as text notes.',
     'paint': 'Enter paint mode to draw filled regions on the canvas. Drag to draw a continuous stroke, double-click/double-tap to fill the enclosed area. Press ESC to exit.',
-    'agent': 'Enter agent spawn mode. Click on the canvas to place ghost agent cursors. Use /agent [spriteName] to use a specific sprite, or /agent to use a default. Press ESC to exit while keeping agents on the canvas.',
+    'agent': 'Agent mode and behaviors. /agent [sprite] to spawn agents. /agent <name> add follow-color black to add behaviors. /agent <name> list to view, /agent <name> clear to remove all.',
     'data': 'Create a data table from selected text. Select CSV-formatted text (comma-separated values), then type /data to convert it into an interactive table with resizable columns and rows. First row becomes the header.',
     'script': 'Convert a note into an executable script. Usage: /script [lang]. Languages: js/javascript (default), py/python. Auto-detects Python from import, def, print(), etc. Use /run to execute.',
     'run': 'Execute the script note at cursor position. JavaScript uses print() or console.log(). Python uses Pyodide (~10MB, lazy loaded on first use). Use #!py at start of script for Python.',
@@ -606,7 +608,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         paintTool: 'brush', // Default to brush tool
         paintColor: '#000000', // Default black paint
         paintBrushSize: 1, // Default brush size (1 cell radius)
-        paintType: 'color', // Default to color paint (not obstacle)
         isAgentMode: false, // Agent spawning mode not active initially
         isAgentAttached: false, // Agents not attached to cursor initially
     });
@@ -1203,7 +1204,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         if (lowerInput === 'paint' || lowerInput.startsWith('paint ')) {
             const parts = input.toLowerCase().split(' ');
             const paintTools = ['brush', 'fill', 'lasso', 'eraser'];
-            const paintTypes = ['obstacle'];
             const colorNames = Object.keys(COLOR_MAP);
 
             if (parts.length > 1) {
@@ -1211,11 +1211,10 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
                 // Check if first arg is a tool
                 if (paintTools.includes(firstArg)) {
-                    // After tool, suggest colors and obstacle
+                    // After tool, suggest colors
                     if (parts.length > 2) {
                         const secondArg = parts[2];
-                        const allOptions = [...paintTypes, ...colorNames];
-                        const suggestions = allOptions
+                        const suggestions = colorNames
                             .filter(opt => opt.startsWith(secondArg))
                             .map(opt => `paint ${firstArg} ${opt}`);
 
@@ -1225,13 +1224,12 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                         }
                         return suggestions.length > 0 ? suggestions : [currentCommand];
                     }
-                    // Just typed tool, show colors and obstacle
-                    const allOptions = [...paintTypes, ...colorNames];
-                    return allOptions.map(opt => `paint ${firstArg} ${opt}`);
+                    // Just typed tool, show colors
+                    return colorNames.map(opt => `paint ${firstArg} ${opt}`);
                 }
 
-                // First arg is not a complete tool - suggest tools, obstacle, and colors
-                const allOptions = [...paintTools, ...paintTypes, ...colorNames];
+                // First arg is not a complete tool - suggest tools and colors
+                const allOptions = [...paintTools, ...colorNames];
                 const suggestions = allOptions
                     .filter(opt => opt.startsWith(firstArg))
                     .map(opt => `paint ${opt}`);
@@ -1243,8 +1241,8 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                 return suggestions.length > 0 ? suggestions : [currentCommand];
             }
 
-            // Just typed 'paint', show tools first, then obstacle, then colors
-            const allOptions = [...paintTools, ...paintTypes, ...colorNames];
+            // Just typed 'paint', show tools first, then colors
+            const allOptions = [...paintTools, ...colorNames];
             return allOptions.map(opt => `paint ${opt}`);
         }
 
@@ -5687,45 +5685,31 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         }
 
         if (commandToExecute.startsWith('paint')) {
-            // Parse arguments: /paint [brush|fill|lasso|eraser] [color|obstacle]
+            // Parse arguments: /paint [brush|fill|lasso|eraser] [color]
             const paintArgs = commandToExecute.slice(5).trim();
             const parts = paintArgs.split(/\s+/);
 
             let tool: 'brush' | 'fill' | 'lasso' | 'eraser' = modeState.paintTool; // Keep current tool
             let color: string | null = null;
-            let paintType: 'color' | 'obstacle' = modeState.paintType; // Keep current paint type
             let hasToolOrColorArg = false;
 
             // Parse tool type
             if (parts[0] === 'brush' || parts[0] === 'fill' || parts[0] === 'lasso' || parts[0] === 'eraser') {
                 tool = parts[0];
                 hasToolOrColorArg = true;
-                // Check for color or obstacle after tool
+                // Check for color after tool
                 if (parts[1]) {
-                    if (parts[1] === 'obstacle') {
-                        paintType = 'obstacle';
-                        color = '#000000'; // Default black for obstacles
-                    } else {
-                        const colorResult = validateColor(parts[1]);
-                        if (colorResult.valid && colorResult.hexColor) {
-                            color = colorResult.hexColor;
-                            paintType = 'color';
-                        }
+                    const colorResult = validateColor(parts[1]);
+                    if (colorResult.valid && colorResult.hexColor) {
+                        color = colorResult.hexColor;
                     }
                 }
             } else if (parts[0]) {
-                // No tool specified, might be just a color or obstacle
-                if (parts[0] === 'obstacle') {
-                    paintType = 'obstacle';
-                    color = '#000000'; // Default black for obstacles
+                // No tool specified, might be just a color
+                const colorResult = validateColor(parts[0]);
+                if (colorResult.valid && colorResult.hexColor) {
+                    color = colorResult.hexColor;
                     hasToolOrColorArg = true;
-                } else {
-                    const colorResult = validateColor(parts[0]);
-                    if (colorResult.valid && colorResult.hexColor) {
-                        color = colorResult.hexColor;
-                        paintType = 'color';
-                        hasToolOrColorArg = true;
-                    }
                 }
             }
 
@@ -5744,16 +5728,15 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             // Enable paint mode with specified settings
             if (paintArgs) {
                 const toolNames = { brush: 'Brush', fill: 'Fill', lasso: 'Lasso', eraser: 'Eraser' };
-                const paintTypeStr = paintType === 'obstacle' ? ' obstacle' : (color ? ` (${parts.find(p => validateColor(p).valid) || color})` : '');
+                const colorStr = color ? ` (${parts.find(p => validateColor(p).valid) || color})` : '';
                 setModeState(prev => ({
                     ...prev,
                     isPaintMode: true,
                     paintTool: tool,
-                    paintColor: color || prev.paintColor,
-                    paintType: paintType
+                    paintColor: color || prev.paintColor
                 }));
                 const actionText = tool === 'fill' ? 'Click to fill.' : tool === 'lasso' ? 'Draw outline then release.' : tool === 'eraser' ? 'Click/drag to erase.' : 'Click/drag to paint.';
-                setDialogueWithRevert(`Paint ${toolNames[tool]} enabled${paintTypeStr}. ${actionText} Press ESC to exit.`, setDialogueText);
+                setDialogueWithRevert(`Paint ${toolNames[tool]} enabled${colorStr}. ${actionText} Press ESC to exit.`, setDialogueText);
                 clearCommandState();
                 return null;
             }
@@ -5771,6 +5754,206 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (commandToExecute.startsWith('agent')) {
             const agentArgs = commandToExecute.slice(5).trim();
+            const argParts = agentArgs.split(/\s+/);
+
+            // Handle behavior commands: /agent <name> add|remove|list|clear ...
+            if (argParts.length >= 2 && ['add', 'remove', 'list', 'clear'].includes(argParts[1])) {
+                const agentName = argParts[0].toLowerCase();
+                const action = argParts[1];
+
+                // Find agent by name in worldData
+                let targetAgentId: string | null = null;
+                let targetAgentData: any = null;
+
+                if (worldData) {
+                    for (const key in worldData) {
+                        if (key.startsWith('agent_')) {
+                            try {
+                                const data = typeof worldData[key] === 'string' ? JSON.parse(worldData[key]) : worldData[key];
+                                if (data.name?.toLowerCase() === agentName) {
+                                    targetAgentId = key;
+                                    targetAgentData = data;
+                                    break;
+                                }
+                            } catch {}
+                        }
+                    }
+                }
+
+                if (!targetAgentId || !targetAgentData) {
+                    setDialogueWithRevert(`Agent "${agentName}" not found`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                // Initialize behaviors array if needed
+                if (!targetAgentData.behaviors) {
+                    targetAgentData.behaviors = [];
+                }
+
+                if (action === 'list') {
+                    // List all behaviors for this agent
+                    const behaviors = targetAgentData.behaviors || [];
+                    if (behaviors.length === 0) {
+                        setDialogueWithRevert(`${agentName} has no behaviors`, setDialogueText);
+                    } else {
+                        const behaviorList = behaviors.map((b: any) => {
+                            let desc = `${b.type} ${b.color}`;
+                            if (b.direction) desc += ` ${b.direction}`;
+                            if (b.onColorAction) {
+                                desc += ` → ${b.onColorAction.action}`;
+                                if (b.onColorAction.value) desc += ` ${b.onColorAction.value}`;
+                            }
+                            return desc;
+                        }).join(', ');
+                        setDialogueWithRevert(`${agentName}: ${behaviorList}`, setDialogueText);
+                    }
+                    clearCommandState();
+                    return null;
+                }
+
+                if (action === 'clear') {
+                    // Clear all behaviors
+                    targetAgentData.behaviors = [];
+                    if (setWorldData) {
+                        setWorldData((prev: Record<string, any>) => ({
+                            ...prev,
+                            [targetAgentId!]: JSON.stringify(targetAgentData)
+                        }));
+                    }
+                    setDialogueWithRevert(`Cleared all behaviors from ${agentName}`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                if (action === 'add' || action === 'remove') {
+                    // Parse: add|remove <behavior-type> <color> [direction|action] [value]
+                    // e.g., add follow-color black
+                    // e.g., add turn-on-color green left
+                    // e.g., add on-color red paint #00ff00
+                    // e.g., add on-color blue command "/grow 5 life"
+                    if (argParts.length < 4) {
+                        setDialogueWithRevert(`Usage: /agent ${agentName} ${action} <behavior> <color> [direction|action] [value]`, setDialogueText);
+                        clearCommandState();
+                        return null;
+                    }
+
+                    const behaviorType = argParts[2] as 'follow-color' | 'avoid-color' | 'stop-on-color' | 'turn-on-color' | 'on-color';
+                    const validTypes = ['follow-color', 'avoid-color', 'stop-on-color', 'turn-on-color', 'on-color'];
+                    if (!validTypes.includes(behaviorType)) {
+                        setDialogueWithRevert(`Invalid behavior: ${behaviorType}. Use: ${validTypes.join(', ')}`, setDialogueText);
+                        clearCommandState();
+                        return null;
+                    }
+
+                    // Parse color - support named colors and hex
+                    let color = argParts[3].toLowerCase();
+                    const namedColors: { [key: string]: string } = {
+                        'black': '#000000',
+                        'white': '#ffffff',
+                        'red': '#ff0000',
+                        'green': '#00ff00',
+                        'blue': '#0000ff',
+                        'yellow': '#ffff00',
+                        'cyan': '#00ffff',
+                        'magenta': '#ff00ff',
+                        'orange': '#ff8800',
+                        'purple': '#8800ff',
+                    };
+                    if (namedColors[color]) {
+                        color = namedColors[color];
+                    } else if (!color.startsWith('#')) {
+                        color = '#' + color;
+                    }
+
+                    // Parse optional direction for turn-on-color
+                    let direction: 'left' | 'right' | 'reverse' | undefined;
+                    if (behaviorType === 'turn-on-color' && argParts.length >= 5) {
+                        const dir = argParts[4].toLowerCase();
+                        if (['left', 'right', 'reverse'].includes(dir)) {
+                            direction = dir as 'left' | 'right' | 'reverse';
+                        }
+                    }
+
+                    // Parse on-color action and value
+                    // Syntax: /agent wizard add on-color red paint #00ff00
+                    // Syntax: /agent wizard add on-color blue command "/grow 5 life"
+                    // Syntax: /agent wizard add on-color green move 10,5
+                    // Syntax: /agent wizard add on-color yellow stop
+                    let onColorAction: { action: string; value?: string } | undefined;
+                    if (behaviorType === 'on-color') {
+                        if (argParts.length < 5) {
+                            setDialogueWithRevert(`Usage: /agent ${agentName} add on-color <color> <action> [value]`, setDialogueText);
+                            clearCommandState();
+                            return null;
+                        }
+                        const actionType = argParts[4].toLowerCase();
+                        // Use canonical action lists from ai.tools.ts
+                        const allActions = [...MAKE_ACTIONS, ...AGENT_MOVEMENT];
+                        if (!allActions.includes(actionType as any)) {
+                            setDialogueWithRevert(`Invalid action: ${actionType}. Use: ${allActions.join(', ')}`, setDialogueText);
+                            clearCommandState();
+                            return null;
+                        }
+                        // Get the value - everything after the action word
+                        // This allows for values with spaces like command "/grow 5 life"
+                        let actionValue: string | undefined;
+                        if (argParts.length > 5) {
+                            // Join remaining parts, handling quoted strings
+                            const remaining = argParts.slice(5).join(' ');
+                            // Strip surrounding quotes if present
+                            actionValue = remaining.replace(/^["']|["']$/g, '');
+                        }
+                        onColorAction = { action: actionType, value: actionValue };
+                    }
+
+                    if (action === 'add') {
+                        // Add new behavior
+                        const newBehavior: any = { type: behaviorType, color };
+                        if (direction) newBehavior.direction = direction;
+                        if (onColorAction) newBehavior.onColorAction = onColorAction;
+
+                        // Check if already exists (for on-color, also check action)
+                        const exists = targetAgentData.behaviors.some((b: any) => {
+                            if (b.type !== behaviorType || b.color.toLowerCase() !== color.toLowerCase()) {
+                                return false;
+                            }
+                            // For on-color, two behaviors with different actions are distinct
+                            if (behaviorType === 'on-color' && onColorAction) {
+                                return b.onColorAction?.action === onColorAction.action;
+                            }
+                            return true;
+                        });
+                        if (!exists) {
+                            targetAgentData.behaviors.push(newBehavior);
+                        }
+
+                        if (setWorldData) {
+                            setWorldData((prev: Record<string, any>) => ({
+                                ...prev,
+                                [targetAgentId!]: JSON.stringify(targetAgentData)
+                            }));
+                        }
+                        const actionInfo = onColorAction ? ` → ${onColorAction.action}${onColorAction.value ? ' ' + onColorAction.value : ''}` : '';
+                        setDialogueWithRevert(`Added ${behaviorType} ${color}${actionInfo} to ${agentName}`, setDialogueText);
+                    } else {
+                        // Remove behavior
+                        targetAgentData.behaviors = targetAgentData.behaviors.filter((b: any) =>
+                            !(b.type === behaviorType && b.color.toLowerCase() === color.toLowerCase())
+                        );
+                        if (setWorldData) {
+                            setWorldData((prev: Record<string, any>) => ({
+                                ...prev,
+                                [targetAgentId!]: JSON.stringify(targetAgentData)
+                            }));
+                        }
+                        setDialogueWithRevert(`Removed ${behaviorType} ${color} from ${agentName}`, setDialogueText);
+                    }
+
+                    clearCommandState();
+                    return null;
+                }
+            }
 
             // Handle /agent attach - toggle cursor attachment for selected agents
             if (agentArgs === 'attach') {
@@ -6142,11 +6325,11 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     }
                 };
 
-                // Calculate outer border cells for obstacle paint
+                // Calculate outer border cells for wall paint
                 const borderCells = calculatePatternBorderCells(rooms, seed);
                 let paintBlobData: Record<string, string> = {};
                 if (borderCells.length > 0) {
-                    const paintBlob = createPaintBlob('#000000', borderCells, 'obstacle', patternKey);
+                    const paintBlob = createPaintBlob('#000000', borderCells, patternKey);
                     paintBlobData[`paintblob_${paintBlob.id}`] = JSON.stringify(paintBlob);
                 }
 
@@ -6157,7 +6340,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
                     ...paintBlobData  // Add the linked paint blob
                 }));
 
-                setDialogueWithRevert(`Pattern generated with ${noteKeys.length} rooms and obstacle walls`, setDialogueText);
+                setDialogueWithRevert(`Pattern generated with ${noteKeys.length} rooms and walls`, setDialogueText);
             }
 
             // Clear command mode
@@ -7507,7 +7690,6 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         paintTool: modeState.paintTool,
         paintColor: modeState.paintColor,
         paintBrushSize: modeState.paintBrushSize,
-        paintType: modeState.paintType,
         exitPaintMode: () => setModeState(prev => ({ ...prev, isPaintMode: false })),
         setPaintColor: (color: string) => setModeState(prev => ({ ...prev, paintColor: color })),
         setPaintBrushSize: (size: number) => setModeState(prev => ({ ...prev, paintBrushSize: size })),

@@ -1,22 +1,14 @@
 /**
  * Pathfinding system for cursor movement
- * Uses A* algorithm with obstacle avoidance and path smoothing
+ * Uses A* algorithm with path smoothing
+ *
+ * Note: Agents are unconstrained - they can move through any cell.
+ * Pathfinding provides smooth waypoint generation, not obstacle avoidance.
  */
-
-import { getAllPaintBlobs } from './world.engine';
 
 export interface Point {
     x: number;
     y: number;
-}
-
-interface PathNode {
-    x: number;
-    y: number;
-    g: number; // Cost from start
-    h: number; // Heuristic cost to end
-    f: number; // Total cost (g + h)
-    parent: PathNode | null;
 }
 
 // Simplified WorldData type for pathfinding (accepts any value type)
@@ -25,249 +17,46 @@ export interface WorldData {
 }
 
 /**
- * Check if a position contains an obstacle (note, image, etc.)
- */
-function isObstacle(x: number, y: number, worldData: WorldData): boolean {
-    const key = `${x},${y}`;
-    const data = worldData[key];
-
-    if (!data) return false;
-
-    try {
-        const parsed = JSON.parse(data);
-
-        // Check if it's a note region
-        if (parsed.startX !== undefined && parsed.endX !== undefined &&
-            parsed.startY !== undefined && parsed.endY !== undefined) {
-            // It's a region - check if point is inside
-            return x >= parsed.startX && x <= parsed.endX &&
-                   y >= parsed.startY && y <= parsed.endY;
-        }
-
-        // Check if it's an image or other blocking entity
-        if (parsed.contentType === 'image' || parsed.imageData) {
-            return true;
-        }
-
-        // Check if it's a selection or other blocking region
-        if (parsed.isSelection) {
-            return true;
-        }
-
-    } catch (e) {
-        // Not JSON or parsing failed
-    }
-
-    return false;
-}
-
-/**
- * Check if any note region overlaps with this position
- */
-function isInsideNoteRegion(x: number, y: number, worldData: WorldData): boolean {
-    for (const key in worldData) {
-        if (!key.startsWith('note_') && !key.startsWith('image_')) continue;
-
-        try {
-            const parsed = JSON.parse(worldData[key]);
-            if (parsed.startX !== undefined && parsed.endX !== undefined &&
-                parsed.startY !== undefined && parsed.endY !== undefined) {
-                if (x >= parsed.startX && x <= parsed.endX &&
-                    y >= parsed.startY && y <= parsed.endY) {
-                    return true;
-                }
-            }
-        } catch (e) {
-            // Skip invalid data
-        }
-    }
-    return false;
-}
-
-/**
- * Check if position contains obstacle paint
- */
-function isObstaclePaint(x: number, y: number, worldData: WorldData): boolean {
-    // Round to integer cell coordinates
-    const roundedX = Math.round(x);
-    const roundedY = Math.round(y);
-    const cellKey = `${roundedX},${roundedY}`;
-    const blobs = getAllPaintBlobs(worldData);
-
-    for (const blob of blobs) {
-        // Only check blobs marked as obstacles
-        if (blob.paintType !== 'obstacle') continue;
-
-        // Quick bounds check first
-        if (roundedX < blob.bounds.minX || roundedX > blob.bounds.maxX ||
-            roundedY < blob.bounds.minY || roundedY > blob.bounds.maxY) {
-            continue;
-        }
-
-        // Check if cell is in this obstacle blob
-        if (blob.cells.includes(cellKey)) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-/**
- * Manhattan distance heuristic
- */
-function heuristic(a: Point, b: Point): number {
-    return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
-}
-
-/**
- * Euclidean distance for more natural diagonal movement
- */
-function euclideanDistance(a: Point, b: Point): number {
-    const dx = a.x - b.x;
-    const dy = a.y - b.y;
-    return Math.sqrt(dx * dx + dy * dy);
-}
-
-/**
- * A* pathfinding algorithm
- * Returns array of points from start to end, avoiding obstacles
+ * Direct pathfinding - returns straight line path
+ * Agents are unconstrained and can move through any cell.
+ * This function generates waypoints for smooth movement.
  */
 export function findPath(
     start: Point,
     end: Point,
-    worldData: WorldData,
-    maxSearchDistance: number = 100
+    _worldData: WorldData,
+    _maxSearchDistance: number = 100
 ): Point[] {
-    // If start and end are the same, return empty path
+    // If start and end are the same, return single point
     if (start.x === end.x && start.y === end.y) {
         return [start];
     }
 
-    // Note: We no longer skip A* for short distances - need to check for obstacles even for short paths
+    // Direct path - no obstacles to avoid
+    // Generate intermediate waypoints using Bresenham's line for smooth movement
+    const path: Point[] = [];
+    const x0 = Math.round(start.x);
+    const y0 = Math.round(start.y);
+    const x1 = Math.round(end.x);
+    const y1 = Math.round(end.y);
 
-    const openSet: PathNode[] = [];
-    const closedSet = new Set<string>();
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    let cx = x0;
+    let cy = y0;
 
-    const startNode: PathNode = {
-        x: Math.round(start.x),
-        y: Math.round(start.y),
-        g: 0,
-        h: heuristic(start, end),
-        f: heuristic(start, end),
-        parent: null
-    };
-
-    openSet.push(startNode);
-
-    // 8-directional movement
-    const directions = [
-        { x: 0, y: 1 },   // South
-        { x: -1, y: 1 },  // South-West
-        { x: -1, y: 0 },  // West
-        { x: -1, y: -1 }, // North-West
-        { x: 0, y: -1 },  // North
-        { x: 1, y: -1 },  // North-East
-        { x: 1, y: 0 },   // East
-        { x: 1, y: 1 }    // South-East
-    ];
-
-    let iterations = 0;
-    const maxIterations = 1000; // Prevent infinite loops
-
-    while (openSet.length > 0 && iterations < maxIterations) {
-        iterations++;
-
-        // Find node with lowest f score
-        openSet.sort((a, b) => a.f - b.f);
-        const current = openSet.shift()!;
-
-        const currentKey = `${current.x},${current.y}`;
-
-        // Check if we reached the goal
-        if (Math.abs(current.x - end.x) < 1 && Math.abs(current.y - end.y) < 1) {
-            // Reconstruct path
-            const path: Point[] = [];
-            let node: PathNode | null = current;
-            while (node) {
-                path.unshift({ x: node.x, y: node.y });
-                node = node.parent;
-            }
-            return path;
-        }
-
-        closedSet.add(currentKey);
-
-        // Check neighbors
-        for (const dir of directions) {
-            const nx = current.x + dir.x;
-            const ny = current.y + dir.y;
-            const neighborKey = `${nx},${ny}`;
-
-            // Skip if already visited
-            if (closedSet.has(neighborKey)) continue;
-
-            // Skip if too far from start (prevent excessive search)
-            if (Math.abs(nx - start.x) > maxSearchDistance ||
-                Math.abs(ny - start.y) > maxSearchDistance) {
-                continue;
-            }
-
-            // Skip if obstacle (but allow target position)
-            const isTarget = Math.abs(nx - end.x) < 1 && Math.abs(ny - end.y) < 1;
-            if (!isTarget && (isInsideNoteRegion(nx, ny, worldData) || isObstaclePaint(nx, ny, worldData))) {
-                continue;
-            }
-
-            // Calculate costs - check if diagonal movement
-            const isDiagonal = dir.x !== 0 && dir.y !== 0;
-
-            // For diagonal movement, check that we're not squeezing through corner-connected obstacles
-            if (isDiagonal) {
-                // Check both orthogonal neighbors - if either is blocked, can't move diagonally
-                const side1X = current.x + dir.x;
-                const side1Y = current.y;
-                const side2X = current.x;
-                const side2Y = current.y + dir.y;
-
-                const side1Blocked = isInsideNoteRegion(side1X, side1Y, worldData) || isObstaclePaint(side1X, side1Y, worldData);
-                const side2Blocked = isInsideNoteRegion(side2X, side2Y, worldData) || isObstaclePaint(side2X, side2Y, worldData);
-
-                // If either orthogonal side is blocked, can't squeeze through diagonally
-                if (side1Blocked || side2Blocked) {
-                    continue;
-                }
-            }
-            const moveCost = isDiagonal ? 1.414 : 1.0; // Diagonal movement costs more
-            const g = current.g + moveCost;
-            const h = heuristic({ x: nx, y: ny }, end);
-            const f = g + h;
-
-            // Check if this neighbor is already in open set with better cost
-            const existingIdx = openSet.findIndex(n => n.x === nx && n.y === ny);
-            if (existingIdx !== -1) {
-                if (g < openSet[existingIdx].g) {
-                    openSet[existingIdx].g = g;
-                    openSet[existingIdx].f = f;
-                    openSet[existingIdx].parent = current;
-                }
-                continue;
-            }
-
-            // Add to open set
-            openSet.push({
-                x: nx,
-                y: ny,
-                g,
-                h,
-                f,
-                parent: current
-            });
-        }
+    while (true) {
+        path.push({ x: cx, y: cy });
+        if (cx === x1 && cy === y1) break;
+        const e2 = 2 * err;
+        if (e2 > -dy) { err -= dy; cx += sx; }
+        if (e2 < dx) { err += dx; cy += sy; }
     }
 
-    // No path found - return direct line
-    return [start, end];
+    return path;
 }
 
 /**
@@ -391,13 +180,6 @@ export function findSmoothPath(
 
     // If path is very short, don't smooth
     if (rawPath.length < 3) return rawPath;
-
-    // Check if there are any obstacles - if so, don't smooth (smoothing can cut through obstacles)
-    const hasObstacles = getAllPaintBlobs(worldData).some(blob => blob.paintType === 'obstacle');
-    if (hasObstacles) {
-        // Return raw A* path without smoothing to avoid cutting through obstacles
-        return rawPath;
-    }
 
     // Simplify to remove unnecessary waypoints
     const simplified = simplifyPath(rawPath, 1.0);

@@ -51,6 +51,18 @@ export interface WorldBounds {
     maxY: number;
 }
 
+// Windowed bound mode - displays bounded content in a movable/resizable window
+export interface BoundWindow {
+    // Window position in world coordinates (where the window frame sits)
+    windowX: number;
+    windowY: number;
+    // Window size in cells (the visible frame)
+    windowWidth: number;
+    windowHeight: number;
+    // Title bar height in cells
+    titleBarHeight: number;
+}
+
 export interface StyledCharacter {
     char: string;
     style?: {
@@ -76,7 +88,6 @@ export const getCharScale = (data: string | StyledCharacter | ImageData): { w: n
 export interface PaintBlob {
     type: 'paint-blob';
     id: string;
-    paintType?: 'color' | 'obstacle'; // Type of paint: color (default) or obstacle (blocks pathfinding)
     patternKey?: string; // Link to pattern - paint will regenerate when pattern changes
     color: string;
     bounds: {
@@ -139,32 +150,6 @@ export const getPaintColorAt = (worldData: Record<string, any>, x: number, y: nu
     return null;
 };
 
-// Check if a position contains an obstacle that blocks character movement
-export const isObstacleAt = (worldData: Record<string, any>, x: number, y: number): boolean => {
-    const cellKey = `${Math.round(x)},${Math.round(y)}`;
-    const blobs = getAllPaintBlobs(worldData);
-
-    for (const blob of blobs) {
-        // Only check obstacle blobs
-        if (blob.paintType !== 'obstacle') continue;
-
-        // Quick bounds check
-        const roundedX = Math.round(x);
-        const roundedY = Math.round(y);
-        if (roundedX < blob.bounds.minX || roundedX > blob.bounds.maxX ||
-            roundedY < blob.bounds.minY || roundedY > blob.bounds.maxY) {
-            continue;
-        }
-
-        // Check if cell is in this obstacle blob
-        if (blob.cells.includes(cellKey)) {
-            return true;
-        }
-    }
-
-    return false;
-};
-
 // Find the blob that contains a specific cell
 export const findBlobAt = (worldData: Record<string, any>, x: number, y: number): PaintBlob | null => {
     const cellKey = `${x},${y}`;
@@ -185,7 +170,6 @@ export const findBlobAt = (worldData: Record<string, any>, x: number, y: number)
 export const createPaintBlob = (
     color: string,
     initialCells: Array<{x: number, y: number}>,
-    paintType?: 'color' | 'obstacle',
     patternKey?: string
 ): PaintBlob => {
     if (initialCells.length === 0) {
@@ -203,7 +187,6 @@ export const createPaintBlob = (
     return {
         type: 'paint-blob',
         id,
-        paintType,
         patternKey,
         color,
         bounds: { minX, maxX, minY, maxY },
@@ -511,7 +494,7 @@ export const regeneratePatternPaint = (
         return { updatedBlob, blobKey: existingPaint.key };
     } else {
         // Create new paint blob
-        const newBlob = createPaintBlob('#000000', borderCells, 'obstacle', patternKey);
+        const newBlob = createPaintBlob('#000000', borderCells, patternKey);
         return { updatedBlob: newBlob, blobKey: `paintblob_${newBlob.id}` };
     }
 };
@@ -521,29 +504,28 @@ export const findOrCreateBlobForCell = (
     worldData: Record<string, any>,
     x: number,
     y: number,
-    color: string,
-    paintType?: 'color' | 'obstacle'
+    color: string
 ): { blob: PaintBlob; isNew: boolean; existingBlobKey?: string } => {
-    // Check if already painted in a blob of same color and type
+    // Check if already painted in a blob of same color
     const existingBlob = findBlobAt(worldData, x, y);
-    if (existingBlob && existingBlob.color === color && existingBlob.paintType === paintType) {
+    if (existingBlob && existingBlob.color === color) {
         return { blob: existingBlob, isNew: false, existingBlobKey: `paintblob_${existingBlob.id}` };
     }
 
-    // Check for adjacent blob of same color and type to merge into
+    // Check for adjacent blob of same color to merge into
     const directions = [
         { dx: 0, dy: -1 }, { dx: 0, dy: 1 },
         { dx: -1, dy: 0 }, { dx: 1, dy: 0 }
     ];
     for (const dir of directions) {
         const adjBlob = findBlobAt(worldData, x + dir.dx, y + dir.dy);
-        if (adjBlob && adjBlob.color === color && adjBlob.paintType === paintType) {
+        if (adjBlob && adjBlob.color === color) {
             return { blob: adjBlob, isNew: false, existingBlobKey: `paintblob_${adjBlob.id}` };
         }
     }
 
     // No adjacent blob - create new one
-    const newBlob = createPaintBlob(color, [{ x, y }], paintType);
+    const newBlob = createPaintBlob(color, [{ x, y }]);
     return { blob: newBlob, isNew: true };
 };
 
@@ -1121,10 +1103,11 @@ export interface WorldEngine {
     userUid?: string | null;
     isMoveMode: boolean;
     isPaintMode: boolean;
-    paintTool: 'brush' | 'fill' | 'lasso' | 'eraser';
+    paintTool: 'brush' | 'fill' | 'lasso' | 'eraser' | 'rail';
     paintColor: string;
     paintBrushSize: number;
-    paintType: 'color' | 'obstacle'; // Type of paint being applied
+    railFirstNode: { x: number; y: number } | null; // First node for rail drawing (tap-tap)
+    setRailFirstNode: (node: { x: number; y: number } | null) => void;
     exitPaintMode: () => void;
     paintCell: (x: number, y: number, prevX?: number, prevY?: number) => void;
     eraseCell: (x: number, y: number, prevX?: number, prevY?: number) => void;
@@ -2176,7 +2159,6 @@ export function useWorldEngine({
         paintTool,
         paintColor,
         paintBrushSize,
-        paintType,
         exitPaintMode,
         gridMode,
         cycleGridMode,
@@ -2308,13 +2290,6 @@ export function useWorldEngine({
                 const distanceToNext = Math.sqrt(dx * dx + dy * dy);
 
                 if (distanceToNext <= remainingDistance) {
-                    // Check if next waypoint is an obstacle
-                    if (isObstacleAt(worldData, nextWaypoint.x, nextWaypoint.y)) {
-                        // Stop movement - can't enter obstacle
-                        remainingDistance = 0;
-                        break;
-                    }
-
                     // Move to next waypoint
                     currentPos = { x: nextWaypoint.x, y: nextWaypoint.y };
                     remainingDistance -= distanceToNext;
@@ -2326,13 +2301,6 @@ export function useWorldEngine({
                         x: currentPos.x + dx * ratio,
                         y: currentPos.y + dy * ratio
                     };
-
-                    // Check if new position would be in an obstacle
-                    if (isObstacleAt(worldData, newPos.x, newPos.y)) {
-                        // Stop movement - can't enter obstacle
-                        remainingDistance = 0;
-                        break;
-                    }
 
                     currentPos = newPos;
                     remainingDistance = 0;
@@ -5215,7 +5183,7 @@ export function useWorldEngine({
                                             setWorldData(prev => {
                                                 let updated = { ...prev };
                                                 for (const [color, colorCells] of cellsByColor) {
-                                                    const { blob } = findOrCreateBlobForCell(updated, colorCells[0].x, colorCells[0].y, color, 'color');
+                                                    const { blob } = findOrCreateBlobForCell(updated, colorCells[0].x, colorCells[0].y, color);
                                                     const updatedBlob = addCellsToBlob(blob, colorCells);
                                                     updated[`paintblob_${updatedBlob.id}`] = JSON.stringify(updatedBlob);
                                                 }
@@ -5288,15 +5256,58 @@ export function useWorldEngine({
                                                 const noteData = typeof noteDataStr === 'string' ? JSON.parse(noteDataStr) : noteDataStr;
                                                 const existingData = noteData.data || {};
 
-                                                if (edit.operation === 'append' && edit.text) {
-                                                    // Find max Y to append after
+                                                // Helper: Convert sparse data to lines array
+                                                const dataToLines = (): string[] => {
+                                                    const lines: string[] = [];
                                                     let maxY = 0;
                                                     for (const key of Object.keys(existingData)) {
                                                         const [, yStr] = key.split(',');
                                                         const y = parseInt(yStr, 10);
                                                         if (y > maxY) maxY = y;
                                                     }
-                                                    const newStartY = maxY + 2;
+                                                    for (let y = 0; y <= maxY; y += 2) { // Lines are 2 units apart
+                                                        let line = '';
+                                                        let maxX = 0;
+                                                        for (const key of Object.keys(existingData)) {
+                                                            const [xStr, yStr] = key.split(',');
+                                                            if (parseInt(yStr, 10) === y) {
+                                                                const x = parseInt(xStr, 10);
+                                                                if (x > maxX) maxX = x;
+                                                            }
+                                                        }
+                                                        for (let x = 0; x <= maxX; x++) {
+                                                            const char = existingData[`${x},${y}`];
+                                                            line += typeof char === 'string' ? char : (char?.char || ' ');
+                                                        }
+                                                        lines.push(line);
+                                                    }
+                                                    return lines;
+                                                };
+
+                                                // Helper: Convert lines array back to sparse data
+                                                const linesToData = (lines: string[]): Record<string, any> => {
+                                                    const newData: Record<string, any> = {};
+                                                    for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+                                                        const y = lineIdx * 2; // Lines are 2 units apart
+                                                        for (let x = 0; x < lines[lineIdx].length; x++) {
+                                                            const char = lines[lineIdx][x];
+                                                            if (char !== ' ' || existingData[`${x},${y}`]) {
+                                                                newData[`${x},${y}`] = char;
+                                                            }
+                                                        }
+                                                    }
+                                                    return newData;
+                                                };
+
+                                                // Operation: APPEND - add text on a new line after existing content
+                                                if (edit.operation === 'append' && edit.text) {
+                                                    let maxY = 0;
+                                                    for (const key of Object.keys(existingData)) {
+                                                        const [, yStr] = key.split(',');
+                                                        const y = parseInt(yStr, 10);
+                                                        if (y > maxY) maxY = y;
+                                                    }
+                                                    const newStartY = Object.keys(existingData).length > 0 ? maxY + 2 : 0;
                                                     for (let charX = 0; charX < edit.text.length; charX++) {
                                                         existingData[`${charX},${newStartY}`] = edit.text[charX];
                                                     }
@@ -5304,6 +5315,102 @@ export function useWorldEngine({
                                                     setWorldData(prev => ({ ...prev, [noteId]: JSON.stringify(noteData) }));
                                                     return { success: true };
                                                 }
+
+                                                // Operation: INSERT - insert text at specific line/column
+                                                if (edit.operation === 'insert' && edit.text && edit.position) {
+                                                    const lines = dataToLines();
+                                                    const { line, column } = edit.position;
+
+                                                    // Ensure we have enough lines
+                                                    while (lines.length <= line) {
+                                                        lines.push('');
+                                                    }
+
+                                                    // Insert text at position
+                                                    const currentLine = lines[line] || '';
+                                                    const paddedLine = currentLine.padEnd(column, ' ');
+                                                    lines[line] = paddedLine.slice(0, column) + edit.text + paddedLine.slice(column);
+
+                                                    noteData.data = linesToData(lines);
+                                                    setWorldData(prev => ({ ...prev, [noteId]: JSON.stringify(noteData) }));
+                                                    return { success: true };
+                                                }
+
+                                                // Operation: DELETE - delete text in a range
+                                                if (edit.operation === 'delete' && edit.range) {
+                                                    const lines = dataToLines();
+                                                    const { startLine, startColumn, endLine, endColumn } = edit.range;
+
+                                                    if (startLine === endLine) {
+                                                        // Single line deletion
+                                                        if (lines[startLine]) {
+                                                            lines[startLine] = lines[startLine].slice(0, startColumn) + lines[startLine].slice(endColumn);
+                                                        }
+                                                    } else {
+                                                        // Multi-line deletion
+                                                        const beforeDelete = lines[startLine]?.slice(0, startColumn) || '';
+                                                        const afterDelete = lines[endLine]?.slice(endColumn) || '';
+                                                        lines[startLine] = beforeDelete + afterDelete;
+                                                        // Remove lines between startLine and endLine
+                                                        lines.splice(startLine + 1, endLine - startLine);
+                                                    }
+
+                                                    noteData.data = linesToData(lines);
+                                                    setWorldData(prev => ({ ...prev, [noteId]: JSON.stringify(noteData) }));
+                                                    return { success: true };
+                                                }
+
+                                                // Operation: REPLACE - replace text in a range with new text
+                                                if (edit.operation === 'replace' && edit.text && edit.range) {
+                                                    const lines = dataToLines();
+                                                    const { startLine, startColumn, endLine, endColumn } = edit.range;
+
+                                                    if (startLine === endLine) {
+                                                        // Single line replacement
+                                                        if (lines[startLine]) {
+                                                            lines[startLine] = lines[startLine].slice(0, startColumn) + edit.text + lines[startLine].slice(endColumn);
+                                                        }
+                                                    } else {
+                                                        // Multi-line replacement
+                                                        const beforeReplace = lines[startLine]?.slice(0, startColumn) || '';
+                                                        const afterReplace = lines[endLine]?.slice(endColumn) || '';
+                                                        lines[startLine] = beforeReplace + edit.text + afterReplace;
+                                                        // Remove lines between startLine and endLine
+                                                        lines.splice(startLine + 1, endLine - startLine);
+                                                    }
+
+                                                    noteData.data = linesToData(lines);
+                                                    setWorldData(prev => ({ ...prev, [noteId]: JSON.stringify(noteData) }));
+                                                    return { success: true };
+                                                }
+
+                                                // Operation: CLEAR - clear all note content
+                                                if (edit.operation === 'clear') {
+                                                    noteData.data = {};
+                                                    setWorldData(prev => ({ ...prev, [noteId]: JSON.stringify(noteData) }));
+                                                    return { success: true };
+                                                }
+
+                                                // Operation: CELL - edit a specific table cell
+                                                if (edit.operation === 'cell' && edit.cell) {
+                                                    const { row, col, value } = edit.cell;
+                                                    // For table notes, cells are stored with row,col as key
+                                                    if (noteData.tableData) {
+                                                        // Update table cell data
+                                                        if (!noteData.tableData.cells) {
+                                                            noteData.tableData.cells = {};
+                                                        }
+                                                        noteData.tableData.cells[`${row},${col}`] = value;
+                                                    } else {
+                                                        // For regular notes, map to x,y coordinates
+                                                        // Assume each cell is 1 char wide, rows are 2 units apart
+                                                        existingData[`${col},${row * 2}`] = value;
+                                                        noteData.data = existingData;
+                                                    }
+                                                    setWorldData(prev => ({ ...prev, [noteId]: JSON.stringify(noteData) }));
+                                                    return { success: true };
+                                                }
+
                                                 return { success: false, error: 'Unsupported edit operation' };
                                             } catch (e) {
                                                 return { success: false, error: 'Failed to parse note' };
@@ -5349,7 +5456,7 @@ export function useWorldEngine({
                             setWorldData(prev => {
                                 let updated = { ...prev };
                                 for (const [color, colorCells] of cellsByColor) {
-                                    const { blob } = findOrCreateBlobForCell(updated, colorCells[0].x, colorCells[0].y, color, 'color');
+                                    const { blob } = findOrCreateBlobForCell(updated, colorCells[0].x, colorCells[0].y, color);
                                     const updatedBlob = addCellsToBlob(blob, colorCells);
                                     updated[`paintblob_${updatedBlob.id}`] = JSON.stringify(updatedBlob);
                                 }
@@ -5617,6 +5724,150 @@ export function useWorldEngine({
                                 delete newData[id];
                                 return newData;
                             });
+                        },
+                        editNote: (noteId: string, edit: any) => {
+                            const noteDataStr = worldData[noteId];
+                            if (!noteDataStr) return { success: false, error: 'Note not found' };
+                            try {
+                                const noteData = typeof noteDataStr === 'string' ? JSON.parse(noteDataStr) : noteDataStr;
+                                const existingData = noteData.data || {};
+
+                                // Helper: Convert sparse data to lines array
+                                const dataToLines = (): string[] => {
+                                    const lines: string[] = [];
+                                    let maxY = 0;
+                                    for (const key of Object.keys(existingData)) {
+                                        const [, yStr] = key.split(',');
+                                        const y = parseInt(yStr, 10);
+                                        if (y > maxY) maxY = y;
+                                    }
+                                    for (let y = 0; y <= maxY; y += 2) { // Lines are 2 units apart
+                                        let line = '';
+                                        let maxX = 0;
+                                        for (const key of Object.keys(existingData)) {
+                                            const [xStr, yStr] = key.split(',');
+                                            if (parseInt(yStr, 10) === y) {
+                                                const x = parseInt(xStr, 10);
+                                                if (x > maxX) maxX = x;
+                                            }
+                                        }
+                                        for (let x = 0; x <= maxX; x++) {
+                                            const char = existingData[`${x},${y}`];
+                                            line += typeof char === 'string' ? char : (char?.char || ' ');
+                                        }
+                                        lines.push(line);
+                                    }
+                                    return lines;
+                                };
+
+                                // Helper: Convert lines array back to sparse data
+                                const linesToData = (lines: string[]): Record<string, any> => {
+                                    const newData: Record<string, any> = {};
+                                    for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+                                        const y = lineIdx * 2; // Lines are 2 units apart
+                                        for (let x = 0; x < lines[lineIdx].length; x++) {
+                                            const char = lines[lineIdx][x];
+                                            if (char !== ' ' || existingData[`${x},${y}`]) {
+                                                newData[`${x},${y}`] = char;
+                                            }
+                                        }
+                                    }
+                                    return newData;
+                                };
+
+                                // Operation: APPEND
+                                if (edit.operation === 'append' && edit.text) {
+                                    let maxY = 0;
+                                    for (const key of Object.keys(existingData)) {
+                                        const [, yStr] = key.split(',');
+                                        const y = parseInt(yStr, 10);
+                                        if (y > maxY) maxY = y;
+                                    }
+                                    const newStartY = Object.keys(existingData).length > 0 ? maxY + 2 : 0;
+                                    for (let charX = 0; charX < edit.text.length; charX++) {
+                                        existingData[`${charX},${newStartY}`] = edit.text[charX];
+                                    }
+                                    noteData.data = existingData;
+                                    setWorldData(prev => ({ ...prev, [noteId]: JSON.stringify(noteData) }));
+                                    return { success: true };
+                                }
+
+                                // Operation: INSERT
+                                if (edit.operation === 'insert' && edit.text && edit.position) {
+                                    const lines = dataToLines();
+                                    const { line, column } = edit.position;
+                                    while (lines.length <= line) lines.push('');
+                                    const currentLine = lines[line] || '';
+                                    const paddedLine = currentLine.padEnd(column, ' ');
+                                    lines[line] = paddedLine.slice(0, column) + edit.text + paddedLine.slice(column);
+                                    noteData.data = linesToData(lines);
+                                    setWorldData(prev => ({ ...prev, [noteId]: JSON.stringify(noteData) }));
+                                    return { success: true };
+                                }
+
+                                // Operation: DELETE
+                                if (edit.operation === 'delete' && edit.range) {
+                                    const lines = dataToLines();
+                                    const { startLine, startColumn, endLine, endColumn } = edit.range;
+                                    if (startLine === endLine) {
+                                        if (lines[startLine]) {
+                                            lines[startLine] = lines[startLine].slice(0, startColumn) + lines[startLine].slice(endColumn);
+                                        }
+                                    } else {
+                                        const beforeDelete = lines[startLine]?.slice(0, startColumn) || '';
+                                        const afterDelete = lines[endLine]?.slice(endColumn) || '';
+                                        lines[startLine] = beforeDelete + afterDelete;
+                                        lines.splice(startLine + 1, endLine - startLine);
+                                    }
+                                    noteData.data = linesToData(lines);
+                                    setWorldData(prev => ({ ...prev, [noteId]: JSON.stringify(noteData) }));
+                                    return { success: true };
+                                }
+
+                                // Operation: REPLACE
+                                if (edit.operation === 'replace' && edit.text && edit.range) {
+                                    const lines = dataToLines();
+                                    const { startLine, startColumn, endLine, endColumn } = edit.range;
+                                    if (startLine === endLine) {
+                                        if (lines[startLine]) {
+                                            lines[startLine] = lines[startLine].slice(0, startColumn) + edit.text + lines[startLine].slice(endColumn);
+                                        }
+                                    } else {
+                                        const beforeReplace = lines[startLine]?.slice(0, startColumn) || '';
+                                        const afterReplace = lines[endLine]?.slice(endColumn) || '';
+                                        lines[startLine] = beforeReplace + edit.text + afterReplace;
+                                        lines.splice(startLine + 1, endLine - startLine);
+                                    }
+                                    noteData.data = linesToData(lines);
+                                    setWorldData(prev => ({ ...prev, [noteId]: JSON.stringify(noteData) }));
+                                    return { success: true };
+                                }
+
+                                // Operation: CLEAR
+                                if (edit.operation === 'clear') {
+                                    noteData.data = {};
+                                    setWorldData(prev => ({ ...prev, [noteId]: JSON.stringify(noteData) }));
+                                    return { success: true };
+                                }
+
+                                // Operation: CELL
+                                if (edit.operation === 'cell' && edit.cell) {
+                                    const { row, col, value } = edit.cell;
+                                    if (noteData.tableData) {
+                                        if (!noteData.tableData.cells) noteData.tableData.cells = {};
+                                        noteData.tableData.cells[`${row},${col}`] = value;
+                                    } else {
+                                        existingData[`${col},${row * 2}`] = value;
+                                        noteData.data = existingData;
+                                    }
+                                    setWorldData(prev => ({ ...prev, [noteId]: JSON.stringify(noteData) }));
+                                    return { success: true };
+                                }
+
+                                return { success: false, error: 'Unsupported edit operation' };
+                            } catch (e) {
+                                return { success: false, error: 'Failed to parse note' };
+                            }
                         },
                     };
 
@@ -14398,7 +14649,6 @@ export function useWorldEngine({
         isPaintMode,
         paintColor,
         paintBrushSize,
-        paintType,
         exitPaintMode,
         paintCell: (x: number, y: number, prevX?: number, prevY?: number) => {
             if (!isPaintMode) return;
@@ -14451,7 +14701,7 @@ export function useWorldEngine({
             // Update world data with blob-based storage
             setWorldData(prev => {
                 // Find or create blob for the first cell
-                const { blob, isNew, existingBlobKey } = findOrCreateBlobForCell(prev, cellsToPaint[0].x, cellsToPaint[0].y, paintColor, paintType);
+                const { blob, isNew, existingBlobKey } = findOrCreateBlobForCell(prev, cellsToPaint[0].x, cellsToPaint[0].y, paintColor);
 
                 // Add all cells to the blob
                 const updatedBlob = addCellsToBlob(blob, cellsToPaint);
@@ -14588,7 +14838,7 @@ export function useWorldEngine({
 
                                 // Update world data with blob-based storage
                                 setWorldData(prev => {
-                                    const { blob } = findOrCreateBlobForCell(prev, cellsToPaint[0].x, cellsToPaint[0].y, paintColor, paintType);
+                                    const { blob } = findOrCreateBlobForCell(prev, cellsToPaint[0].x, cellsToPaint[0].y, paintColor);
                                     const updatedBlob = addCellsToBlob(blob, cellsToPaint);
                                     return {
                                         ...prev,
@@ -14657,7 +14907,7 @@ export function useWorldEngine({
 
             // Update world data with blob-based storage
             setWorldData(prev => {
-                const { blob } = findOrCreateBlobForCell(prev, cellsToFill[0].x, cellsToFill[0].y, paintColor, paintType);
+                const { blob } = findOrCreateBlobForCell(prev, cellsToFill[0].x, cellsToFill[0].y, paintColor);
                 const updatedBlob = addCellsToBlob(blob, cellsToFill);
                 return {
                     ...prev,
@@ -14681,7 +14931,7 @@ export function useWorldEngine({
                 let updated = { ...prev };
 
                 for (const [color, colorCells] of cellsByColor) {
-                    const { blob } = findOrCreateBlobForCell(updated, colorCells[0].x, colorCells[0].y, color, 'color');
+                    const { blob } = findOrCreateBlobForCell(updated, colorCells[0].x, colorCells[0].y, color);
                     const updatedBlob = addCellsToBlob(blob, colorCells);
                     updated[`paintblob_${updatedBlob.id}`] = JSON.stringify(updatedBlob);
                 }

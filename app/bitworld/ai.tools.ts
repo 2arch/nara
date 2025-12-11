@@ -1,6 +1,7 @@
 // Consolidated tool definitions for Nara canvas
 // Two core tools: sense() and make()
 // No external dependencies - can be used by both Gemini AI and MCP server
+// This file is the SINGLE SOURCE OF TRUTH for all canvas actions
 
 // Tool definition interface (framework-agnostic)
 export interface ToolDefinition {
@@ -12,6 +13,52 @@ export interface ToolDefinition {
     required?: string[];
   };
 }
+
+// =============================================================================
+// ACTION TYPES - Single source of truth for canvas actions
+// =============================================================================
+
+/** Top-level make() action keys - the canonical list of what can be done to the canvas */
+export const MAKE_ACTIONS = [
+  'paint',       // Paint cells, shapes, lines
+  'note',        // Create notes (text, image, data, script)
+  'text',        // Write text directly on canvas
+  'chip',        // Create label chips
+  'agent',       // Create/move/command agents
+  'delete',      // Delete entities
+  'command',     // Run any /command
+  'run_script',  // Execute a script note
+  'edit_note',   // CRDT-style note editing
+] as const;
+
+/** Type derived from MAKE_ACTIONS array */
+export type MakeAction = typeof MAKE_ACTIONS[number];
+
+/** Sense query types */
+export const SENSE_QUERIES = [
+  'notes',
+  'agents',
+  'chips',
+  'text',
+  'paint',
+  'viewport',
+  'cursor',
+  'selection',
+  'all',
+] as const;
+
+export type SenseQuery = typeof SENSE_QUERIES[number];
+
+/** Agent movement commands - separate from canvas actions */
+export const AGENT_MOVEMENT = [
+  'move',        // Move agent (relative dx,dy)
+  'stop',        // Stop agent movement
+] as const;
+
+export type AgentMovement = typeof AGENT_MOVEMENT[number];
+
+/** Combined: what behaviors can trigger (canvas actions + movement) */
+export type OnColorAction = MakeAction | AgentMovement;
 
 // =============================================================================
 // CONSOLIDATED TOOLS: sense + make
@@ -339,6 +386,46 @@ Examples:
             think: {
               type: 'boolean',
               description: 'Trigger one thinking cycle for the targeted agent(s). Agent will perceive nearby context and decide what to do.'
+            },
+            behaviors: {
+              type: 'object',
+              description: 'Add or remove paint-reactive behaviors for stigmergic movement',
+              properties: {
+                add: {
+                  type: 'object',
+                  description: 'Add a behavior',
+                  properties: {
+                    type: {
+                      type: 'string',
+                      enum: ['follow-color', 'avoid-color', 'stop-on-color', 'turn-on-color'],
+                      description: 'Behavior type'
+                    },
+                    color: { type: 'string', description: 'Hex color to react to (e.g., #000000)' },
+                    direction: {
+                      type: 'string',
+                      enum: ['left', 'right', 'reverse'],
+                      description: 'Turn direction (for turn-on-color)'
+                    },
+                    priority: { type: 'number', description: 'Higher = evaluated first' }
+                  },
+                  required: ['type', 'color']
+                },
+                remove: {
+                  type: 'object',
+                  description: 'Remove a behavior',
+                  properties: {
+                    type: {
+                      type: 'string',
+                      enum: ['follow-color', 'avoid-color', 'stop-on-color', 'turn-on-color'],
+                      description: 'Behavior type to remove'
+                    },
+                    color: { type: 'string', description: 'Color of behavior to remove' }
+                  },
+                  required: ['type', 'color']
+                },
+                clear: { type: 'boolean', description: 'Remove all behaviors' },
+                list: { type: 'boolean', description: 'Return list of current behaviors' }
+              }
             }
           }
         },

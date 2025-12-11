@@ -3,6 +3,11 @@
 // Separated from ai.ts for clarity - tools remain in ai.tools.ts
 
 import { ai, AIResult, CanvasState } from './ai';
+import { type OnColorAction, MAKE_ACTIONS, AGENT_MOVEMENT } from './ai.tools';
+
+// Re-export for convenience
+export type { OnColorAction };
+export { MAKE_ACTIONS, AGENT_MOVEMENT };
 
 // =============================================================================
 // Agent Mind - Internal state for autonomous agents
@@ -20,6 +25,210 @@ export interface AgentMind {
 export interface AgentThought {
     thought: string;           // The agent's reasoning
     actions?: AIResult['actions'];  // Actions to execute
+}
+
+// =============================================================================
+// Agent Behaviors - Stigmergic perception-based movement
+// =============================================================================
+
+/** Behavior types for paint-based agent movement */
+export type AgentBehaviorType =
+    | 'follow-color'    // Move toward cells of this color
+    | 'avoid-color'     // Move away from cells of this color
+    | 'stop-on-color'   // Stop when standing on this color
+    | 'turn-on-color'   // Turn when encountering this color
+    | 'on-color';       // Execute action when encountering this color
+
+/** Direction for turn behaviors */
+export type TurnDirection = 'left' | 'right' | 'reverse';
+
+/** Action definition for on-color behavior - type imported from ai.tools.ts */
+export interface OnColorActionDef {
+    action: OnColorAction;
+    value?: string;     // The argument (color, text, command, coordinates, etc.)
+}
+
+/** A single behavior rule */
+export interface AgentBehavior {
+    type: AgentBehaviorType;
+    color: string;              // Hex color to react to
+    priority?: number;          // Higher = evaluated first (default: 0)
+    direction?: TurnDirection;  // For turn-on-color behavior
+    onColorAction?: OnColorActionDef;  // For on-color behavior
+}
+
+/** Agent perception configuration */
+export interface AgentPerception {
+    radius: number;             // How far agent can sense (default: 8)
+    angle: number;              // Field of view in degrees (default: 360)
+    direction: number;          // Facing direction in radians
+}
+
+/** Velocity vector */
+export interface Velocity {
+    x: number;
+    y: number;
+}
+
+/** Adjacent cell with color info */
+export interface AdjacentCell {
+    dx: number;                 // Offset from agent (-1, 0, or 1)
+    dy: number;
+    x: number;                  // Absolute position
+    y: number;
+    color: string | null;       // Paint color at this cell, null if empty
+}
+
+// =============================================================================
+// Behavior Evaluation
+// =============================================================================
+
+/**
+ * Get the 8 adjacent cells and their paint colors
+ */
+export function getAdjacentColors(
+    x: number,
+    y: number,
+    getPaintColorAt: (x: number, y: number) => string | null
+): AdjacentCell[] {
+    const neighbors: AdjacentCell[] = [];
+    for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue; // Skip self
+            const nx = Math.floor(x) + dx;
+            const ny = Math.floor(y) + dy;
+            neighbors.push({
+                dx, dy,
+                x: nx,
+                y: ny,
+                color: getPaintColorAt(nx, ny)
+            });
+        }
+    }
+    return neighbors;
+}
+
+/**
+ * Check if two colors match (case-insensitive hex comparison)
+ */
+function colorsMatch(c1: string | null, c2: string): boolean {
+    if (!c1) return false;
+    return c1.toLowerCase() === c2.toLowerCase();
+}
+
+/**
+ * Evaluate behaviors and compute velocity
+ */
+export function evaluateBehaviors(
+    behaviors: AgentBehavior[],
+    currentPos: { x: number; y: number },
+    adjacentCells: AdjacentCell[],
+    currentVelocity: Velocity
+): Velocity {
+    if (!behaviors || behaviors.length === 0) {
+        return { x: 0, y: 0 };
+    }
+
+    // Sort by priority (higher first)
+    const sorted = [...behaviors].sort((a, b) => (b.priority || 0) - (a.priority || 0));
+
+    let velocity: Velocity = { ...currentVelocity };
+    let stopped = false;
+
+    for (const behavior of sorted) {
+        if (stopped) break;
+
+        const matchingCells = adjacentCells.filter(c => colorsMatch(c.color, behavior.color));
+
+        switch (behavior.type) {
+            case 'follow-color': {
+                // Move toward the matching color
+                if (matchingCells.length > 0) {
+                    // Average direction toward all matching cells
+                    let avgDx = 0, avgDy = 0;
+                    for (const cell of matchingCells) {
+                        avgDx += cell.dx;
+                        avgDy += cell.dy;
+                    }
+                    // Normalize to unit velocity
+                    const len = Math.sqrt(avgDx * avgDx + avgDy * avgDy);
+                    if (len > 0) {
+                        velocity = {
+                            x: avgDx / len,
+                            y: avgDy / len
+                        };
+                    }
+                }
+                break;
+            }
+
+            case 'avoid-color': {
+                // Move away from the matching color
+                if (matchingCells.length > 0) {
+                    let avgDx = 0, avgDy = 0;
+                    for (const cell of matchingCells) {
+                        avgDx -= cell.dx; // Negative = away
+                        avgDy -= cell.dy;
+                    }
+                    const len = Math.sqrt(avgDx * avgDx + avgDy * avgDy);
+                    if (len > 0) {
+                        velocity = {
+                            x: avgDx / len,
+                            y: avgDy / len
+                        };
+                    }
+                }
+                break;
+            }
+
+            case 'stop-on-color': {
+                // Check if standing on this color (check current cell)
+                // We need to check the cell we're on, not adjacent
+                // This will be handled separately with current cell color
+                break;
+            }
+
+            case 'turn-on-color': {
+                // Turn when seeing this color
+                if (matchingCells.length > 0 && behavior.direction) {
+                    const angle = Math.atan2(velocity.y, velocity.x);
+                    let newAngle = angle;
+                    switch (behavior.direction) {
+                        case 'left':
+                            newAngle = angle - Math.PI / 2;
+                            break;
+                        case 'right':
+                            newAngle = angle + Math.PI / 2;
+                            break;
+                        case 'reverse':
+                            newAngle = angle + Math.PI;
+                            break;
+                    }
+                    const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y) || 1;
+                    velocity = {
+                        x: Math.cos(newAngle) * speed,
+                        y: Math.sin(newAngle) * speed
+                    };
+                }
+                break;
+            }
+        }
+    }
+
+    return velocity;
+}
+
+/**
+ * Check if agent should stop based on current cell color
+ */
+export function shouldStop(
+    behaviors: AgentBehavior[],
+    currentCellColor: string | null
+): boolean {
+    if (!currentCellColor) return false;
+    return behaviors.some(b =>
+        b.type === 'stop-on-color' && colorsMatch(currentCellColor, b.color)
+    );
 }
 
 // =============================================================================
