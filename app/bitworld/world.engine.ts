@@ -994,6 +994,10 @@ export interface WorldEngine {
     processingRegion: { startX: number, endX: number, startY: number, endY: number } | null;
     selectedNoteKey: string | null; // Track selected note region from canvas
     setSelectedNoteKey: React.Dispatch<React.SetStateAction<string | null>>; // Allow canvas to update selected note
+    selectedAgentIds: Set<string>; // Currently selected agent IDs
+    setSelectedAgentIds: React.Dispatch<React.SetStateAction<Set<string>>>; // Update selected agents
+    agentVisualPositions: Record<string, { x: number; y: number }>; // Visual positions of agents
+    setAgentVisualPositions: React.Dispatch<React.SetStateAction<Record<string, { x: number; y: number }>>>; // Update agent positions
     handleSelectionStart: (canvasRelativeX: number, canvasRelativeY: number) => void;
     handleSelectionMove: (canvasRelativeX: number, canvasRelativeY: number) => void;
     handleSelectionEnd: () => void;
@@ -1472,6 +1476,8 @@ export function useWorldEngine({
     const [selectionEnd, setSelectionEnd] = useState<Point | null>(null);
     const [processingRegion, setProcessingRegion] = useState<{ startX: number, endX: number, startY: number, endY: number } | null>(null);
     const [selectedNoteKey, setSelectedNoteKey] = useState<string | null>(null); // Track selected note region from canvas
+    const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set()); // Track selected agents
+    const [agentVisualPositions, setAgentVisualPositions] = useState<Record<string, { x: number; y: number }>>({}); // Agent positions
 
     // === State ===
     const [worldData, setWorldData] = useState<WorldData>(initialWorldData);
@@ -2192,7 +2198,7 @@ export function useWorldEngine({
         agentSpriteName,
         isAgentAttached,
         setAgentAttached,
-    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid: authenticatedUserUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, currentScale, setCurrentScale, recorder, setBounds: setCurrentBounds, canvasState, setCanvasState, setBoundedWorldData, boundedSource, setBoundedSource, boundedWorldData, setZoomLevel, setViewOffset, selectionStart, selectionEnd, setProcessingRegion, triggerUpgradeFlow: () => {
+    } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid: authenticatedUserUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, currentScale, setCurrentScale, recorder, setBounds: setCurrentBounds, canvasState, setCanvasState, setBoundedWorldData, boundedSource, setBoundedSource, boundedWorldData, setZoomLevel, setViewOffset, selectionStart, selectionEnd, setProcessingRegion, selectedAgentIds, getAgentVisualPositions: () => agentVisualPositions, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
         }
@@ -14549,6 +14555,10 @@ export function useWorldEngine({
         processingRegion,
         selectedNoteKey, // Expose selected note key for canvas
         setSelectedNoteKey, // Allow canvas to update selected note
+        selectedAgentIds, // Currently selected agents
+        setSelectedAgentIds, // Update selected agents
+        agentVisualPositions, // Agent visual positions
+        setAgentVisualPositions, // Update agent positions
         handleSelectionStart,
         handleSelectionMove,
         handleSelectionEnd,

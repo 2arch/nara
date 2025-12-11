@@ -397,6 +397,8 @@ interface UseCommandSystemProps {
     cancelComposition?: () => void; // Callback to cancel IME composition
     selectedNoteKey?: string | null; // Currently selected note
     selectedPatternKey?: string | null; // Currently selected pattern
+    selectedAgentIds?: Set<string>; // Currently selected agent IDs
+    getAgentVisualPositions?: () => Record<string, { x: number; y: number }>; // Get agent positions for cursor detection
     currentScale?: { w: number; h: number }; // Current text scale
     setCurrentScale?: (scale: { w: number; h: number }) => void; // Set current text scale
     monogramSystem?: { // WebGPU monogram background system
@@ -487,7 +489,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'export': 'Export selected area as a PNG image. Make a selection, then type /export to download it as an image. Use /export --grid to include grid lines in the export.',
     'upload': 'Upload files to your canvas. Images are rasterized to fit. Scripts (.js, .py) become executable script notes - use /run to execute. Also supports .json, .txt, .md, .csv as text notes.',
     'paint': 'Enter paint mode to draw filled regions on the canvas. Drag to draw a continuous stroke, double-click/double-tap to fill the enclosed area. Press ESC to exit.',
-    'agent': 'Agent mode and behaviors. /agent [sprite] to spawn agents. /agent <name> add follow-color black to add behaviors. /agent <name> list to view, /agent <name> clear to remove all.',
+    'agent': 'Spawn and configure agents. /agent spawns at cursor. /agent [sprite] spawns specific sprite. Select agents then: /agent follow-color black, /agent sense radius 5, /agent list, /agent clear.',
     'data': 'Create a data table from selected text. Select CSV-formatted text (comma-separated values), then type /data to convert it into an interactive table with resizable columns and rows. First row becomes the header.',
     'script': 'Convert a note into an executable script. Usage: /script [lang]. Languages: js/javascript (default), py/python. Auto-detects Python from import, def, print(), etc. Use /run to execute.',
     'run': 'Execute the script note at cursor position. JavaScript uses print() or console.log(). Python uses Pyodide (~10MB, lazy loaded on first use). Use #!py at start of script for Python.',
@@ -542,7 +544,7 @@ export const COLOR_MAP: { [name: string]: string } = {
 };
 
 // --- Command System Hook ---
-export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllChips, getAllBounds = () => [], availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, currentScale, setCurrentScale, monogramSystem, recorder, setBounds, canvasState, setCanvasState, setBoundedWorldData, boundedSource, setBoundedSource, boundedWorldData, setZoomLevel, setViewOffset, selectionStart, selectionEnd, setProcessingRegion }: UseCommandSystemProps) {
+export function useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground = false, getAllChips, getAllBounds = () => [], availableStates = [], username, userUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems = [], toggleRecording, isReadOnly = false, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, triggerUpgradeFlow, triggerTutorialFlow, onCommandExecuted, cancelComposition, selectedNoteKey, selectedPatternKey, selectedAgentIds, getAgentVisualPositions, currentScale, setCurrentScale, monogramSystem, recorder, setBounds, canvasState, setCanvasState, setBoundedWorldData, boundedSource, setBoundedSource, boundedWorldData, setZoomLevel, setViewOffset, selectionStart, selectionEnd, setProcessingRegion }: UseCommandSystemProps) {
     const router = useRouter();
     const backgroundStreamRef = useRef<MediaStream | undefined>(undefined);
     const previousBackgroundStateRef = useRef<{
@@ -5754,361 +5756,408 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (commandToExecute.startsWith('agent')) {
             const agentArgs = commandToExecute.slice(5).trim();
-            const argParts = agentArgs.split(/\s+/);
+            const argParts = agentArgs.split(/\s+/).filter(p => p.length > 0);
 
-            // Handle sense command: /agent <name> sense [radius <n>] [angle <n>]
-            if (argParts.length >= 2 && argParts[1] === 'sense') {
-                const agentName = argParts[0].toLowerCase();
+            // Helper: Get target agents from selection or cursor
+            const getTargetAgents = (): Array<{ id: string; data: any }> => {
+                const targets: Array<{ id: string; data: any }> = [];
 
-                // Find agent by name in worldData
-                let targetAgentId: string | null = null;
-                let targetAgentData: any = null;
-
-                if (worldData) {
-                    for (const key in worldData) {
-                        if (key.startsWith('agent_')) {
+                // First, check if agents are selected
+                if (selectedAgentIds && selectedAgentIds.size > 0) {
+                    for (const agentId of selectedAgentIds) {
+                        if (worldData && worldData[agentId]) {
                             try {
-                                const data = typeof worldData[key] === 'string' ? JSON.parse(worldData[key]) : worldData[key];
-                                if (data.name?.toLowerCase() === agentName) {
-                                    targetAgentId = key;
-                                    targetAgentData = data;
-                                    break;
-                                }
+                                const data = typeof worldData[agentId] === 'string'
+                                    ? JSON.parse(worldData[agentId])
+                                    : worldData[agentId];
+                                targets.push({ id: agentId, data });
                             } catch {}
                         }
                     }
                 }
 
-                if (!targetAgentId || !targetAgentData) {
-                    setDialogueWithRevert(`Agent "${agentName}" not found`, setDialogueText);
-                    clearCommandState();
-                    return null;
-                }
+                // If no selected agents, try to find agent at cursor position
+                if (targets.length === 0 && getAgentVisualPositions) {
+                    const cursorPos = commandState.commandStartPos;
+                    const agentPositions = getAgentVisualPositions();
 
-                // Initialize sense with defaults if not set
-                if (!targetAgentData.sense) {
-                    targetAgentData.sense = { radius: 1, angle: 360 };
-                }
-
-                // No args = show current sense
-                if (argParts.length === 2) {
-                    const s = targetAgentData.sense;
-                    setDialogueWithRevert(`${agentName} sense: radius ${s.radius}, angle ${s.angle}°`, setDialogueText);
-                    clearCommandState();
-                    return null;
-                }
-
-                const subcommand = argParts[2].toLowerCase();
-
-                // /agent wizard sense radius <n>
-                if (subcommand === 'radius') {
-                    if (argParts.length < 4) {
-                        setDialogueWithRevert(`Usage: /agent ${agentName} sense radius <1-20>`, setDialogueText);
-                        clearCommandState();
-                        return null;
-                    }
-                    const radius = parseInt(argParts[3], 10);
-                    if (isNaN(radius) || radius < 1 || radius > 20) {
-                        setDialogueWithRevert(`Invalid radius: ${argParts[3]}. Use 1-20`, setDialogueText);
-                        clearCommandState();
-                        return null;
-                    }
-                    targetAgentData.sense.radius = radius;
-
-                    if (setWorldData) {
-                        setWorldData((prev: Record<string, any>) => ({
-                            ...prev,
-                            [targetAgentId!]: JSON.stringify(targetAgentData)
-                        }));
-                    }
-                    setDialogueWithRevert(`${agentName} sense radius: ${radius}`, setDialogueText);
-                    clearCommandState();
-                    return null;
-                }
-
-                // /agent wizard sense angle <n>
-                if (subcommand === 'angle') {
-                    if (argParts.length < 4) {
-                        setDialogueWithRevert(`Usage: /agent ${agentName} sense angle <1-360>`, setDialogueText);
-                        clearCommandState();
-                        return null;
-                    }
-                    const angle = parseInt(argParts[3], 10);
-                    if (isNaN(angle) || angle < 1 || angle > 360) {
-                        setDialogueWithRevert(`Invalid angle: ${argParts[3]}. Use 1-360`, setDialogueText);
-                        clearCommandState();
-                        return null;
-                    }
-                    targetAgentData.sense.angle = angle;
-
-                    if (setWorldData) {
-                        setWorldData((prev: Record<string, any>) => ({
-                            ...prev,
-                            [targetAgentId!]: JSON.stringify(targetAgentData)
-                        }));
-                    }
-                    setDialogueWithRevert(`${agentName} sense angle: ${angle}°`, setDialogueText);
-                    clearCommandState();
-                    return null;
-                }
-
-                // Unknown subcommand
-                setDialogueWithRevert(`Usage: /agent ${agentName} sense [radius <n>] [angle <n>]`, setDialogueText);
-                clearCommandState();
-                return null;
-            }
-
-            // Handle behavior commands: /agent <name> add|remove|list|clear ...
-            if (argParts.length >= 2 && ['add', 'remove', 'list', 'clear'].includes(argParts[1])) {
-                const agentName = argParts[0].toLowerCase();
-                const action = argParts[1];
-
-                // Find agent by name in worldData
-                let targetAgentId: string | null = null;
-                let targetAgentData: any = null;
-
-                if (worldData) {
-                    for (const key in worldData) {
-                        if (key.startsWith('agent_')) {
-                            try {
-                                const data = typeof worldData[key] === 'string' ? JSON.parse(worldData[key]) : worldData[key];
-                                if (data.name?.toLowerCase() === agentName) {
-                                    targetAgentId = key;
-                                    targetAgentData = data;
-                                    break;
-                                }
-                            } catch {}
-                        }
-                    }
-                }
-
-                if (!targetAgentId || !targetAgentData) {
-                    setDialogueWithRevert(`Agent "${agentName}" not found`, setDialogueText);
-                    clearCommandState();
-                    return null;
-                }
-
-                // Initialize behaviors array if needed
-                if (!targetAgentData.behaviors) {
-                    targetAgentData.behaviors = [];
-                }
-
-                if (action === 'list') {
-                    // List all behaviors for this agent
-                    const behaviors = targetAgentData.behaviors || [];
-                    if (behaviors.length === 0) {
-                        setDialogueWithRevert(`${agentName} has no behaviors`, setDialogueText);
-                    } else {
-                        const behaviorList = behaviors.map((b: any) => {
-                            let desc = `${b.type} ${b.color}`;
-                            if (b.direction) desc += ` ${b.direction}`;
-                            if (b.onColorAction) {
-                                desc += ` → ${b.onColorAction.action}`;
-                                if (b.onColorAction.value) desc += ` ${b.onColorAction.value}`;
+                    for (const [agentId, pos] of Object.entries(agentPositions)) {
+                        // Check if cursor is on or near this agent (within 2 cells)
+                        const dx = Math.abs(pos.x - cursorPos.x);
+                        const dy = Math.abs(pos.y - cursorPos.y);
+                        if (dx <= 2 && dy <= 2) {
+                            if (worldData && worldData[agentId]) {
+                                try {
+                                    const data = typeof worldData[agentId] === 'string'
+                                        ? JSON.parse(worldData[agentId])
+                                        : worldData[agentId];
+                                    targets.push({ id: agentId, data });
+                                    break; // Take first match
+                                } catch {}
                             }
-                            return desc;
-                        }).join(', ');
-                        setDialogueWithRevert(`${agentName}: ${behaviorList}`, setDialogueText);
+                        }
                     }
-                    clearCommandState();
-                    return null;
                 }
 
-                if (action === 'clear') {
-                    // Clear all behaviors
-                    targetAgentData.behaviors = [];
-                    if (setWorldData) {
-                        setWorldData((prev: Record<string, any>) => ({
-                            ...prev,
-                            [targetAgentId!]: JSON.stringify(targetAgentData)
-                        }));
-                    }
-                    setDialogueWithRevert(`Cleared all behaviors from ${agentName}`, setDialogueText);
-                    clearCommandState();
-                    return null;
-                }
+                return targets;
+            };
 
-                if (action === 'add' || action === 'remove') {
-                    // Parse: add|remove <behavior-type> <color> [direction|action] [value]
-                    // e.g., add follow-color black
-                    // e.g., add turn-on-color green left
-                    // e.g., add on-color red paint #00ff00
-                    // e.g., add on-color blue command "/grow 5 life"
-                    if (argParts.length < 4) {
-                        setDialogueWithRevert(`Usage: /agent ${agentName} ${action} <behavior> <color> [direction|action] [value]`, setDialogueText);
+            // Named colors for behavior parsing
+            const namedColors: { [key: string]: string } = {
+                'black': '#000000',
+                'white': '#ffffff',
+                'red': '#ff0000',
+                'green': '#00ff00',
+                'blue': '#0000ff',
+                'yellow': '#ffff00',
+                'cyan': '#00ffff',
+                'magenta': '#ff00ff',
+                'orange': '#ff8800',
+                'purple': '#8800ff',
+            };
+
+            const parseColor = (colorStr: string): string => {
+                const lower = colorStr.toLowerCase();
+                if (namedColors[lower]) return namedColors[lower];
+                if (!lower.startsWith('#')) return '#' + lower;
+                return lower;
+            };
+
+            // /agent alone → spawn 1 agent at cursor if no agents selected
+            if (argParts.length === 0) {
+                const targets = getTargetAgents();
+
+                if (targets.length === 0) {
+                    // No agents selected or under cursor → spawn one at cursor
+                    const cursorPos = commandState.commandStartPos;
+                    const sprite = userSprites[0]; // Use first available sprite
+
+                    if (!sprite) {
+                        setDialogueWithRevert("No sprites available. Create one with /be first.", setDialogueText);
                         clearCommandState();
                         return null;
                     }
 
-                    const behaviorType = argParts[2] as 'follow-color' | 'avoid-color' | 'stop-on-color' | 'turn-on-color' | 'on-color';
-                    const validTypes = ['follow-color', 'avoid-color', 'stop-on-color', 'turn-on-color', 'on-color'];
-                    if (!validTypes.includes(behaviorType)) {
-                        setDialogueWithRevert(`Invalid behavior: ${behaviorType}. Use: ${validTypes.join(', ')}`, setDialogueText);
-                        clearCommandState();
-                        return null;
-                    }
-
-                    // Parse color - support named colors and hex
-                    let color = argParts[3].toLowerCase();
-                    const namedColors: { [key: string]: string } = {
-                        'black': '#000000',
-                        'white': '#ffffff',
-                        'red': '#ff0000',
-                        'green': '#00ff00',
-                        'blue': '#0000ff',
-                        'yellow': '#ffff00',
-                        'cyan': '#00ffff',
-                        'magenta': '#ff00ff',
-                        'orange': '#ff8800',
-                        'purple': '#8800ff',
+                    // Generate unique agent ID
+                    const agentId = `agent_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                    const agentData = {
+                        x: cursorPos.x,
+                        y: cursorPos.y,
+                        spriteName: sprite.name,
+                        name: sprite.name.toLowerCase(),
+                        behaviors: [],
+                        sense: { radius: 1, angle: 360 }
                     };
-                    if (namedColors[color]) {
-                        color = namedColors[color];
-                    } else if (!color.startsWith('#')) {
-                        color = '#' + color;
+
+                    if (setWorldData) {
+                        setWorldData((prev: Record<string, any>) => ({
+                            ...prev,
+                            [agentId]: JSON.stringify(agentData)
+                        }));
                     }
-
-                    // Parse optional direction for turn-on-color
-                    let direction: 'left' | 'right' | 'reverse' | undefined;
-                    if (behaviorType === 'turn-on-color' && argParts.length >= 5) {
-                        const dir = argParts[4].toLowerCase();
-                        if (['left', 'right', 'reverse'].includes(dir)) {
-                            direction = dir as 'left' | 'right' | 'reverse';
-                        }
-                    }
-
-                    // Parse on-color action and value
-                    // Syntax: /agent wizard add on-color red paint #00ff00
-                    // Syntax: /agent wizard add on-color blue command "/grow 5 life"
-                    // Syntax: /agent wizard add on-color green move 10,5
-                    // Syntax: /agent wizard add on-color yellow stop
-                    let onColorAction: { action: string; value?: string } | undefined;
-                    if (behaviorType === 'on-color') {
-                        if (argParts.length < 5) {
-                            setDialogueWithRevert(`Usage: /agent ${agentName} add on-color <color> <action> [value]`, setDialogueText);
-                            clearCommandState();
-                            return null;
-                        }
-                        const actionType = argParts[4].toLowerCase();
-                        // Use canonical action lists from ai.tools.ts
-                        const allActions = [...MAKE_ACTIONS, ...AGENT_MOVEMENT];
-                        if (!allActions.includes(actionType as any)) {
-                            setDialogueWithRevert(`Invalid action: ${actionType}. Use: ${allActions.join(', ')}`, setDialogueText);
-                            clearCommandState();
-                            return null;
-                        }
-                        // Get the value - everything after the action word
-                        // This allows for values with spaces like command "/grow 5 life"
-                        let actionValue: string | undefined;
-                        if (argParts.length > 5) {
-                            // Join remaining parts, handling quoted strings
-                            const remaining = argParts.slice(5).join(' ');
-                            // Strip surrounding quotes if present
-                            actionValue = remaining.replace(/^["']|["']$/g, '');
-                        }
-                        onColorAction = { action: actionType, value: actionValue };
-                    }
-
-                    if (action === 'add') {
-                        // Add new behavior
-                        const newBehavior: any = { type: behaviorType, color };
-                        if (direction) newBehavior.direction = direction;
-                        if (onColorAction) newBehavior.onColorAction = onColorAction;
-
-                        // Check if already exists (for on-color, also check action)
-                        const exists = targetAgentData.behaviors.some((b: any) => {
-                            if (b.type !== behaviorType || b.color.toLowerCase() !== color.toLowerCase()) {
-                                return false;
-                            }
-                            // For on-color, two behaviors with different actions are distinct
-                            if (behaviorType === 'on-color' && onColorAction) {
-                                return b.onColorAction?.action === onColorAction.action;
-                            }
-                            return true;
-                        });
-                        if (!exists) {
-                            targetAgentData.behaviors.push(newBehavior);
-                        }
-
-                        if (setWorldData) {
-                            setWorldData((prev: Record<string, any>) => ({
-                                ...prev,
-                                [targetAgentId!]: JSON.stringify(targetAgentData)
-                            }));
-                        }
-                        const actionInfo = onColorAction ? ` → ${onColorAction.action}${onColorAction.value ? ' ' + onColorAction.value : ''}` : '';
-                        setDialogueWithRevert(`Added ${behaviorType} ${color}${actionInfo} to ${agentName}`, setDialogueText);
-                    } else {
-                        // Remove behavior
-                        targetAgentData.behaviors = targetAgentData.behaviors.filter((b: any) =>
-                            !(b.type === behaviorType && b.color.toLowerCase() === color.toLowerCase())
-                        );
-                        if (setWorldData) {
-                            setWorldData((prev: Record<string, any>) => ({
-                                ...prev,
-                                [targetAgentId!]: JSON.stringify(targetAgentData)
-                            }));
-                        }
-                        setDialogueWithRevert(`Removed ${behaviorType} ${color} from ${agentName}`, setDialogueText);
-                    }
-
+                    setDialogueWithRevert(`Spawned ${sprite.name} at (${cursorPos.x}, ${cursorPos.y})`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                } else {
+                    // Agents are selected/under cursor → show info
+                    const names = targets.map(t => t.data.name || 'unnamed').join(', ');
+                    setDialogueWithRevert(`Selected: ${names}. Use /agent <command> to configure.`, setDialogueText);
                     clearCommandState();
                     return null;
                 }
             }
 
-            // Handle /agent attach - toggle cursor attachment for selected agents
-            if (agentArgs === 'attach') {
+            // /agent attach - toggle cursor attachment
+            if (argParts[0] === 'attach') {
                 if (modeState.isAgentAttached) {
-                    // Already attached, detach
-                    setModeState(prev => ({
-                        ...prev,
-                        isAgentAttached: false
-                    }));
+                    setModeState(prev => ({ ...prev, isAgentAttached: false }));
                     setDialogueWithRevert("Agents detached from cursor", setDialogueText);
                 } else {
-                    // Attach selected agents to cursor
-                    setModeState(prev => ({
-                        ...prev,
-                        isAgentAttached: true
-                    }));
-                    setDialogueWithRevert("Agents attached to cursor. Use /agent attach to detach.", setDialogueText);
+                    setModeState(prev => ({ ...prev, isAgentAttached: true }));
+                    setDialogueWithRevert("Agents attached to cursor. /agent attach to detach.", setDialogueText);
                 }
                 clearCommandState();
                 return null;
             }
 
-            // If already in agent mode and no arguments, toggle it off
-            if (modeState.isAgentMode && !agentArgs) {
-                setModeState(prev => ({
-                    ...prev,
-                    isAgentMode: false
-                }));
-                setDialogueWithRevert("Agent mode disabled", setDialogueText);
-                clearCommandState();
-                return null;
-            }
-
-            // Parse sprite name if provided
-            let spriteName: string | undefined;
-            if (agentArgs) {
-                spriteName = agentArgs.toLowerCase();
-                // Validate sprite exists
-                const sprite = userSprites.find(s => s.name.toLowerCase() === spriteName);
-                if (!sprite) {
-                    setDialogueWithRevert(`Sprite "${agentArgs}" not found`, setDialogueText);
+            // /agent list - show behaviors of selected agents
+            if (argParts[0] === 'list') {
+                const targets = getTargetAgents();
+                if (targets.length === 0) {
+                    setDialogueWithRevert("No agents selected. Select agents or position cursor on one.", setDialogueText);
                     clearCommandState();
                     return null;
                 }
+
+                const info = targets.map(t => {
+                    const behaviors = t.data.behaviors || [];
+                    if (behaviors.length === 0) {
+                        return `${t.data.name || 'agent'}: no behaviors`;
+                    }
+                    const behaviorList = behaviors.map((b: any) => {
+                        let desc = `${b.type} ${b.color}`;
+                        if (b.direction) desc += ` ${b.direction}`;
+                        if (b.onColorAction) desc += ` → ${b.onColorAction.action}`;
+                        return desc;
+                    }).join(', ');
+                    return `${t.data.name || 'agent'}: ${behaviorList}`;
+                }).join(' | ');
+
+                setDialogueWithRevert(info, setDialogueText);
+                clearCommandState();
+                return null;
             }
 
-            // Enable agent mode
-            setModeState(prev => ({
-                ...prev,
-                isAgentMode: true,
-                agentSpriteName: spriteName
-            }));
-            setDialogueWithRevert(`Agent spawn mode enabled. Click on canvas to place agents. Press ESC to exit.`, setDialogueText);
+            // /agent clear - clear all behaviors from selected agents
+            if (argParts[0] === 'clear') {
+                const targets = getTargetAgents();
+                if (targets.length === 0) {
+                    setDialogueWithRevert("No agents selected", setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                if (setWorldData) {
+                    setWorldData((prev: Record<string, any>) => {
+                        const newData = { ...prev };
+                        for (const target of targets) {
+                            target.data.behaviors = [];
+                            newData[target.id] = JSON.stringify(target.data);
+                        }
+                        return newData;
+                    });
+                }
+                setDialogueWithRevert(`Cleared behaviors from ${targets.length} agent(s)`, setDialogueText);
+                clearCommandState();
+                return null;
+            }
+
+            // /agent sense radius <n> OR /agent sense angle <n>
+            if (argParts[0] === 'sense') {
+                const targets = getTargetAgents();
+                if (targets.length === 0) {
+                    setDialogueWithRevert("No agents selected", setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                // /agent sense - show current
+                if (argParts.length === 1) {
+                    const info = targets.map(t => {
+                        const s = t.data.sense || { radius: 1, angle: 360 };
+                        return `${t.data.name || 'agent'}: r=${s.radius} a=${s.angle}°`;
+                    }).join(', ');
+                    setDialogueWithRevert(info, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                const subcommand = argParts[1].toLowerCase();
+
+                if (subcommand === 'radius' && argParts.length >= 3) {
+                    const radius = parseInt(argParts[2], 10);
+                    if (isNaN(radius) || radius < 1 || radius > 20) {
+                        setDialogueWithRevert("Invalid radius. Use 1-20", setDialogueText);
+                        clearCommandState();
+                        return null;
+                    }
+                    if (setWorldData) {
+                        setWorldData((prev: Record<string, any>) => {
+                            const newData = { ...prev };
+                            for (const target of targets) {
+                                if (!target.data.sense) target.data.sense = { radius: 1, angle: 360 };
+                                target.data.sense.radius = radius;
+                                newData[target.id] = JSON.stringify(target.data);
+                            }
+                            return newData;
+                        });
+                    }
+                    setDialogueWithRevert(`Set sense radius to ${radius} for ${targets.length} agent(s)`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                if (subcommand === 'angle' && argParts.length >= 3) {
+                    const angle = parseInt(argParts[2], 10);
+                    if (isNaN(angle) || angle < 1 || angle > 360) {
+                        setDialogueWithRevert("Invalid angle. Use 1-360", setDialogueText);
+                        clearCommandState();
+                        return null;
+                    }
+                    if (setWorldData) {
+                        setWorldData((prev: Record<string, any>) => {
+                            const newData = { ...prev };
+                            for (const target of targets) {
+                                if (!target.data.sense) target.data.sense = { radius: 1, angle: 360 };
+                                target.data.sense.angle = angle;
+                                newData[target.id] = JSON.stringify(target.data);
+                            }
+                            return newData;
+                        });
+                    }
+                    setDialogueWithRevert(`Set sense angle to ${angle}° for ${targets.length} agent(s)`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                setDialogueWithRevert("Usage: /agent sense [radius <n>] [angle <n>]", setDialogueText);
+                clearCommandState();
+                return null;
+            }
+
+            // /agent <behavior-type> <color> [args...] - add behavior directly
+            // e.g., /agent follow-color black
+            // e.g., /agent turn-on-color green left
+            // e.g., /agent on-color red paint #00ff00
+            const validBehaviors = ['follow-color', 'avoid-color', 'stop-on-color', 'turn-on-color', 'on-color'];
+            if (validBehaviors.includes(argParts[0])) {
+                const targets = getTargetAgents();
+                if (targets.length === 0) {
+                    setDialogueWithRevert("No agents selected", setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                const behaviorType = argParts[0] as 'follow-color' | 'avoid-color' | 'stop-on-color' | 'turn-on-color' | 'on-color';
+
+                if (argParts.length < 2) {
+                    setDialogueWithRevert(`Usage: /agent ${behaviorType} <color> [options]`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                const color = parseColor(argParts[1]);
+
+                // Parse optional direction for turn-on-color
+                let direction: 'left' | 'right' | 'reverse' | undefined;
+                if (behaviorType === 'turn-on-color' && argParts.length >= 3) {
+                    const dir = argParts[2].toLowerCase();
+                    if (['left', 'right', 'reverse'].includes(dir)) {
+                        direction = dir as 'left' | 'right' | 'reverse';
+                    }
+                }
+
+                // Parse on-color action
+                let onColorAction: { action: string; value?: string } | undefined;
+                if (behaviorType === 'on-color') {
+                    if (argParts.length < 3) {
+                        setDialogueWithRevert("Usage: /agent on-color <color> <action> [value]", setDialogueText);
+                        clearCommandState();
+                        return null;
+                    }
+                    const actionType = argParts[2].toLowerCase();
+                    const allActions = [...MAKE_ACTIONS, ...AGENT_MOVEMENT];
+                    if (!allActions.includes(actionType as any)) {
+                        setDialogueWithRevert(`Invalid action: ${actionType}. Use: ${allActions.join(', ')}`, setDialogueText);
+                        clearCommandState();
+                        return null;
+                    }
+                    let actionValue: string | undefined;
+                    if (argParts.length > 3) {
+                        actionValue = argParts.slice(3).join(' ').replace(/^["']|["']$/g, '');
+                    }
+                    onColorAction = { action: actionType, value: actionValue };
+                }
+
+                // Build behavior object
+                const newBehavior: any = { type: behaviorType, color };
+                if (direction) newBehavior.direction = direction;
+                if (onColorAction) newBehavior.onColorAction = onColorAction;
+
+                // Add to all target agents
+                if (setWorldData) {
+                    setWorldData((prev: Record<string, any>) => {
+                        const newData = { ...prev };
+                        for (const target of targets) {
+                            if (!target.data.behaviors) target.data.behaviors = [];
+                            // Check for duplicates
+                            const exists = target.data.behaviors.some((b: any) => {
+                                if (b.type !== behaviorType || b.color.toLowerCase() !== color.toLowerCase()) return false;
+                                if (behaviorType === 'on-color' && onColorAction) {
+                                    return b.onColorAction?.action === onColorAction.action;
+                                }
+                                return true;
+                            });
+                            if (!exists) {
+                                target.data.behaviors.push(newBehavior);
+                            }
+                            newData[target.id] = JSON.stringify(target.data);
+                        }
+                        return newData;
+                    });
+                }
+
+                const actionInfo = onColorAction ? ` → ${onColorAction.action}` : '';
+                setDialogueWithRevert(`Added ${behaviorType} ${color}${actionInfo} to ${targets.length} agent(s)`, setDialogueText);
+                clearCommandState();
+                return null;
+            }
+
+            // /agent remove <behavior-type> <color> - remove a specific behavior
+            if (argParts[0] === 'remove') {
+                const targets = getTargetAgents();
+                if (targets.length === 0) {
+                    setDialogueWithRevert("No agents selected", setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                if (argParts.length < 3) {
+                    setDialogueWithRevert("Usage: /agent remove <behavior> <color>", setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                const behaviorType = argParts[1];
+                const color = parseColor(argParts[2]);
+
+                if (setWorldData) {
+                    setWorldData((prev: Record<string, any>) => {
+                        const newData = { ...prev };
+                        for (const target of targets) {
+                            if (target.data.behaviors) {
+                                target.data.behaviors = target.data.behaviors.filter((b: any) =>
+                                    !(b.type === behaviorType && b.color.toLowerCase() === color.toLowerCase())
+                                );
+                            }
+                            newData[target.id] = JSON.stringify(target.data);
+                        }
+                        return newData;
+                    });
+                }
+                setDialogueWithRevert(`Removed ${behaviorType} ${color} from ${targets.length} agent(s)`, setDialogueText);
+                clearCommandState();
+                return null;
+            }
+
+            // /agent <spritename> - spawn agent with specific sprite at cursor
+            const spriteName = argParts[0].toLowerCase();
+            const sprite = userSprites.find(s => s.name.toLowerCase() === spriteName);
+            if (sprite) {
+                const cursorPos = commandState.commandStartPos;
+                const agentId = `agent_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                const agentData = {
+                    x: cursorPos.x,
+                    y: cursorPos.y,
+                    spriteName: sprite.name,
+                    name: sprite.name.toLowerCase(),
+                    behaviors: [],
+                    sense: { radius: 1, angle: 360 }
+                };
+
+                if (setWorldData) {
+                    setWorldData((prev: Record<string, any>) => ({
+                        ...prev,
+                        [agentId]: JSON.stringify(agentData)
+                    }));
+                }
+                setDialogueWithRevert(`Spawned ${sprite.name} at (${cursorPos.x}, ${cursorPos.y})`, setDialogueText);
+                clearCommandState();
+                return null;
+            }
+
+            // Unknown command
+            setDialogueWithRevert(`Unknown: /agent ${argParts[0]}. Try: list, clear, sense, follow-color, etc.`, setDialogueText);
             clearCommandState();
             return null;
         }

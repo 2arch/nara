@@ -2009,9 +2009,12 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const [agentIdleSheet, setAgentIdleSheet] = useState<HTMLImageElement | null>(null);
 
     // Agent selection and movement state (supports multiple selection)
-    const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
+    // Using engine's state for selectedAgentIds and agentVisualPositions
+    const selectedAgentIds = engine.selectedAgentIds;
+    const setSelectedAgentIds = engine.setSelectedAgentIds;
+    const agentVisualPositions = engine.agentVisualPositions;
+    const setAgentVisualPositions = engine.setAgentVisualPositions;
     const selectedAgentIdsRef = useRef<Set<string>>(new Set());
-    const [agentVisualPositions, setAgentVisualPositions] = useState<Record<string, Point>>({});
     const [agentDirections, setAgentDirections] = useState<Record<string, number>>({});
     const [agentMoving, setAgentMoving] = useState<Record<string, boolean>>({});
     const [agentFrames, setAgentFrames] = useState<Record<string, number>>({});
