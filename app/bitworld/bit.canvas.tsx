@@ -2346,7 +2346,10 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 x: pos.x,
                 y: pos.y,
                 spriteName: spriteName || 'default',
+                name: spriteName || 'agent',
                 createdAt: new Date().toISOString(),
+                behaviors: [],
+                sense: { radius: 1, angle: 360 },
             };
 
             // Add to pending cache immediately (sync) for subsequent operations
@@ -8243,84 +8246,9 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
         // === Render Bounded Canvas Overlay ===
         // When canvasState is 1 (bounded), dim area outside bounds and draw border
-        // Two modes: fullscreen bounds (no boundWindow) or windowed bounds (with boundWindow)
         if (engine.canvasState === 1 && engine.bounds) {
             const bounds = engine.bounds;
-            const boundWindow = engine.boundWindow;
-
-            if (boundWindow) {
-                // === WINDOWED MODE ===
-                // Draw a movable/resizable window frame containing the bounded content
-                const titleBarHeight = boundWindow.titleBarHeight;
-
-                // Window position in screen coordinates
-                const windowScreenX = (boundWindow.windowX - currentOffset.x) * effectiveCharWidth;
-                const windowScreenY = (boundWindow.windowY - currentOffset.y) * effectiveCharHeight;
-                const windowScreenWidth = boundWindow.windowWidth * effectiveCharWidth;
-                const windowScreenHeight = boundWindow.windowHeight * effectiveCharHeight;
-                const titleBarScreenHeight = titleBarHeight * effectiveCharHeight;
-
-                // Draw window background (slightly transparent)
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
-                ctx.fillRect(windowScreenX, windowScreenY, windowScreenWidth, windowScreenHeight);
-
-                // Draw title bar background
-                ctx.fillStyle = getTextColor(engine, 0.15);
-                ctx.fillRect(windowScreenX, windowScreenY, windowScreenWidth, titleBarScreenHeight);
-
-                // Draw title bar text (centered)
-                const contentWidth = bounds.maxX - bounds.minX;
-                const contentHeight = bounds.maxY - bounds.minY;
-                const titleText = `Bounded: ${contentWidth}×${contentHeight}`;
-                ctx.font = `${Math.floor(effectiveCharHeight * 0.8)}px ${engine.fontFamily}`;
-                ctx.fillStyle = getTextColor(engine, 0.7);
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(titleText, windowScreenX + windowScreenWidth / 2, windowScreenY + titleBarScreenHeight / 2);
-                ctx.textAlign = 'left';
-                ctx.textBaseline = 'alphabetic';
-
-                // Draw window border
-                ctx.strokeStyle = getTextColor(engine, 0.6);
-                ctx.lineWidth = 2;
-                ctx.strokeRect(windowScreenX, windowScreenY, windowScreenWidth, windowScreenHeight);
-
-                // Draw title bar separator line
-                ctx.beginPath();
-                ctx.moveTo(windowScreenX, windowScreenY + titleBarScreenHeight);
-                ctx.lineTo(windowScreenX + windowScreenWidth, windowScreenY + titleBarScreenHeight);
-                ctx.stroke();
-
-                // Draw resize handles at corners (small squares)
-                const handleSize = Math.max(6, effectiveCharWidth * 0.5);
-                ctx.fillStyle = getTextColor(engine, 0.5);
-
-                // Bottom-left handle
-                ctx.fillRect(
-                    windowScreenX - handleSize / 2,
-                    windowScreenY + windowScreenHeight - handleSize / 2,
-                    handleSize, handleSize
-                );
-                // Bottom-right handle
-                ctx.fillRect(
-                    windowScreenX + windowScreenWidth - handleSize / 2,
-                    windowScreenY + windowScreenHeight - handleSize / 2,
-                    handleSize, handleSize
-                );
-                // Top-left handle (below title bar)
-                ctx.fillRect(
-                    windowScreenX - handleSize / 2,
-                    windowScreenY - handleSize / 2,
-                    handleSize, handleSize
-                );
-                // Top-right handle
-                ctx.fillRect(
-                    windowScreenX + windowScreenWidth - handleSize / 2,
-                    windowScreenY - handleSize / 2,
-                    handleSize, handleSize
-                );
-            } else {
-                // === FULLSCREEN MODE (original behavior) ===
+            {
                 // Convert bounds to screen coordinates
                 // Note: Visual minY is bounds.minY - 1 because characters at Y render with top at Y-1 (GRID_CELL_SPAN)
                 const boundsScreenMinX = (bounds.minX - currentOffset.x) * effectiveCharWidth;
@@ -10438,75 +10366,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     engine.paintCell(worldPos.x, worldPos.y);
                     lastPaintPosRef.current = worldPos;
                     isPaintingRef.current = true;
-                    return;
-                } else if (engine.paintTool === 'rail') {
-                    // Rail tool: tap-tap to place nodes and draw rail between them
-                    const nodeX = Math.round(worldPos.x);
-                    const nodeY = Math.round(worldPos.y);
-
-                    if (!engine.railFirstNode) {
-                        // First tap - place first node
-                        engine.setRailFirstNode({ x: nodeX, y: nodeY });
-                        // Paint a marker at the first node
-                        engine.paintCell(nodeX, nodeY);
-                        engine.setDialogueText?.(`Rail: first node at (${nodeX}, ${nodeY}). Tap to place second node.`);
-                    } else {
-                        // Second tap - draw rail between first and second node
-                        const firstNode = engine.railFirstNode;
-                        const secondNode = { x: nodeX, y: nodeY };
-
-                        // Draw line between nodes using Bresenham's algorithm
-                        const drawRailLine = (x0: number, y0: number, x1: number, y1: number) => {
-                            const cells: Array<{ x: number; y: number }> = [];
-                            const dx = Math.abs(x1 - x0);
-                            const dy = Math.abs(y1 - y0);
-                            const sx = x0 < x1 ? 1 : -1;
-                            const sy = y0 < y1 ? 1 : -1;
-                            let err = dx - dy;
-                            let x = x0;
-                            let y = y0;
-
-                            while (true) {
-                                cells.push({ x, y });
-                                if (x === x1 && y === y1) break;
-                                const e2 = 2 * err;
-                                if (e2 > -dy) {
-                                    err -= dy;
-                                    x += sx;
-                                }
-                                if (e2 < dx) {
-                                    err += dx;
-                                    y += sy;
-                                }
-                            }
-                            return cells;
-                        };
-
-                        const railCells = drawRailLine(firstNode.x, firstNode.y, secondNode.x, secondNode.y);
-
-                        // Paint the rail cells
-                        for (const cell of railCells) {
-                            engine.paintCell(cell.x, cell.y);
-                        }
-
-                        // Store rail data in worldData
-                        const railId = `rail_${Date.now()}`;
-                        const railData = {
-                            type: 'rail',
-                            nodes: [firstNode, secondNode],
-                            cells: railCells,
-                            color: engine.paintColor,
-                            createdAt: Date.now()
-                        };
-                        engine.setWorldData?.((prev: Record<string, any>) => ({
-                            ...prev,
-                            [railId]: JSON.stringify(railData)
-                        }));
-
-                        // Reset for next rail
-                        engine.setRailFirstNode(null);
-                        engine.setDialogueText?.(`Rail created from (${firstNode.x}, ${firstNode.y}) to (${secondNode.x}, ${secondNode.y})`);
-                    }
                     return;
                 }
             }

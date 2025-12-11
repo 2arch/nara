@@ -352,10 +352,9 @@ export interface ModeState {
         isTracked?: boolean; // True if from MediaPipe tracking, false if autonomous
     };
     isPaintMode: boolean; // Whether paint mode is active
-    paintTool: 'brush' | 'fill' | 'lasso' | 'eraser' | 'rail'; // Current paint tool
+    paintTool: 'brush' | 'fill' | 'lasso' | 'eraser'; // Current paint tool
     paintColor: string; // Current paint brush color
     paintBrushSize: number; // Paint brush radius in cells
-    railFirstNode: { x: number; y: number } | null; // First node for rail drawing (tap-tap)
     isAgentMode: boolean; // Whether agent spawning mode is active
     agentSpriteName?: string; // Name of sprite to use for agents (uses ghost effect)
     isAgentAttached: boolean; // Whether selected agents are attached to cursor

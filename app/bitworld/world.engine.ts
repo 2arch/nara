@@ -1107,11 +1107,9 @@ export interface WorldEngine {
     userUid?: string | null;
     isMoveMode: boolean;
     isPaintMode: boolean;
-    paintTool: 'brush' | 'fill' | 'lasso' | 'eraser' | 'rail';
+    paintTool: 'brush' | 'fill' | 'lasso' | 'eraser';
     paintColor: string;
     paintBrushSize: number;
-    railFirstNode: { x: number; y: number } | null; // First node for rail drawing (tap-tap)
-    setRailFirstNode: (node: { x: number; y: number } | null) => void;
     exitPaintMode: () => void;
     paintCell: (x: number, y: number, prevX?: number, prevY?: number) => void;
     eraseCell: (x: number, y: number, prevX?: number, prevY?: number) => void;
@@ -5545,8 +5543,11 @@ export function useWorldEngine({
                             const agentId = `agent_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                             const agentData = {
                                 x, y,
-                                name: spriteName,
+                                spriteName: spriteName || 'default',
+                                name: spriteName || 'agent',
                                 timestamp: Date.now(),
+                                behaviors: [],
+                                sense: { radius: 1, angle: 360 },
                             };
                             setWorldData(prev => ({ ...prev, [agentId]: JSON.stringify(agentData) }));
                             return agentId;
