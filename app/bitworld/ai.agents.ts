@@ -59,10 +59,15 @@ export interface AgentBehavior {
 
 /** Agent perception configuration */
 export interface AgentPerception {
-    radius: number;             // How far agent can sense (default: 8)
+    radius: number;             // How far agent can sense (default: 1)
     angle: number;              // Field of view in degrees (default: 360)
-    direction: number;          // Facing direction in radians
 }
+
+/** Default perception for agents without custom config */
+export const DEFAULT_PERCEPTION: AgentPerception = {
+    radius: 1,
+    angle: 360
+};
 
 /** Velocity vector */
 export interface Velocity {
@@ -70,42 +75,94 @@ export interface Velocity {
     y: number;
 }
 
-/** Adjacent cell with color info */
-export interface AdjacentCell {
-    dx: number;                 // Offset from agent (-1, 0, or 1)
+/** Perceived cell with color and distance info */
+export interface PerceivedCell {
+    dx: number;                 // Offset from agent
     dy: number;
     x: number;                  // Absolute position
     y: number;
     color: string | null;       // Paint color at this cell, null if empty
+    distance: number;           // Distance from agent
 }
+
+// Legacy alias for backwards compatibility
+export type AdjacentCell = PerceivedCell;
 
 // =============================================================================
 // Behavior Evaluation
 // =============================================================================
 
 /**
- * Get the 8 adjacent cells and their paint colors
+ * Get cells within perception radius and angle
+ * @param x Agent x position
+ * @param y Agent y position
+ * @param getPaintColorAt Function to look up paint color
+ * @param perception Perception config (radius, angle)
+ * @param facingDirection Direction agent is facing in radians (0 = right, PI/2 = down)
+ */
+export function getPerceivedColors(
+    x: number,
+    y: number,
+    getPaintColorAt: (x: number, y: number) => string | null,
+    perception: AgentPerception = DEFAULT_PERCEPTION,
+    facingDirection: number = 0
+): PerceivedCell[] {
+    const { radius, angle } = perception;
+    const cells: PerceivedCell[] = [];
+    const halfAngleRad = (angle / 2) * (Math.PI / 180);
+    const cx = Math.floor(x);
+    const cy = Math.floor(y);
+
+    // Scan cells within radius
+    for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+            if (dx === 0 && dy === 0) continue; // Skip self
+
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            // Skip if outside radius
+            if (distance > radius) continue;
+
+            // Check angle constraint if not 360°
+            if (angle < 360) {
+                const cellAngle = Math.atan2(dy, dx);
+                let angleDiff = cellAngle - facingDirection;
+
+                // Normalize to [-PI, PI]
+                while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+                while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+
+                // Skip if outside field of view
+                if (Math.abs(angleDiff) > halfAngleRad) continue;
+            }
+
+            const nx = cx + dx;
+            const ny = cy + dy;
+            cells.push({
+                dx, dy,
+                x: nx,
+                y: ny,
+                color: getPaintColorAt(nx, ny),
+                distance
+            });
+        }
+    }
+
+    // Sort by distance (closest first)
+    cells.sort((a, b) => a.distance - b.distance);
+
+    return cells;
+}
+
+/**
+ * Legacy function - get the 8 adjacent cells (radius=1, angle=360)
  */
 export function getAdjacentColors(
     x: number,
     y: number,
     getPaintColorAt: (x: number, y: number) => string | null
-): AdjacentCell[] {
-    const neighbors: AdjacentCell[] = [];
-    for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-            if (dx === 0 && dy === 0) continue; // Skip self
-            const nx = Math.floor(x) + dx;
-            const ny = Math.floor(y) + dy;
-            neighbors.push({
-                dx, dy,
-                x: nx,
-                y: ny,
-                color: getPaintColorAt(nx, ny)
-            });
-        }
-    }
-    return neighbors;
+): PerceivedCell[] {
+    return getPerceivedColors(x, y, getPaintColorAt, { radius: 1, angle: 360 }, 0);
 }
 
 /**

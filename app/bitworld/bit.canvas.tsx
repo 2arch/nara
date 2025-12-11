@@ -18,6 +18,7 @@ import { terminalManager, type TerminalBuffer } from './terminal.manager';
 import { findSmoothPath, evaluateExpression, ExpressionContext } from './paths';
 import { ghostEffect, applySkin } from './post';
 import { useMcpBridge } from '../hooks/useMcpBridge';
+import { getPerceivedColors, evaluateBehaviors, shouldStop, DEFAULT_PERCEPTION, type AgentBehavior, type AgentPerception } from './ai.agents';
 
 // --- Constants --- (Copied and relevant ones kept)
 const GRID_COLOR = '#F2F2F233';
@@ -2031,6 +2032,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const agentExpressionsRef = useRef<Record<string, { xExpr: string; yExpr: string; vars: Record<string, number>; startTime: number; startPos: Point; duration?: number }>>({});
     const agentVelocitiesRef = useRef<Record<string, Point>>({});
     const agentLastAnimTimeRef = useRef<number>(0);
+    // Track previous cell positions for behavior evaluation (detect cell boundary crossings)
+    const agentPrevCellsRef = useRef<Record<string, { x: number; y: number }>>({});
     // Pending agent move (to allow double-tap to cancel)
     const pendingAgentMoveRef = useRef<NodeJS.Timeout | null>(null);
     // Keep refs in sync with state (for draw callback which may have stale closure)
@@ -3931,6 +3934,91 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             for (const id of expiredExpressions) {
                 delete agentExpressionsRef.current[id];
                 delete agentVelocitiesRef.current[id];
+            }
+
+            // =================================================================
+            // BEHAVIOR EVALUATION - Check paint colors when agents cross cells
+            // =================================================================
+            for (const agentId in newPositions) {
+                const newPos = newPositions[agentId];
+                const newCell = { x: Math.floor(newPos.x), y: Math.floor(newPos.y) };
+                const prevCell = agentPrevCellsRef.current[agentId];
+
+                // Check if agent crossed into a new cell
+                if (!prevCell || prevCell.x !== newCell.x || prevCell.y !== newCell.y) {
+                    // Update previous cell tracker
+                    agentPrevCellsRef.current[agentId] = newCell;
+
+                    // Get agent data to check for behaviors
+                    const agentDataStr = engine.worldData[agentId];
+                    if (!agentDataStr) continue;
+
+                    try {
+                        const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+                        const behaviors: AgentBehavior[] = agentData.behaviors || [];
+
+                        if (behaviors.length === 0) continue;
+
+                        // Get paint color at current cell
+                        const currentColor = getPaintColorAt(engine.worldData, newCell.x, newCell.y);
+
+                        // Check stop-on-color first
+                        if (shouldStop(behaviors, currentColor)) {
+                            // Stop the agent
+                            stoppedAgents.push(agentId);
+                            continue;
+                        }
+
+                        // Get agent's sense config (or use defaults)
+                        const perception: AgentPerception = agentData.sense || DEFAULT_PERCEPTION;
+
+                        // Get agent's facing direction from current velocity or stored direction
+                        const vel = agentVelocitiesRef.current[agentId] || { x: 1, y: 0 };
+                        const facingDirection = Math.atan2(vel.y, vel.x);
+
+                        // Get perceived colors within radius and angle
+                        const adjacentColors = getPerceivedColors(
+                            newCell.x,
+                            newCell.y,
+                            (x, y) => getPaintColorAt(engine.worldData, x, y),
+                            perception,
+                            facingDirection
+                        );
+
+                        // Get current velocity
+                        const currentVel = agentVelocitiesRef.current[agentId] || { x: 0, y: 0 };
+
+                        // Evaluate behaviors to get new velocity
+                        const newVel = evaluateBehaviors(behaviors, newCell, adjacentColors, currentVel);
+
+                        // If velocity changed significantly, update agent's movement
+                        if (Math.abs(newVel.x) > 0.01 || Math.abs(newVel.y) > 0.01) {
+                            // Calculate target position based on velocity
+                            const targetX = newCell.x + Math.sign(newVel.x) * 5;
+                            const targetY = newCell.y + Math.sign(newVel.y) * 5;
+
+                            // Update path to follow behavior-driven direction
+                            const behaviorPath = findSmoothPath(newCell, { x: targetX, y: targetY }, engine.worldData);
+                            if (behaviorPath.length > 1) {
+                                agentPathsRef.current[agentId] = behaviorPath;
+                                agentPathIndicesRef.current[agentId] = 0;
+                                agentVelocitiesRef.current[agentId] = newVel;
+
+                                // Ensure agent keeps moving
+                                if (!agentMovingRef.current[agentId]) {
+                                    setAgentMoving(prev => {
+                                        const updated = { ...prev, [agentId]: true };
+                                        agentMovingRef.current = updated;
+                                        return updated;
+                                    });
+                                    stillMoving = true;
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Ignore parse errors
+                    }
+                }
             }
 
             // Update refs immediately for smooth animation

@@ -5756,6 +5756,108 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             const agentArgs = commandToExecute.slice(5).trim();
             const argParts = agentArgs.split(/\s+/);
 
+            // Handle sense command: /agent <name> sense [radius <n>] [angle <n>]
+            if (argParts.length >= 2 && argParts[1] === 'sense') {
+                const agentName = argParts[0].toLowerCase();
+
+                // Find agent by name in worldData
+                let targetAgentId: string | null = null;
+                let targetAgentData: any = null;
+
+                if (worldData) {
+                    for (const key in worldData) {
+                        if (key.startsWith('agent_')) {
+                            try {
+                                const data = typeof worldData[key] === 'string' ? JSON.parse(worldData[key]) : worldData[key];
+                                if (data.name?.toLowerCase() === agentName) {
+                                    targetAgentId = key;
+                                    targetAgentData = data;
+                                    break;
+                                }
+                            } catch {}
+                        }
+                    }
+                }
+
+                if (!targetAgentId || !targetAgentData) {
+                    setDialogueWithRevert(`Agent "${agentName}" not found`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                // Initialize sense with defaults if not set
+                if (!targetAgentData.sense) {
+                    targetAgentData.sense = { radius: 1, angle: 360 };
+                }
+
+                // No args = show current sense
+                if (argParts.length === 2) {
+                    const s = targetAgentData.sense;
+                    setDialogueWithRevert(`${agentName} sense: radius ${s.radius}, angle ${s.angle}°`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                const subcommand = argParts[2].toLowerCase();
+
+                // /agent wizard sense radius <n>
+                if (subcommand === 'radius') {
+                    if (argParts.length < 4) {
+                        setDialogueWithRevert(`Usage: /agent ${agentName} sense radius <1-20>`, setDialogueText);
+                        clearCommandState();
+                        return null;
+                    }
+                    const radius = parseInt(argParts[3], 10);
+                    if (isNaN(radius) || radius < 1 || radius > 20) {
+                        setDialogueWithRevert(`Invalid radius: ${argParts[3]}. Use 1-20`, setDialogueText);
+                        clearCommandState();
+                        return null;
+                    }
+                    targetAgentData.sense.radius = radius;
+
+                    if (setWorldData) {
+                        setWorldData((prev: Record<string, any>) => ({
+                            ...prev,
+                            [targetAgentId!]: JSON.stringify(targetAgentData)
+                        }));
+                    }
+                    setDialogueWithRevert(`${agentName} sense radius: ${radius}`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                // /agent wizard sense angle <n>
+                if (subcommand === 'angle') {
+                    if (argParts.length < 4) {
+                        setDialogueWithRevert(`Usage: /agent ${agentName} sense angle <1-360>`, setDialogueText);
+                        clearCommandState();
+                        return null;
+                    }
+                    const angle = parseInt(argParts[3], 10);
+                    if (isNaN(angle) || angle < 1 || angle > 360) {
+                        setDialogueWithRevert(`Invalid angle: ${argParts[3]}. Use 1-360`, setDialogueText);
+                        clearCommandState();
+                        return null;
+                    }
+                    targetAgentData.sense.angle = angle;
+
+                    if (setWorldData) {
+                        setWorldData((prev: Record<string, any>) => ({
+                            ...prev,
+                            [targetAgentId!]: JSON.stringify(targetAgentData)
+                        }));
+                    }
+                    setDialogueWithRevert(`${agentName} sense angle: ${angle}°`, setDialogueText);
+                    clearCommandState();
+                    return null;
+                }
+
+                // Unknown subcommand
+                setDialogueWithRevert(`Usage: /agent ${agentName} sense [radius <n>] [angle <n>]`, setDialogueText);
+                clearCommandState();
+                return null;
+            }
+
             // Handle behavior commands: /agent <name> add|remove|list|clear ...
             if (argParts.length >= 2 && ['add', 'remove', 'list', 'clear'].includes(argParts[1])) {
                 const agentName = argParts[0].toLowerCase();
