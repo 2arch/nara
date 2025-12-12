@@ -2037,6 +2037,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const agentLastAnimTimeRef = useRef<number>(0);
     // Track previous cell positions for behavior evaluation (detect cell boundary crossings)
     const agentPrevCellsRef = useRef<Record<string, { x: number; y: number }>>({});
+    // Track which agents are in "rail mode" (movement induced by follow-color behavior)
+    // When true, rail continuation applies. When false (user-commanded), rails don't override.
+    const agentRailModeRef = useRef<Record<string, boolean>>({});
     // Pending agent move (to allow double-tap to cancel)
     const pendingAgentMoveRef = useRef<NodeJS.Timeout | null>(null);
     // Keep refs in sync with state (for draw callback which may have stale closure)
@@ -2269,6 +2272,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                     agentPathsRef.current[agentId] = path;
                     agentPathIndicesRef.current[agentId] = 0;
 
+                    // User-initiated movement: disable rail mode
+                    agentRailModeRef.current[agentId] = false;
+
                     // Start animation - update ref inside setter to ensure sync
                     setAgentMoving(prev => {
                         const updated = { ...prev, [agentId]: true };
@@ -2311,6 +2317,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                     // Use the provided path directly (no pathfinding)
                     agentPathsRef.current[agentId] = path;
                     agentPathIndicesRef.current[agentId] = 0;
+
+                    // User-initiated movement: disable rail mode
+                    agentRailModeRef.current[agentId] = false;
 
                     // Start animation - update ref inside setter to ensure sync
                     setAgentMoving(prev => {
@@ -3869,7 +3878,108 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 if (pathIndex >= path.length - 1) {
                     const finalPos = path[path.length - 1];
                     newPositions[agentId] = { x: finalPos.x, y: finalPos.y };
-                    stoppedAgents.push(agentId);
+
+                    // =================================================================
+                    // RAIL CONTINUATION CHECK: Before stopping, check if on a rail
+                    // Only continue on rail if agent is already in rail mode (not user-commanded)
+                    // =================================================================
+                    const finalCell = { x: Math.floor(finalPos.x), y: Math.floor(finalPos.y) };
+                    const isInRailMode = agentRailModeRef.current[agentId] === true;
+
+                    let shouldContinueOnRail = false;
+
+                    // Only check for rail continuation if already in rail mode
+                    if (isInRailMode) {
+                        const cellColor = getPaintColorAt(engine.worldData, finalCell.x, finalCell.y);
+
+                        if (cellColor) {
+                            try {
+                                const agentDataStr = engine.worldData[agentId];
+                                if (agentDataStr) {
+                                    const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+                                    const behaviors: AgentBehavior[] = agentData.behaviors || [];
+
+                                    // Check if this color matches a follow-color behavior
+                                    const railBehavior = behaviors.find(b =>
+                                        b.type === 'follow-color' &&
+                                        b.color.toLowerCase() === cellColor.toLowerCase()
+                                    );
+
+                                    if (railBehavior) {
+                                        // On a rail! Find where it continues by looking at adjacent cells
+                                        const adjacentRailCells: { dx: number; dy: number }[] = [];
+                                        const deltas = [
+                                            { dx: 1, dy: 0 }, { dx: -1, dy: 0 },
+                                            { dx: 0, dy: 1 }, { dx: 0, dy: -1 },
+                                            { dx: 1, dy: 1 }, { dx: -1, dy: -1 },
+                                            { dx: 1, dy: -1 }, { dx: -1, dy: 1 }
+                                        ];
+
+                                        for (const d of deltas) {
+                                            const adjColor = getPaintColorAt(engine.worldData, finalCell.x + d.dx, finalCell.y + d.dy);
+                                            if (adjColor && adjColor.toLowerCase() === cellColor.toLowerCase()) {
+                                                adjacentRailCells.push(d);
+                                            }
+                                        }
+
+                                        if (adjacentRailCells.length > 0) {
+                                            // Continue in direction most aligned with current velocity
+                                            const currentVel = agentVelocitiesRef.current[agentId] || { x: 1, y: 0 };
+                                            const speed = Math.sqrt(currentVel.x * currentVel.x + currentVel.y * currentVel.y);
+
+                                            let direction: { x: number; y: number } | null = null;
+                                            if (speed > 0.01) {
+                                                let bestDot = -Infinity;
+                                                let bestDir = adjacentRailCells[0];
+                                                const normVel = { x: currentVel.x / speed, y: currentVel.y / speed };
+
+                                                for (const d of adjacentRailCells) {
+                                                    const len = Math.sqrt(d.dx * d.dx + d.dy * d.dy);
+                                                    const dot = (d.dx / len) * normVel.x + (d.dy / len) * normVel.y;
+                                                    if (dot > bestDot) {
+                                                        bestDot = dot;
+                                                        bestDir = d;
+                                                    }
+                                                }
+
+                                                // Don't turn back - if best direction is opposite to velocity, stop
+                                                if (bestDot >= 0) {
+                                                    const len = Math.sqrt(bestDir.dx * bestDir.dx + bestDir.dy * bestDir.dy);
+                                                    direction = { x: bestDir.dx / len, y: bestDir.dy / len };
+                                                }
+                                            } else {
+                                                const d = adjacentRailCells[0];
+                                                const len = Math.sqrt(d.dx * d.dx + d.dy * d.dy);
+                                                direction = { x: d.dx / len, y: d.dy / len };
+                                            }
+
+                                            if (direction) {
+                                                // Extend path
+                                                const nextCell = {
+                                                    x: finalCell.x + direction.x,
+                                                    y: finalCell.y + direction.y
+                                                };
+                                                agentPathsRef.current[agentId] = [finalCell, nextCell];
+                                                agentPathIndicesRef.current[agentId] = 0;
+                                                agentVelocitiesRef.current[agentId] = direction;
+                                                shouldContinueOnRail = true;
+                                                stillMoving = true;
+                                            }
+                                        }
+                                        // If no adjacent rail cells or would turn back, agent stops (end of rail)
+                                    }
+                                }
+                            } catch {
+                                // Ignore parse errors
+                            }
+                        }
+                    }
+
+                    if (!shouldContinueOnRail) {
+                        // Exiting rail mode when stopping
+                        agentRailModeRef.current[agentId] = false;
+                        stoppedAgents.push(agentId);
+                    }
                 } else {
                     stillMoving = true;
                 }
@@ -3945,6 +4055,79 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             // =================================================================
             // BEHAVIOR EVALUATION - Check paint colors when agents cross cells
             // =================================================================
+            // Helper: Check if agent is on a "rail" (standing on follow-color pixel)
+            // Returns the direction to push if on rail, or null if not
+            // Now looks at adjacent cells to find where the rail continues
+            const checkRailPush = (
+                behaviors: AgentBehavior[],
+                currentColor: string | null,
+                currentVel: Point,
+                cellX: number,
+                cellY: number
+            ): Point | null => {
+                if (!currentColor) return null;
+
+                // Find follow-color behaviors that match current cell
+                const railBehavior = behaviors.find(b =>
+                    b.type === 'follow-color' &&
+                    b.color.toLowerCase() === currentColor.toLowerCase()
+                );
+
+                if (!railBehavior) return null;
+
+                // Look at adjacent cells to find where the rail continues
+                const adjacentRailCells: { dx: number; dy: number }[] = [];
+                const deltas = [
+                    { dx: 1, dy: 0 }, { dx: -1, dy: 0 },
+                    { dx: 0, dy: 1 }, { dx: 0, dy: -1 },
+                    { dx: 1, dy: 1 }, { dx: -1, dy: -1 },
+                    { dx: 1, dy: -1 }, { dx: -1, dy: 1 }
+                ];
+
+                for (const d of deltas) {
+                    const adjColor = getPaintColorAt(engine.worldData, cellX + d.dx, cellY + d.dy);
+                    if (adjColor && adjColor.toLowerCase() === currentColor.toLowerCase()) {
+                        adjacentRailCells.push(d);
+                    }
+                }
+
+                if (adjacentRailCells.length > 0) {
+                    // Find direction most aligned with current velocity
+                    const speed = Math.sqrt(currentVel.x * currentVel.x + currentVel.y * currentVel.y);
+
+                    if (speed > 0.01) {
+                        let bestDot = -Infinity;
+                        let bestDir = adjacentRailCells[0];
+                        const normVel = { x: currentVel.x / speed, y: currentVel.y / speed };
+
+                        for (const d of adjacentRailCells) {
+                            const len = Math.sqrt(d.dx * d.dx + d.dy * d.dy);
+                            const dot = (d.dx / len) * normVel.x + (d.dy / len) * normVel.y;
+                            if (dot > bestDot) {
+                                bestDot = dot;
+                                bestDir = d;
+                            }
+                        }
+
+                        // Don't turn back - if best direction is opposite to velocity, stop
+                        if (bestDot < 0) {
+                            return null; // End of rail - stop here
+                        }
+
+                        const len = Math.sqrt(bestDir.dx * bestDir.dx + bestDir.dy * bestDir.dy);
+                        return { x: bestDir.dx / len, y: bestDir.dy / len };
+                    } else {
+                        // No velocity - pick first adjacent rail cell
+                        const d = adjacentRailCells[0];
+                        const len = Math.sqrt(d.dx * d.dx + d.dy * d.dy);
+                        return { x: d.dx / len, y: d.dy / len };
+                    }
+                }
+
+                // No adjacent rail cells - can't continue, return null
+                return null;
+            };
+
             for (const agentId in newPositions) {
                 const newPos = newPositions[agentId];
                 const newCell = { x: Math.floor(newPos.x), y: Math.floor(newPos.y) };
@@ -3975,12 +4158,45 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                             continue;
                         }
 
+                        // Get current velocity
+                        const currentVel = agentVelocitiesRef.current[agentId] || { x: 0, y: 0 };
+
+                        // =================================================================
+                        // RAIL CHECK: If standing ON a follow-color pixel, push forward
+                        // =================================================================
+                        const railDirection = checkRailPush(behaviors, currentColor, currentVel, newCell.x, newCell.y);
+                        if (railDirection) {
+                            // On a rail! Push one cell in direction of rail
+                            const targetX = newCell.x + railDirection.x;
+                            const targetY = newCell.y + railDirection.y;
+
+                            // Set path to next cell and enable rail mode
+                            const railPath = [newCell, { x: targetX, y: targetY }];
+                            agentPathsRef.current[agentId] = railPath;
+                            agentPathIndicesRef.current[agentId] = 0;
+                            agentVelocitiesRef.current[agentId] = railDirection;
+                            agentRailModeRef.current[agentId] = true; // Enable rail mode
+
+                            // Ensure agent keeps moving
+                            if (!agentMovingRef.current[agentId]) {
+                                setAgentMoving(prev => {
+                                    const updated = { ...prev, [agentId]: true };
+                                    agentMovingRef.current = updated;
+                                    return updated;
+                                });
+                            }
+                            stillMoving = true;
+                            continue; // Rail takes priority, skip other behavior evaluation
+                        }
+
+                        // =================================================================
+                        // ADJACENT COLOR CHECK: Look around for colors to move toward/away
+                        // =================================================================
                         // Get agent's sense config (or use defaults)
                         const perception: AgentPerception = agentData.sense || DEFAULT_PERCEPTION;
 
                         // Get agent's facing direction from current velocity or stored direction
-                        const vel = agentVelocitiesRef.current[agentId] || { x: 1, y: 0 };
-                        const facingDirection = Math.atan2(vel.y, vel.x);
+                        const facingDirection = Math.atan2(currentVel.y, currentVel.x);
 
                         // Get perceived colors within radius and angle
                         const adjacentColors = getPerceivedColors(
@@ -3990,9 +4206,6 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                             perception,
                             facingDirection
                         );
-
-                        // Get current velocity
-                        const currentVel = agentVelocitiesRef.current[agentId] || { x: 0, y: 0 };
 
                         // Evaluate behaviors to get new velocity
                         const newVel = evaluateBehaviors(behaviors, newCell, adjacentColors, currentVel);
@@ -4109,6 +4322,167 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             }
         };
     }, []); // Empty dependency array - only run once on mount
+
+    // =================================================================
+    // STATIONARY AGENT BEHAVIOR CHECK - Periodic check for rails under idle agents
+    // This catches agents spawned on rails or paint that appears under stationary agents
+    // =================================================================
+    const stationaryCheckRef = useRef<NodeJS.Timeout | null>(null);
+
+    useEffect(() => {
+        if (stationaryCheckRef.current) {
+            return; // Already running
+        }
+
+        stationaryCheckRef.current = setInterval(() => {
+            const currentMoving = agentMovingRef.current;
+
+            // Find all agents with behaviors that are NOT currently moving
+            const agentsToCheck: string[] = [];
+            for (const key in engine.worldData) {
+                if (!key.startsWith('agent_')) continue;
+                if (currentMoving[key]) continue; // Skip moving agents
+
+                try {
+                    const agentDataStr = engine.worldData[key];
+                    if (!agentDataStr) continue;
+                    const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+
+                    if (agentData.behaviors && agentData.behaviors.length > 0) {
+                        agentsToCheck.push(key);
+                    }
+                } catch {
+                    // Ignore parse errors
+                }
+            }
+
+            if (agentsToCheck.length === 0) return;
+
+            let anyStartedMoving = false;
+
+            for (const agentId of agentsToCheck) {
+                try {
+                    const agentDataStr = engine.worldData[agentId];
+                    if (!agentDataStr) continue;
+                    const agentData = typeof agentDataStr === 'string' ? JSON.parse(agentDataStr) : agentDataStr;
+                    const behaviors: AgentBehavior[] = agentData.behaviors || [];
+
+                    // Get agent position
+                    const visualPos = agentVisualPositionsRef.current[agentId];
+                    const pos = visualPos || { x: agentData.x, y: agentData.y };
+                    const cell = { x: Math.floor(pos.x), y: Math.floor(pos.y) };
+
+                    // Check paint color at current cell
+                    const currentColor = getPaintColorAt(engine.worldData, cell.x, cell.y);
+
+                    // Check stop-on-color (keep agent stopped)
+                    if (shouldStop(behaviors, currentColor)) {
+                        continue;
+                    }
+
+                    // Check for rail (follow-color on current cell)
+                    if (currentColor) {
+                        const railBehavior = behaviors.find(b =>
+                            b.type === 'follow-color' &&
+                            b.color.toLowerCase() === currentColor.toLowerCase()
+                        );
+
+                        if (railBehavior) {
+                            // Agent is on a rail! Find where the rail continues
+                            // Look at 8 adjacent cells for same-color pixels
+                            const adjacentRailCells: { dx: number; dy: number }[] = [];
+                            const deltas = [
+                                { dx: 1, dy: 0 }, { dx: -1, dy: 0 },
+                                { dx: 0, dy: 1 }, { dx: 0, dy: -1 },
+                                { dx: 1, dy: 1 }, { dx: -1, dy: -1 },
+                                { dx: 1, dy: -1 }, { dx: -1, dy: 1 }
+                            ];
+
+                            for (const d of deltas) {
+                                const adjColor = getPaintColorAt(engine.worldData, cell.x + d.dx, cell.y + d.dy);
+                                if (adjColor && adjColor.toLowerCase() === currentColor.toLowerCase()) {
+                                    adjacentRailCells.push(d);
+                                }
+                            }
+
+                            let direction: { x: number; y: number } | null = null;
+
+                            if (adjacentRailCells.length > 0) {
+                                // Prefer to continue in current velocity direction if possible
+                                const currentVel = agentVelocitiesRef.current[agentId] || { x: 0, y: 0 };
+                                const speed = Math.sqrt(currentVel.x * currentVel.x + currentVel.y * currentVel.y);
+
+                                if (speed > 0.01) {
+                                    // Find adjacent rail cell most aligned with current direction
+                                    let bestDot = -Infinity;
+                                    let bestDir = adjacentRailCells[0];
+                                    const normVel = { x: currentVel.x / speed, y: currentVel.y / speed };
+
+                                    for (const d of adjacentRailCells) {
+                                        const len = Math.sqrt(d.dx * d.dx + d.dy * d.dy);
+                                        const dot = (d.dx / len) * normVel.x + (d.dy / len) * normVel.y;
+                                        if (dot > bestDot) {
+                                            bestDot = dot;
+                                            bestDir = d;
+                                        }
+                                    }
+
+                                    // Don't turn back - if best direction is opposite to velocity, stay put
+                                    if (bestDot >= 0) {
+                                        const len = Math.sqrt(bestDir.dx * bestDir.dx + bestDir.dy * bestDir.dy);
+                                        direction = { x: bestDir.dx / len, y: bestDir.dy / len };
+                                    }
+                                } else {
+                                    // No velocity - pick first adjacent rail cell
+                                    const d = adjacentRailCells[0];
+                                    const len = Math.sqrt(d.dx * d.dx + d.dy * d.dy);
+                                    direction = { x: d.dx / len, y: d.dy / len };
+                                }
+                            }
+                            // If no adjacent rail cells, don't start moving (isolated rail pixel)
+
+                            if (direction) {
+                                // Set target one cell in direction
+                                const targetX = cell.x + direction.x;
+                                const targetY = cell.y + direction.y;
+
+                                // Set path and enable rail mode
+                                agentPathsRef.current[agentId] = [cell, { x: targetX, y: targetY }];
+                                agentPathIndicesRef.current[agentId] = 0;
+                                agentVelocitiesRef.current[agentId] = direction;
+                                agentPrevCellsRef.current[agentId] = cell;
+                                agentRailModeRef.current[agentId] = true; // Enable rail mode
+
+                                // Start agent moving
+                                setAgentMoving(prev => {
+                                    const updated = { ...prev, [agentId]: true };
+                                    agentMovingRef.current = updated;
+                                    return updated;
+                                });
+
+                                anyStartedMoving = true;
+                            }
+                        }
+                    }
+                } catch {
+                    // Ignore errors
+                }
+            }
+
+            // If any agent started moving, ensure animation loop is running
+            if (anyStartedMoving && !agentAnimationRef.current) {
+                agentLastAnimTimeRef.current = 0;
+                // The animation will start via the agentMoving state change
+            }
+        }, 200); // Check every 200ms
+
+        return () => {
+            if (stationaryCheckRef.current) {
+                clearInterval(stationaryCheckRef.current);
+                stationaryCheckRef.current = null;
+            }
+        };
+    }, []);
 
     // Agent attach to cursor - continuously update target paths for selected agents
     // Uses the existing path-based movement system for consistent constant-speed movement
