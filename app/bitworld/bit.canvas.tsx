@@ -4990,6 +4990,86 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         wasHostActiveRef.current = hostDialogue.isHostActive;
     }, [hostDialogue.isHostActive]);
 
+    // Keyboard-reactive viewport offset for host mode
+    // When virtual keyboard appears, shift viewport up so cursor/input stays visible
+    const keyboardOffsetRef = useRef<number>(0);
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        const vv = window.visualViewport;
+        if (!vv) return;
+
+        const handleResize = () => {
+            // Only apply keyboard offset during host mode
+            if (!hostDialogue.isHostActive) {
+                // Reset any applied offset when leaving host mode
+                if (keyboardOffsetRef.current !== 0) {
+                    engine.setViewOffset((prev: { x: number; y: number }) => ({
+                        ...prev,
+                        y: prev.y + keyboardOffsetRef.current
+                    }));
+                    keyboardOffsetRef.current = 0;
+                }
+                return;
+            }
+
+            // Calculate keyboard height from difference between window and visual viewport
+            const keyboardHeight = window.innerHeight - vv.height;
+            const { height: effectiveCharHeight } = engine.getEffectiveCharDims(engine.zoomLevel);
+
+            if (effectiveCharHeight <= 0) return;
+
+            // Convert keyboard height to character cells
+            const keyboardHeightInCells = keyboardHeight / effectiveCharHeight;
+
+            // Threshold: only react if keyboard takes significant space (>100px)
+            const isKeyboardVisible = keyboardHeight > 100;
+
+            if (isKeyboardVisible) {
+                // Keyboard appeared - shift viewport up
+                // We want to shift by half the keyboard height to keep cursor in visible center
+                const targetOffset = keyboardHeightInCells / 2;
+                const deltaOffset = targetOffset - keyboardOffsetRef.current;
+
+                if (Math.abs(deltaOffset) > 0.5) {
+                    engine.setViewOffset((prev: { x: number; y: number }) => ({
+                        ...prev,
+                        y: prev.y - deltaOffset
+                    }));
+                    keyboardOffsetRef.current = targetOffset;
+                }
+            } else {
+                // Keyboard hidden - restore viewport
+                if (keyboardOffsetRef.current !== 0) {
+                    engine.setViewOffset((prev: { x: number; y: number }) => ({
+                        ...prev,
+                        y: prev.y + keyboardOffsetRef.current
+                    }));
+                    keyboardOffsetRef.current = 0;
+                }
+            }
+        };
+
+        vv.addEventListener('resize', handleResize);
+
+        // Also check on scroll (iOS sometimes scrolls instead of resizing)
+        vv.addEventListener('scroll', handleResize);
+
+        return () => {
+            vv.removeEventListener('resize', handleResize);
+            vv.removeEventListener('scroll', handleResize);
+
+            // Clean up any applied offset on unmount
+            if (keyboardOffsetRef.current !== 0) {
+                engine.setViewOffset((prev: { x: number; y: number }) => ({
+                    ...prev,
+                    y: prev.y + keyboardOffsetRef.current
+                }));
+                keyboardOffsetRef.current = 0;
+            }
+        };
+    }, [hostDialogue.isHostActive, engine]);
+
     // Sync host input type with engine for password masking
     useEffect(() => {
         if (hostDialogue.isHostActive) {
