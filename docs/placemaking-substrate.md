@@ -1,12 +1,12 @@
 # Placemaking on Programmable Substrate: A Layered Abstraction Model for Infinite Canvas Interaction
 
-**December 2024**
+**December 2024 (revised December 2025)**
 
 ---
 
 ## Abstract
 
-We present a conceptual framework for understanding user intervention on an infinite canvas substrate. Rather than treating the canvas as a tool with workflows, we propose a *placemaking* paradigm: the canvas is territory, and users construct places within it using layered primitives. We identify eight fundamental layers of abstraction—ranging from atomic cells to autonomous agents—and characterize the connective tissue that enables circulation between them. This framework reveals the canvas as a primeval organism awaiting its nervous system: the scripting layer that transforms spatial connections into functional data flows.
+We present a conceptual framework for understanding user intervention on an infinite canvas substrate. Rather than treating the canvas as a tool with workflows, we propose a *placemaking* paradigm: the canvas is territory, and users construct places within it using layered primitives. We identify eight fundamental layers of abstraction—ranging from atomic cells to autonomous agents—and characterize the connective tissue that enables circulation between them. The canvas has evolved from primeval organism to living system: paint functions as signal, agents perceive and react to environmental marks, and stigmergic coordination emerges from simple behavioral rules. The nervous system is not a scripting layer imposed from above, but a perceptual layer grown from below.
 
 ---
 
@@ -58,7 +58,19 @@ The focused attention regime. A bounded viewport that frames what is visible and
 
 Autonomous actors inhabiting the canvas. Entities with behavior, goals, and the capacity for independent action. The life that moves through places.
 
-**Intervention**: Agent spawning, goal setting, behavior scripting, object placement.
+Agents possess **perception**: a configurable radius and angle defining their sensory field. They read the vascular layer—detecting paint colors in their vicinity—and respond according to **behaviors**:
+
+- `follow-color`: Move toward cells of a specified color
+- `avoid-color`: Move away from cells of a specified color
+- `stop-on-color`: Halt when standing on a specified color
+- `turn-on-color`: Change direction when encountering a specified color
+- `on-color`: Execute any canvas action when encountering a specified color
+
+These behaviors compose. An agent might follow black paint while avoiding red, stop on green, and execute a command when touching blue. The substrate becomes a reactive environment where painted marks function as instructions.
+
+Agents also possess **minds**: persona and goals that enable autonomous reasoning. When triggered to think, an agent perceives nearby notes, agents, and chips, then decides what to say or do.
+
+**Intervention**: Agent spawning, perception tuning, behavior assignment, mind configuration, object placement.
 
 ### 2.7 Aesthetic (Monograms)
 
@@ -70,7 +82,11 @@ Visual identity marks. The signature that distinguishes one presence from anothe
 
 The connective tissue. Runs orthogonally through all other layers, enabling circulation and flow. How movement happens between places. The infrastructure of connection.
 
-**Intervention**: Painting, path drawing, corridor creation, note connection.
+Paint serves dual purposes: **aesthetic marking** and **signal carrying**. A painted line can be a decorative border *and* a trail that agents follow. A colored region can be a visual zone *and* a trigger that causes agents to stop, turn, or act. The vascular layer is both skeleton and nervous system—structure and signal unified in a single medium.
+
+This is **stigmergic coordination**: indirect communication through environmental modification. Agents do not message each other directly; they read and write the shared substrate. One agent paints a trail; another follows it. One agent marks a region red; others avoid it. The canvas becomes a medium for distributed computation through accumulated marks.
+
+**Intervention**: Painting, path drawing, corridor creation, note connection, signal laying.
 
 ---
 
@@ -99,44 +115,45 @@ The same substrate affords radically different places depending on how materials
 
 ---
 
-## 4. The Primeval Organism
+## 4. The Living Organism
 
-The current state of the substrate resembles a primeval organism:
+The substrate has matured from primeval form to living system:
 
 - **Cells** exist (nucleic)
 - **Tissues** have differentiated (dermic, composit)
 - **Organs** have formed (notes, tables, bounded regions)
 - **Skeleton** provides structure (vascular corridors and paths)
+- **Nervous system** enables signal propagation (paint-as-signal, agent perception)
 
-What remains nascent is the **nervous system**: the capacity for signals to propagate through the vascular network, for one organ to trigger another, for the organism to exhibit coordinated behavior beyond the sum of its parts.
+The nervous system emerged not through explicit wiring but through stigmergic perception. Agents read the environment; paint carries meaning; behaviors translate perception into action. The organism exhibits coordinated behavior beyond the sum of its parts—not because components are connected by data pipes, but because they share a reactive medium.
 
 ---
 
-## 5. The Scripting Transition
+## 5. Stigmergic Signaling
 
-The missing piece is functional flow. Currently:
-
-```
-Note ──corridor── Note
-     (spatial relation only)
-```
-
-The scripting layer transforms this into:
+The nervous system arrived not as a scripting layer but as a perceptual one. The original vision imagined explicit data flow:
 
 ```
 Note ──[data]──→ Note
-     (functional flow)
+     (wired connection)
 ```
 
-Corridors become wires. Notes become components with inputs and outputs. The vascular system carries signals, not just connects endpoints.
+What emerged instead is environmental signaling:
 
-This is a phase transition. The substrate shifts from:
+```
+Agent ──perceives── Paint ──triggers── Action
+       (stigmergic loop)
+```
 
-- **Drawable** → **Programmable**
-- **Spatial** → **Computational**
-- **Static connection** → **Dynamic flow**
+This is a different kind of programmability. Rather than wiring components together, users paint signals into the environment and configure agents to perceive and react. The substrate shifts from:
 
-The organism gains a nervous system. Places become machines. Complex scientific workflows—previously only imaginable—become constructible.
+- **Drawable** → **Reactive**
+- **Spatial** → **Perceptual**
+- **Static connection** → **Behavioral response**
+
+The key insight: signals need not flow through pipes. They can persist in the medium itself. An ant colony coordinates through pheromone trails, not telephone lines. The canvas coordinates through painted marks, not data wires.
+
+This approach offers unexpected portability. The same painted trail can guide multiple agents. The same colored region can trigger different behaviors in different agents. Signals are not consumed by reading—they persist, accumulate, and can be overwritten. The environment becomes a shared blackboard for distributed coordination.
 
 ---
 
@@ -159,6 +176,12 @@ Not every path through the layers is useful. We seek the *desire lines*: the cha
 **Composition Chain**: dermic → vascular → dermic
 *Note, corridor, note. The circuit pattern.*
 
+**Stigmergic Chain**: vascular → agentic → vascular
+*Paint signal, agent perceives, agent acts (possibly painting more). The feedback loop.*
+
+**Coordination Chain**: agentic → vascular → agentic
+*Agent paints mark, another agent reads it, behavior changes. Indirect communication.*
+
 These chains are not prescribed workflows but emergent patterns—the paths worn into the substrate by repeated use.
 
 ---
@@ -175,7 +198,7 @@ For the substrate to support robust placemaking:
 
 4. **Primitives must be selectable**: Users can recognize and choose the right material for their place.
 
-5. **Connections must carry**: The vascular system must evolve to support data flow, not just spatial adjacency.
+5. **Connections must carry**: The vascular system carries signal through paint-as-medium, enabling stigmergic coordination between agents.
 
 ---
 
@@ -183,21 +206,23 @@ For the substrate to support robust placemaking:
 
 The infinite canvas is not a productivity tool but a territory for placemaking. Users intervene across eight layers of abstraction—from atomic cells to autonomous agents—using connective tissue to create circulation between them.
 
-The substrate currently resembles a primeval organism: differentiated tissues, formed organs, skeletal structure. The scripting layer represents the emergence of a nervous system, transforming static places into dynamic machines capable of complex, coordinated behavior.
+The substrate has evolved from primeval organism to living system. The nervous system emerged through stigmergic perception: agents that read painted signals and respond with configurable behaviors. Places are no longer static arrangements but reactive environments where marks carry meaning and inhabitants respond.
 
-The design challenge is ensuring that placemaking primitives are complete, concrete, undistracted, and selectable—so that users can construct the places they need, from gardens to laboratories, from libraries to workshops.
+The design challenge remains ensuring that placemaking primitives are complete, concrete, undistracted, and selectable—so that users can construct the places they need, from gardens to laboratories, from libraries to workshops. But now, those places can come alive.
 
-The canvas awaits its nervous system.
+The canvas has its nervous system.
 
 ---
 
 ## References
 
 - Alexander, C. (1977). *A Pattern Language*. Oxford University Press.
+- Grassé, P.-P. (1959). La reconstruction du nid et les coordinations interindividuelles chez Bellicositermes natalensis et Cubitermes sp. *Insectes Sociaux*.
 - Ray, T. (1991). An approach to the synthesis of life. *Artificial Life II*.
 - Epstein, J. & Axtell, R. (1996). *Growing Artificial Societies*. MIT Press.
+- Theraulaz, G. & Bonabeau, E. (1999). A brief history of stigmergy. *Artificial Life*.
 - Victor, B. (2014). Humane representation of thought. *Talk at UIST*.
 
 ---
 
-*December 2024. Nara Project.*
+*December 2024, revised December 2025. Nara Project.*
