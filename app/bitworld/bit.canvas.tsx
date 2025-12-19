@@ -5016,6 +5016,339 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         return () => clearTimeout(readyTimeout);
     }, []); // Run once on mount
 
+    // === Voice Mode: Gemini Audio Transcription (Batch) ===
+    // When voice mode is activated, capture audio and send to Gemini for transcription
+    useEffect(() => {
+        const isVoiceActive = engine.isVoiceMode;
+        const wasActive = voiceModeWasActiveRef.current;
+        voiceModeWasActiveRef.current = isVoiceActive;
+
+        // Helper to add transcript to chat
+        const addTranscriptToChat = (transcript: string) => {
+            if (!transcript.trim()) return;
+
+            const currentInput = engine.chatMode.currentInput;
+            const newInput = currentInput ? currentInput + ' ' + transcript.trim() : transcript.trim();
+
+            // Get start position
+            const startPos = engine.chatMode.inputPositions[0] || engine.cursorPos;
+            const scale = engine.currentScale;
+
+            // Clear existing chat data and rebuild with new text
+            engine.clearChatData();
+
+            // Build new positions array and chat data
+            const newPositions: { x: number; y: number }[] = [];
+            const newChatData: Record<string, any> = {};
+            let currentX = startPos.x;
+            let currentY = startPos.y;
+
+            for (let i = 0; i < newInput.length; i++) {
+                const char = newInput[i];
+                if (char === '\n') {
+                    currentX = startPos.x;
+                    currentY += scale.h;
+                } else {
+                    newPositions.push({ x: currentX, y: currentY });
+                    const key = `${currentX},${currentY}`;
+                    newChatData[key] = {
+                        char,
+                        color: engine.textColor,
+                        scale: { w: scale.w, h: scale.h }
+                    };
+                    currentX += scale.w;
+                }
+            }
+
+            // Update chat data in one batch
+            engine.setChatData(newChatData);
+
+            // Update chat mode state
+            engine.setChatMode({
+                isActive: true,
+                currentInput: newInput,
+                inputPositions: newPositions,
+                isProcessing: false
+            });
+
+            // Move cursor to end
+            if (newPositions.length > 0) {
+                const lastPos = newPositions[newPositions.length - 1];
+                engine.setCursorPos({ x: lastPos.x + scale.w, y: lastPos.y });
+            }
+        };
+
+        // Helper to send audio to transcription API
+        const transcribeAudio = async (audioBlob: Blob) => {
+            if (isTranscribingRef.current) return;
+            isTranscribingRef.current = true;
+
+            try {
+                engine.setVoiceTranscript('Transcribing...');
+
+                const formData = new FormData();
+                formData.append('audio', audioBlob);
+
+                const response = await fetch('/api/transcribe', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error('Transcription failed');
+                }
+
+                const { transcript } = await response.json();
+
+                const trimmedTranscript = transcript?.trim() || '';
+
+                // Treat minimal responses (just punctuation, etc.) as silence
+                const isSilence = !trimmedTranscript ||
+                    trimmedTranscript === '.' ||
+                    trimmedTranscript === '...' ||
+                    trimmedTranscript === ',' ||
+                    /^[.\s,;:!?]+$/.test(trimmedTranscript);
+
+                if (trimmedTranscript && !isSilence) {
+                    // Reset empty counter since we got actual speech
+                    emptyTranscriptCountRef.current = 0;
+
+                    // Check for exit commands
+                    const lowerText = trimmedTranscript.toLowerCase();
+                    if (lowerText === 'stop' || lowerText === 'stop.' || lowerText === 'exit' || lowerText === 'quit') {
+                        // Stop recording and exit voice mode
+                        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+                            mediaRecorderRef.current.stop();
+                        }
+                        if (audioStreamRef.current) {
+                            audioStreamRef.current.getTracks().forEach(track => track.stop());
+                            audioStreamRef.current = null;
+                        }
+                        engine.exitVoiceMode();
+                        engine.setChatMode({
+                            isActive: false,
+                            currentInput: '',
+                            inputPositions: [],
+                            isProcessing: false
+                        });
+                        engine.clearChatData();
+                        engine.setDialogueText('Voice mode disabled');
+                        return;
+                    }
+
+                    // Check for send command
+                    if (lowerText === 'send' || lowerText === 'send.' || lowerText === 'go' || lowerText === 'go.') {
+                        engine.setVoiceTranscript('');
+                        sendChatToAI();
+                        return;
+                    }
+
+                    addTranscriptToChat(trimmedTranscript);
+                    engine.setVoiceTranscript('');
+                    engine.setDialogueText('Listening... (press Escape to exit)');
+                } else {
+                    // Empty transcript - user is silent
+                    emptyTranscriptCountRef.current++;
+
+                    // Auto-send after 2 consecutive empty transcripts (8 seconds of silence)
+                    // but only if there's something to send
+                    if (emptyTranscriptCountRef.current >= 2 && engine.chatMode.currentInput.trim()) {
+                        engine.setDialogueText('Silence detected, sending...');
+                        sendChatToAI();
+                    }
+                }
+            } catch (error) {
+                console.error('Transcription error:', error);
+                engine.setDialogueText('Transcription failed, still listening...');
+            } finally {
+                isTranscribingRef.current = false;
+            }
+        };
+
+        // Helper to send chat message to AI (simulates Enter key behavior)
+        const sendChatToAI = async () => {
+            const userMessage = engine.chatMode.currentInput.trim();
+            if (!userMessage || engine.chatMode.isProcessing) return;
+
+            engine.setChatMode(prev => ({ ...prev, isProcessing: true }));
+            engine.setDialogueText('Processing...');
+
+            try {
+                const response = await fetch('/api/ai', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: userMessage })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const aiResponse = data.response || 'No response';
+
+                    // Show response in dialogue
+                    engine.setDialogueText(aiResponse.slice(0, 200) + (aiResponse.length > 200 ? '...' : ''));
+
+                    // Write response below input on canvas
+                    const startPos = engine.chatMode.inputPositions[0] || engine.cursorPos;
+                    const lastInputPos = engine.chatMode.inputPositions[engine.chatMode.inputPositions.length - 1];
+                    const responseStartY = (lastInputPos?.y || startPos.y) + engine.currentScale.h;
+
+                    engine.addInstantAIResponse(
+                        { x: startPos.x, y: responseStartY },
+                        aiResponse,
+                        { queryText: userMessage }
+                    );
+                }
+            } catch (error) {
+                console.error('AI request failed:', error);
+                engine.setDialogueText('Failed to get AI response');
+            } finally {
+                // Clear chat and reset for next voice input
+                engine.clearChatData();
+                engine.setChatMode({
+                    isActive: true,
+                    currentInput: '',
+                    inputPositions: [],
+                    isProcessing: false
+                });
+                emptyTranscriptCountRef.current = 0;
+                engine.setDialogueText('Listening... (press Escape to exit)');
+            }
+        };
+
+        // Voice mode just activated
+        if (isVoiceActive && !wasActive) {
+            // Reset empty transcript counter
+            emptyTranscriptCountRef.current = 0;
+
+            // Also activate chat mode (voice is speech-driven chat)
+            if (!engine.chatMode.isActive) {
+                engine.setChatMode({
+                    isActive: true,
+                    currentInput: '',
+                    inputPositions: [],
+                    isProcessing: false
+                });
+            }
+
+            // Check if mediaDevices is available (requires HTTPS or localhost)
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                engine.setDialogueText('Voice requires HTTPS. Use localhost or enable HTTPS.');
+                engine.exitVoiceMode();
+                return;
+            }
+
+            // Request microphone access and start recording
+            (async () => {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    audioStreamRef.current = stream;
+
+                    // Determine supported mime type
+                    const mimeType = MediaRecorder.isTypeSupported('audio/webm')
+                        ? 'audio/webm'
+                        : MediaRecorder.isTypeSupported('audio/mp4')
+                            ? 'audio/mp4'
+                            : 'audio/wav';
+
+                    const mediaRecorder = new MediaRecorder(stream, { mimeType });
+                    mediaRecorderRef.current = mediaRecorder;
+
+                    let audioChunks: Blob[] = [];
+
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) {
+                            audioChunks.push(event.data);
+                        }
+                    };
+
+                    mediaRecorder.onstop = () => {
+                        if (audioChunks.length > 0) {
+                            const audioBlob = new Blob(audioChunks, { type: mimeType });
+                            audioChunks = [];
+
+                            // Only transcribe if still in voice mode
+                            if (engine.isVoiceMode) {
+                                transcribeAudio(audioBlob);
+                            }
+                        }
+                    };
+
+                    // Start recording
+                    mediaRecorder.start();
+                    engine.setVoiceListening(true);
+                    engine.setDialogueText('Listening... (press Escape to exit)');
+
+                    // Record in chunks (stop and restart every 4 seconds for batch processing)
+                    const recordingInterval = setInterval(() => {
+                        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording' && engine.isVoiceMode) {
+                            mediaRecorderRef.current.stop();
+                            // Small delay before restarting to allow onstop to fire
+                            setTimeout(() => {
+                                if (mediaRecorderRef.current && engine.isVoiceMode && audioStreamRef.current) {
+                                    try {
+                                        mediaRecorderRef.current.start();
+                                    } catch (e) {
+                                        // Stream might have ended
+                                    }
+                                }
+                            }, 100);
+                        } else {
+                            clearInterval(recordingInterval);
+                        }
+                    }, 4000);
+
+                    // Store interval ID for cleanup
+                    (mediaRecorder as any)._recordingInterval = recordingInterval;
+
+                } catch (error) {
+                    console.error('Failed to access microphone:', error);
+                    engine.setDialogueText('Microphone access denied. Please allow microphone access.');
+                    engine.exitVoiceMode();
+                }
+            })();
+        }
+
+        // Voice mode just deactivated
+        if (!isVoiceActive && wasActive) {
+            // Stop recording
+            if (mediaRecorderRef.current) {
+                // Clear the interval
+                if ((mediaRecorderRef.current as any)._recordingInterval) {
+                    clearInterval((mediaRecorderRef.current as any)._recordingInterval);
+                }
+                if (mediaRecorderRef.current.state !== 'inactive') {
+                    mediaRecorderRef.current.stop();
+                }
+                mediaRecorderRef.current = null;
+            }
+            // Stop audio stream
+            if (audioStreamRef.current) {
+                audioStreamRef.current.getTracks().forEach(track => track.stop());
+                audioStreamRef.current = null;
+            }
+            engine.setVoiceListening(false);
+        }
+
+        // Cleanup on unmount
+        return () => {
+            if (mediaRecorderRef.current) {
+                if ((mediaRecorderRef.current as any)._recordingInterval) {
+                    clearInterval((mediaRecorderRef.current as any)._recordingInterval);
+                }
+                if (mediaRecorderRef.current.state !== 'inactive') {
+                    try {
+                        mediaRecorderRef.current.stop();
+                    } catch (e) {
+                        // Ignore
+                    }
+                }
+            }
+            if (audioStreamRef.current) {
+                audioStreamRef.current.getTracks().forEach(track => track.stop());
+            }
+        };
+    }, [engine.isVoiceMode, engine.chatMode.isActive]);
+
     // Track viewport center cell position and calculate total panned distance
     useEffect(() => {
         const interval = setInterval(() => {
@@ -5110,6 +5443,13 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
     // Cache for parsed GIF frame data
     const gifFrameCache = useRef<Map<string, { frames: HTMLImageElement[], delays: number[] }>>(new Map());
+
+    // Voice mode: MediaRecorder for audio capture
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioStreamRef = useRef<MediaStream | null>(null);
+    const voiceModeWasActiveRef = useRef<boolean>(false);
+    const isTranscribingRef = useRef<boolean>(false);
+    const emptyTranscriptCountRef = useRef<number>(0); // Track consecutive empty transcripts for auto-send
 
     // Preload all images immediately when worldData changes (don't wait for viewport)
     useEffect(() => {
@@ -9155,6 +9495,13 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             ctx.fillStyle = engine.textColor;
                         }
 
+                        // Voice mode: pulse cursor opacity
+                        const savedAlpha = ctx.globalAlpha;
+                        if (engine.isVoiceMode) {
+                            const pulseOpacity = (Math.sin(Date.now() / 300) + 1) / 2;
+                            ctx.globalAlpha = 0.3 + pulseOpacity * 0.7; // Range: 0.3 to 1.0
+                        }
+
                         // Add glowy effect to cursor
                         ctx.shadowColor = ctx.fillStyle as string;
                         ctx.shadowBlur = 0;
@@ -9163,6 +9510,9 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                         // Render cursor with dynamic dimensions
                         ctx.fillRect(cursorTopScreenPos.x, cursorTopScreenPos.y, cursorPixelWidth, cursorPixelHeight);
                         ctx.shadowBlur = 0;
+
+                        // Restore alpha
+                        ctx.globalAlpha = savedAlpha;
                     }
 
                     const charData = engine.worldData[key];

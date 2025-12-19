@@ -138,7 +138,7 @@ export async function editTextContent(
         }
 
         const response = await getAIClient().models.generateContent({
-            model: 'gemini-2.0-flash',
+            model: 'gemini-3-flash-preview',
             contents: `You are editing text content. Apply the user's instruction to transform the text.
 
 Current text:
@@ -206,7 +206,7 @@ export async function editTableContent(
         }
 
         const response = await getAIClient().models.generateContent({
-            model: 'gemini-2.0-flash',
+            model: 'gemini-3-flash-preview',
             contents: `You are editing a table/spreadsheet. Apply the user's instruction to transform the data.
 
 Current table (${rows.length} rows x ${columns.length} columns, tab-separated):

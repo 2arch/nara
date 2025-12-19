@@ -60,3 +60,4 @@ functions/service-account-key.json
 
 # Google Cloud SDK
 /google-cloud-sdk/
+certificates

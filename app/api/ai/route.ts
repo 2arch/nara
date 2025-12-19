@@ -400,7 +400,7 @@ export async function POST(request: NextRequest) {
             iterations++;
 
             const response = await getClient().models.generateContent({
-                model: 'gemini-2.0-flash',
+                model: 'gemini-3-flash-preview',
                 contents: history,
                 config: {
                     systemInstruction: SYSTEM_INSTRUCTION,

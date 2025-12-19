@@ -1036,6 +1036,7 @@ export interface WorldEngine {
         isProcessing: boolean;
     }>>;
     clearChatData: () => void;
+    setChatData: React.Dispatch<React.SetStateAction<WorldData>>;
     clearLightModeData: () => void;
     // Agent system
     agentEnabled: boolean;
@@ -1183,6 +1184,18 @@ export interface WorldEngine {
     agentSpriteName?: string;
     isAgentAttached: boolean;
     setAgentAttached: (attached: boolean) => void;
+    // Voice input mode
+    isVoiceMode: boolean;
+    voiceState?: {
+        isListening: boolean;
+        isProcessing: boolean;
+        transcript: string;
+        error?: string;
+        provider: 'browser' | 'gemini';
+    };
+    setVoiceListening: (isListening: boolean) => void;
+    setVoiceTranscript: (transcript: string) => void;
+    exitVoiceMode: () => void;
     // Agent movement handlers (registered by BitCanvas which has animation state)
     agentHandlers?: {
         moveAgents: (agentIds: string[], destination: { x: number; y: number }) => { moved: string[]; errors: string[] };
@@ -2196,6 +2209,11 @@ export function useWorldEngine({
         agentSpriteName,
         isAgentAttached,
         setAgentAttached,
+        isVoiceMode,
+        voiceState,
+        setVoiceListening,
+        setVoiceTranscript,
+        exitVoiceMode,
     } = useCommandSystem({ setDialogueText, initialBackgroundColor, initialTextColor, skipInitialBackground, getAllChips, availableStates, username, userUid: authenticatedUserUid, membershipLevel, updateSettings, settings, getEffectiveCharDims, zoomLevel, clipboardItems, toggleRecording: tapeRecordingCallbackRef.current || undefined, isReadOnly, getNormalizedSelection, setWorldData, worldData, setSelectionStart, setSelectionEnd, uploadImageToStorage, cancelComposition, monogramSystem, currentScale, setCurrentScale, recorder, setBounds: setCurrentBounds, canvasState, setCanvasState, setBoundedWorldData, boundedSource, setBoundedSource, boundedWorldData, setZoomLevel, setViewOffset, selectionStart, selectionEnd, setProcessingRegion, selectedAgentIds, triggerUpgradeFlow: () => {
         if (upgradeFlowHandlerRef.current) {
             upgradeFlowHandlerRef.current();
@@ -4226,9 +4244,24 @@ export function useWorldEngine({
             // Allow commands in read-only mode - we'll gate specific commands later
         }
 
+        // === Voice Mode Exit ===
+        // Exit voice mode on Escape (also exits underlying chat mode)
+        if (key === 'Escape' && isVoiceMode) {
+            exitVoiceMode();
+            setChatMode({
+                isActive: false,
+                currentInput: '',
+                inputPositions: [],
+                isProcessing: false
+            });
+            setChatData({});
+            setDialogueWithRevert("Voice mode disabled", setDialogueText);
+            return true;
+        }
+
         // === Chat Mode Exit ===
         // Don't allow ESC out of chat mode if in host mode (authentication) or read-only
-        if (key === 'Escape' && chatMode.isActive && !hostMode.isActive && !isReadOnly) {
+        if (key === 'Escape' && chatMode.isActive && !hostMode.isActive && !isReadOnly && !isVoiceMode) {
             // Cancel any active composition before exiting
             if (isComposingRef.current) {
                 compositionCancelledByModeExitRef.current = true;
@@ -14600,6 +14633,7 @@ export function useWorldEngine({
         chatMode,
         setChatMode,
         clearChatData: () => setChatData({}),
+        setChatData,
         clearLightModeData: clearLightModeData,
         hostMode,
         setHostMode,
@@ -15039,6 +15073,12 @@ export function useWorldEngine({
         agentSpriteName,
         isAgentAttached,
         setAgentAttached,
+        // Voice input mode
+        isVoiceMode,
+        voiceState,
+        setVoiceListening,
+        setVoiceTranscript,
+        exitVoiceMode,
         // Agent movement handlers (registered by BitCanvas)
         agentHandlers: agentHandlersRef.current,
         registerAgentHandlers: (handlers: WorldEngine['agentHandlers']) => {

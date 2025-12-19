@@ -364,6 +364,17 @@ export interface ModeState {
         scrollOffset: number; // Current scroll position
         maxScroll: number; // Maximum scroll value
     };
+    isVoiceMode: boolean; // Whether voice input mode is active
+    voiceState?: VoiceState; // Detailed voice mode state
+}
+
+// Voice mode state for speech-to-text
+export interface VoiceState {
+    isListening: boolean; // Currently listening for speech
+    isProcessing: boolean; // Processing audio through AI
+    transcript: string; // Current/partial transcript
+    error?: string; // Any error message
+    provider: 'browser' | 'gemini'; // Which STT provider to use
 }
 
 interface UseCommandSystemProps {
@@ -436,7 +447,7 @@ const AVAILABLE_COMMANDS = [
     // Content Creation
     'chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint', 'agent', 'pattern', 'connect', 'export', 'data', 'list', 'grow', 'duplicate', 'name',
     // Special
-    'mode', 'note', 'mail', 'shell', 'chat', 'talk', 'tutorial', 'help', 'script', 'run',
+    'mode', 'note', 'mail', 'shell', 'chat', 'voice', 'talk', 'tutorial', 'help', 'script', 'run',
     // Styling & Display
     'bg', 'text', 'font', 'style', 'display', 'scale', 'be',
     // State Management
@@ -455,7 +466,7 @@ const AVAILABLE_COMMANDS = [
 export const COMMAND_CATEGORIES: { [category: string]: string[] } = {
     'nav': ['nav', 'search', 'cam', 'indent', 'zoom', 'map', 'view', 'bound'],
     'create': ['chip', 'task', 'link', 'pack', 'clip', 'upload', 'paint', 'agent', 'export', 'data', 'list', 'grow', 'duplicate', 'name'],
-    'special': ['mode', 'note', 'mail', 'shell', 'chat', 'talk', 'tutorial', 'help', 'script', 'run'],
+    'special': ['mode', 'note', 'mail', 'shell', 'chat', 'voice', 'talk', 'tutorial', 'help', 'script', 'run'],
     'style': ['bg', 'text', 'font', 'style', 'display', 'be'],
     'state': ['state', 'random', 'clear', 'replay', 'record'],
     'share': ['publish', 'unpublish', 'share', 'spawn', 'monogram'],
@@ -501,6 +512,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'mail': '[SUPER ONLY] Create an email region. Select a rectangular area, type /mail. Row 1 = recipient email, Row 2 = subject line, Row 3+ = message body. Click the send button to deliver the email.',
     'shell': 'Convert a note into a terminal shell. Position cursor inside a note and type /shell to connect to the terminal server. Interact with the shell through the canvas. Supports keyboard input, arrow keys, and command history.',
     'chat': 'Quick shortcut to enter chat mode. Talk with AI to transform, expand, or generate text. The AI can help you develop ideas or create content based on your prompts.',
+    'voice': 'Toggle voice input mode. Speak commands or dictate text using your microphone. Uses browser speech recognition for instant results or Gemini for higher accuracy. Say "stop" or press Escape to exit.',
     'talk': 'Enable face-piloted geometry with different face styles. Type /talk to use default Macintosh face, or /talk [facename] to select a specific face (macintosh, robot, kawaii). Activates your front webcam and tracks your face to control the face in real-time.',
     'tutorial': 'Start the interactive tutorial. Learn the basics of spatial writing through hands-on exercises that teach you core commands and concepts.',
     'help': 'Show this detailed help menu. The command list stays open with descriptions for every available command, so you can explore what\'s possible.',
@@ -610,6 +622,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         paintBrushSize: 1, // Default brush size (1 cell radius)
         isAgentMode: false, // Agent spawning mode not active initially
         isAgentAttached: false, // Agents not attached to cursor initially
+        isVoiceMode: false, // Voice input mode not active initially
     });
 
     // User's saved sprites
@@ -2291,6 +2304,40 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
             clearCommandState();
 
             return null; // Autocomplete toggle doesn't need further processing
+        }
+
+        // Handle /voice command for voice input mode
+        if (commandName === 'voice') {
+            const { arg1 } = parseCurrentInput();
+            const provider = arg1 === 'gemini' ? 'gemini' : 'browser';
+
+            // Toggle voice mode
+            const newVoiceMode = !modeState.isVoiceMode;
+
+            setModeState(prev => ({
+                ...prev,
+                isVoiceMode: newVoiceMode,
+                voiceState: newVoiceMode ? {
+                    isListening: false,
+                    isProcessing: false,
+                    transcript: '',
+                    provider
+                } : undefined
+            }));
+
+            if (newVoiceMode) {
+                setDialogueWithRevert(
+                    `Voice mode enabled (${provider}). Microphone will activate on canvas.`,
+                    setDialogueText
+                );
+            } else {
+                setDialogueWithRevert("Voice mode disabled", setDialogueText);
+            }
+
+            // Clear command mode
+            clearCommandState();
+
+            return null;
         }
 
         // Handle /talk command for face-piloted geometry
@@ -7832,5 +7879,25 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
         isAgentAttached: modeState.isAgentAttached,
         exitAgentMode: () => setModeState(prev => ({ ...prev, isAgentMode: false, agentSpriteName: undefined })),
         setAgentAttached: (attached: boolean) => setModeState(prev => ({ ...prev, isAgentAttached: attached })),
+        // Voice mode
+        isVoiceMode: modeState.isVoiceMode,
+        voiceState: modeState.voiceState,
+        setVoiceListening: (isListening: boolean) => setModeState(prev => ({
+            ...prev,
+            voiceState: prev.voiceState ? { ...prev.voiceState, isListening } : undefined
+        })),
+        setVoiceProcessing: (isProcessing: boolean) => setModeState(prev => ({
+            ...prev,
+            voiceState: prev.voiceState ? { ...prev.voiceState, isProcessing } : undefined
+        })),
+        setVoiceTranscript: (transcript: string) => setModeState(prev => ({
+            ...prev,
+            voiceState: prev.voiceState ? { ...prev.voiceState, transcript } : undefined
+        })),
+        setVoiceError: (error?: string) => setModeState(prev => ({
+            ...prev,
+            voiceState: prev.voiceState ? { ...prev.voiceState, error } : undefined
+        })),
+        exitVoiceMode: () => setModeState(prev => ({ ...prev, isVoiceMode: false, voiceState: undefined })),
     };
 }
