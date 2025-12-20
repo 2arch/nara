@@ -14311,32 +14311,36 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             }
         }
 
-        // Host mode: check if we're on a non-input message that needs manual advancement
-        if (hostDialogue.isHostActive) {
-            const currentMessage = hostDialogue.getCurrentMessage();
+        // Host mode: check if we're in host dialogue OR keyframe experience
+        const isKeyframeActive = keyframeExperience.isActive;
+        const isAnyHostActive = isKeyframeActive || hostDialogue.isHostActive;
 
-            // If message doesn't expect input (display-only), allow navigation
-            if (currentMessage && !currentMessage.expectsInput) {
-                // Right arrow or any other key advances forward (if next exists)
-                if (currentMessage.nextMessageId && (e.key === 'ArrowRight' || (e.key !== 'ArrowLeft' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown'))) {
-                    hostDialogue.advanceToNextMessage();
-                    e.preventDefault();
-                    e.stopPropagation();
-                    return;
-                }
-                // Left arrow goes back to previous message
-                if (e.key === 'ArrowLeft' && currentMessage.previousMessageId) {
-                    hostDialogue.goBackToPreviousMessage();
-                    e.preventDefault();
-                    e.stopPropagation();
-                    return;
+        if (isAnyHostActive) {
+            // For old hostDialogue: check if we're on a non-input message that needs manual advancement
+            if (hostDialogue.isHostActive && !isKeyframeActive) {
+                const currentMessage = hostDialogue.getCurrentMessage();
+
+                // If message doesn't expect input (display-only), allow navigation
+                if (currentMessage && !currentMessage.expectsInput) {
+                    // Right arrow or any other key advances forward (if next exists)
+                    if (currentMessage.nextMessageId && (e.key === 'ArrowRight' || (e.key !== 'ArrowLeft' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown'))) {
+                        hostDialogue.advanceToNextMessage();
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return;
+                    }
+                    // Left arrow goes back to previous message
+                    if (e.key === 'ArrowLeft' && currentMessage.previousMessageId) {
+                        hostDialogue.goBackToPreviousMessage();
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return;
+                    }
                 }
             }
 
-            // Tab key toggles password visibility ONLY in password input mode during host dialogue
+            // Tab key toggles password visibility in password input mode
             if (e.key === 'Tab' &&
-                hostDialogue.isHostActive &&
-                hostDialogue.isExpectingInput() &&
                 engine.hostMode.currentInputType === 'password' &&
                 engine.chatMode.isActive) {
                 setIsPasswordVisible(prev => !prev);
@@ -14347,8 +14351,6 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
             // Intercept Enter in host mode for chat input processing
             // Route to keyframe experience if active, otherwise use old host dialogue
-            const isKeyframeActive = keyframeExperience.isActive;
-            const isHostActive = isKeyframeActive || hostDialogue.isHostActive;
             const isExpectingInput = isKeyframeActive
                 ? keyframeExperience.currentState.input !== null
                 : hostDialogue.isExpectingInput();
@@ -14356,7 +14358,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 ? keyframeExperience.isProcessing
                 : hostDialogue.isHostProcessing;
 
-            if (engine.chatMode.isActive && e.key === 'Enter' && !e.shiftKey && isHostActive && isExpectingInput) {
+            if (engine.chatMode.isActive && e.key === 'Enter' && !e.shiftKey && isAnyHostActive && isExpectingInput) {
                 // Debounce: prevent rapid Enter presses
                 const now = Date.now();
                 if (now - lastEnterPressRef.current < 500) return; // 500ms debounce
