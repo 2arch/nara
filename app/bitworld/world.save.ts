@@ -2,8 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { logger } from './logger';
 import { database } from '@/app/firebase'; // Adjust path if needed
 import { ref, set, onValue, DataSnapshot, get, onChildAdded, onChildChanged, onChildRemoved, update, serverTimestamp } from 'firebase/database';
-// Import functions and constants directly from @sanity/diff-match-patch
-import { makeDiff, DIFF_EQUAL } from '@sanity/diff-match-patch';
+// Note: diff-match-patch was removed in favor of direct key comparison for performance
 import type { WorldData } from './world.engine'; // Adjust path if needed
 import type { WorldSettings } from './settings';
 
@@ -40,6 +39,13 @@ export function useWorldSave(
     const clientIdRef = useRef<string>(`${Date.now()}-${Math.random().toString(36).substr(2, 6)}`);
     const isSendingRef = useRef(false);
     const pendingSaveRef = useRef(false);
+
+    // Track keys we've sent to Firebase (to distinguish echoes from remote changes)
+    // Maps key -> value we sent (to detect if incoming data is our echo)
+    const pendingSendsRef = useRef<Map<string, any>>(new Map());
+
+    // Track dirty keys for efficient diffing (instead of full JSON.stringify)
+    const dirtyKeysRef = useRef<Set<string>>(new Set());
 
     // Replay sequence counter
     const replayCounterRef = useRef<number>(0);
@@ -174,6 +180,21 @@ export function useWorldSave(
                 if (!initialDataLoaded) {
                     initialData[key] = value;
                 } else if (autoLoadData) {
+                    // Check if this is an echo of data we sent (can happen if key was deleted then re-added)
+                    const pendingSentValue = pendingSendsRef.current.get(key);
+                    const isOurEcho = pendingSentValue !== undefined &&
+                        JSON.stringify(pendingSentValue) === JSON.stringify(value);
+
+                    if (isOurEcho) {
+                        // This is Firebase confirming our own write
+                        pendingSendsRef.current.delete(key);
+                        if (lastSyncedDataRef.current) {
+                            lastSyncedDataRef.current[key] = value;
+                        }
+                        logger.debug(`📥 Received echo (add) for ${key}, updating lastSynced only`);
+                        return;
+                    }
+
                     // Update local state and lastSyncedDataRef atomically
                     setLocalWorldData((prevData: WorldData) => {
                         const isDuplicate = prevData[key] && JSON.stringify(prevData[key]) === JSON.stringify(value);
@@ -201,11 +222,29 @@ export function useWorldSave(
                 const value = snapshot.val();
                 if (!key || !autoLoadData) return;
 
-                // Update local state and lastSyncedDataRef atomically
+                // Check if this is an echo of data we sent
+                const pendingSentValue = pendingSendsRef.current.get(key);
+                const isOurEcho = pendingSentValue !== undefined &&
+                    JSON.stringify(pendingSentValue) === JSON.stringify(value);
+
+                if (isOurEcho) {
+                    // This is Firebase confirming our own write - update lastSyncedDataRef but DON'T touch local state
+                    // This prevents overwriting keystrokes typed while the save was in flight
+                    pendingSendsRef.current.delete(key);
+                    if (lastSyncedDataRef.current) {
+                        lastSyncedDataRef.current[key] = value;
+                    }
+                    logger.debug(`📥 Received echo for ${key}, updating lastSynced only (not local state)`);
+                    return;
+                }
+
+                // This is data from another client - apply it, but only if local hasn't diverged
                 setLocalWorldData((prevData: WorldData) => {
-                    const isDuplicate = prevData[key] && JSON.stringify(prevData[key]) === JSON.stringify(value);
+                    const localValue = prevData[key];
+                    const isDuplicate = localValue && JSON.stringify(localValue) === JSON.stringify(value);
+
                     if (isDuplicate) {
-                        // Confirmed echo - safe to update lastSyncedDataRef
+                        // Already have this value locally
                         if (lastSyncedDataRef.current) {
                             lastSyncedDataRef.current[key] = value;
                         }
@@ -213,12 +252,25 @@ export function useWorldSave(
                         return prevData;
                     }
 
-                    // New data from Firebase (possibly from another client or initial sync)
-                    // Only update lastSyncedDataRef if we're actually applying this change
+                    // Check if local has advanced past what we last synced (user typed more)
+                    // In this case, don't overwrite local state - our next save will reconcile
+                    const lastSyncedValue = lastSyncedDataRef.current?.[key];
+                    if (localValue !== undefined && lastSyncedValue !== undefined &&
+                        JSON.stringify(localValue) !== JSON.stringify(lastSyncedValue)) {
+                        // Local has changes that haven't been synced yet - don't overwrite
+                        // Just update lastSyncedDataRef to reflect what Firebase has
+                        if (lastSyncedDataRef.current) {
+                            lastSyncedDataRef.current[key] = value;
+                        }
+                        logger.debug(`📥 Received remote change for ${key}, but local has unsaved changes - skipping overwrite`);
+                        return prevData;
+                    }
+
+                    // Safe to apply remote change
                     if (lastSyncedDataRef.current) {
                         lastSyncedDataRef.current[key] = value;
                     }
-                    logger.debug(`📥 Received changed data for ${key}`);
+                    logger.debug(`📥 Applying remote change for ${key}`);
                     return { ...prevData, [key]: value };
                 });
             }),
@@ -310,11 +362,44 @@ export function useWorldSave(
             clearTimeout(saveTimeoutRef.current);
         }
 
-        const lastSyncedStr = JSON.stringify(lastSyncedDataRef.current || {});
-        const currentStr = JSON.stringify(localWorldData || {});
+        // OPTIMIZATION: Instead of JSON.stringify + diff-match-patch on entire world,
+        // do fast O(1) reference check first, then O(n) key comparison only if needed
+        const lastSynced = lastSyncedDataRef.current || {};
+        const current = localWorldData || {};
 
-        const diff = makeDiff(lastSyncedStr, currentStr);
-        const hasChanges = diff.length > 1 || (diff.length === 1 && diff[0][0] !== DIFF_EQUAL);
+        // Fast path: reference equality means no changes
+        if (lastSynced === current) {
+            return;
+        }
+
+        // Quick check: compare key counts first (O(1))
+        const lastSyncedKeys = Object.keys(lastSynced);
+        const currentKeys = Object.keys(current);
+
+        // Fast path: if key counts match, do spot check on a few keys
+        let hasChanges = lastSyncedKeys.length !== currentKeys.length;
+
+        if (!hasChanges) {
+            // Check for any changed or new keys (O(n) but avoids full JSON.stringify)
+            for (const key of currentKeys) {
+                const currentValue = current[key];
+                const lastValue = lastSynced[key];
+
+                // Fast string comparison for most common case (cell values)
+                if (typeof currentValue === 'string' && typeof lastValue === 'string') {
+                    if (currentValue !== lastValue) {
+                        hasChanges = true;
+                        break;
+                    }
+                } else if (currentValue !== lastValue) {
+                    // Reference check for objects
+                    if (JSON.stringify(currentValue) !== JSON.stringify(lastValue)) {
+                        hasChanges = true;
+                        break;
+                    }
+                }
+            }
+        }
 
         if (!hasChanges) {
             // Even if no changes detected, check if there's a pending save to retry
@@ -397,12 +482,21 @@ export function useWorldSave(
                 if (Object.keys(updates).length > 0) {
                     logger.debug(`📤 Sending ${Object.keys(updates).length} updates to Firebase`, updates);
 
+                    // Track what we're sending so we can identify our own echoes
+                    // This prevents the echo handler from overwriting local state with stale data
+                    for (const [fullPath, value] of Object.entries(updates)) {
+                        const key = fullPath.split('/').pop();
+                        if (key && !fullPath.includes('/replay/')) {
+                            pendingSendsRef.current.set(key, value);
+                        }
+                    }
+
                     // Add replay log entries for each change
                     if (replayRefPath) {
                         for (const [fullPath, value] of Object.entries(updates)) {
                             // Extract the key from the full path (e.g., "worlds/uid/home/data/5,10" -> "5,10")
                             const key = fullPath.split('/').pop();
-                            if (key) {
+                            if (key && !fullPath.includes('/replay/')) {
                                 const replayEntry = {
                                     key,
                                     value,
@@ -429,6 +523,8 @@ export function useWorldSave(
                     logger.error("Firebase: Error saving data:", err);
                     setError(`Failed to save world data: ${err.message}`);
                 }
+                // Clear pending sends on error so echoes don't get stuck
+                pendingSendsRef.current.clear();
             } finally {
                 setIsSaving(false);
                 isSendingRef.current = false;

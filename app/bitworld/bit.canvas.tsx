@@ -7,6 +7,7 @@ import { useDialogue, useDebugDialogue } from './dialogue';
 import { useControllerSystem, createCameraController, createGridController, createTapeController, createCommandController } from './controllers';
 import { COLOR_MAP, COMMAND_CATEGORIES, COMMAND_HELP } from './commands';
 import { useHostDialogue } from './host.dialogue';
+import { useKeyframeExperience } from './experiences';
 import { setDialogueWithRevert, agentThink as aiAgentThink, agentChat as aiAgentChat, updateMind, AgentMind, CanvasState } from './ai';
 import { executeTool, ToolContext } from './ai.tools';
 import { CanvasRecorder } from './tape';
@@ -1933,9 +1934,10 @@ interface BitCanvasProps {
     isPublicWorld?: boolean; // Whether this is a public world (affects sign-up flow)
     monogram?: ReturnType<typeof useMonogram>; // Monogram system for visual effects
     mcpEnabled?: boolean; // Enable MCP bridge for AI paint tools
+    experienceId?: string; // Experience link ID for outreach tracking (?exp=[id])
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, onTutorialComplete, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true, isPublicWorld = false, monogram: externalMonogram, mcpEnabled = false }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, onTutorialComplete, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true, isPublicWorld = false, monogram: externalMonogram, mcpEnabled = false, experienceId }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -4829,8 +4831,41 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
         // === Context ===
         hostBackgroundColor,
+        isPublicWorld,
+
+        // === Outreach tracking ===
+        experienceId
+    });
+
+    // Keyframe-based experience renderer (used when experienceId points to a keyframe experience)
+    const keyframeExperience = useKeyframeExperience({
+        experienceId,
+        setHostData: engine.setHostData,
+        getViewportCenter: engine.getViewportCenter,
+        setHostMode: engine.setHostMode,
+        setChatMode: engine.setChatMode,
+        screenEffects: {
+            setBackgroundColor: (color) => {
+                engine.updateSettings({ backgroundColor: color });
+            },
+            setBackgroundMode: (mode) => {
+                // Wire to background mode when ready
+            },
+            setBackgroundImage: (imageUrl) => {
+                // Wire to background image when ready
+            },
+            setMonogramMode: (mode) => {
+                // Wire to monogram when ready
+            },
+            setWorldData: engine.setWorldData
+        },
+        onAuthSuccess,
+        hostBackgroundColor,
         isPublicWorld
     });
+
+    // Use keyframe experience if active, otherwise fall back to hostDialogue
+    const useKeyframeFlow = keyframeExperience.isActive;
 
     // Handle email verification flow
     useEffect(() => {
@@ -4937,7 +4972,39 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     const previousCameraModeRef = useRef<'default' | 'focus' | null>(null); // Store camera mode before host flow
 
     // Start host flow when enabled (only once)
+    // Skip if experienceId is present - keyframe experience handles it
     useEffect(() => {
+        // If experienceId is present, keyframe experience will handle the flow
+        if (experienceId) {
+            // Still set up host mode for keyframe experience
+            if (hostModeEnabled && !hasStartedInitialFlowRef.current) {
+                hasStartedInitialFlowRef.current = true;
+
+                if (hostTextColor && engine.updateSettings) {
+                    engine.updateSettings({ textColor: hostTextColor });
+                }
+
+                previousCameraModeRef.current = engine.cameraMode;
+                if (engine.cameraMode !== 'focus') {
+                    engine.setCameraMode('focus');
+                }
+
+                engine.setHostMode({ isActive: true, currentInputType: null });
+                engine.setChatMode({
+                    isActive: true,
+                    currentInput: '',
+                    inputPositions: [],
+                    isProcessing: false
+                });
+
+                if (canvasRef.current) {
+                    canvasRef.current.focus();
+                }
+            }
+            return;
+        }
+
+        // Fallback: use old host dialogue system
         if (hostModeEnabled && initialHostFlow && !hostDialogue.isHostActive && !hasStartedInitialFlowRef.current) {
             // Mark as started to prevent restart after authentication completes
             hasStartedInitialFlowRef.current = true;
@@ -4974,7 +5041,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 canvasRef.current.focus();
             }
         }
-    }, [hostModeEnabled, initialHostFlow, hostDialogue.isHostActive, hostTextColor]);
+    }, [hostModeEnabled, initialHostFlow, hostDialogue.isHostActive, hostTextColor, experienceId]);
 
     // Restore camera mode when host flow exits
     const wasHostActiveRef = useRef(false);
@@ -5534,6 +5601,16 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             monogram.setOptions(prev => ({ ...prev, mode: 'nara' }));
         }
     }, [engine.faceOrientation, engine.isFaceDetectionEnabled, monogram]);
+
+    // Sync keyframe experience monogram mode with actual monogram system
+    useEffect(() => {
+        if (keyframeExperience.isActive && keyframeExperience.currentState.monogram) {
+            const mode = keyframeExperience.currentState.monogram as 'clear' | 'perlin' | 'nara' | 'voronoi' | 'face3d';
+            if (monogram.options.mode !== mode) {
+                monogram.setOptions(prev => ({ ...prev, mode }));
+            }
+        }
+    }, [keyframeExperience.isActive, keyframeExperience.currentState.monogram, monogram]);
 
     // Preload monogram chunks when viewport changes
     useEffect(() => {
@@ -9817,19 +9894,29 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
         // === Render Multiplayer Cursors ===
         if (engine.multiplayerCursors && engine.multiplayerCursors.length > 0) {
-            for (const cursor of engine.multiplayerCursors) {
-                const cursorScreenPos = engine.worldToScreen(cursor.x, cursor.y, currentZoom, currentOffset);
+            // Multiplayer cursors should respect GRID_CELL_SPAN like the local cursor
+            const multiplayerCursorHeight = effectiveCharHeight * GRID_CELL_SPAN;
 
-                // Only draw if visible on screen
-                if (cursorScreenPos.x >= -effectiveCharWidth &&
-                    cursorScreenPos.x <= cssWidth &&
-                    cursorScreenPos.y >= -effectiveCharHeight &&
-                    cursorScreenPos.y <= cssHeight) {
+            for (const cursor of engine.multiplayerCursors) {
+                // Offset Y by -(GRID_CELL_SPAN - 1) to get TOP of cursor, same as local cursor
+                // The cursor position is the bottom cell, but we draw from the top
+                const cursorTopScreenPos = engine.worldToScreen(
+                    cursor.x,
+                    cursor.y - (GRID_CELL_SPAN - 1),
+                    currentZoom,
+                    currentOffset
+                );
+
+                // Only draw if visible on screen (use full cursor height for visibility check)
+                if (cursorTopScreenPos.x >= -effectiveCharWidth &&
+                    cursorTopScreenPos.x <= cssWidth &&
+                    cursorTopScreenPos.y >= -multiplayerCursorHeight &&
+                    cursorTopScreenPos.y <= cssHeight) {
 
                     // Draw cursor rectangle with user's color
                     ctx.fillStyle = cursor.color;
                     ctx.globalAlpha = 0.7; // Slight transparency
-                    ctx.fillRect(cursorScreenPos.x, cursorScreenPos.y, effectiveCharWidth, effectiveCharHeight);
+                    ctx.fillRect(cursorTopScreenPos.x, cursorTopScreenPos.y, effectiveCharWidth, multiplayerCursorHeight);
                     ctx.globalAlpha = 1.0;
 
                     // Check if there's a character at cursor position and render it
@@ -9839,7 +9926,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                         const char = engine.isImageData(charData) ? '' : engine.getCharacter(charData);
                         if (char && char.trim() !== '') {
                             ctx.fillStyle = '#FFFFFF'; // White text on colored background
-                            renderText(ctx, char, cursorScreenPos.x, cursorScreenPos.y + verticalTextOffset);
+                            renderText(ctx, char, cursorTopScreenPos.x, cursorTopScreenPos.y + verticalTextOffset);
                         }
                     }
 
@@ -9849,8 +9936,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                         ctx.font = `${Math.max(10, effectiveFontSize * 0.7)}px ${fontFamily}`;
                         ctx.fillStyle = cursor.color;
                         ctx.textBaseline = 'bottom';
-                        const labelY = cursorScreenPos.y - 2;
-                        ctx.fillText(cursor.username, cursorScreenPos.x, labelY);
+                        const labelY = cursorTopScreenPos.y - 2;
+                        ctx.fillText(cursor.username, cursorTopScreenPos.x, labelY);
                         ctx.restore();
                     }
                 }
@@ -9861,23 +9948,30 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         if (engine.multiplayerCursors && engine.multiplayerCursors.length > 0) {
             const viewportCenterScreen = { x: cssWidth / 2, y: cssHeight / 2 };
             const edgeBuffer = 20; // Buffer from viewport edge
+            const multiplayerCursorHeight = effectiveCharHeight * GRID_CELL_SPAN;
 
             for (const cursor of engine.multiplayerCursors) {
-                const cursorScreenPos = engine.worldToScreen(cursor.x, cursor.y, currentZoom, currentOffset);
+                // Use same Y offset as on-screen cursors for consistency
+                const cursorTopScreenPos = engine.worldToScreen(
+                    cursor.x,
+                    cursor.y - (GRID_CELL_SPAN - 1),
+                    currentZoom,
+                    currentOffset
+                );
 
-                // Check if cursor is offscreen
-                const isOffscreen = cursorScreenPos.x < -effectiveCharWidth ||
-                                    cursorScreenPos.x > cssWidth ||
-                                    cursorScreenPos.y < -effectiveCharHeight ||
-                                    cursorScreenPos.y > cssHeight;
+                // Check if cursor is offscreen (use full cursor height)
+                const isOffscreen = cursorTopScreenPos.x < -effectiveCharWidth ||
+                                    cursorTopScreenPos.x > cssWidth ||
+                                    cursorTopScreenPos.y < -multiplayerCursorHeight ||
+                                    cursorTopScreenPos.y > cssHeight;
 
                 if (isOffscreen) {
                     // Find intersection point on viewport edge
                     const intersection = getViewportEdgeIntersection(
                         viewportCenterScreen.x,
                         viewportCenterScreen.y,
-                        cursorScreenPos.x,
-                        cursorScreenPos.y,
+                        cursorTopScreenPos.x,
+                        cursorTopScreenPos.y,
                         cssWidth,
                         cssHeight
                     );
@@ -10536,6 +10630,15 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             const currentMessage = hostDialogue.getCurrentMessage();
             if (currentMessage && !currentMessage.expectsInput) {
                 hostDialogue.advanceToNextMessage();
+                return; // Don't process further
+            }
+        }
+
+        // Keyframe experience: click to advance (if not expecting input)
+        if (keyframeExperience.isActive) {
+            const currentInput = keyframeExperience.currentState.input;
+            if (!currentInput && !keyframeExperience.isProcessing) {
+                keyframeExperience.advance();
                 return; // Don't process further
             }
         }
@@ -14243,18 +14346,31 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             }
 
             // Intercept Enter in host mode for chat input processing
-            // Only intercept if we're actively expecting input from the user
-            if (engine.chatMode.isActive && e.key === 'Enter' && !e.shiftKey && hostDialogue.isHostActive && hostDialogue.isExpectingInput()) {
+            // Route to keyframe experience if active, otherwise use old host dialogue
+            const isKeyframeActive = keyframeExperience.isActive;
+            const isHostActive = isKeyframeActive || hostDialogue.isHostActive;
+            const isExpectingInput = isKeyframeActive
+                ? keyframeExperience.currentState.input !== null
+                : hostDialogue.isExpectingInput();
+            const isProcessing = isKeyframeActive
+                ? keyframeExperience.isProcessing
+                : hostDialogue.isHostProcessing;
+
+            if (engine.chatMode.isActive && e.key === 'Enter' && !e.shiftKey && isHostActive && isExpectingInput) {
                 // Debounce: prevent rapid Enter presses
                 const now = Date.now();
                 if (now - lastEnterPressRef.current < 500) return; // 500ms debounce
 
                 const userInput = engine.chatMode.currentInput.trim();
-                if (userInput && !hostDialogue.isHostProcessing) {
+                if (userInput && !isProcessing) {
                     lastEnterPressRef.current = now;
 
-                    // Process through host dialogue
-                    hostDialogue.processInput(userInput);
+                    // Process through appropriate handler
+                    if (isKeyframeActive) {
+                        keyframeExperience.processInput(userInput);
+                    } else {
+                        hostDialogue.processInput(userInput);
+                    }
 
                     // Clear chat input and visual data
                     engine.clearChatData();
@@ -14276,6 +14392,17 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     e.stopPropagation();
                     return;
                 }
+            }
+
+            // Handle Enter to advance non-input keyframes
+            if (isKeyframeActive && e.key === 'Enter' && !e.shiftKey && !isExpectingInput && !isProcessing) {
+                const now = Date.now();
+                if (now - lastEnterPressRef.current < 300) return;
+                lastEnterPressRef.current = now;
+                keyframeExperience.advance();
+                e.preventDefault();
+                e.stopPropagation();
+                return;
             }
         }
 
