@@ -24,6 +24,7 @@ export interface Keyframe {
   bg?: string;
   monogram?: string;
   monogramSpeed?: number;
+  monogramComplexity?: number;
   backgroundMode?: 'color' | 'image' | 'video' | 'transparent';
   backgroundImage?: string;
 
@@ -71,6 +72,7 @@ export interface KeyframeState {
   bg: string;
   monogram: string;
   monogramSpeed: number;
+  monogramComplexity: number;
   backgroundMode: 'color' | 'image' | 'video' | 'transparent';
   backgroundImage: string | null;
 
@@ -109,6 +111,8 @@ export interface UseKeyframeExperienceProps {
     setBackgroundMode?: (mode: 'color' | 'image' | 'video' | 'transparent') => void;
     setBackgroundImage?: (imageUrl: string) => void;
     setMonogramMode?: (mode: string) => void;
+    setMonogramSpeed?: (speed: number) => void;
+    setMonogramComplexity?: (complexity: number) => void;
     setWorldData?: (updater: (prev: Record<string, any>) => Record<string, any>) => void;
   };
 
@@ -172,6 +176,7 @@ export function useKeyframeExperience({
     bg: hostBackgroundColor || '#000000',
     monogram: 'perlin',
     monogramSpeed: 0.5,
+    monogramComplexity: 1.0,
     backgroundMode: 'color',
     backgroundImage: null,
     dialogue: '',
@@ -245,6 +250,7 @@ export function useKeyframeExperience({
         bg: keyframe.bg ?? prev.bg,
         monogram: keyframe.monogram ?? prev.monogram,
         monogramSpeed: keyframe.monogramSpeed ?? prev.monogramSpeed,
+        monogramComplexity: keyframe.monogramComplexity ?? prev.monogramComplexity,
         backgroundMode: keyframe.backgroundMode ?? prev.backgroundMode,
         backgroundImage: keyframe.backgroundImage ?? prev.backgroundImage,
         dialogue: keyframe.dialogue ?? '',
@@ -269,6 +275,12 @@ export function useKeyframeExperience({
     }
     if (keyframe.monogram && screenEffects?.setMonogramMode) {
       screenEffects.setMonogramMode(keyframe.monogram);
+    }
+    if (keyframe.monogramSpeed !== undefined && screenEffects?.setMonogramSpeed) {
+      screenEffects.setMonogramSpeed(keyframe.monogramSpeed);
+    }
+    if (keyframe.monogramComplexity !== undefined && screenEffects?.setMonogramComplexity) {
+      screenEffects.setMonogramComplexity(keyframe.monogramComplexity);
     }
 
     // Spawn content

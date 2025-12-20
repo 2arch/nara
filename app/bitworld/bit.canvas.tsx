@@ -4818,7 +4818,12 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 engine.switchBackgroundMode('image' as any, url, engine.textColor);
             },
             setMonogramMode: (mode) => {
-                // TODO: Wire up to monogram system once setMonogramMode is implemented on engine
+                if (monogram && mode) {
+                    const validModes = ['clear', 'perlin', 'nara', 'voronoi', 'face3d'];
+                    if (validModes.includes(mode)) {
+                        monogram.setOptions(prev => ({ ...prev, mode: mode as any }));
+                    }
+                }
             },
             setWorldData: engine.setWorldData,
             addEphemeralText: engine.addInstantAIResponse ?
@@ -4849,13 +4854,28 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 engine.updateSettings({ backgroundColor: color });
             },
             setBackgroundMode: (mode) => {
-                // Wire to background mode when ready
+                engine.switchBackgroundMode(mode as any, engine.backgroundImage || '', engine.textColor);
             },
             setBackgroundImage: (imageUrl) => {
-                // Wire to background image when ready
+                engine.switchBackgroundMode('image' as any, imageUrl, engine.textColor);
             },
             setMonogramMode: (mode) => {
-                // Wire to monogram when ready
+                if (monogram && mode) {
+                    const validModes = ['clear', 'perlin', 'nara', 'voronoi', 'face3d'];
+                    if (validModes.includes(mode)) {
+                        monogram.setOptions(prev => ({ ...prev, mode: mode as any }));
+                    }
+                }
+            },
+            setMonogramSpeed: (speed: number) => {
+                if (monogram) {
+                    monogram.setOptions(prev => ({ ...prev, speed }));
+                }
+            },
+            setMonogramComplexity: (complexity: number) => {
+                if (monogram) {
+                    monogram.setOptions(prev => ({ ...prev, complexity }));
+                }
             },
             setWorldData: engine.setWorldData
         },
