@@ -1053,11 +1053,11 @@ export interface WorldEngine {
     // Host mode for onboarding
     hostMode: {
         isActive: boolean;
-        currentInputType: import('./host.flows').InputType | null;
+        currentInputType: import('./experiences').InputType | null;
     };
     setHostMode: React.Dispatch<React.SetStateAction<{
         isActive: boolean;
-        currentInputType: import('./host.flows').InputType | null;
+        currentInputType: import('./experiences').InputType | null;
     }>>;
     setHostData: React.Dispatch<React.SetStateAction<{ text: string; color?: string; centerPos: Point; timestamp?: number } | null>>;
     // Ephemeral text rendering for host dialogue
@@ -1229,11 +1229,12 @@ interface UseWorldEngineProps {
     monogramSystem?: { // WebGPU monogram background system
         setOptions: (updater: ((prev: any) => any) | any) => void;
         toggleEnabled: () => void;
+        setPressure?: (value: number) => void; // Envelope-driven pressure for flat mode
         options?: {
             enabled?: boolean;
             speed?: number;
             complexity?: number;
-            mode?: 'clear' | 'perlin' | 'nara' | 'voronoi' | 'face3d';
+            mode?: 'clear' | 'flat' | 'perlin' | 'nara' | 'voronoi' | 'face3d' | 'sparkle';
         };
     };
     bounds?: WorldBounds; // Optional bounds for constrained canvas mode (e.g., { minX: 0, minY: 0, maxX: 1000, maxY: 1000 } for 1M cells)
@@ -1728,6 +1729,22 @@ export function useWorldEngine({
     const lastEscTimeRef = useRef<number | null>(null);
     const [lastEnterX, setLastEnterX] = useState<number | null>(null); // Track X position from last Enter
 
+    // === Envelope State for Monogram Pressure ===
+    // Each keypress triggers a sine bump that accumulates and decays
+    interface SineBump {
+        startTime: number;
+        duration: number;
+    }
+    const envelopeBumpsRef = useRef<SineBump[]>([]);
+    const envelopeAccumulatedRef = useRef<number>(0);
+    const envelopeLastTimeRef = useRef<number>(Date.now());
+
+    // Envelope parameters (tunable)
+    const ENVELOPE_BUMP_DURATION = 150;  // ms - how long each sine bump lasts
+    const ENVELOPE_DEPOSIT_AMOUNT = 0.15; // energy deposited when bump completes
+    const ENVELOPE_DECAY_RATE = 0.8;      // energy drained per second (linear)
+    const ENVELOPE_TANH_SCALE = 1.5;      // controls soft clamp curve steepness
+
     // Pack toggle guard - prevents double-toggle from touch+click events (all packs, not just UI)
     const uiPackToggleTimeRef = useRef<number>(0);
 
@@ -1753,6 +1770,54 @@ export function useWorldEngine({
     useEffect(() => {
         cursorPosRef.current = cursorPos;
     }, [cursorPos]);
+
+    // === Envelope Animation Loop ===
+    // Computes pressure from sine bumps + accumulated energy each frame
+    useEffect(() => {
+        let frameId: number;
+
+        const tick = () => {
+            const now = Date.now();
+            const dt = (now - envelopeLastTimeRef.current) / 1000;
+            envelopeLastTimeRef.current = now;
+
+            // 1. Process active bumps
+            let bumpSum = 0;
+            const stillActive: SineBump[] = [];
+
+            for (const bump of envelopeBumpsRef.current) {
+                const elapsed = now - bump.startTime;
+                if (elapsed < bump.duration) {
+                    // Active: contribute sine value (0 to π gives 0 → 1 → 0)
+                    const phase = (elapsed / bump.duration) * Math.PI;
+                    bumpSum += Math.sin(phase);
+                    stillActive.push(bump);
+                } else {
+                    // Completed: deposit energy into accumulated pool
+                    envelopeAccumulatedRef.current += ENVELOPE_DEPOSIT_AMOUNT;
+                }
+            }
+            envelopeBumpsRef.current = stillActive;
+
+            // 2. Decay accumulated energy (linear drain)
+            envelopeAccumulatedRef.current = Math.max(0,
+                envelopeAccumulatedRef.current - ENVELOPE_DECAY_RATE * dt
+            );
+
+            // 3. Compute pressure with tanh soft clamp
+            // Active bumps contribute directly, accumulated provides the tail
+            const rawEnergy = envelopeAccumulatedRef.current + bumpSum * 0.3;
+            const pressure = Math.tanh(rawEnergy / ENVELOPE_TANH_SCALE);
+
+            // 4. Push to monogram
+            monogramSystem?.setPressure?.(pressure);
+
+            frameId = requestAnimationFrame(tick);
+        };
+
+        frameId = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(frameId);
+    }, [monogramSystem]);
 
     // Fetch user membership level
     useEffect(() => {
@@ -1814,7 +1879,7 @@ export function useWorldEngine({
     // === Host Mode State (for onboarding) ===
     const [hostMode, setHostMode] = useState<{
         isActive: boolean;
-        currentInputType: import('./host.flows').InputType | null;
+        currentInputType: import('./experiences').InputType | null;
     }>({
         isActive: false,
         currentInputType: null
@@ -4074,14 +4139,14 @@ export function useWorldEngine({
             }
 
             const finalCursorX = pasteStartX + (linesToPaste[linesToPaste.length - 1]?.length || 0);
-            const finalCursorY = pasteStartY + linesToPaste.length - 1;
+            const finalCursorY = pasteStartY + (linesToPaste.length - 1) * GRID_CELL_SPAN;
 
             // Build complete paste data in one pass (no chunking to avoid hundreds of re-renders)
             const worldUpdate: WorldData = {};
             for (let i = 0; i < linesToPaste.length; i++) {
                 const line = linesToPaste[i];
                 for (let j = 0; j < line.length; j++) {
-                    worldUpdate[`${pasteStartX + j},${pasteStartY + i}`] = line[j];
+                    worldUpdate[`${pasteStartX + j},${pasteStartY + i * GRID_CELL_SPAN}`] = line[j];
                 }
             }
 
@@ -4180,6 +4245,15 @@ export function useWorldEngine({
 
         const isMod = ctrlKey || metaKey; // Modifier key check
         const currentSelectionActive = !!(selectionStart && selectionEnd && (selectionStart.x !== selectionEnd.x || selectionStart.y !== selectionEnd.y));
+
+        // === Envelope Trigger for Monogram Pressure ===
+        // Add sine bump on any character input (key.length === 1 and no modifier)
+        if (key.length === 1 && !isMod) {
+            envelopeBumpsRef.current.push({
+                startTime: Date.now(),
+                duration: ENVELOPE_BUMP_DURATION
+            });
+        }
 
         // === Double ESC Detection for AI Interruption ===
         if (key === 'Escape') {
@@ -4826,13 +4900,13 @@ export function useWorldEngine({
 
                             const wrappedLines = wrapText(response, wrapWidth);
 
-                            // Write wrapped response starting at selection top-left
+                            // Write wrapped response starting at selection top-left (respecting GRID_CELL_SPAN)
                             for (let lineIndex = 0; lineIndex < wrappedLines.length; lineIndex++) {
                                 const line = wrappedLines[lineIndex];
                                 for (let charIndex = 0; charIndex < line.length; charIndex++) {
                                     const char = line[charIndex];
                                     const x = minX + charIndex;
-                                    const y = minY + lineIndex;
+                                    const y = minY + lineIndex * GRID_CELL_SPAN;
                                     const key = `${x},${y}`;
                                     newWorldData[key] = char;
                                 }
@@ -5163,13 +5237,13 @@ export function useWorldEngine({
 
                             const wrappedLines = wrapText(response, wrapWidth);
 
-                            // Write wrapped response starting at minX, minY
+                            // Write wrapped response starting at minX, minY (respecting GRID_CELL_SPAN)
                             for (let lineIndex = 0; lineIndex < wrappedLines.length; lineIndex++) {
                                 const line = wrappedLines[lineIndex];
                                 for (let charIndex = 0; charIndex < line.length; charIndex++) {
                                     const char = line[charIndex];
                                     const x = minX + charIndex;
-                                    const y = minY + lineIndex;
+                                    const y = minY + lineIndex * GRID_CELL_SPAN;
                                     const key = `${x},${y}`;
                                     newWorldData[key] = char;
                                 }
@@ -5270,8 +5344,12 @@ export function useWorldEngine({
                                         writeText: (x: number, y: number, text: string) => {
                                             setWorldData(prev => {
                                                 const newData = { ...prev };
-                                                for (let i = 0; i < text.length; i++) {
-                                                    newData[`${x + i},${y}`] = text[i];
+                                                const lines = text.split('\n');
+                                                for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+                                                    const line = lines[lineIndex];
+                                                    for (let charIndex = 0; charIndex < line.length; charIndex++) {
+                                                        newData[`${x + charIndex},${y + lineIndex * GRID_CELL_SPAN}`] = line[charIndex];
+                                                    }
                                                 }
                                                 return newData;
                                             });
@@ -5746,9 +5824,13 @@ export function useWorldEngine({
                         writeText: (x, y, text) => {
                             setWorldData(prev => {
                                 const newData = { ...prev };
-                                for (let i = 0; i < text.length; i++) {
-                                    const key = `${x + i},${y}`;
-                                    newData[key] = text[i];
+                                const lines = text.split('\n');
+                                for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+                                    const line = lines[lineIndex];
+                                    for (let charIndex = 0; charIndex < line.length; charIndex++) {
+                                        const key = `${x + charIndex},${y + lineIndex * GRID_CELL_SPAN}`;
+                                        newData[key] = line[charIndex];
+                                    }
                                 }
                                 return newData;
                             });
@@ -6005,7 +6087,7 @@ export function useWorldEngine({
                                     for (let charIndex = 0; charIndex < line.length; charIndex++) {
                                         const char = line[charIndex];
                                         const x = responseStartPos.x + charIndex;
-                                        const y = responseStartPos.y + lineIndex;
+                                        const y = responseStartPos.y + lineIndex * GRID_CELL_SPAN;
                                         const key = `${x},${y}`;
                                         newWorldData[key] = char;
                                     }
@@ -6013,7 +6095,7 @@ export function useWorldEngine({
                                 setWorldData(newWorldData);
                                 setCursorPos({
                                     x: responseStartPos.x + wrappedLines[wrappedLines.length - 1].length,
-                                    y: responseStartPos.y + wrappedLines.length - 1
+                                    y: responseStartPos.y + (wrappedLines.length - 1) * GRID_CELL_SPAN
                                 });
                                 setDialogueWithRevert("AI response written", setDialogueText);
                             } else {
@@ -7104,12 +7186,12 @@ export function useWorldEngine({
                         const startX = cursorPos.x;
                         const startY = cursorPos.y;
 
-                        // Place text line by line
+                        // Place text line by line (respecting GRID_CELL_SPAN for vertical spacing)
                         for (let i = 0; i < lines.length; i++) {
                             const line = lines[i];
                             for (let j = 0; j < line.length; j++) {
                                 const char = line[j];
-                                const key = `${startX + j},${startY + i}`;
+                                const key = `${startX + j},${startY + i * GRID_CELL_SPAN}`;
                                 setWorldData(prev => ({
                                     ...prev,
                                     [key]: { char, color: textColor }
@@ -7121,7 +7203,7 @@ export function useWorldEngine({
                         const lastLine = lines[lines.length - 1];
                         setCursorPos({
                             x: startX + lastLine.length,
-                            y: startY + lines.length - 1
+                            y: startY + (lines.length - 1) * GRID_CELL_SPAN
                         });
 
                         setDialogueWithRevert(`Pasted clipboard item`, setDialogueText);

@@ -6,7 +6,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { getMask, type FaceFeature as MaskFaceFeature, type FaceDynamics, type FaceBounds } from './mask';
 
-export type MonogramMode = 'clear' | 'perlin' | 'nara' | 'voronoi' | 'face3d';
+export type MonogramMode = 'clear' | 'flat' | 'perlin' | 'nara' | 'voronoi' | 'face3d' | 'sparkle';
 
 // Trail position interface for interactive monogram trails
 interface MonogramTrailPosition {
@@ -687,6 +687,68 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 `;
 
+// WebGPU Compute Shader - Sparkle mode (pressure-driven peak detection)
+const CHUNK_SPARKLE_SHADER = `
+@group(0) @binding(0) var<storage, read_write> output: array<f32>;
+@group(0) @binding(1) var<uniform> params: SparkleParams;
+
+struct SparkleParams {
+    chunkWorldX: f32,
+    chunkWorldY: f32,
+    chunkSize: f32,
+    time: f32,
+    complexity: f32,
+    pressure: f32,
+}
+
+${PERLIN_UTILS_WGSL}
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let localX = global_id.x;
+    let localY = global_id.y;
+    let chunkSize = u32(params.chunkSize);
+
+    if (localX >= chunkSize || localY >= chunkSize) {
+        return;
+    }
+
+    let worldX = params.chunkWorldX + f32(localX);
+    let worldY = params.chunkWorldY + f32(localY);
+
+    // Scale and aspect ratio (Y stretched for 1x2 cells)
+    let scale = 0.03 * params.complexity;
+    let nx = worldX * scale;
+    let ny = (worldY * 0.5) * scale;
+
+    // Animated Perlin - simpler than full perlin mode
+    // Just two octaves drifting over time
+    let drift1 = perlin(nx + params.time * 0.5, ny + params.time * 0.3);
+    let drift2 = perlin(nx * 2.0 - params.time * 0.3, ny * 2.0 + params.time * 0.2);
+
+    // Combine octaves (range roughly -2 to +2, normalize to 0-1)
+    let combined = (drift1 + drift2 * 0.5) / 1.5;
+    let normalized = (combined + 1.0) * 0.5;
+
+    // Pressure-driven threshold
+    // High pressure (1.0) = low threshold (0.0) = many sparkles
+    // Low pressure (0.0) = high threshold (1.0) = no sparkles
+    let threshold = 1.0 - params.pressure;
+
+    // Hard cutoff for sparkle effect
+    var intensity = 0.0;
+    if (normalized > threshold) {
+        // Above threshold = sparkle
+        // Optional: intensity based on how far above threshold
+        intensity = (normalized - threshold) / max(0.01, params.pressure);
+        intensity = min(1.0, intensity);
+    }
+
+    let index = localY * chunkSize + localX;
+    output[index] = intensity;
+}
+`;
+
 class MonogramSystem {
     private chunks: Map<string, Float32Array> = new Map();
     private device: GPUDevice | null = null;
@@ -710,6 +772,10 @@ class MonogramSystem {
     private faceParamsBuffer: GPUBuffer | null = null;
     private featuresBuffer: GPUBuffer | null = null;
     private currentFaceOrientation: NonNullable<MonogramOptions['faceOrientation']> | null = null;
+
+    // Sparkle mode GPU resources
+    private sparklePipeline: GPUComputePipeline | null = null;
+    private sparkleParamsBuffer: GPUBuffer | null = null;
     
     // Trail tracking
     private mouseTrail: MonogramTrailPosition[] = [];
@@ -733,6 +799,8 @@ class MonogramSystem {
     private toggledCells: Set<string> = new Set();
     private readonly MAX_ACTIVE_CELLS = 64;
 
+    // Envelope-driven pressure (set by world.engine.ts)
+    private pressure: number = 0;
 
     constructor(options: MonogramOptions) {
         this.options = options;
@@ -870,6 +938,24 @@ class MonogramSystem {
             this.featuresBuffer = this.device.createBuffer({
                 size: MAX_FEATURES * 8 * 4, // 8 floats per feature
                 usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+            });
+
+            // Create Sparkle pipeline
+            const sparkleShaderModule = this.device.createShaderModule({
+                code: CHUNK_SPARKLE_SHADER
+            });
+
+            this.sparklePipeline = this.device.createComputePipeline({
+                layout: 'auto',
+                compute: {
+                    module: sparkleShaderModule,
+                    entryPoint: 'main'
+                }
+            });
+
+            this.sparkleParamsBuffer = this.device.createBuffer({
+                size: 6 * 4, // 6 floats: chunkWorldX, chunkWorldY, chunkSize, time, complexity, pressure
+                usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
             });
 
             // Generate and upload NARA text texture
@@ -1115,6 +1201,8 @@ class MonogramSystem {
             return this.computeChunkVoronoi(chunkWorldX, chunkWorldY);
         } else if (mode === 'face3d') {
             return this.computeChunkFace(chunkWorldX, chunkWorldY);
+        } else if (mode === 'sparkle') {
+            return this.computeChunkSparkle(chunkWorldX, chunkWorldY);
         } else {
             return this.computeChunkPerlin(chunkWorldX, chunkWorldY);
         }
@@ -1471,6 +1559,67 @@ class MonogramSystem {
         return intensities;
     }
 
+    private async computeChunkSparkle(chunkWorldX: number, chunkWorldY: number): Promise<Float32Array> {
+        if (!this.device || !this.sparklePipeline || !this.sparkleParamsBuffer) {
+            throw new Error('[Monogram] Sparkle pipeline not initialized');
+        }
+
+        const device = this.device;
+        const bufferSize = this.CHUNK_SIZE * this.CHUNK_SIZE * 4;
+
+        const outputBuffer = device.createBuffer({
+            size: bufferSize,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
+        });
+
+        const stagingBuffer = device.createBuffer({
+            size: bufferSize,
+            usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
+        });
+
+        // Pass pressure to shader
+        const paramsData = new Float32Array([
+            chunkWorldX,
+            chunkWorldY,
+            this.CHUNK_SIZE,
+            this.time,
+            this.options.complexity,
+            this.pressure  // The key ingredient - pressure drives the threshold
+        ]);
+        device.queue.writeBuffer(this.sparkleParamsBuffer, 0, paramsData);
+
+        const bindGroup = device.createBindGroup({
+            layout: this.sparklePipeline.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: { buffer: outputBuffer } },
+                { binding: 1, resource: { buffer: this.sparkleParamsBuffer } }
+            ]
+        });
+
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.sparklePipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(
+            Math.ceil(this.CHUNK_SIZE / 8),
+            Math.ceil(this.CHUNK_SIZE / 8)
+        );
+        computePass.end();
+
+        commandEncoder.copyBufferToBuffer(outputBuffer, 0, stagingBuffer, 0, bufferSize);
+        device.queue.submit([commandEncoder.finish()]);
+
+        await stagingBuffer.mapAsync(GPUMapMode.READ);
+        const result = new Float32Array(stagingBuffer.getMappedRange());
+        const intensities = new Float32Array(result);
+        stagingBuffer.unmap();
+
+        outputBuffer.destroy();
+        stagingBuffer.destroy();
+
+        return intensities;
+    }
+
     private async ensureChunk(chunkKey: string): Promise<Float32Array> {
         // For smooth animation: always recompute chunks with current time
         // No caching - pattern flows continuously like water
@@ -1529,6 +1678,9 @@ class MonogramSystem {
         // If mode is 'clear', return 0 (no background pattern, only character glows)
         if (this.options.mode === 'clear') return 0;
 
+        // If mode is 'flat', return envelope-driven pressure (set by world.engine.ts)
+        if (this.options.mode === 'flat') return this.pressure;
+
         const chunkKey = this.worldToChunk(worldX, worldY);
         const chunk = this.chunks.get(chunkKey);
 
@@ -1583,6 +1735,16 @@ class MonogramSystem {
         if (options.faceOrientation) {
             this.currentFaceOrientation = options.faceOrientation;
         }
+    }
+
+    // Set pressure from envelope (called by world.engine.ts each frame)
+    setPressure(value: number) {
+        this.pressure = value;
+    }
+
+    // Get current pressure (for debugging/visualization)
+    getPressure(): number {
+        return this.pressure;
     }
 
     toggleEnabled() {
@@ -1710,18 +1872,23 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
     const toggleCell = useCallback((worldX: number, worldY: number) => {
         systemRef.current?.toggleCell(worldX, worldY);
     }, []);
-    
+
     // Explicitly update face data (useful for high-frequency updates outside of options)
-    const setFaceData = useCallback((faceData: { 
-        rotX: number; 
-        rotY: number; 
-        rotZ: number; 
-        mouthOpen?: number; 
-        leftEyeBlink?: number; 
-        rightEyeBlink?: number; 
-        isTracked?: boolean; 
+    const setFaceData = useCallback((faceData: {
+        rotX: number;
+        rotY: number;
+        rotZ: number;
+        mouthOpen?: number;
+        leftEyeBlink?: number;
+        rightEyeBlink?: number;
+        isTracked?: boolean;
     }) => {
         systemRef.current?.updateFaceData(faceData);
+    }, []);
+
+    // Set envelope pressure (called by world.engine.ts each frame)
+    const setPressure = useCallback((value: number) => {
+        systemRef.current?.setPressure(value);
     }, []);
 
     // Calculate interactive trail intensity at a given position
@@ -1825,6 +1992,7 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         updateMousePosition,
         clearTrail,
         toggleCell,
-        setFaceData
+        setFaceData,
+        setPressure
     };
 }

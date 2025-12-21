@@ -413,11 +413,12 @@ interface UseCommandSystemProps {
     monogramSystem?: { // WebGPU monogram background system
         setOptions: (updater: ((prev: any) => any) | any) => void;
         toggleEnabled: () => void;
+        setPressure?: (value: number) => void; // Envelope-driven pressure for flat mode
         options?: {
             enabled?: boolean;
             speed?: number;
             complexity?: number;
-            mode?: 'clear' | 'perlin' | 'nara' | 'voronoi' | 'face3d';
+            mode?: 'clear' | 'flat' | 'perlin' | 'nara' | 'voronoi' | 'face3d' | 'sparkle';
         };
     };
     recorder?: DataRecorder;
@@ -530,7 +531,7 @@ export const COMMAND_HELP: { [command: string]: string } = {
     'unpublish': 'Unpublish your canvas. Makes your canvas private again. It will no longer be accessible at the public URL.',
     'share': 'Get a shareable link to your canvas. Copy this link to share your canvas with others. If published, they can view it; if private, you control access.',
     'spawn': 'Set your spawn point. This is where you\'ll start when you open this canvas. Type /spawn to set it to your current position.',
-    'monogram': 'Control WebGPU background effects. /monogram to toggle on/off, /monogram clear for character glows only, /monogram perlin for perlin noise with character glows, /monogram nara for animated NARA text.',
+    'monogram': 'Control WebGPU background effects. /monogram to toggle on/off, /monogram clear for character glows only, /monogram perlin for flowing noise, /monogram nara for animated NARA text, /monogram sparkle for pressure-reactive peaks.',
     'signin': 'Sign in to your Nara account. Required for saving work, publishing canvases, and accessing AI features.',
     'signout': 'Sign out of your Nara account. You\'ll return to read-only mode.',
     'account': 'Manage your account settings. Use /account reset to reset your password.',
@@ -1465,7 +1466,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (lowerInput === 'monogram') {
             const parts = input.toLowerCase().split(' ');
-            const MONOGRAM_OPTIONS = ['clear', 'perlin', 'nara', 'face', 'on', 'off'];
+            const MONOGRAM_OPTIONS = ['clear', 'flat', 'perlin', 'nara', 'sparkle', 'face', 'on', 'off'];
             if (parts.length > 1) {
                 // Show monogram options that match the input
                 const monogramInput = parts[1];
