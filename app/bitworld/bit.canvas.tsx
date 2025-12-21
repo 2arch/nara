@@ -6,7 +6,6 @@ import { getCharScale, rewrapNoteText, findConnectedPaintRegion, getAllPaintBlob
 import { useDialogue, useDebugDialogue } from './dialogue';
 import { useControllerSystem, createCameraController, createGridController, createTapeController, createCommandController } from './controllers';
 import { COLOR_MAP, COMMAND_CATEGORIES, COMMAND_HELP } from './commands';
-import { useHostDialogue } from './host.dialogue';
 import { useKeyframeExperience } from './experiences';
 import { setDialogueWithRevert, agentThink as aiAgentThink, agentChat as aiAgentChat, updateMind, AgentMind, CanvasState } from './ai';
 import { executeTool, ToolContext } from './ai.tools';
@@ -1150,7 +1149,7 @@ function renderHostDialogue(
     ctx: CanvasRenderingContext2D,
     params: {
         engine: any;
-        hostDialogue: any;
+        keyframeExperience?: any; // Optional keyframe experience for hint rendering
         cssWidth: number;
         cssHeight: number;
         effectiveCharWidth: number;
@@ -1179,7 +1178,7 @@ function renderHostDialogue(
 ): void {
     const {
         engine,
-        hostDialogue,
+        keyframeExperience,
         cssWidth,
         cssHeight,
         effectiveCharWidth,
@@ -1455,17 +1454,16 @@ function renderHostDialogue(
         y += GRID_CELL_SPAN;
     });
 
-    // Render context-specific hints for certain messages
-    const currentMessage = hostDialogue.getCurrentMessage();
+    // Render context-specific hints for certain keyframes
     const isMobile = typeof window !== 'undefined' && 'ontouchstart' in window;
-
     let hintText: string | null = null;
 
-    // Show hint only for specific message IDs
-    if (currentMessage && !isMobile) {
-        if (currentMessage.id === 'welcome_message' && !currentMessage.expectsInput) {
+    // Show hint based on keyframe experience state
+    if (keyframeExperience?.isActive && !isMobile) {
+        const { input, keyframeIndex } = keyframeExperience.state || {};
+        if (keyframeIndex === 0 && !input) {
             hintText = 'press any key to continue';
-        } else if (currentMessage.id === 'collect_password' && currentMessage.expectsInput) {
+        } else if (input === 'password') {
             hintText = 'press Tab to unhide password';
         }
     }
@@ -1923,7 +1921,6 @@ interface BitCanvasProps {
     dialogueEnabled?: boolean;
     fontFamily?: string; // Font family for text rendering
     hostModeEnabled?: boolean; // Enable host dialogue mode for onboarding
-    initialHostFlow?: string; // Initial flow to start (e.g., 'welcome')
     onAuthSuccess?: (username: string) => void; // Callback after successful auth
     onTutorialComplete?: () => void; // Callback when tutorial is completed
     isVerifyingEmail?: boolean; // Flag to indicate email verification in progress
@@ -1937,7 +1934,7 @@ interface BitCanvasProps {
     experienceId?: string; // Experience link ID for outreach tracking (?exp=[id])
 }
 
-export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, initialHostFlow, onAuthSuccess, onTutorialComplete, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true, isPublicWorld = false, monogram: externalMonogram, mcpEnabled = false, experienceId }: BitCanvasProps) {
+export function BitCanvas({ engine, cursorColorAlternate, className, showCursor = true, dialogueEnabled = true, fontFamily = 'IBM Plex Mono', hostModeEnabled = false, onAuthSuccess, onTutorialComplete, isVerifyingEmail = false, hostTextColor, hostBackgroundColor, onPanDistanceChange, hostDimBackground = true, isPublicWorld = false, monogram: externalMonogram, mcpEnabled = false, experienceId }: BitCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const devicePixelRatioRef = useRef(1);
     const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
@@ -4793,56 +4790,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         requestAnimationFrame(animateZoom);
     }, [engine]);
 
-    // Host dialogue system for onboarding
-    const hostDialogue = useHostDialogue({
-        // === Dialogue UI ===
-        setHostData: engine.setHostData,
-        getViewportCenter: engine.getViewportCenter,
-        setDialogueText: engine.setDialogueText,
-        setHostMode: engine.setHostMode,
-        setChatMode: engine.setChatMode,
-
-        // === App Navigation/Auth ===
-        onAuthSuccess,
-        onTriggerZoom: handleZoom,
-
-        // === Screen Effects ===
-        screenEffects: {
-            setBackgroundColor: (color) => {
-                engine.updateSettings({ backgroundColor: color });
-            },
-            setBackgroundMode: (mode) => {
-                engine.switchBackgroundMode(mode as any, engine.backgroundImage || '', engine.textColor);
-            },
-            setBackgroundImage: (url) => {
-                engine.switchBackgroundMode('image' as any, url, engine.textColor);
-            },
-            setMonogramMode: (mode) => {
-                if (monogram && mode) {
-                    const validModes = ['clear', 'perlin', 'nara', 'voronoi', 'face3d'];
-                    if (validModes.includes(mode)) {
-                        monogram.setOptions(prev => ({ ...prev, mode: mode as any }));
-                    }
-                }
-            },
-            setWorldData: engine.setWorldData,
-            addEphemeralText: engine.addInstantAIResponse ?
-                (pos, char, options) => engine.addInstantAIResponse(pos, char, {
-                    fadeDelay: options?.animationDelay || 1500,
-                    color: options?.color,
-                    wrapWidth: 1
-                }) : undefined
-        },
-
-        // === Context ===
-        hostBackgroundColor,
-        isPublicWorld,
-
-        // === Outreach tracking ===
-        experienceId
-    });
-
-    // Keyframe-based experience renderer (used when experienceId points to a keyframe experience)
+    // Keyframe-based experience renderer - the sole driver of onboarding flows
     const keyframeExperience = useKeyframeExperience({
         experienceId,
         setHostData: engine.setHostData,
@@ -4861,7 +4809,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             },
             setMonogramMode: (mode) => {
                 if (monogram && mode) {
-                    const validModes = ['clear', 'perlin', 'nara', 'voronoi', 'face3d'];
+                    const validModes = ['clear', 'flat', 'perlin', 'nara', 'voronoi', 'face3d'];
                     if (validModes.includes(mode)) {
                         monogram.setOptions(prev => ({ ...prev, mode: mode as any }));
                     }
@@ -4884,12 +4832,9 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         isPublicWorld
     });
 
-    // Use keyframe experience if active, otherwise fall back to hostDialogue
-    const useKeyframeFlow = keyframeExperience.isActive;
-
     // Handle email verification flow
     useEffect(() => {
-        if (isVerifyingEmail && hostModeEnabled && !hostDialogue.isHostActive) {
+        if (isVerifyingEmail && hostModeEnabled && !keyframeExperience.isActive) {
             // Check if user already has a username (existing user)
             const checkExistingUser = async () => {
                 const { auth } = require('../firebase');
@@ -4929,158 +4874,68 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                     canvasRef.current.focus();
                 }
 
+                // Jump to username collection keyframe after showing verification message
                 setTimeout(() => {
-                    hostDialogue.startFlow('verification');
+                    keyframeExperience.goToKeyframe('collect_username');
                 }, 2000);
             };
 
             checkExistingUser();
         }
-    }, [isVerifyingEmail, hostModeEnabled, hostDialogue.isHostActive, engine, hostDialogue]);
-
-    // Listen for auth state changes (when user verifies email in another tab)
-    // DISABLED: This was auto-prompting for username on every page load
-    // useEffect(() => {
-    //     if (!hostModeEnabled || hostDialogue.isHostActive) return;
-
-    //     const { auth } = require('../firebase');
-    //     const { onAuthStateChanged } = require('firebase/auth');
-
-    //     const unsubscribe = onAuthStateChanged(auth, async (user: any) => {
-    //         if (user && !hostDialogue.isHostActive) {
-    //             const { getUserProfile } = require('../firebase');
-    //             const profile = await getUserProfile(user.uid);
-
-    //             if (profile && !profile.username) {
-    //                 engine.setHostMode({ isActive: true, currentInputType: null });
-    //                 engine.setChatMode({
-    //                     isActive: true,
-    //                     currentInput: '',
-    //                     inputPositions: [],
-    //                     isProcessing: false
-    //                 });
-
-    //                 if (engine.updateSettings) {
-    //                     engine.updateSettings({ textColor: '#FFA500' });
-    //                 }
-
-    //                 engine.setHostData({
-    //                     text: 'email verified!',
-    //                     color: '#00AA00',
-    //                     centerPos: engine.getViewportCenter(),
-    //                     timestamp: Date.now()
-    //                 });
-
-    //                 if (canvasRef.current) {
-    //                     canvasRef.current.focus();
-    //                 }
-
-    //                 setTimeout(() => {
-    //                     hostDialogue.startFlow('verification');
-    //                 }, 2000);
-    //             }
-    //         }
-    //     });
-
-    //     return () => unsubscribe();
-    // }, [hostModeEnabled, hostDialogue, engine]);
+    }, [isVerifyingEmail, hostModeEnabled, keyframeExperience.isActive, engine, keyframeExperience]);
 
     // No animation - host text renders immediately (removed typing animation)
 
-    // Track if initial host flow has been started (prevent restart after authentication)
+    // Track if initial experience has been started (prevent restart after authentication)
     const hasStartedInitialFlowRef = useRef(false);
     const previousCameraModeRef = useRef<'default' | 'focus' | null>(null); // Store camera mode before host flow
 
-    // Start host flow when enabled (only once)
-    // Skip if experienceId is present - keyframe experience handles it
+    // Start keyframe experience when host mode is enabled (only once)
     useEffect(() => {
-        // If experienceId is present, keyframe experience will handle the flow
-        if (experienceId) {
-            // Still set up host mode for keyframe experience
-            if (hostModeEnabled && !hasStartedInitialFlowRef.current) {
-                hasStartedInitialFlowRef.current = true;
-
-                if (hostTextColor && engine.updateSettings) {
-                    engine.updateSettings({ textColor: hostTextColor });
-                }
-
-                previousCameraModeRef.current = engine.cameraMode;
-                if (engine.cameraMode !== 'focus') {
-                    engine.setCameraMode('focus');
-                }
-
-                engine.setHostMode({ isActive: true, currentInputType: null });
-                engine.setChatMode({
-                    isActive: true,
-                    currentInput: '',
-                    inputPositions: [],
-                    isProcessing: false
-                });
-
-                if (canvasRef.current) {
-                    canvasRef.current.focus();
-                }
-            }
-            return;
-        }
-
-        // Fallback: use old host dialogue system
-        if (hostModeEnabled && initialHostFlow && !hostDialogue.isHostActive && !hasStartedInitialFlowRef.current) {
-            // Mark as started to prevent restart after authentication completes
+        if (hostModeEnabled && !hasStartedInitialFlowRef.current) {
             hasStartedInitialFlowRef.current = true;
 
-            // Set host mode colors
-            // The background is already set via initialBackgroundColor in page.tsx
-            // Set text color if provided
             if (hostTextColor && engine.updateSettings) {
-                engine.updateSettings({
-                    textColor: hostTextColor
-                });
+                engine.updateSettings({ textColor: hostTextColor });
             }
 
-            // Save current camera mode and switch to focus mode (prevents virtual keyboard obscuring input)
             previousCameraModeRef.current = engine.cameraMode;
             if (engine.cameraMode !== 'focus') {
                 engine.setCameraMode('focus');
             }
 
-            // Activate host mode in engine
             engine.setHostMode({ isActive: true, currentInputType: null });
-            // Activate chat mode for input
             engine.setChatMode({
                 isActive: true,
                 currentInput: '',
                 inputPositions: [],
                 isProcessing: false
             });
-            // Start the flow
-            hostDialogue.startFlow(initialHostFlow);
 
-            // Auto-focus canvas so typing works immediately without clicking
             if (canvasRef.current) {
                 canvasRef.current.focus();
             }
         }
-    }, [hostModeEnabled, initialHostFlow, hostDialogue.isHostActive, hostTextColor, experienceId]);
+    }, [hostModeEnabled, hostTextColor, engine]);
 
-    // Restore camera mode when host flow exits
+    // Restore camera mode when keyframe experience exits
     const wasHostActiveRef = useRef(false);
     useEffect(() => {
         // Track when host mode transitions from active to inactive
-        if (wasHostActiveRef.current && !hostDialogue.isHostActive) {
-            // Host flow just exited - restore previous camera mode
+        if (wasHostActiveRef.current && !keyframeExperience.isActive) {
+            // Experience just exited - restore previous camera mode
             if (previousCameraModeRef.current !== null) {
                 engine.setCameraMode(previousCameraModeRef.current);
                 previousCameraModeRef.current = null;
             }
         }
-        wasHostActiveRef.current = hostDialogue.isHostActive;
-    }, [hostDialogue.isHostActive]);
+        wasHostActiveRef.current = keyframeExperience.isActive;
+    }, [keyframeExperience.isActive, engine]);
 
     // Sync host input type with engine for password masking
     useEffect(() => {
-        if (hostDialogue.isHostActive) {
-            const inputType = hostDialogue.getCurrentInputType();
+        if (keyframeExperience.isActive) {
+            const inputType = keyframeExperience.currentState?.input || null;
             const currentInputType = engine.hostMode.currentInputType;
             // Only update if actually changed to avoid infinite loop
             if (currentInputType !== inputType) {
@@ -5091,7 +4946,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                 }
             }
         }
-    }, [hostDialogue.isHostActive, hostDialogue.hostState.currentMessageId]);
+    }, [keyframeExperience.isActive, keyframeExperience.currentState?.input, engine]);
 
     // Mark world as ready after initial settling period (2 seconds after mount)
     // This allows spawn points and initial view to settle before enabling signup prompts
@@ -5480,6 +5335,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
 
                     // Check for 100 cell threshold - trigger signup for unauthenticated users
                     // Only trigger after world is ready (settled from spawn points, etc.)
+                    // Note: keyframe experience handles welcome flow automatically on load,
+                    // so this is only needed if user somehow bypassed the initial flow
                     if (newTotal >= 100 && !hasTriggeredSignupPromptRef.current && isWorldReady) {
                         hasTriggeredSignupPromptRef.current = true;
 
@@ -5487,8 +5344,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                         const { auth } = require('../firebase');
                         const user = auth.currentUser;
 
-                        if (!user && hostDialogue && !hostDialogue.isHostActive) {
-
+                        if (!user && !keyframeExperience.isActive) {
                             // Activate host mode in engine
                             engine.setHostMode({ isActive: true, currentInputType: null });
 
@@ -5500,7 +5356,8 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
                                 isProcessing: false
                             });
 
-                            hostDialogue.startFlow('welcome');
+                            // Start keyframe experience from the beginning
+                            keyframeExperience.goToKeyframe(0);
                         }
                     }
                 }
@@ -5510,7 +5367,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
         }, 100); // Check every 100ms
 
         return () => clearInterval(interval);
-    }, [engine.viewOffset, engine.zoomLevel, totalPannedDistance, PAN_MILESTONE_INTERVAL, engine, hostDialogue]);
+    }, [engine.viewOffset, engine.zoomLevel, totalPannedDistance, PAN_MILESTONE_INTERVAL, engine, keyframeExperience]);
 
     const router = useRouter();
     
@@ -5625,7 +5482,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     // Sync keyframe experience monogram mode with actual monogram system
     useEffect(() => {
         if (keyframeExperience.isActive && keyframeExperience.currentState.monogram) {
-            const mode = keyframeExperience.currentState.monogram as 'clear' | 'perlin' | 'nara' | 'voronoi' | 'face3d';
+            const mode = keyframeExperience.currentState.monogram as 'clear' | 'flat' | 'perlin' | 'nara' | 'voronoi' | 'face3d';
             if (monogram.options.mode !== mode) {
                 monogram.setOptions(prev => ({ ...prev, mode }));
             }
@@ -5717,7 +5574,7 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     }, [engine.dialogueText, engine.dialogueTimestamp, engine.hostData]);
 
 
-    // Host dialogue flow handler
+    // Host dialogue flow handler - starts keyframe experience from beginning
     const handleHostDialogueFlow = useCallback(() => {
         // Activate host mode
         engine.setHostMode({ isActive: true, currentInputType: null });
@@ -5730,16 +5587,16 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             isProcessing: false
         });
 
-        // Start the welcome flow (handles authentication)
-        hostDialogue.startFlow('welcome');
-    }, [engine, hostDialogue]);
+        // Start the keyframe experience from the beginning
+        keyframeExperience.goToKeyframe(0);
+    }, [engine, keyframeExperience]);
 
     // Register host dialogue handler with engine
     useEffect(() => {
         engine.setHostDialogueHandler(handleHostDialogueFlow);
     }, [engine, handleHostDialogueFlow]);
 
-    // Upgrade flow handler
+    // Upgrade flow handler - jump to upgrade keyframes
     const handleUpgradeFlow = useCallback(() => {
         // Activate host mode
         engine.setHostMode({ isActive: true, currentInputType: null });
@@ -5752,26 +5609,25 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
             isProcessing: false
         });
 
-        // Start the upgrade flow
-        hostDialogue.startFlow('upgrade');
-    }, [engine, hostDialogue]);
+        // Jump to upgrade keyframe (will need to add upgrade keyframes to experience)
+        keyframeExperience.goToKeyframe('upgrade_start');
+    }, [engine, keyframeExperience]);
 
     // Register upgrade flow handler with engine
     useEffect(() => {
         engine.setUpgradeFlowHandler(handleUpgradeFlow);
     }, [engine, handleUpgradeFlow]);
 
-    // Tutorial flow handler
+    // Tutorial flow handler - jump to tutorial keyframes
     const handleTutorialFlow = useCallback(() => {
         // Activate host mode
         engine.setHostMode({ isActive: true, currentInputType: null });
 
         // Do NOT activate chat mode - tutorial validates actual commands on canvas
-        // Chat mode will be controlled by individual messages via requiresChatMode field
 
-        // Start the tutorial flow
-        hostDialogue.startFlow('tutorial');
-    }, [engine, hostDialogue]);
+        // Jump to tutorial keyframe (will need to add tutorial keyframes to experience)
+        keyframeExperience.goToKeyframe('tutorial_start');
+    }, [engine, keyframeExperience]);
 
     // Register tutorial flow handler with engine
     useEffect(() => {
@@ -5779,24 +5635,24 @@ export function BitCanvas({ engine, cursorColorAlternate, className, showCursor 
     }, [engine, handleTutorialFlow]);
 
     // Register command validation handler with engine (for tutorial)
+    // Note: Tutorial command validation needs keyframe experience support
     useEffect(() => {
         engine.setCommandValidationHandler((command: string, args: string[], worldState?: any) => {
-            return hostDialogue.validateCommand(command, args, worldState);
+            // TODO: Implement command validation in keyframe experience
+            return true;
         });
-    }, [engine, hostDialogue]);
+    }, [engine]);
 
-    // Monitor tutorial completion
-    const prevTutorialActiveRef = useRef(false);
+    // Monitor tutorial/experience completion
+    const prevExperienceActiveRef = useRef(false);
     useEffect(() => {
-        const isTutorialActive = hostDialogue.hostState.isActive && hostDialogue.hostState.currentFlowId === 'tutorial';
-
-        // If tutorial was active and now is not, it completed
-        if (prevTutorialActiveRef.current && !isTutorialActive && onTutorialComplete) {
+        // If experience was active and now is not, it completed
+        if (prevExperienceActiveRef.current && !keyframeExperience.isActive && onTutorialComplete) {
             onTutorialComplete();
         }
 
-        prevTutorialActiveRef.current = isTutorialActive;
-    }, [hostDialogue.hostState.isActive, hostDialogue.hostState.currentFlowId, onTutorialComplete]);
+        prevExperienceActiveRef.current = keyframeExperience.isActive;
+    }, [keyframeExperience.isActive, onTutorialComplete]);
 
     // Track clipboard additions for visual feedback
     const prevClipboardLengthRef = useRef(0);
@@ -7009,8 +6865,10 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                         // GPU-based sampling (Perlin / Nara / Voronoi)
                         if (monogram.options.mode !== 'clear') {
                             sampleCount++;
-                            // Sample intensity from GPU-computed chunk (already includes character glows)
-                            const intensity = monogram.sampleAt(worldX, worldY);
+                            // Sample RGB from GPU-computed chunk (handles both mono and color modes)
+                            const color = monogram.sampleColorAt(worldX, worldY);
+                            // Compute intensity as max of RGB for threshold check
+                            const intensity = Math.max(color.r, color.g, color.b);
 
                             if (intensity === 0) {
                                 zeroIntensityCount++;
@@ -7021,11 +6879,24 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                             } else {
                                 renderedCount++;
                                 // Render pattern
-                                // Use Cyan for Voronoi mode, standard text color for others
-                                ctx.fillStyle = monogram.options.mode === 'voronoi' ? '#00FFFF' : engine.textColor;
-                                // Use higher alpha for Voronoi edges to make them crisp
-                                ctx.globalAlpha = monogram.options.mode === 'voronoi' ? intensity * 0.8 : intensity * 0.5;
-                                
+                                // For sparkle2 (RGB mode): use actual RGB color
+                                // For voronoi: use Cyan
+                                // For others: use standard text color with intensity as alpha
+                                if (monogram.options.mode === 'sparkle2') {
+                                    // RGB mode - apply color directly
+                                    const r = Math.round(color.r * 255);
+                                    const g = Math.round(color.g * 255);
+                                    const b = Math.round(color.b * 255);
+                                    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                                    ctx.globalAlpha = intensity * 0.6;
+                                } else if (monogram.options.mode === 'voronoi') {
+                                    ctx.fillStyle = '#00FFFF';
+                                    ctx.globalAlpha = intensity * 0.8;
+                                } else {
+                                    ctx.fillStyle = engine.textColor;
+                                    ctx.globalAlpha = intensity * 0.5;
+                                }
+
                                 ctx.fillRect(
                                     screenPos.x,
                                     screenPos.y,
@@ -8024,7 +7895,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         // === Render Host Data (Centered at Initial Position) ===
         renderHostDialogue(ctx, {
             engine,
-            hostDialogue,
+            keyframeExperience,
             cssWidth,
             cssHeight,
             effectiveCharWidth,
@@ -10645,18 +10516,9 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
              return;
         }
 
-        // Host mode: tap/click to advance to next message (if not expecting input)
-        if (engine.hostMode.isActive && hostDialogue.isHostActive) {
-            const currentMessage = hostDialogue.getCurrentMessage();
-            if (currentMessage && !currentMessage.expectsInput) {
-                hostDialogue.advanceToNextMessage();
-                return; // Don't process further
-            }
-        }
-
         // Keyframe experience: click to advance (if not expecting input)
         if (keyframeExperience.isActive) {
-            const currentInput = keyframeExperience.currentState.input;
+            const currentInput = keyframeExperience.currentState?.input;
             if (!currentInput && !keyframeExperience.isProcessing) {
                 keyframeExperience.advance();
                 return; // Don't process further
@@ -10802,7 +10664,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             }, MOVE_DELAY);
 
             // Focus hidden input to keep virtual keyboard accessible
-            if (hiddenInputRef.current && !hostDialogue.isHostActive) {
+            if (hiddenInputRef.current && !keyframeExperience.isActive) {
                 hiddenInputRef.current.focus();
             }
             return;
@@ -11026,7 +10888,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             }
 
             // Focus hidden input even in agent mode to keep virtual keyboard accessible
-            if (hiddenInputRef.current && !hostDialogue.isHostActive) {
+            if (hiddenInputRef.current && !keyframeExperience.isActive) {
                 hiddenInputRef.current.focus();
             }
             return; // Don't process as regular click
@@ -11039,8 +10901,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         // - When host dialogue is active: only if expecting input
         // - When host dialogue is NOT active: always focus for regular typing
         if (hiddenInputRef.current) {
-            if (hostDialogue.isHostActive) {
-                if (hostDialogue.isExpectingInput()) {
+            if (keyframeExperience.isActive) {
+                if (!!keyframeExperience.currentState?.input) {
                     hiddenInputRef.current.focus();
                 }
             } else {
@@ -11048,7 +10910,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 hiddenInputRef.current.focus();
             }
         }
-    }, [engine, canvasSize, router, handleNavClick, handleCoordinateClick, handleColorFilterClick, handleSortModeClick, handleStateClick, handleIndexClick, hostDialogue, monogram]);
+    }, [engine, canvasSize, router, handleNavClick, handleCoordinateClick, handleColorFilterClick, handleSortModeClick, handleStateClick, handleIndexClick, keyframeExperience, monogram]);
 
     const handleCanvasDoubleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
         if (e.button !== 0) return; // Only left clicks
@@ -13485,7 +13347,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 isTouchSelectingRef.current = false;
                 touchStartRef.current = null;
                 // Maintain keyboard focus for virtual keyboard accessibility
-                if (hiddenInputRef.current && !hostDialogue.isHostActive) {
+                if (hiddenInputRef.current && !keyframeExperience.isActive) {
                     hiddenInputRef.current.focus();
                 }
                 return;
@@ -13505,7 +13367,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 isTouchSelectingRef.current = false;
                 touchStartRef.current = null;
                 // Maintain keyboard focus for virtual keyboard accessibility
-                if (hiddenInputRef.current && !hostDialogue.isHostActive) {
+                if (hiddenInputRef.current && !keyframeExperience.isActive) {
                     hiddenInputRef.current.focus();
                 }
                 return;
@@ -13518,7 +13380,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 isTouchSelectingRef.current = false;
                 touchStartRef.current = null;
                 // Maintain keyboard focus for virtual keyboard accessibility
-                if (hiddenInputRef.current && !hostDialogue.isHostActive) {
+                if (hiddenInputRef.current && !keyframeExperience.isActive) {
                     hiddenInputRef.current.focus();
                 }
                 return;
@@ -14202,8 +14064,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                         } else {
                             // No command menu - just focus the hidden input to trigger keyboard, preserve selection
                             if (hiddenInputRef.current) {
-                                if (hostDialogue.isHostActive) {
-                                    if (hostDialogue.isExpectingInput()) {
+                                if (keyframeExperience.isActive) {
+                                    if (!!keyframeExperience.currentState?.input) {
                                         hiddenInputRef.current.focus();
                                     }
                                 } else {
@@ -14240,8 +14102,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
 
                             // Focus hidden input for iOS keyboard
                             if (hiddenInputRef.current) {
-                                if (hostDialogue.isHostActive) {
-                                    if (hostDialogue.isExpectingInput()) {
+                                if (keyframeExperience.isActive) {
+                                    if (!!keyframeExperience.currentState?.input) {
                                         hiddenInputRef.current.focus();
                                     }
                                 } else {
@@ -14262,14 +14124,14 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
         const shouldFocusKeyboard = wasTap &&
                                     selectedAgentIdsRef.current.size === 0 &&
                                     !engine.isAgentMode &&
-                                    !hostDialogue.isHostActive;
+                                    !keyframeExperience.isActive;
         if (shouldFocusKeyboard && hiddenInputRef.current) {
             hiddenInputRef.current.focus();
         }
 
         touchStartRef.current = null;
         touchHasMovedRef.current = false;
-    }, [engine, handleCanvasClick, findImageAtPosition, selectedNoteKey, setSelectedNoteKey, selectedAgentIds.size, hostDialogue.isHostActive]);
+    }, [engine, handleCanvasClick, findImageAtPosition, selectedNoteKey, setSelectedNoteKey, selectedAgentIds.size, keyframeExperience.isActive]);
 
     // === IME Composition Handlers ===
     const handleCompositionStart = useCallback((e: React.CompositionEvent<HTMLCanvasElement>) => {
@@ -14331,31 +14193,28 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             }
         }
 
-        // Host mode: check if we're in host dialogue OR keyframe experience
+        // Host mode: check if keyframe experience is active
         const isKeyframeActive = keyframeExperience.isActive;
-        const isAnyHostActive = isKeyframeActive || hostDialogue.isHostActive;
 
-        if (isAnyHostActive) {
-            // For old hostDialogue: check if we're on a non-input message that needs manual advancement
-            if (hostDialogue.isHostActive && !isKeyframeActive) {
-                const currentMessage = hostDialogue.getCurrentMessage();
+        if (isKeyframeActive) {
+            // Check if we're on a non-input keyframe that needs manual advancement
+            const currentInput = keyframeExperience.currentState?.input;
 
-                // If message doesn't expect input (display-only), allow navigation
-                if (currentMessage && !currentMessage.expectsInput) {
-                    // Right arrow or any other key advances forward (if next exists)
-                    if (currentMessage.nextMessageId && (e.key === 'ArrowRight' || (e.key !== 'ArrowLeft' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown'))) {
-                        hostDialogue.advanceToNextMessage();
-                        e.preventDefault();
-                        e.stopPropagation();
-                        return;
-                    }
-                    // Left arrow goes back to previous message
-                    if (e.key === 'ArrowLeft' && currentMessage.previousMessageId) {
-                        hostDialogue.goBackToPreviousMessage();
-                        e.preventDefault();
-                        e.stopPropagation();
-                        return;
-                    }
+            // If keyframe doesn't expect input (display-only), allow navigation
+            if (!currentInput) {
+                // Right arrow or any other key advances forward
+                if (e.key === 'ArrowRight' || (e.key !== 'ArrowLeft' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Tab' && e.key !== 'Escape')) {
+                    keyframeExperience.advance();
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
+                // Left arrow goes back to previous keyframe
+                if (e.key === 'ArrowLeft') {
+                    keyframeExperience.goBack();
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
                 }
             }
 
@@ -14370,15 +14229,10 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             }
 
             // Intercept Enter in host mode for chat input processing
-            // Route to keyframe experience if active, otherwise use old host dialogue
-            const isExpectingInput = isKeyframeActive
-                ? keyframeExperience.currentState.input !== null
-                : hostDialogue.isExpectingInput();
-            const isProcessing = isKeyframeActive
-                ? keyframeExperience.isProcessing
-                : hostDialogue.isHostProcessing;
+            const isExpectingInput = !!keyframeExperience.currentState?.input;
+            const isProcessing = keyframeExperience.isProcessing;
 
-            if (engine.chatMode.isActive && e.key === 'Enter' && !e.shiftKey && isAnyHostActive && isExpectingInput) {
+            if (engine.chatMode.isActive && e.key === 'Enter' && !e.shiftKey && isKeyframeActive && isExpectingInput) {
                 // Debounce: prevent rapid Enter presses
                 const now = Date.now();
                 if (now - lastEnterPressRef.current < 500) return; // 500ms debounce
@@ -14387,12 +14241,8 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                 if (userInput && !isProcessing) {
                     lastEnterPressRef.current = now;
 
-                    // Process through appropriate handler
-                    if (isKeyframeActive) {
-                        keyframeExperience.processInput(userInput);
-                    } else {
-                        hostDialogue.processInput(userInput);
-                    }
+                    // Process through keyframe experience
+                    keyframeExperience.processInput(userInput);
 
                     // Clear chat input and visual data
                     engine.clearChatData();
@@ -14557,7 +14407,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             e.preventDefault();
             e.stopPropagation();
         }
-    }, [engine, handleKeyDownFromController, selectedImageKey, selectedNoteKey, selectedPatternKey, hostDialogue, activeTerminalKey, selectedAgentIds]);
+    }, [engine, handleKeyDownFromController, selectedImageKey, selectedNoteKey, selectedPatternKey, keyframeExperience, activeTerminalKey, selectedAgentIds]);
 
     // Continuous render loop for processing effects
     useEffect(() => {
@@ -14599,7 +14449,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
                     outline: 'none',
                     width: '100%',
                     height: '100%',
-                    cursor: hostModeEnabled && hostDialogue.isHostActive && !hostDialogue.isExpectingInput() && hostDialogue.getCurrentMessage()?.id !== 'validate_user' ? 'pointer' : 'text',
+                    cursor: hostModeEnabled && keyframeExperience.isActive && !keyframeExperience.currentState?.input ? 'pointer' : 'text',
                     position: 'relative',
                     zIndex: 1
                 }}
@@ -14796,7 +14646,7 @@ function getVoronoiEdge(x: number, y: number, scale: number, thickness: number =
             })()} */}
 
             {/* Hidden input for IME composition and mobile keyboard - only in write mode OR host mode */}
-            {(!engine.isReadOnly || hostDialogue.isHostActive) && (
+            {(!engine.isReadOnly || keyframeExperience.isActive) && (
                 <input
                     ref={hiddenInputRef}
                     type="text"

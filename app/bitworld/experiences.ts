@@ -125,6 +125,74 @@ export interface UseKeyframeExperienceProps {
 }
 
 // ============================================================================
+// DEFAULT EXPERIENCE
+// ============================================================================
+
+// Default experience ID - used when no experienceId is provided
+export const DEFAULT_EXPERIENCE_ID = 'default';
+
+// Default visual settings for the landing experience
+export const DEFAULT_VISUAL_CONFIG = {
+  backgroundColor: '#FFFFFF',
+  hostTextColor: '#10B981',
+  monogram: 'perlin',
+  monogramSpeed: 0.5,
+  monogramComplexity: 1.0,
+  backgroundMode: 'color' as const,
+  backgroundImage: null as string | null,
+};
+
+// Fallback experience when Firebase doesn't have one
+// This ensures the app works even without Firebase data
+const DEFAULT_EXPERIENCE: Experience = {
+  id: DEFAULT_EXPERIENCE_ID,
+  name: 'Default Welcome',
+  keyframes: [
+    {
+      id: 'welcome',
+      bg: DEFAULT_VISUAL_CONFIG.backgroundColor,
+      monogram: DEFAULT_VISUAL_CONFIG.monogram,
+      monogramSpeed: DEFAULT_VISUAL_CONFIG.monogramSpeed,
+      monogramComplexity: DEFAULT_VISUAL_CONFIG.monogramComplexity,
+      backgroundMode: DEFAULT_VISUAL_CONFIG.backgroundMode,
+      dialogue: "Hey! Welcome to Nara.",
+      autoAdvanceMs: 2000,
+    },
+    {
+      id: 'collect_email',
+      dialogue: "What's your email?",
+      input: 'email',
+    },
+    {
+      id: 'collect_password',
+      dialogue: "Create a password (6+ characters)",
+      input: 'password',
+    },
+    {
+      id: 'check_credentials',
+      dialogue: "Checking...",
+      handler: 'checkCredentials',
+    },
+    {
+      id: 'collect_username',
+      dialogue: "Pick a username",
+      input: 'username',
+    },
+    {
+      id: 'create_account',
+      dialogue: "Setting up your space...",
+      handler: 'createAccount',
+    },
+    {
+      id: 'complete',
+      dialogue: "Welcome aboard! Taking you to your canvas...",
+      handler: 'redirect',
+    }
+  ],
+  createdAt: new Date().toISOString(),
+};
+
+// ============================================================================
 // VALIDATORS
 // ============================================================================
 
@@ -202,17 +270,28 @@ export function useKeyframeExperience({
     };
   }, []);
 
-  // Fetch experience from Firebase
+  // Track if we've applied the first keyframe
+  const hasAppliedFirstKeyframeRef = useRef(false);
+
+  // Fetch experience from Firebase (only when explicitly requested)
   useEffect(() => {
-    if (!experienceId) return;
+    // IMPORTANT: Only activate experiences when one is explicitly requested
+    // This prevents [username]/ pages from triggering sign-up flows
+    if (!experienceId) {
+      setExperience(null);
+      return;
+    }
 
     experienceIdRef.current = experienceId;
+    hasAppliedFirstKeyframeRef.current = false;
 
     const fetchExperience = async () => {
+      console.log('[keyframe] Fetching experience:', experienceId);
       try {
         const snapshot = await get(ref(database, `experiences/${experienceId}`));
         if (snapshot.exists()) {
           const exp = snapshot.val() as Experience;
+          console.log('[keyframe] Experience loaded:', exp.name, 'with', exp.keyframes?.length, 'keyframes');
 
           // Build keyframe map for named jumps
           const keyframeMap: Record<string, number> = {};
@@ -222,16 +301,35 @@ export function useKeyframeExperience({
           exp.keyframeMap = keyframeMap;
 
           setExperience(exp);
-
-          // Apply first keyframe
-          if (exp.keyframes.length > 0) {
-            applyKeyframe(exp.keyframes[0], 0, exp);
-          }
+        } else if (experienceId === DEFAULT_EXPERIENCE_ID) {
+          // Only use fallback for explicit 'default' experience request
+          console.log('[keyframe] Using fallback default experience');
+          const fallback = { ...DEFAULT_EXPERIENCE };
+          const keyframeMap: Record<string, number> = {};
+          fallback.keyframes.forEach((kf, idx) => {
+            if (kf.id) keyframeMap[kf.id] = idx;
+          });
+          fallback.keyframeMap = keyframeMap;
+          setExperience(fallback);
         } else {
           console.warn(`[experience] Experience not found: ${experienceId}`);
+          setExperience(null);
         }
       } catch (error) {
         console.error('[experience] Failed to fetch experience:', error);
+        // Only use fallback for explicit 'default' experience request
+        if (experienceId === DEFAULT_EXPERIENCE_ID) {
+          console.log('[keyframe] Using fallback default experience (after error)');
+          const fallback = { ...DEFAULT_EXPERIENCE };
+          const keyframeMap: Record<string, number> = {};
+          fallback.keyframes.forEach((kf, idx) => {
+            if (kf.id) keyframeMap[kf.id] = idx;
+          });
+          fallback.keyframeMap = keyframeMap;
+          setExperience(fallback);
+        } else {
+          setExperience(null);
+        }
       }
     };
 
@@ -335,11 +433,14 @@ export function useKeyframeExperience({
 
     // Display dialogue
     if (keyframe.dialogue) {
+      console.log('[keyframe] Setting host data:', keyframe.dialogue.slice(0, 50) + '...');
       setHostData({
         text: keyframe.dialogue,
         centerPos: centerPos,
         timestamp: Date.now()
       });
+    } else {
+      console.log('[keyframe] No dialogue for keyframe:', keyframe.id);
     }
 
     // Auto-advance timer
@@ -354,6 +455,20 @@ export function useKeyframeExperience({
       }, keyframe.autoAdvanceMs);
     }
   }, [experience, screenEffects, setHostMode, setChatMode, setHostData, getViewportCenter]);
+
+  // Apply first keyframe when experience loads (separate effect to ensure applyKeyframe is fresh)
+  useEffect(() => {
+    console.log('[keyframe] Effect check:', {
+      hasExperience: !!experience,
+      keyframeCount: experience?.keyframes?.length,
+      hasAppliedFirst: hasAppliedFirstKeyframeRef.current
+    });
+    if (experience && experience.keyframes.length > 0 && !hasAppliedFirstKeyframeRef.current) {
+      console.log('[keyframe] Applying first keyframe:', experience.keyframes[0]);
+      hasAppliedFirstKeyframeRef.current = true;
+      applyKeyframe(experience.keyframes[0], 0, experience);
+    }
+  }, [experience, applyKeyframe]);
 
   // Clean up and exit flow
   const exitFlow = useCallback(() => {

@@ -1234,7 +1234,7 @@ interface UseWorldEngineProps {
             enabled?: boolean;
             speed?: number;
             complexity?: number;
-            mode?: 'clear' | 'flat' | 'perlin' | 'nara' | 'voronoi' | 'face3d' | 'sparkle';
+            mode?: 'clear' | 'flat' | 'perlin' | 'nara' | 'voronoi' | 'face3d' | 'sparkle' | 'sparkle2' | 'sparkle3';
         };
     };
     bounds?: WorldBounds; // Optional bounds for constrained canvas mode (e.g., { minX: 0, minY: 0, maxX: 1000, maxY: 1000 } for 1M cells)
@@ -1741,9 +1741,9 @@ export function useWorldEngine({
 
     // Envelope parameters (tunable)
     const ENVELOPE_BUMP_DURATION = 150;  // ms - how long each sine bump lasts
-    const ENVELOPE_DEPOSIT_AMOUNT = 0.15; // energy deposited when bump completes
-    const ENVELOPE_DECAY_RATE = 0.8;      // energy drained per second (linear)
-    const ENVELOPE_TANH_SCALE = 1.5;      // controls soft clamp curve steepness
+    const ENVELOPE_CLIMB_RATE = 8.0;     // gap-closing rate per second (scaled by sine)
+    const ENVELOPE_DECAY_RATE = 3.0;     // exponential decay speed (per second)
+    const ENVELOPE_TARGET = 1.0;         // asymptotic ceiling
 
     // Pack toggle guard - prevents double-toggle from touch+click events (all packs, not just UI)
     const uiPackToggleTimeRef = useRef<number>(0);
@@ -1788,26 +1788,29 @@ export function useWorldEngine({
             for (const bump of envelopeBumpsRef.current) {
                 const elapsed = now - bump.startTime;
                 if (elapsed < bump.duration) {
-                    // Active: contribute sine value (0 to π gives 0 → 1 → 0)
+                    // Active: sine value (0 to π gives 0 → 1 → 0)
                     const phase = (elapsed / bump.duration) * Math.PI;
-                    bumpSum += Math.sin(phase);
+                    const sineValue = Math.sin(phase);
+
+                    // Continuous deposit: close gap proportionally to sine curve
+                    // Energy flows in smoothly during the bump, not as a step at the end
+                    const gap = ENVELOPE_TARGET - envelopeAccumulatedRef.current;
+                    envelopeAccumulatedRef.current += gap * ENVELOPE_CLIMB_RATE * sineValue * dt;
+
+                    bumpSum += sineValue;
                     stillActive.push(bump);
-                } else {
-                    // Completed: deposit energy into accumulated pool
-                    envelopeAccumulatedRef.current += ENVELOPE_DEPOSIT_AMOUNT;
                 }
+                // No deposit at completion - energy already flowed in during bump
             }
             envelopeBumpsRef.current = stillActive;
 
-            // 2. Decay accumulated energy (linear drain)
-            envelopeAccumulatedRef.current = Math.max(0,
-                envelopeAccumulatedRef.current - ENVELOPE_DECAY_RATE * dt
-            );
+            // 2. Exponential decay toward 0
+            // dx/dt = -k * x  →  x *= e^(-k*dt)  ≈  x *= (1 - k*dt) for small dt
+            envelopeAccumulatedRef.current *= Math.exp(-ENVELOPE_DECAY_RATE * dt);
 
-            // 3. Compute pressure with tanh soft clamp
-            // Active bumps contribute directly, accumulated provides the tail
-            const rawEnergy = envelopeAccumulatedRef.current + bumpSum * 0.3;
-            const pressure = Math.tanh(rawEnergy / ENVELOPE_TANH_SCALE);
+            // 3. Compute pressure directly (already bounded 0-1)
+            // Active bumps add a small immediate response on top
+            const pressure = Math.min(1, envelopeAccumulatedRef.current + bumpSum * 0.15);
 
             // 4. Push to monogram
             monogramSystem?.setPressure?.(pressure);

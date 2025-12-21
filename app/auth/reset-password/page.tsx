@@ -37,7 +37,7 @@ export default function ResetPasswordPage() {
         engine={engine}
         cursorColorAlternate={cursorAlternate}
         hostModeEnabled={true}
-        initialHostFlow="password_reset"
+        experienceId="password_reset"
         onAuthSuccess={handleAuthSuccess}
         fontFamily="IBM Plex Mono"
         hostTextColor="#000000"

@@ -1,20 +1,24 @@
 "use client";
-import React, { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useWorldEngine } from './bitworld/world.engine';
 import { BitCanvas } from './bitworld/bit.canvas';
 import { useMonogram } from './bitworld/monogram';
 import { auth } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { getUsernameByUid, completeSignInWithEmailLink } from './firebase';
-import { selectIntro, resolveIntroConfig } from './bitworld/intro';
+import { DEFAULT_VISUAL_CONFIG, DEFAULT_EXPERIENCE_ID } from './bitworld/experiences';
 
-export default function Home() {
+function HomeContent() {
   const [cursorAlternate, setCursorAlternate] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isVerifyingEmail, setIsVerifyingEmail] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Experience link system: ?exp=[id]
+  const experienceId = searchParams.get('exp');
 
   // Check for email link sign-in on mount
   useEffect(() => {
@@ -52,16 +56,19 @@ export default function Home() {
     return () => unsubscribe();
   }, [router]);
 
-  // Select and resolve intro configuration
-  const introConfig = selectIntro();
-  const resolvedIntro = resolveIntroConfig(introConfig);
+  // Log experience link for analytics/debugging
+  useEffect(() => {
+    if (experienceId) {
+      console.log(`[Experience] User arrived via: ${experienceId}`);
+    }
+  }, [experienceId]);
 
   // Monogram system - create once and pass to both engine and canvas
   const monogram = useMonogram({ enabled: true, speed: 0.5, complexity: 1.0 });
 
   const engine = useWorldEngine({
     worldId: null, // Always null for home page (anonymous users)
-    initialBackgroundColor: resolvedIntro.backgroundColor,
+    initialBackgroundColor: DEFAULT_VISUAL_CONFIG.backgroundColor,
     userUid: null, // Always null for home page
     initialZoomLevel: 1.6, // Zoomed in for host mode onboarding
     skipInitialBackground: !isVerifyingEmail, // Skip initial bg when intro flow is active
@@ -81,10 +88,6 @@ export default function Home() {
     return () => clearInterval(interval);
   }, []);
 
-  // If coming from email verification, don't start normal flow
-  // Otherwise, start with configured intro flow
-  const initialFlow = isVerifyingEmail ? undefined : resolvedIntro.hostFlow;
-
   return (
     <div className="w-screen relative" style={{backgroundColor: '#F8F8F0', height: '100dvh'}}>
       <BitCanvas
@@ -93,15 +96,23 @@ export default function Home() {
         className="w-full h-full"
         dialogueEnabled={false}
         hostModeEnabled={true}
-        initialHostFlow={initialFlow}
         onAuthSuccess={handleAuthSuccess}
         fontFamily={engine.fontFamily}
         isVerifyingEmail={isVerifyingEmail}
-        hostTextColor={resolvedIntro.hostTextColor}
+        hostTextColor={DEFAULT_VISUAL_CONFIG.hostTextColor}
         monogram={monogram}
-        hostBackgroundColor={resolvedIntro.backgroundColor}
+        hostBackgroundColor={DEFAULT_VISUAL_CONFIG.backgroundColor}
         hostDimBackground={false}
+        experienceId={experienceId || DEFAULT_EXPERIENCE_ID}
       />
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div className="w-screen h-screen" style={{backgroundColor: '#F8F8F0'}} />}>
+      <HomeContent />
+    </Suspense>
   );
 }

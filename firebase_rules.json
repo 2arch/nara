@@ -6,13 +6,61 @@
     },
 
     "users": {
-      ".indexOn": ["username", "email"],
+      ".indexOn": ["username", "email", "seed"],
       ".read": true,
       "$userId": {
         ".read": "auth != null && auth.uid == $userId",
         ".write": "auth != null && auth.uid == $userId",
         "membership": {
           ".write": true
+        },
+        "seed": {
+          ".read": true
+        }
+      }
+    },
+
+    "experiences": {
+      ".read": true,
+      ".write": false,
+      "$experienceId": {
+        ".validate": "newData.hasChildren(['id', 'name', 'openingHook', 'openingMessages', 'visualPreset'])"
+      }
+    },
+
+    "outreach": {
+      ".read": "auth != null",
+
+      "strategies": {
+        ".read": true,
+        ".write": false,
+        "$strategyId": {
+          ".validate": "newData.hasChildren(['id', 'name', 'type'])"
+        }
+      },
+
+      "conversions": {
+        ".read": "auth != null",
+        ".write": true,
+        ".indexOn": ["experienceId", "timestamp", "strategyId"],
+        "$conversionId": {
+          ".validate": "newData.hasChildren(['experienceId', 'timestamp'])"
+        }
+      },
+
+      "analytics": {
+        ".read": "auth != null",
+        ".write": true,
+        "$experienceId": {
+          "views": {
+            ".write": true
+          },
+          "signups": {
+            ".write": true
+          },
+          "conversions": {
+            ".write": true
+          }
         }
       }
     },

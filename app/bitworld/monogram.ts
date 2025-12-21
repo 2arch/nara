@@ -6,7 +6,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { getMask, type FaceFeature as MaskFaceFeature, type FaceDynamics, type FaceBounds } from './mask';
 
-export type MonogramMode = 'clear' | 'flat' | 'perlin' | 'nara' | 'voronoi' | 'face3d' | 'sparkle';
+export type MonogramMode = 'clear' | 'flat' | 'perlin' | 'nara' | 'voronoi' | 'face3d' | 'sparkle' | 'sparkle2' | 'sparkle3';
 
 // Trail position interface for interactive monogram trails
 interface MonogramTrailPosition {
@@ -749,8 +749,129 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 `;
 
+// WebGPU Compute Shader - Sparkle2 mode (RGB color output with velocity)
+const CHUNK_SPARKLE2_SHADER = `
+@group(0) @binding(0) var<storage, read_write> output: array<f32>;
+@group(0) @binding(1) var<uniform> params: SparkleParams;
+
+struct SparkleParams {
+    chunkWorldX: f32,
+    chunkWorldY: f32,
+    chunkSize: f32,
+    time: f32,
+    complexity: f32,
+    pressure: f32,
+}
+
+${PERLIN_UTILS_WGSL}
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let localX = global_id.x;
+    let localY = global_id.y;
+    let chunkSize = u32(params.chunkSize);
+
+    if (localX >= chunkSize || localY >= chunkSize) {
+        return;
+    }
+
+    let worldX = params.chunkWorldX + f32(localX);
+    let worldY = params.chunkWorldY + f32(localY);
+
+    // Scale and aspect ratio
+    let scale = 0.03 * params.complexity;
+    let nx = worldX * scale;
+    let ny = (worldY * 0.5) * scale;
+
+    // Time already has velocity baked in (accumulated on CPU for smooth animation)
+    let t = params.time;
+
+    // Sample perlin at different offsets for each RGB channel
+    // This creates chromatic separation / RGB shift effect
+    let offsetR = 0.0;
+    let offsetG = 50.0;
+    let offsetB = 100.0;
+
+    // Red channel
+    let r1 = perlin(nx + offsetR + t * 0.5, ny + offsetR + t * 0.3);
+    let r2 = perlin(nx * 2.0 + offsetR - t * 0.3, ny * 2.0 + offsetR + t * 0.2);
+    let r = ((r1 + r2 * 0.5) / 1.5 + 1.0) * 0.5;
+
+    // Green channel (offset in space)
+    let g1 = perlin(nx + offsetG + t * 0.5, ny + offsetG + t * 0.3);
+    let g2 = perlin(nx * 2.0 + offsetG - t * 0.3, ny * 2.0 + offsetG + t * 0.2);
+    let g = ((g1 + g2 * 0.5) / 1.5 + 1.0) * 0.5;
+
+    // Blue channel (offset further)
+    let b1 = perlin(nx + offsetB + t * 0.5, ny + offsetB + t * 0.3);
+    let b2 = perlin(nx * 2.0 + offsetB - t * 0.3, ny * 2.0 + offsetB + t * 0.2);
+    let b = ((b1 + b2 * 0.5) / 1.5 + 1.0) * 0.5;
+
+    // Output RGB (3 floats per cell)
+    let index = (localY * chunkSize + localX) * 3u;
+    output[index] = r;
+    output[index + 1u] = g;
+    output[index + 2u] = b;
+}
+`;
+
+// WebGPU Compute Shader - Sparkle3 mode (pressure shifts brightness)
+const CHUNK_SPARKLE3_SHADER = `
+@group(0) @binding(0) var<storage, read_write> output: array<f32>;
+@group(0) @binding(1) var<uniform> params: SparkleParams;
+
+struct SparkleParams {
+    chunkWorldX: f32,
+    chunkWorldY: f32,
+    chunkSize: f32,
+    time: f32,
+    complexity: f32,
+    pressure: f32,
+}
+
+${PERLIN_UTILS_WGSL}
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let localX = global_id.x;
+    let localY = global_id.y;
+    let chunkSize = u32(params.chunkSize);
+
+    if (localX >= chunkSize || localY >= chunkSize) {
+        return;
+    }
+
+    let worldX = params.chunkWorldX + f32(localX);
+    let worldY = params.chunkWorldY + f32(localY);
+
+    // Scale and aspect ratio
+    let scale = 0.03 * params.complexity;
+    let nx = worldX * scale;
+    let ny = (worldY * 0.5) * scale;
+
+    // Animated Perlin
+    let drift1 = perlin(nx + params.time * 0.5, ny + params.time * 0.3);
+    let drift2 = perlin(nx * 2.0 - params.time * 0.3, ny * 2.0 + params.time * 0.2);
+    let combined = (drift1 + drift2 * 0.5) / 1.5;
+    let normalized = (combined + 1.0) * 0.5;
+
+    // Pressure shifts the whole field up/down
+    // pressure=0 → shift by -0.5 (mostly dark)
+    // pressure=1 → shift by +0.5 (mostly bright)
+    let shift = (params.pressure - 0.5) * 1.0;
+    let shifted = normalized + shift;
+
+    // Clamp to valid range
+    let intensity = clamp(shifted, 0.0, 1.0);
+
+    let index = localY * chunkSize + localX;
+    output[index] = intensity;
+}
+`;
+
 class MonogramSystem {
     private chunks: Map<string, Float32Array> = new Map();
+    private rgbChunks: Map<string, Float32Array> = new Map();  // For color modes (3 floats per cell)
     private device: GPUDevice | null = null;
     private pipeline: GPUComputePipeline | null = null;
     private paramsBuffer: GPUBuffer | null = null;
@@ -775,7 +896,9 @@ class MonogramSystem {
 
     // Sparkle mode GPU resources
     private sparklePipeline: GPUComputePipeline | null = null;
-    private sparkleParamsBuffer: GPUBuffer | null = null;
+    private sparkle2Pipeline: GPUComputePipeline | null = null;
+    private sparkle3Pipeline: GPUComputePipeline | null = null;
+    private sparkleParamsBuffer: GPUBuffer | null = null;  // shared by all sparkle variants
     
     // Trail tracking
     private mouseTrail: MonogramTrailPosition[] = [];
@@ -789,6 +912,7 @@ class MonogramSystem {
     private chunkAccessTime: Map<string, number> = new Map();
 
     private time = 0;
+    private velocityPhase = 0;  // Accumulated phase for velocity-based effects (sparkle2)
     private options: MonogramOptions;
 
     // Track last viewport for auto-reload on invalidation
@@ -956,6 +1080,32 @@ class MonogramSystem {
             this.sparkleParamsBuffer = this.device.createBuffer({
                 size: 6 * 4, // 6 floats: chunkWorldX, chunkWorldY, chunkSize, time, complexity, pressure
                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+            });
+
+            // Create Sparkle2 pipeline (quantization levels)
+            const sparkle2ShaderModule = this.device.createShaderModule({
+                code: CHUNK_SPARKLE2_SHADER
+            });
+
+            this.sparkle2Pipeline = this.device.createComputePipeline({
+                layout: 'auto',
+                compute: {
+                    module: sparkle2ShaderModule,
+                    entryPoint: 'main'
+                }
+            });
+
+            // Create Sparkle3 pipeline (brightness shift)
+            const sparkle3ShaderModule = this.device.createShaderModule({
+                code: CHUNK_SPARKLE3_SHADER
+            });
+
+            this.sparkle3Pipeline = this.device.createComputePipeline({
+                layout: 'auto',
+                compute: {
+                    module: sparkle3ShaderModule,
+                    entryPoint: 'main'
+                }
             });
 
             // Generate and upload NARA text texture
@@ -1202,7 +1352,12 @@ class MonogramSystem {
         } else if (mode === 'face3d') {
             return this.computeChunkFace(chunkWorldX, chunkWorldY);
         } else if (mode === 'sparkle') {
-            return this.computeChunkSparkle(chunkWorldX, chunkWorldY);
+            return this.computeChunkSparkle(chunkWorldX, chunkWorldY, this.sparklePipeline!);
+        } else if (mode === 'sparkle2') {
+            // RGB color output mode with velocity phase
+            return this.computeChunkSparkleRGB(chunkWorldX, chunkWorldY);
+        } else if (mode === 'sparkle3') {
+            return this.computeChunkSparkle(chunkWorldX, chunkWorldY, this.sparkle3Pipeline!);
         } else {
             return this.computeChunkPerlin(chunkWorldX, chunkWorldY);
         }
@@ -1559,8 +1714,8 @@ class MonogramSystem {
         return intensities;
     }
 
-    private async computeChunkSparkle(chunkWorldX: number, chunkWorldY: number): Promise<Float32Array> {
-        if (!this.device || !this.sparklePipeline || !this.sparkleParamsBuffer) {
+    private async computeChunkSparkle(chunkWorldX: number, chunkWorldY: number, pipeline: GPUComputePipeline, timeOverride?: number): Promise<Float32Array> {
+        if (!this.device || !this.sparkleParamsBuffer) {
             throw new Error('[Monogram] Sparkle pipeline not initialized');
         }
 
@@ -1577,19 +1732,19 @@ class MonogramSystem {
             usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
         });
 
-        // Pass pressure to shader
+        // Pass pressure to shader (use timeOverride for velocity-based effects)
         const paramsData = new Float32Array([
             chunkWorldX,
             chunkWorldY,
             this.CHUNK_SIZE,
-            this.time,
+            timeOverride ?? this.time,
             this.options.complexity,
-            this.pressure  // The key ingredient - pressure drives the threshold
+            this.pressure  // The key ingredient - pressure drives the effect
         ]);
         device.queue.writeBuffer(this.sparkleParamsBuffer, 0, paramsData);
 
         const bindGroup = device.createBindGroup({
-            layout: this.sparklePipeline.getBindGroupLayout(0),
+            layout: pipeline.getBindGroupLayout(0),
             entries: [
                 { binding: 0, resource: { buffer: outputBuffer } },
                 { binding: 1, resource: { buffer: this.sparkleParamsBuffer } }
@@ -1598,7 +1753,7 @@ class MonogramSystem {
 
         const commandEncoder = device.createCommandEncoder();
         const computePass = commandEncoder.beginComputePass();
-        computePass.setPipeline(this.sparklePipeline);
+        computePass.setPipeline(pipeline);
         computePass.setBindGroup(0, bindGroup);
         computePass.dispatchWorkgroups(
             Math.ceil(this.CHUNK_SIZE / 8),
@@ -1620,19 +1775,89 @@ class MonogramSystem {
         return intensities;
     }
 
+    private async computeChunkSparkleRGB(chunkWorldX: number, chunkWorldY: number): Promise<Float32Array> {
+        if (!this.device || !this.sparkle2Pipeline || !this.sparkleParamsBuffer) {
+            throw new Error('[Monogram] Sparkle2 RGB pipeline not initialized');
+        }
+
+        const device = this.device;
+        // 3x buffer size for RGB output
+        const bufferSize = this.CHUNK_SIZE * this.CHUNK_SIZE * 3 * 4;
+
+        const outputBuffer = device.createBuffer({
+            size: bufferSize,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
+        });
+
+        const stagingBuffer = device.createBuffer({
+            size: bufferSize,
+            usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
+        });
+
+        // Pass velocityPhase as time for smooth animation
+        const paramsData = new Float32Array([
+            chunkWorldX,
+            chunkWorldY,
+            this.CHUNK_SIZE,
+            this.velocityPhase,
+            this.options.complexity,
+            this.pressure
+        ]);
+        device.queue.writeBuffer(this.sparkleParamsBuffer, 0, paramsData);
+
+        const bindGroup = device.createBindGroup({
+            layout: this.sparkle2Pipeline.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: { buffer: outputBuffer } },
+                { binding: 1, resource: { buffer: this.sparkleParamsBuffer } }
+            ]
+        });
+
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.sparkle2Pipeline);
+        computePass.setBindGroup(0, bindGroup);
+        computePass.dispatchWorkgroups(
+            Math.ceil(this.CHUNK_SIZE / 8),
+            Math.ceil(this.CHUNK_SIZE / 8)
+        );
+        computePass.end();
+
+        commandEncoder.copyBufferToBuffer(outputBuffer, 0, stagingBuffer, 0, bufferSize);
+        device.queue.submit([commandEncoder.finish()]);
+
+        await stagingBuffer.mapAsync(GPUMapMode.READ);
+        const result = new Float32Array(stagingBuffer.getMappedRange());
+        const rgbData = new Float32Array(result);
+        stagingBuffer.unmap();
+
+        outputBuffer.destroy();
+        stagingBuffer.destroy();
+
+        return rgbData;
+    }
+
+    private isRGBMode(): boolean {
+        return this.options.mode === 'sparkle2';
+    }
+
     private async ensureChunk(chunkKey: string): Promise<Float32Array> {
         // For smooth animation: always recompute chunks with current time
         // No caching - pattern flows continuously like water
         const { x, y } = this.chunkToWorld(chunkKey);
-        const intensities = await this.computeChunk(x, y);
+        const data = await this.computeChunk(x, y);
 
-        // Store in cache for this frame only (avoids recomputing same chunk multiple times per frame)
-        this.chunks.set(chunkKey, intensities);
+        // Store in appropriate cache based on mode
+        if (this.isRGBMode()) {
+            this.rgbChunks.set(chunkKey, data);
+        } else {
+            this.chunks.set(chunkKey, data);
+        }
         this.chunkAccessTime.set(chunkKey, Date.now());
 
         this.evictOldChunks();
 
-        return intensities;
+        return data;
     }
 
     private evictOldChunks() {
@@ -1698,8 +1923,69 @@ class MonogramSystem {
         return chunk[index];
     }
 
+    sampleColorAt(worldX: number, worldY: number): { r: number, g: number, b: number } {
+        if (!this.options.enabled) return { r: 0, g: 0, b: 0 };
+
+        // If mode is 'clear', return black
+        if (this.options.mode === 'clear') return { r: 0, g: 0, b: 0 };
+
+        // If mode is 'flat', return grayscale based on pressure
+        if (this.options.mode === 'flat') {
+            const v = this.pressure;
+            return { r: v, g: v, b: v };
+        }
+
+        const chunkKey = this.worldToChunk(worldX, worldY);
+
+        // Check if we're in RGB mode
+        if (this.isRGBMode()) {
+            const chunk = this.rgbChunks.get(chunkKey);
+            if (!chunk) return { r: 0, g: 0, b: 0 };
+
+            const chunkOrigin = this.chunkToWorld(chunkKey);
+            const localX = Math.floor(worldX) - chunkOrigin.x;
+            const localY = Math.floor(worldY) - chunkOrigin.y;
+
+            if (localX < 0 || localX >= this.CHUNK_SIZE || localY < 0 || localY >= this.CHUNK_SIZE) {
+                return { r: 0, g: 0, b: 0 };
+            }
+
+            // RGB data is stored as [r, g, b, r, g, b, ...]
+            const index = (localY * this.CHUNK_SIZE + localX) * 3;
+            return {
+                r: chunk[index],
+                g: chunk[index + 1],
+                b: chunk[index + 2]
+            };
+        } else {
+            // Monochrome mode - return same value for all channels
+            const chunk = this.chunks.get(chunkKey);
+            if (!chunk) return { r: 0, g: 0, b: 0 };
+
+            const chunkOrigin = this.chunkToWorld(chunkKey);
+            const localX = Math.floor(worldX) - chunkOrigin.x;
+            const localY = Math.floor(worldY) - chunkOrigin.y;
+
+            if (localX < 0 || localX >= this.CHUNK_SIZE || localY < 0 || localY >= this.CHUNK_SIZE) {
+                return { r: 0, g: 0, b: 0 };
+            }
+
+            const index = localY * this.CHUNK_SIZE + localX;
+            const v = chunk[index];
+            return { r: v, g: v, b: v };
+        }
+    }
+
     updateTime(deltaTime: number) {
         this.time += deltaTime * this.options.speed;
+
+        // Accumulate velocity phase for sparkle2 (hyperlapse effect)
+        // Velocity is modulated by pressure - this gives smooth continuous animation
+        // Base is normal speed, pressure accelerates up to 4x
+        const baseSpeed = 1.0;
+        const maxSpeed = 4.0;
+        const velocity = baseSpeed + this.pressure * (maxSpeed - baseSpeed);
+        this.velocityPhase += deltaTime * this.options.speed * velocity;
     }
     
     updateFaceData(faceData: MonogramOptions['faceOrientation']) {
@@ -1962,6 +2248,20 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         return Math.max(gpuIntensity, trailIntensity);
     }, [calculateInteractiveTrail]);
 
+    const sampleColorAt = useCallback((worldX: number, worldY: number): { r: number, g: number, b: number } => {
+        // Get GPU-computed RGB values (handles both mono and color modes)
+        const color = systemRef.current?.sampleColorAt(worldX, worldY) ?? { r: 0, g: 0, b: 0 };
+
+        // Add CPU-computed trail effect (boost all channels equally for trails)
+        const trailIntensity = calculateInteractiveTrail(worldX, worldY);
+
+        return {
+            r: Math.max(color.r, trailIntensity),
+            g: Math.max(color.g, trailIntensity),
+            b: Math.max(color.b, trailIntensity)
+        };
+    }, [calculateInteractiveTrail]);
+
     const toggleEnabled = useCallback(() => {
         setOptions(prev => ({ ...prev, enabled: !prev.enabled }));
     }, []);
@@ -1988,6 +2288,7 @@ export function useMonogram(initialOptions?: Partial<MonogramOptions>) {
         toggleEnabled,
         preloadViewport,
         sampleAt,
+        sampleColorAt,
         isInitialized,
         updateMousePosition,
         clearTrail,

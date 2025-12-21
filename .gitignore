@@ -61,3 +61,8 @@ functions/service-account-key.json
 # Google Cloud SDK
 /google-cloud-sdk/
 certificates
+
+# outreach database (local only, syncs to Firebase)
+outreach/*.db
+outreach/*.db-wal
+outreach/*.db-shm

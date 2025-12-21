@@ -418,7 +418,7 @@ interface UseCommandSystemProps {
             enabled?: boolean;
             speed?: number;
             complexity?: number;
-            mode?: 'clear' | 'flat' | 'perlin' | 'nara' | 'voronoi' | 'face3d' | 'sparkle';
+            mode?: 'clear' | 'flat' | 'perlin' | 'nara' | 'voronoi' | 'face3d' | 'sparkle' | 'sparkle2' | 'sparkle3';
         };
     };
     recorder?: DataRecorder;
@@ -1466,7 +1466,7 @@ export function useCommandSystem({ setDialogueText, initialBackgroundColor, init
 
         if (lowerInput === 'monogram') {
             const parts = input.toLowerCase().split(' ');
-            const MONOGRAM_OPTIONS = ['clear', 'flat', 'perlin', 'nara', 'sparkle', 'face', 'on', 'off'];
+            const MONOGRAM_OPTIONS = ['clear', 'flat', 'perlin', 'nara', 'sparkle', 'sparkle2', 'sparkle3', 'face', 'on', 'off'];
             if (parts.length > 1) {
                 // Show monogram options that match the input
                 const monogramInput = parts[1];

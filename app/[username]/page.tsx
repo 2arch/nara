@@ -140,10 +140,10 @@ export default function UserHome() {
         dialogueEnabled={true}
         fontFamily={engine.fontFamily}
         hostModeEnabled={shouldShowTutorial}
-        initialHostFlow={shouldShowTutorial ? 'tutorial' : undefined}
         onTutorialComplete={handleTutorialComplete}
         monogram={monogram}
         mcpEnabled={true}
+        experienceId={shouldShowTutorial ? 'tutorial' : undefined}
       />
     </div>
   );
